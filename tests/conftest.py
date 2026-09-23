@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 from hypothesis import settings
 
-pytest_plugins = ["tests.fixtures.deterministic", "tests.fixtures.persistence"]
+pytest_plugins = [
+    "tests.fixtures.deterministic",
+    "tests.fixtures.persistence",
+    "tests.factories.models",
+]
 
 # Deterministic in CI so a failure reproduces locally; randomised exploration otherwise.
 settings.register_profile("ci", derandomize=True, deadline=None, print_blob=True)
