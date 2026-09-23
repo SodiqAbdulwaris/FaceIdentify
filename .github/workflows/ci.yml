@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  branch-name:
+    name: Branch name
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Same script as the local pre-push hook. On pushes to main there is no head branch to check.
+      - name: Check branch name
+        if: github.event_name == 'pull_request'
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: sh .githooks/check-branch-name "$BRANCH"
+
+  commit-messages:
+    name: Commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Same script as the local .githooks/commit-msg hook, so bypassing the hook is still caught.
+      - name: Check every new commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            range="$HEAD"          # first push of a branch: check everything reachable
+          else
+            range="$BASE..$HEAD"
+          fi
+          status=0
+          for sha in $(git rev-list --no-merges "$range"); do
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/msg"
+            sh .githooks/commit-msg "$RUNNER_TEMP/msg" || { echo "  in commit $sha"; status=1; }
+          done
+          exit $status
+
+  static:
+    name: Static validation (CI-001)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+
+  backend-tests:
+    name: Backend fast tests (CI-002, CI-003, CI-005)
+    # The product is Windows-only; SQLite file locking and native USearch wheels differ there.
+    runs-on: windows-latest
+    env:
+      HYPOTHESIS_PROFILE: ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      # Default addopts already exclude e2e, ml_eval, benchmark and hardware.
+      - run: uv run pytest --cov --cov-report=term --cov-report=xml --cov-report=html
+      # Coverage contains source-line data only; no test data or user media.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 14
+
+  frontend:
+    name: Frontend (CI-001, CI-004)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint -- --deny-warnings
+      - run: npm test
+      - run: npm run build
+
+  # Desktop (Tauri/Rust) build is not in CI yet: a cold cargo build is slow and there is no
+  # desktop behaviour to test until M4 (TST-047). Add a windows-latest `cargo check` job then.
