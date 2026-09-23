@@ -53,7 +53,7 @@ All tasks below begin as `PLANNED`. This document does not claim that their impl
 
 ### M0 status (2026-09-23)
 
-Verified locally on Windows 11, Python 3.12.14: `uv run pytest` gives 19 passed, 0 skipped, 0 warnings. Remote CI has not run yet because the repository has no commits or remote. So no task is `COMPLETE`.
+Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions: PR #1, run `35902624488` (2026-09-23), all five jobs green, 19 backend and 1 frontend tests passed. Tasks move to `COMPLETE` once PR #1 is reviewed and merged.
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
@@ -66,7 +66,7 @@ Verified locally on Windows 11, Python 3.12.14: `uv run pytest` gives 19 passed,
 | TST-007 | `PASSING` | `make_usearch_index` with real USearch 2.26: add/search/save/restore/remove tested |
 | TST-008 | `IN_PROGRESS` | Deterministic clock/UUID/RNG utilities done and tested. Domain factories `BLOCKED` until Identity/Observation/Source/Job models exist (M1/M2); location documented in `docs/guides/TESTING_GUIDE.md` |
 | TST-009 | `PASSING` | Vitest 5 + React Testing Library + jsdom in `frontend/`; `src/app/App.test.tsx` passes; typecheck, lint and build pass |
-| TST-010 | `IN_PROGRESS` | `.github/workflows/ci.yml` jobs: commit messages, static (ruff, mypy), backend tests + coverage artifact, frontend. Every command passes locally; needs a pushed repository and an observed green run |
+| TST-010 | `PASSING` | `.github/workflows/ci.yml`: branch name, commit messages, static (ruff, mypy), backend tests + coverage artifact (Windows), frontend. Observed green on GitHub (run `35902624488`) |
 | SEC-001 | `PASSING` | `tests/security/test_test_data_isolation.py` |
 
 ---
@@ -297,7 +297,7 @@ Start with the following tasks:
 - [x] Establish isolated SQLite and filesystem fixtures.
 - [ ] Implement deterministic identity and observation factories. (Deterministic utilities done; factories blocked on models.)
 - [ ] Create the first Identity Manager invariant tests.
-- [ ] Add the initial CI workflow. (Written and locally verified, including frontend and commit-message checks; remote run not yet observed.)
+- [x] Add the initial CI workflow. (Green on GitHub Actions, run `35902624488`.)
 - [ ] Implement real persistence integration fixtures.
 - [ ] Prepare the single-image pipeline integration test.
 

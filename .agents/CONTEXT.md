@@ -11,8 +11,8 @@ _Last updated: 2026-09-23_
   integrity). Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` holds only
   the bootstrap commit and is protected by ruleset `23894323` (PR required, rebase merge only,
-  five required CI checks, no bypass). The project foundation arrives via the
-  `chore/project-foundation` PR.
+  five required CI checks, no bypass). The project foundation is in PR #1
+  (`chore/project-foundation`); its first CI run (`35902624488`) passed all five jobs.
 - **Backend:** only `backend/infrastructure/db/engine.py` has code (SQLite engine and session
   factory per Persistence §24/§25, plus an empty `Base` registry). All other backend packages are
   empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There are no domain models, no FastAPI
