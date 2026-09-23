@@ -13,10 +13,11 @@ _Last updated: 2026-09-23_
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
   ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
-- **Backend:** only `backend/infrastructure/db/engine.py` has code (SQLite engine and session
-  factory per Persistence §24/§25, plus an empty `Base` registry). All other backend packages are
-  empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There are no domain models, no FastAPI
-  app and no ML worker yet.
+- **Backend:** the SQLite engine/session factory plus the M1 PR 1 models (sources, processing
+  provenance, jobs, runtime catalog, representation spaces, settings; registry
+  `backend/app/models.py`). Identity/observation models come in PR 2. The remaining backend
+  packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There are no use cases, no
+  FastAPI app and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
   Vitest. It is a placeholder `App` shell only; no features.
 - **Desktop:** Tauri v2 in `desktop/src-tauri`, default shell. It loads the frontend at
@@ -84,6 +85,11 @@ Unresolved items need the user's decision. Do not settle them silently.
 10. ~~Merge/split in M1 (tracker) vs after the first milestone (roadmap)~~ **Resolved 2026-09-23:**
     domain-level merge/split and TST-015/016 are in M1; roadmap Phases D/E keep the API/UI/ML
     integration.
+11. **Open: unconstrained model columns.** No spec gives the complete value sets for every
+    runtime-catalog `state`, `ModelExport.format`/`precision`, `RuntimeVariant.provider`/
+    `device_kind` or `RepresentationSpace.normalization`. They are plain strings until decided
+    (before the M2 migration). The transient run-state list for the partial index is inferred
+    from recovery (§28).
 
 ## Next steps (M1)
 

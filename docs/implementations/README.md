@@ -44,3 +44,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-09-23 | [Branch workflow and main protection](2026-09-23-branch-workflow.md) | done; ruleset active |
 | 2026-09-23 | [Resolve open repository decisions](2026-09-23-resolve-open-decisions.md) | done |
 | 2026-09-23 | [Align specs with M1 decisions; doc-conflict rule](2026-09-23-align-specs-with-decisions.md) | done |
+| 2026-09-23 | [M1 PR 1: core persistence models](2026-09-23-m1-core-persistence-models.md) | done |
