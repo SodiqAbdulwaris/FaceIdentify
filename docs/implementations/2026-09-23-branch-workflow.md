@@ -97,3 +97,11 @@ It flagged three more problems, all fixed:
 - the prompt and result files had no location, and the result was written into the author's checkout;
 - the network fetch was inside the reviewer procedure. The Cursor CLI is not installed. Shipped in PR #2 (`docs: require independent review of
 every pull request`).
+
+The final re-review attempt with Codex exited 1 and produced no review. The procedure then
+deleted the temp directory together with the log. A probe run showed the cause: the Codex
+account hit its usage limit (until 2026-09-26 15:38). The procedure now keeps the reviewer's log
+in `$tmp/reviewer.log`, checks the exit code and that the result is non-empty *before* cleanup, and
+states that a failed run is not a review. The subagent entry was also corrected: subagents
+can have a shell, so their confinement is detected (`git status` in the worktree and in the
+author's checkout) rather than sandboxed. The final review of PR #2 used the subagent fallback.
