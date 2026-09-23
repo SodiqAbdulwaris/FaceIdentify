@@ -54,3 +54,13 @@ def test_commit_is_durable(sqlite_engine: Engine, clock: FrozenClock, new_id: Se
         session.add(_snapshot(clock, new_id))
         session.commit()
     assert _count(sqlite_engine) == 1
+
+
+def test_autocommit_connections_run_outside_a_transaction(sqlite_engine: Engine) -> None:
+    # VACUUM (and PRAGMA foreign_keys changes, needed by Alembic batch mode) are refused or
+    # ignored inside a transaction, so AUTOCOMMIT connections must not get the explicit BEGIN.
+    with sqlite_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.exec_driver_sql("VACUUM")
+        conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
+        assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 0
+        conn.exec_driver_sql("PRAGMA foreign_keys = ON")

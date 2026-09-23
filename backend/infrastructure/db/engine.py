@@ -60,6 +60,10 @@ def _disable_driver_transactions(
 
 
 def _begin(connection: Connection) -> None:
+    # AUTOCOMMIT connections (VACUUM, WAL checkpoints, Alembic batch-mode PRAGMAs) must stay
+    # outside a transaction, so they get no BEGIN.
+    if connection.get_execution_options().get("isolation_level") == "AUTOCOMMIT":
+        return
     connection.exec_driver_sql("BEGIN")
 
 
