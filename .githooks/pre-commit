@@ -1,0 +1,10 @@
+#!/bin/sh
+# Blocks commits on main. The only exception is the repository's first commit, which has to
+# create main before any pull request is possible (.agents/rules/branches.md).
+
+[ "$(git branch --show-current)" = "main" ] || exit 0
+git rev-parse --verify --quiet HEAD >/dev/null || exit 0  # no commits yet: bootstrap
+
+echo "pre-commit: do not commit on main; create a branch first:" >&2
+echo "  git switch -c <type>/<short-kebab-description>" >&2
+exit 1

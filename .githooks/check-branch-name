@@ -1,0 +1,16 @@
+#!/bin/sh
+# Validates a branch name: <type>/<short-kebab-description>, e.g. feat/identity-merge-service.
+# Used by .githooks/pre-push and the `branch-name` CI job, so the pattern lives in one place.
+# Types match the Conventional Commits types in .githooks/commit-msg.
+
+TYPES='feat|fix|docs|chore|refactor|test|ci|build|perf|style|revert'
+branch="$1"
+
+if echo "$branch" | grep -Eq "^($TYPES)/[a-z0-9]+(-[a-z0-9]+)*$"; then
+  exit 0
+fi
+
+echo "branch name '$branch' is not <type>/<short-kebab-description>" >&2
+echo "  types: $(echo "$TYPES" | tr '|' ' ')" >&2
+echo "  e.g.   feat/identity-merge-service, fix/sqlite-busy-retry, docs/testing-guide" >&2
+exit 1

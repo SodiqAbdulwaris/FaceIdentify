@@ -1,0 +1,4 @@
+* text=auto
+# Shell scripts must keep LF or sh fails on Windows checkouts with autocrlf.
+.githooks/* text eol=lf
+*.sh text eol=lf

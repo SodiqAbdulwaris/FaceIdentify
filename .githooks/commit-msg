@@ -1,0 +1,30 @@
+#!/bin/sh
+# Enforces Conventional Commits headers: <type>(<optional scope>)<optional !>: <subject>
+# Enable once per clone:  git config core.hooksPath .githooks
+# CI runs this same script against every commit in a pull request.
+
+TYPES='feat|fix|docs|chore|refactor|test|ci|build|perf|style|revert'
+MAX_HEADER=72
+
+# First line that is not a git comment is the header.
+header=$(grep -v '^#' "$1" | head -n 1)
+
+case "$header" in
+  # Messages git generates itself.
+  'Merge '* | 'Revert "'* | 'fixup! '* | 'squash! '* | 'amend! '*) exit 0 ;;
+esac
+
+fail() {
+  echo "commit-msg: $1" >&2
+  echo "  header: $header" >&2
+  echo "  expected: <type>(<scope>)!: <subject>   e.g. 'feat(identities): add merge service'" >&2
+  echo "  types: $(echo "$TYPES" | tr '|' ' ')" >&2
+  exit 1
+}
+
+echo "$header" | grep -Eq "^($TYPES)(\([a-z0-9][a-z0-9._/-]*\))?!?: [^ ]" \
+  || fail "header does not follow Conventional Commits"
+
+[ "${#header}" -le "$MAX_HEADER" ] || fail "header is ${#header} chars; keep it <= $MAX_HEADER"
+
+exit 0

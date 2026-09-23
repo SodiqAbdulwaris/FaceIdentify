@@ -1,0 +1,25 @@
+#!/bin/sh
+# Blocks direct pushes to main and pushes of badly named branches.
+# GitHub enforces the same thing server-side (.github/rulesets/main.json); this fails faster.
+# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>
+
+hooks_dir=$(dirname "$0")
+zero=0000000000000000000000000000000000000000
+status=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/*) branch=${remote_ref#refs/heads/} ;;
+    *) continue ;;  # tags and other refs are not branch work
+  esac
+  [ "$local_sha" = "$zero" ] && continue  # deleting a remote branch
+
+  if [ "$branch" = "main" ]; then
+    echo "pre-push: direct pushes to main are not allowed; push a branch and open a PR" >&2
+    status=1
+  elif ! sh "$hooks_dir/check-branch-name" "$branch"; then
+    status=1
+  fi
+done
+
+exit $status
