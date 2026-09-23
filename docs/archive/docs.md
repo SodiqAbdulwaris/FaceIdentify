@@ -1,0 +1,16 @@
+and boundaries — exactly what the app is and is not supposed to do; local vs cloud; live camera vs uploaded media; single-video vs cross-video memory.
+User workflows — add a person, encounter an unknown person, rename someone, process a movie, inspect appearances, merge/split mistaken identities, delete someone, etc.
+Identity model — the most important part: what exactly constitutes a "person", how unknown identities work, when two detections become the same person, confidence/uncertainty, aliases, merging and splitting.
+Face-processing pipeline — detection → alignment/quality → tracking → embeddings → matching → clustering → identity assignment. We decide the responsibilities without committing prematurely to specific libraries.
+Video pipeline — sampling strategy, scene handling, tracks, timestamps, representative face selection, re-identification after someone leaves/re-enters, background processing, progress and resumability.
+Persistent memory — what the app remembers between sessions and between different movies/videos; embeddings per identity rather than relying on one reference photograph; how identities improve as more examples are collected.
+Data model — Person/Identity, FaceSample, Embedding, Video, Track, Appearance, BoundingBox, ProcessingJob, Alias, merge history, etc., including relationships and lifecycle.
+Recognition policy — similarity thresholds, known/unknown/uncertain states, false-positive protection, duplicate-person detection and human confirmation. We should explicitly design this rather than saying "cosine similarity > X."
+UI/UX — library, video viewer, live recognition, people gallery, person detail page, unknown-person inbox, timeline, rename/merge/split workflow, settings and processing screen.
+Architecture — frontend/backend/ML boundaries, database, vector search, video storage, job processing, GPU utilization, API responsibilities and whether everything runs locally.
+Performance strategy — a two-hour 4K movie is very different from a webcam. We'll define batching, frame sampling, tracking, caching, GPU inference and what gets stored.
+Privacy/security — biometric storage, encryption, deletion, media retention and keeping recognition scoped to the user's own enrolled/labeled identities rather than building an external identity lookup system.
+Failure cases — twins/lookalikes, profiles, masks, glasses, darkness, makeup, aging, tiny background faces, cuts between scenes, crowds, photos of people inside the video, false detections and identity drift.
+Testing/evaluation — our own small test dataset, precision/recall-type measurements, false match rate, unknown rejection, tracking accuracy, movie-level identity consistency and performance benchmarks.
+MVP → V2 → V3 roadmap — determine what we actually build first instead of trying to solve everything simultaneously.
+Final technical specification — folder/module responsibilities, schemas, APIs, processing state machine, sequence diagrams, decisions/ADRs, acceptance criteria and implementation milestones. This becomes the document you give the coding agent.
