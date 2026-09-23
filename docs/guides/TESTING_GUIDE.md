@@ -110,12 +110,34 @@ Registered in `tests/conftest.py` via `pytest_plugins`. They are available to ev
 - Hypothesis `@given` tests cannot use function-scoped fixtures. Construct helpers such as
   `FrozenClock()` inside the test instead.
 
-### Domain factories (not yet created)
+### Model factories (`build`)
 
-No Identity, Observation, Source, Job or Evidence models exist yet. When
-`0001_initial_schema` lands (M1/M2), add `tests/factories/<aggregate>.py` with plain functions
-that take the `new_id` and `clock` fixtures and a `Session`, and return persisted models. Do not
-create factories for models that do not exist.
+`tests/factories/models.py` provides `ModelFactory`, exposed as the `build` fixture. Each method
+returns a valid, flushed row with ids from `new_id` and timestamps from `clock`, and creates
+missing parents on demand:
+
+```python
+def test_example(build: ModelFactory) -> None:
+    run = build.run()
+    face = build.observation(run)                     # shares the run's segment, next sequence
+    rep = build.representation(face, state="ACTIVE", identity_id=build.identity().id, ann_key=1)
+```
+
+- Override any column with a keyword. Passing `parent_id=None` explicitly is kept as `None`,
+  so NOT NULL rules can be tested; omitting it creates a parent.
+- Builders cover: `artifact`, `source`, `snapshot`, `run`, `segment`, `checkpoint`, `job`,
+  `component_version`, `representation_space`, `observation`, `representation`, `occurrence`,
+  `identity`, `evidence`, `lineage`, `index_operation`, `person`, `association`. Link rows
+  (`evidence_representations`, `evidence_candidates`, `occurrence_observations`,
+  `ann_key_sequences`) and runtime-catalog rows are built inline with `build.add(Model(...))`.
+- Add a builder when two or more tests need the same row shape.
+
+### Asserting constraint failures
+
+Use `tests/fixtures/constraints.py`: `rejected(session, make, check("ck_<table>_<name>"))` or
+`unique("table.col", ...)`. `rejected` runs `make()` inside a SAVEPOINT, so rows created
+earlier in the test survive. Do the whole failing mutation inside `make()`: a change made
+before calling `rejected` is flushed *outside* the savepoint.
 
 ## Writing deterministic tests
 

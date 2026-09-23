@@ -59,7 +59,7 @@ Shared conventions:
 
 Do not add a generic `metadata JSON` field. A versioned JSON payload is permitted only where the payload is genuinely variable and historical: snapshots, checkpoints, evidence details, job payload/progress, runtime manifests, and structured diagnostics. Stable queryable data gets a typed column.
 
-> **Decision 2026-09-23:** columns are NOT NULL unless marked nullable, **except** a column whose value only exists after an event (an attempt, a failure, an end/apply/erase time). Those are nullable even when this document does not mark them. Each such case is listed in the implementation log.
+> **Decision 2026-09-23:** columns are NOT NULL unless marked nullable, **except** a column whose value only exists after an event (an attempt, a failure, an end/apply/erase time). Those are nullable even when this document does not mark them. Each such case is listed in the implementation log. (Owner decision, M1 PR #5.)
 
 ## 4. Source and Artifact persistence
 
@@ -113,7 +113,7 @@ An `Observation` is a concrete detected face in one source at a point/frame. It 
 
 Bounds use normalized `REAL` values in `[0, 1]`; width and height are greater than zero and `x + width <= 1`, `y + height <= 1`. An image has null frame/time values; a video observation requires them. `UNIQUE(processing_run_id, sequence_in_run)` makes replay/idempotent settlement unambiguous. The crop FK uses `SET NULL`, because a cleanup policy may remove a derivative without invalidating historical observation semantics.
 
-> **Decision 2026-09-23:** the "optional landmark/quality JSON" is two nullable columns, `landmarks_json` and `quality_json` (matching `representations.quality_json`). Their contents are not yet defined.
+> **Decision 2026-09-23:** the "optional landmark/quality JSON" is two nullable columns, `landmarks_json` and `quality_json` (matching `representations.quality_json`). Their contents are not yet defined. (Owner decision, M1 PR #5.)
 
 Detection output is persisted before embedding settlement. A meaningful crop may be stored as an Artifact; a transient detector crop must remain temporary. Accepting a run changes only that run's `PENDING` observations to `ACTIVE`; reprocessing supersedes old active observations explicitly, never by overwriting their geometry.
 
@@ -156,7 +156,7 @@ An equal dimension does not establish compatibility. A vector may only be compar
 
 Use `UNIQUE(observation_id, representation_space_id)` for one persisted embedding per observation per semantic space. An active representation must have an active identity, an allocated `ann_key`, and a non-erased vector. `PENDING` representations are run-private and must never be placed in the global ANN index. `ERASED` retains provenance but has `vector = NULL`, `ann_key = NULL`, and a durable `REMOVE` operation must have been requested before final erasure.
 
-> **Decision 2026-09-23:** `vector` is nullable **only** for `ERASED`: a CHECK requires `vector` and `ann_key` to be NULL when `ERASED`, and `vector` to be present in every other state. This resolves the column table's "non-null" against the erasure rule above.
+> **Decision 2026-09-23:** `vector` is nullable **only** for `ERASED`: a CHECK requires `vector` and `ann_key` to be NULL when `ERASED`, and `vector` to be present in every other state. This resolves the column table's "non-null" against the erasure rule above. (Owner decision, M1 PR #5.)
 
 ### 6.3 `ann_key_sequences`
 
@@ -204,7 +204,7 @@ Evidence records a durable reason for an authoritative memory decision. It is im
 
 `evidence_representations` is a role-bearing association: `evidence_id`, `representation_id`, `role` (`SUBJECT`, `SELECTED_CANDIDATE`, `CANDIDATE`, `SUPPORTING`), primary key `(evidence_id, representation_id, role)`. `evidence_candidates` stores bounded recognition candidates in their original order: `evidence_id`, `rank`, nullable `representation_id`, nullable `identity_id`, `raw_similarity`, nullable `calibrated_confidence`, `decision`, and `details_json`, with primary key `(evidence_id, rank)`.
 
-> **Decision 2026-09-23:** `evidence_candidates.decision` has no defined value set yet, so it is an unconstrained string until the decision engine defines one.
+> **Decision 2026-09-23:** `evidence_candidates.decision` has no defined value set yet, so it is an unconstrained string until the decision engine defines one. (Owner decision, M1 PR #5.)
 
 Recognition Evidence must preserve the representation-space and calibration provenance through typed FKs and the snapshot payload. It records a bounded candidate set, never an unbounded raw ANN dump. Transient assessments that do not affect durable memory do not create Evidence.
 
@@ -214,7 +214,7 @@ An `Occurrence` is a meaningful appearance of an Identity within a Source. For a
 
 `occurrences` contains `id`, non-null `source_id`, `identity_id`, and `processing_run_id`; nullable `representative_observation_id`; `kind` (`IMAGE`, `TRACK`, `SEGMENT`); `state` (`PENDING`, `ACTIVE`, `SUPERSEDED`, `DELETED`); nullable `start_frame`, `end_frame`, `start_timestamp_ms`, `end_timestamp_ms`; nullable `confidence_json`; and lifecycle timestamps. Frame/time ranges are both null for `IMAGE`; otherwise start is not greater than end. An active occurrence requires an active identity.
 
-> **Decision 2026-09-23:** the occurrence "lifecycle timestamps" are `created_at` and `activated_at` (set by run acceptance). Supersede/delete timestamps are added with those use cases.
+> **Decision 2026-09-23:** the occurrence "lifecycle timestamps" are `created_at` and `activated_at` (set by run acceptance). Supersede/delete timestamps are added with those use cases. (Owner decision, M1 PR #5.)
 
 `occurrence_observations` has `occurrence_id`, `observation_id`, `ordinal`, primary key `(occurrence_id, observation_id)`, and unique `(occurrence_id, ordinal)`. An observation may normally belong to one active occurrence per run; use a partial unique index for that state if video workflows need it. The V1 image path writes one membership and sets that observation as representative.
 

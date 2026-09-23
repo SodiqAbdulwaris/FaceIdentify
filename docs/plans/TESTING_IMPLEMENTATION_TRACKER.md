@@ -64,7 +64,7 @@ Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, ru
 | TST-005 | `COMPLETE` | `sqlite_engine`/`db_session` use the production engine factory (Persistence §24/§25); pragmas, FK enforcement and per-test isolation tested; leak detection verified by mutation. Schema initialisation is `Base.metadata.create_all` until Alembic `0001_initial_schema` exists (M2) |
 | TST-006 | `COMPLETE` | `app_dirs` + `_require_inside` guard; session-wide user-data env sandbox |
 | TST-007 | `COMPLETE` | `make_usearch_index` with real USearch 2.26: add/search/save/restore/remove tested |
-| TST-008 | `PASSING` | Deterministic clock/UUID/RNG utilities (M0) plus `tests/factories/models.py`: a deterministic factory for every domain model (sources, runs, jobs, observations, representations, identities, evidence, occurrences, people, associations), added in M1 PR #5. `COMPLETE` once PR #5 merges |
+| TST-008 | `PASSING` | Deterministic clock/UUID/RNG utilities (M0) plus `tests/factories/models.py` (M1 PR #5): builders for sources, runs, jobs, observations, representations, identities, evidence, lineage, index operations, occurrences, people and associations. Link and catalog rows are built inline (see TESTING_GUIDE.md). `COMPLETE` once PR #5 merges |
 | TST-009 | `COMPLETE` | Vitest 5 + React Testing Library + jsdom in `frontend/`; `src/app/App.test.tsx` passes; typecheck, lint and build pass |
 | TST-010 | `COMPLETE` | `.github/workflows/ci.yml`: branch name, commit messages, static (ruff, mypy), backend tests + coverage artifact (Windows), frontend. Observed green on GitHub (run `35902624488`) |
 | SEC-001 | `COMPLETE` | `tests/security/test_test_data_isolation.py` |
