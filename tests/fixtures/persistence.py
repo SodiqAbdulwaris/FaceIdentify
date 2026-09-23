@@ -14,7 +14,8 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 from usearch.index import Index
 
-from backend.infrastructure.db.engine import Base, create_session_factory, create_sqlite_engine
+from backend.app.models import Base
+from backend.infrastructure.db.engine import create_session_factory, create_sqlite_engine
 
 
 @dataclass(frozen=True)
