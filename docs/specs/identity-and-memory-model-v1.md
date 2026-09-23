@@ -1756,6 +1756,8 @@ P-27 → canonical P-10
 
 Historical references can therefore still be interpreted after reconciliation.
 
+> **Decision 2026-09-23:** merge redirection is Identity-level: a merged Identity keeps its row with `state = MERGED` and `merged_into_identity_id` (PERSISTENCE_IMPLEMENTATION.md §7). There is no Person-level `canonical` redirect; `P-27 → canonical P-10` above is conceptual.
+
 If source content is permanently deleted, historical IDs may remain as non-biometric references while the deleted content itself becomes unavailable.
 
 ---
@@ -1790,6 +1792,8 @@ Actor
 ```
 
 If a result later merges into another Person, historical references should remain resolvable through stable IDs/tombstones.
+
+> **Decision 2026-09-23:** "merges into another Person" means its Identity is merged (Identity-level, §18) or re-associated through `identity_person_associations`. References stay resolvable through `merged_into_identity_id` and `identity_lineage`.
 
 If the underlying source is permanently deleted, historical feedback may retain a non-biometric reference while the deleted thumbnail/visual content remains unavailable.
 
@@ -1904,7 +1908,6 @@ The following decisions are locked for Identity & Memory Model v1.0:
 21. Memory retains rich history while active recognition uses curated evidence.
 22. Automatic reconciliation is allowed but is conservative, especially for established identities.
 23. Person-level merge preserves underlying Identity provenance.
-    > **Decision 2026-09-23:** read as Identity-level merge (see §18).
 24. Merge and split operations are reversible where data permits and trigger affected derived-state rebuilds.
 25. Movie processing may use temporary/local clusters before global identity commitment.
 26. Camera memory should consolidate useful evidence rather than learning independently from every frame.
@@ -1942,6 +1945,8 @@ The following decisions are locked for Identity & Memory Model v1.0:
 58. Stable IDs/tombstones preserve historical interpretation across merge, split, and deletion.
 59. Automated important identity decisions retain sufficient component/decision provenance.
 60. Search feedback history preserves original result context and model/ranker provenance.
+
+> **Decision 2026-09-23:** locked decision 23 is read as Identity-level merge (see §18).
 
 ---
 

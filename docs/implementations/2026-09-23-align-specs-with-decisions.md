@@ -13,9 +13,11 @@
   - `IMPLEMENTATION_ARCHITECTURE.md` (end of §26): schema comes from persistence, not an ERD mapping.
   - `Roadmap-Plan.md` §13 and §47: uuid4 instead of UUIDv7. §60: the domain-level Phase A–E work
     (naming, query guard, corrections, merge, split; TST-011–020) is built in testing milestone M1.
-  - `PERSISTENCE_IMPLEMENTATION.md` §7: domain-level merge/split are M1; "later" means UI/integration.
-  - `identity-and-memory-model-v1.md` §18, §19.1, the reconciliation events list, and locked
-    decision 23: merge is Identity-level; Person-level operations are association changes.
+  - `PERSISTENCE_IMPLEMENTATION.md` §7 and §26: domain-level merge/split are M1; "later" means UI/integration, and only forget is later.
+  - `identity-and-memory-model-v1.md` §18, §19.1, the reconciliation events list, §53
+    (tombstones/redirection), the feedback "merges into another Person" passage, and locked
+    decision 23 (note after the list): merge is Identity-level; Person-level operations are
+    association changes.
 - **New rule** in `.agents/rules/documentation.md` (*When documents conflict*), linked from
   `AGENTS.md`: agents ask the owner with a recommendation, then update every affected doc.
 - `.agents/CONTEXT.md`: conflicts 7–10 marked resolved, and the agreed 8-PR M1 plan recorded.
@@ -42,7 +44,9 @@ a standing rule on handling future doc conflicts.
   The subagent review found passages this search missed (§19.1, `PERSON_MERGED/SPLIT`,
   decision 23, persistence §7, roadmap §60, architecture §26). They were fixed, and the rule now
   requires searching all related terms.
-- Every note was checked in rendered context (end of a paragraph or list, never inside one).
+- Every note was checked in rendered context (end of a paragraph or list, never inside one). A
+  second subagent review found one note still inside a list (decision 23), plus §53, the feedback
+  passage and persistence §26. All were fixed.
 - Relative links in the changed agent docs resolve.
 
 ## Open issues / follow-ups
