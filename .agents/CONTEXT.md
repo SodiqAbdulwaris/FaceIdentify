@@ -7,12 +7,12 @@ _Last updated: 2026-09-23_
 
 ## Current state
 
-- **Milestone:** M0 (testing foundation) is implemented and verified locally. Next is M1 (domain
-  integrity). Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
-- **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` holds only
-  the bootstrap commit and is protected by ruleset `23894323` (PR required, rebase merge only,
-  five required CI checks, no bypass). The project foundation is in PR #1
-  (`chore/project-foundation`); its first CI run (`35902624488`) passed all five jobs.
+- **Milestone:** M0 (testing foundation) is complete and merged, except the domain-factory part
+  of TST-008. That part is blocked until domain models exist and is carried into M1. Next is M1
+  (domain integrity). Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
+- **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
+  bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
+  ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
 - **Backend:** only `backend/infrastructure/db/engine.py` has code (SQLite engine and session
   factory per Persistence §24/§25, plus an empty `Base` registry). All other backend packages are
   empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There are no domain models, no FastAPI
@@ -77,9 +77,7 @@ Unresolved items need the user's decision. Do not settle them silently.
 
 ## Next steps (M1)
 
-1. Get the `chore/project-foundation` PR green and merged (by the user). That moves the M0 tasks to
-   `COMPLETE`.
-2. Add Alembic at `backend/alembic/` and the models for `0001_initial_schema` per PERSISTENCE_IMPLEMENTATION.md.
+1. Add Alembic at `backend/alembic/` and the models for `0001_initial_schema` per PERSISTENCE_IMPLEMENTATION.md.
    Switch the `sqlite_engine` fixture from `create_all` to migrations.
-3. Add `tests/factories/` for the new models.
-4. Write the Identity Manager invariant tests (TST-011 to TST-020).
+2. Add `tests/factories/` for the new models (completes TST-008, carried over from M0).
+3. Write the Identity Manager invariant tests (TST-011 to TST-020).
