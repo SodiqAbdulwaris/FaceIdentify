@@ -98,11 +98,15 @@ Unresolved items need the user's decision. Do not settle them silently.
     PERSISTENCE_IMPLEMENTATION.md §21 says "unique `ann_key`" as a plain table-wide index, but
     §6.3's `ann_key_sequences` allocates independently per `representation_space_id`, each
     starting at 1. Two different ACTIVE spaces can therefore legitimately both allocate key 1,
-    which the current global `UNIQUE(ann_key)` (PR #4) would reject. V1's "one preferred
-    evaluated RepresentationSpace" scope (§30) means this is unreachable today; a future
-    multi-space scenario (e.g. a model upgrade with two ACTIVE spaces briefly overlapping) would
-    need either `UNIQUE(representation_space_id, ann_key)` or a single global sequence. Decide
-    before M3 introduces a second concurrently-active space.
+    which the current global `UNIQUE(ann_key)` (PR #4) would reject. **Nothing in the current
+    backend can construct two simultaneously-ACTIVE spaces**, so this cannot happen through any
+    code path today (only directly in tests) — but if it ever did,
+    `assign_representation_to_identity` would surface a raw, unguarded `sqlite3.IntegrityError`,
+    not a domain error (PR #6 reviewed this and deliberately left it unguarded rather than invent
+    RepresentationSpace lifecycle policy the specs don't define). A future multi-space scenario
+    (e.g. a model upgrade with two ACTIVE spaces briefly overlapping) would need either
+    `UNIQUE(representation_space_id, ann_key)` or a single global sequence. Decide before M3
+    introduces a second concurrently-active space.
 13. **Open (M6): job claim order.** `jobs.priority` is a string, so `ORDER BY priority` is
     alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
     claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
