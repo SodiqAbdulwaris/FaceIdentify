@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.infrastructure.db.engine import Base
@@ -88,7 +88,7 @@ class Job(Base):
     lease_owner: Mapped[str | None] = mapped_column(String)
     lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     heartbeat_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     failure_code: Mapped[str | None] = mapped_column(String)
     failure_detail: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)

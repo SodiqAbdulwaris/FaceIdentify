@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -143,7 +144,7 @@ class Source(Base):
     height: Mapped[int | None] = mapped_column(Integer)
     frame_rate_num: Mapped[int | None] = mapped_column(Integer)
     frame_rate_den: Mapped[int | None] = mapped_column(Integer)
-    revision: Mapped[int] = mapped_column(Integer, default=1)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
     recycled_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

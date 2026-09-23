@@ -5,16 +5,16 @@ RepresentationSpace (see `backend.app.memory.models`), RecognitionCalibrationPro
 RuntimePackage. Metadata rows are retained after uninstall; only installation rows change.
 
 Open questions (no spec defines the complete value sets, so these are unconstrained strings for
-now; see .agents/CONTEXT.md): the `state` columns of every catalog table, and
+now; see .agents/CONTEXT.md): `Component.kind`, the `state` columns of every catalog table,
 `ModelExport.format`/`precision` and `RuntimeVariant.provider`/`device_kind`. The API contract
-gives only examples (ONNX/TensorRT, FP32/FP16/INT8, CUDA/DirectML/CPU). The package-membership
-association tables are deferred: §18 adds them "only when the trusted manifest needs relational
-querying".
+gives only examples (FACE_DETECTOR/FACE_REPRESENTATION/FACE_QUALITY, ONNX/TensorRT,
+FP32/FP16/INT8, CUDA/DirectML/CPU). `RuntimeVariant.variant_key` is not declared unique because
+§18 does not say so. The package-membership association tables are deferred: §18 adds them
+"only when the trusted manifest needs relational querying".
 """
 
 import uuid
 from datetime import datetime
-from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
@@ -29,22 +29,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.infrastructure.db.engine import Base
-from backend.infrastructure.db.types import UTCDateTime, enum_check, uuid_pk
-
-
-class ComponentKind(StrEnum):
-    """Logical ML capabilities named in API and Contracts §73."""
-
-    FACE_DETECTOR = "FACE_DETECTOR"
-    FACE_REPRESENTATION = "FACE_REPRESENTATION"
-    FACE_QUALITY = "FACE_QUALITY"
+from backend.infrastructure.db.types import UTCDateTime, uuid_pk
 
 
 class Component(Base):
     """A logical capability; CUDA and CPU implementations are not separate components."""
 
     __tablename__ = "components"
-    __table_args__ = (enum_check("kind", ComponentKind),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     key: Mapped[str] = mapped_column(String, unique=True)
@@ -114,7 +105,7 @@ class RuntimeVariant(Base):
     )
     provider: Mapped[str] = mapped_column(String)
     device_kind: Mapped[str] = mapped_column(String)
-    variant_key: Mapped[str] = mapped_column(String, unique=True)
+    variant_key: Mapped[str] = mapped_column(String)
     requirements_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     state: Mapped[str] = mapped_column(String)
 

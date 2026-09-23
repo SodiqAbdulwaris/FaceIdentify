@@ -7,7 +7,7 @@ columns exist; typed columns are added with the features that own them.
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Integer
+from sqlalchemy import CheckConstraint, Integer, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.infrastructure.db.engine import Base
@@ -26,7 +26,7 @@ class ProcessingSettings(Base):
     __table_args__ = _singleton_checks()
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    revision: Mapped[int] = mapped_column(Integer, default=1)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
@@ -35,7 +35,7 @@ class StorageSettings(Base):
     __table_args__ = _singleton_checks()
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    revision: Mapped[int] = mapped_column(Integer, default=1)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
@@ -44,5 +44,5 @@ class RuntimeSettings(Base):
     __table_args__ = _singleton_checks()
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    revision: Mapped[int] = mapped_column(Integer, default=1)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
