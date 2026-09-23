@@ -59,9 +59,9 @@ npx tauri build --debug --no-bundle    # desktop build check (~3 min cold)
 
 Unresolved items need the user's decision. Do not settle them silently.
 
-1. **Migrations directory:** IMPLEMENTATION_ARCHITECTURE.md §8/§24 says `backend/migrations/`,
-   while PERSISTENCE_IMPLEMENTATION.md says `backend/alembic/` with `versions/`. Neither is
-   scaffolded yet. Resolve before M2 adds Alembic.
+1. ~~Migrations directory~~ **Resolved 2026-09-23:** `backend/alembic/` with revisions in
+   `backend/alembic/versions/`, as PERSISTENCE_IMPLEMENTATION.md specifies. The architecture spec
+   was aligned. The folder is created by `alembic init` in M2.
 2. **ML evaluation location:** only `benchmarks/` is specified. Where `ml_eval` code lives is
    undecided.
 3. **Tauri identifier:** `com.faceidentify.desktop` is a placeholder chosen during scaffolding.
@@ -76,7 +76,7 @@ Unresolved items need the user's decision. Do not settle them silently.
 
 1. Get the `chore/project-foundation` PR green and merged (by the user). That moves the M0 tasks to
    `COMPLETE`.
-2. Resolve conflict 1, then add models for `0001_initial_schema` per PERSISTENCE_IMPLEMENTATION.md.
+2. Add Alembic at `backend/alembic/` and the models for `0001_initial_schema` per PERSISTENCE_IMPLEMENTATION.md.
    Switch the `sqlite_engine` fixture from `create_all` to migrations.
 3. Add `tests/factories/` for the new models.
 4. Write the Identity Manager invariant tests (TST-011 to TST-020).

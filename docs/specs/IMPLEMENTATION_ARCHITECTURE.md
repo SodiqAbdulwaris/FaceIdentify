@@ -400,7 +400,7 @@ backend/
 │   ├── supervisor/
 │   └── worker/
 │
-└── migrations/
+└── alembic/          # Alembic environment; revisions in alembic/versions/
 ```
 
 ### 8.1 Maintainability rules
@@ -1627,7 +1627,7 @@ visual-memory/
 │   │   ├── supervisor/
 │   │   └── worker/
 │   │
-│   └── migrations/
+│   └── alembic/
 │
 ├── runtime/
 │   ├── manifests/
