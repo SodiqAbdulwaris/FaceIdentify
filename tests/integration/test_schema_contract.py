@@ -10,6 +10,8 @@ apart from `RESTRICT`.
 
 from sqlalchemy import Engine
 
+from backend.app.processing.models import TRANSIENT_RUN_STATES
+
 # (table, column) -> (referenced table, ON DELETE), for every foreign key in the schema.
 EXPECTED_FOREIGN_KEYS = {
     ("sources", "original_artifact_id"): ("artifacts", "RESTRICT"),
@@ -71,7 +73,11 @@ EXPECTED_INDEXES: dict[str, set[tuple[tuple[str, ...], bool]]] = {
 }
 
 EXPECTED_PARTIAL_INDEXES = {
-    "ix_processing_runs_transient_state": ("processing_runs", False, "state IN ("),
+    "ix_processing_runs_transient_state": (
+        "processing_runs",
+        False,
+        "state IN (" + ", ".join(f"'{state.value}'" for state in TRANSIENT_RUN_STATES) + ")",
+    ),
     "uq_execution_segments_one_running_per_run": ("execution_segments", True, "state = 'RUNNING'"),
     "uq_processing_checkpoints_one_valid_final_per_run": (
         "processing_checkpoints",

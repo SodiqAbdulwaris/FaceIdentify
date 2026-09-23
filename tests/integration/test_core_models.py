@@ -8,6 +8,7 @@ import hashlib
 import re
 import uuid
 from datetime import UTC, datetime, timedelta, timezone
+from enum import StrEnum
 from typing import Any
 
 import pytest
@@ -21,18 +22,35 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
 
-from backend.app.jobs.models import Job
-from backend.app.memory.models import RepresentationSpace
+from backend.app.jobs.models import Job, JobPriority, JobState, JobType, ProgressMode
+from backend.app.memory.models import (
+    RepresentationMetric,
+    RepresentationSpace,
+    RepresentationSpaceState,
+)
 from backend.app.models import Base
 from backend.app.processing.models import (
+    CheckpointKind,
+    CheckpointState,
     ExecutionSegment,
+    ExecutionSegmentEndReason,
+    ExecutionSegmentState,
     ProcessingCheckpoint,
     ProcessingConfigurationSnapshot,
     ProcessingRun,
+    ProcessingRunState,
 )
-from backend.app.runtime.models import Component, ComponentVersion
-from backend.app.settings.models import ProcessingSettings
-from backend.app.sources.models import Artifact, Source
+from backend.app.runtime.models import Component, ComponentVersion, ModelExport
+from backend.app.settings.models import ProcessingSettings, RuntimeSettings, StorageSettings
+from backend.app.sources.models import (
+    Artifact,
+    ArtifactKind,
+    ArtifactState,
+    Source,
+    SourceKind,
+    SourceState,
+    StorageMode,
+)
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 
 SHA = hashlib.sha256(b"bytes").digest()
@@ -413,9 +431,93 @@ def test_representation_space_rules(build: Builder) -> None:
     )
 
 
-def test_settings_tables_are_singletons(db_session: Session, clock: FrozenClock) -> None:
-    db_session.add(ProcessingSettings(id=1, updated_at=clock()))
+@pytest.mark.parametrize("model", [ProcessingSettings, StorageSettings, RuntimeSettings])
+def test_settings_tables_are_singletons(
+    db_session: Session, clock: FrozenClock, model: type[ProcessingSettings]
+) -> None:
+    db_session.add(model(id=1, updated_at=clock()))
     db_session.flush()
-    db_session.add(ProcessingSettings(id=2, updated_at=clock()))
-    with pytest.raises(IntegrityError, match=check("ck_processing_settings_singleton")):
+    db_session.add(model(id=2, updated_at=clock()))
+    with pytest.raises(IntegrityError, match=check(f"ck_{model.__tablename__}_singleton")):
         db_session.flush()
+
+
+def test_remaining_integrity_checks(build: Builder) -> None:
+    """Checks not covered above, each broken once from an otherwise valid row."""
+    run = build.run()
+    rejected(
+        build,
+        lambda: build.segment(run, -1, "RUNNING"),
+        check("ck_execution_segments_ordinal_non_negative"),
+    )
+    run = build.run()
+    rejected(
+        build,
+        lambda: build.checkpoint(run, -1, "FINAL", "VALID"),
+        check("ck_processing_checkpoints_ordinal_non_negative"),
+    )
+    rejected(build, lambda: build.source(revision=0), check("ck_sources_revision_positive"))
+    rejected(build, lambda: build.run(revision=0), check("ck_processing_runs_revision_positive"))
+    rejected(build, lambda: build.job(attempt_number=0), check("ck_jobs_attempt_number_positive"))
+    rejected(build, lambda: build.artifact(size_bytes=-1), check("ck_artifacts_size_non_negative"))
+    rejected(
+        build,
+        lambda: build.add(
+            ProcessingConfigurationSnapshot(
+                id=build.new_id(), schema_version=1, canonical_json={},
+                fingerprint_sha256=b"short", created_at=build.clock(),
+            )
+        ),
+        check("ck_processing_configuration_snapshots_fingerprint_length"),
+    )  # fmt: skip
+    space = build.representation_space()
+    export_bytes = build.artifact(kind="MODEL_EXPORT")
+    rejected(
+        build,
+        lambda: build.add(
+            ModelExport(
+                id=build.new_id(), component_version_id=space.component_version_id,
+                format="ONNX", precision="FP32", artifact_id=export_bytes.id, sha256=b"short",
+                input_contract_json={}, created_at=build.clock(),
+            )
+        ),
+        check("ck_model_exports_sha256_length"),
+    )  # fmt: skip
+
+
+# The complete value sets PERSISTENCE_IMPLEMENTATION.md defines (§4, §6.1, §12-§16). If a StrEnum
+# drifts from the spec, its CHECK drifts with it, so pin the enums to the spec text itself.
+SPEC_VALUE_SETS: dict[type[StrEnum], set[str]] = {
+    ArtifactKind: {"SOURCE_ORIGINAL", "FACE_CROP", "THUMBNAIL", "MODEL_EXPORT", "RUNTIME_PACKAGE"},
+    StorageMode: {"MANAGED", "REFERENCED"},
+    ArtifactState: {"PENDING", "AVAILABLE", "MISSING", "DELETING", "DELETE_FAILED", "DELETED"},
+    SourceKind: {"IMAGE", "VIDEO"},
+    SourceState: {"ACTIVE", "RECYCLED", "DELETING", "DELETED", "UNAVAILABLE"},
+    RepresentationSpaceState: {"ACTIVE", "DEPRECATED"},
+    RepresentationMetric: {"COSINE"},
+    ProcessingRunState: {
+        "PENDING", "RUNNING", "PAUSING", "PAUSED", "CANCELLING", "CANCELLED", "FINALIZING",
+        "COMPLETED", "FAILED", "INTERRUPTED", "NOT_RESUMABLE",
+    },
+    ExecutionSegmentState: {"RUNNING", "COMPLETED", "FAILED", "INTERRUPTED", "ABANDONED"},
+    ExecutionSegmentEndReason: {
+        "NORMAL", "FALLBACK", "CUDA_OOM", "WORKER_CRASH", "CANCELLED", "SHUTDOWN",
+    },
+    CheckpointKind: {"INTERMEDIATE", "FINAL"},
+    CheckpointState: {"VALID", "INVALIDATED"},
+    JobType: {
+        "PROCESS_SOURCE", "REPROCESS_SOURCE", "REBUILD_INDEX", "RETRAIN_MODEL",
+        "INSTALL_RUNTIME", "CLEAN_STORAGE",
+    },
+    JobState: {
+        "QUEUED", "RUNNING", "PAUSING", "PAUSED", "CANCELLING", "CANCELLED", "COMPLETED",
+        "FAILED", "INTERRUPTED",
+    },
+    JobPriority: {"INTERACTIVE", "HIGH", "NORMAL", "LOW", "MAINTENANCE"},
+    ProgressMode: {"DETERMINATE", "INDETERMINATE"},
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("enum", SPEC_VALUE_SETS, ids=lambda e: e.__name__)
+def test_enums_match_the_spec_value_sets(enum: type[StrEnum]) -> None:
+    assert {member.value for member in enum} == SPEC_VALUE_SETS[enum]
