@@ -27,7 +27,7 @@ _Last updated: 2026-09-23_
 
 | Path | Contents |
 |---|---|
-| `docs/specs/` | **Authoritative** architecture and contracts (architecture, API, persistence, ERD, identity model, processing, search, product, ML components) |
+| `docs/specs/` | **Authoritative** architecture and contracts (architecture, API, persistence, identity model, processing, search, product, ML components). The **schema** comes from `PERSISTENCE_IMPLEMENTATION.md`; `ERD.md` is conceptual only |
 | `docs/plans/` | Roadmap, testing tracker, identity decision engine plan |
 | `docs/strategy/` | Testing strategy, ML benchmark and evaluation protocol |
 | `docs/guides/` | How-tos, e.g. `TESTING_GUIDE.md` |
@@ -75,13 +75,35 @@ Unresolved items need the user's decision. Do not settle them silently.
 5. `docs/archive/opendecisions.md` is superseded (it predates the SQLite/USearch/SQLAlchemy
    decisions).
 6. `docs/research/tech-stack.md` holds **locked** decisions despite living under `research/`.
+7. ~~ERD vs persistence schema~~ **Resolved 2026-09-23:** `PERSISTENCE_IMPLEMENTATION.md` is the
+   implementation schema; `ERD.md` is conceptual (status note added).
+8. ~~UUIDv7 (roadmap) vs uuid4 (persistence)~~ **Resolved 2026-09-23:** uuid4 in `Uuid` / CHAR(32).
+   Roadmap updated.
+9. ~~Person-level vs Identity-level merge~~ **Resolved 2026-09-23:** Identity-level (persistence
+   §7, API §8.1/§114). Identity model §18 annotated.
+10. ~~Merge/split in M1 (tracker) vs after the first milestone (roadmap)~~ **Resolved 2026-09-23:**
+    domain-level merge/split and TST-015/016 are in M1; roadmap Phases D/E keep the API/UI/ML
+    integration.
 
 ## Next steps (M1)
 
-1. Add the persistence models for `0001_initial_schema` per PERSISTENCE_IMPLEMENTATION.md. Test
-   fixtures keep using `create_all` until M2.
-2. Add `tests/factories/` for the new models (completes TST-008, carried over from M0).
-3. Write the Identity Manager invariant tests (TST-011 to TST-020).
+M1 is delivered as a series of small PRs, each reviewed and green before the next (agreed
+2026-09-23):
+
+1. Provenance and runtime-catalog models: artifacts, sources, snapshots, runs, segments,
+   checkpoints, jobs, components, representation spaces, calibration, settings. Constraint tests.
+2. Memory models: observations, representations, ann-key sequences, identities, lineage,
+   people, associations, evidence, occurrences, index operations. Constraint tests.
+3. `tests/factories/` for those models. This completes TST-008, carried over from M0.
+4. Identity Manager core: create/activate, assign, observation provenance, Evidence
+   (TST-011, 012, 017, 018).
+5. Corrections and rename via Person association (TST-013, 014).
+6. Query-only recognition guard (TST-019).
+7. Merge, then split, at the domain level (TST-015, 016).
+8. Hypothesis property tests over operation sequences (TST-020).
+
+Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
+plain string, listed as an open question. Test fixtures keep using `create_all` until M2.
 
 Deferred to M2: Alembic at `backend/alembic/` (revision `0001_initial_schema`), switching the
 `sqlite_engine` fixture from `create_all` to migrations, and migration tests (TST-032).
