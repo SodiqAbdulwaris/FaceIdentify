@@ -65,10 +65,11 @@ Unresolved items need the user's decision. Do not settle them silently.
 2. ~~ML evaluation location~~ **Resolved 2026-09-23:** top-level `evaluation/`, separate from
    `tests/` (correctness) and `benchmarks/` (performance). Datasets go in the Git-ignored
    `evaluation/datasets/`, never committed.
-3. **Tauri identifier:** `com.faceidentify.desktop` is a placeholder chosen during scaffolding.
-   Confirm before any release build (it determines app-data paths on Windows).
-4. **Product name:** the specs use `<App>` and the architecture's repo example is named
-   `visual-memory`. The code currently uses "FaceIdentify".
+3. ~~Tauri identifier~~ **Resolved 2026-09-23:** `io.github.sodiqabdulwaris.faceidentify`
+   (reverse-DNS of a domain the owner controls). **Never change it after the first release:**
+   Windows app-data paths derive from it.
+4. ~~Product name~~ **Resolved 2026-09-23:** "FaceIdentify". Read `<App>` in the specs as
+   FaceIdentify.
 5. `docs/archive/opendecisions.md` is superseded (it predates the SQLite/USearch/SQLAlchemy
    decisions).
 6. `docs/research/tech-stack.md` holds **locked** decisions despite living under `research/`.
