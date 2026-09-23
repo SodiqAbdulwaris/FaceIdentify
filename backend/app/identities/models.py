@@ -42,9 +42,10 @@ class Identity(Base):
     __table_args__ = (
         enum_check("state", IdentityState),
         CheckConstraint("revision >= 1", name="revision_positive"),
-        # A MERGED identity must say where it went, and only a MERGED one may.
+        # A MERGED identity must say where it went (§7). Whether a later state (e.g.
+        # FORGOTTEN) keeps the pointer is not specified, so that is left unconstrained.
         CheckConstraint(
-            "(state = 'MERGED') = (merged_into_identity_id IS NOT NULL)", name="merged_target"
+            "state != 'MERGED' OR merged_into_identity_id IS NOT NULL", name="merged_target"
         ),
         CheckConstraint("merged_into_identity_id != id", name="not_merged_into_self"),
     )
