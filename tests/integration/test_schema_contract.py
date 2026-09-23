@@ -51,6 +51,46 @@ EXPECTED_FOREIGN_KEYS = {
     ("runtime_package_installations", "runtime_package_id"): ("runtime_packages", "RESTRICT"),
     ("runtime_package_installations", "artifact_id"): ("artifacts", "RESTRICT"),
     ("representation_spaces", "component_version_id"): ("component_versions", "RESTRICT"),
+    # Memory, identity and people (M1 PR 2).
+    ("ann_key_sequences", "representation_space_id"): ("representation_spaces", "RESTRICT"),
+    ("observations", "source_id"): ("sources", "RESTRICT"),
+    ("observations", "processing_run_id"): ("processing_runs", "RESTRICT"),
+    ("observations", "execution_segment_id"): ("execution_segments", "RESTRICT"),
+    ("observations", "face_crop_artifact_id"): ("artifacts", "SET NULL"),
+    ("observations", "detector_component_version_id"): ("component_versions", "RESTRICT"),
+    ("observations", "superseded_by_run_id"): ("processing_runs", "RESTRICT"),
+    ("representations", "observation_id"): ("observations", "CASCADE"),
+    ("representations", "identity_id"): ("identities", "RESTRICT"),
+    ("representations", "processing_run_id"): ("processing_runs", "RESTRICT"),
+    ("representations", "execution_segment_id"): ("execution_segments", "RESTRICT"),
+    ("representations", "representation_space_id"): ("representation_spaces", "RESTRICT"),
+    ("occurrences", "source_id"): ("sources", "RESTRICT"),
+    ("occurrences", "identity_id"): ("identities", "RESTRICT"),
+    ("occurrences", "processing_run_id"): ("processing_runs", "RESTRICT"),
+    ("occurrences", "representative_observation_id"): ("observations", "SET NULL"),
+    ("occurrence_observations", "occurrence_id"): ("occurrences", "CASCADE"),
+    ("occurrence_observations", "observation_id"): ("observations", "RESTRICT"),
+    ("index_operations", "representation_id"): ("representations", "RESTRICT"),
+    ("index_operations", "representation_space_id"): ("representation_spaces", "RESTRICT"),
+    ("identities", "created_by_processing_run_id"): ("processing_runs", "RESTRICT"),
+    ("identities", "representative_observation_id"): ("observations", "SET NULL"),
+    ("identities", "merged_into_identity_id"): ("identities", "RESTRICT"),
+    ("identity_lineage", "from_identity_id"): ("identities", "RESTRICT"),
+    ("identity_lineage", "to_identity_id"): ("identities", "RESTRICT"),
+    ("identity_lineage", "evidence_id"): ("evidence", "RESTRICT"),
+    ("evidence", "processing_run_id"): ("processing_runs", "RESTRICT"),
+    ("evidence", "source_id"): ("sources", "RESTRICT"),
+    ("evidence", "subject_identity_id"): ("identities", "RESTRICT"),
+    ("evidence", "subject_person_id"): ("people", "RESTRICT"),
+    ("evidence", "calibration_profile_id"): ("recognition_calibration_profiles", "RESTRICT"),
+    ("evidence_representations", "evidence_id"): ("evidence", "CASCADE"),
+    ("evidence_representations", "representation_id"): ("representations", "RESTRICT"),
+    ("evidence_candidates", "evidence_id"): ("evidence", "CASCADE"),
+    ("evidence_candidates", "representation_id"): ("representations", "RESTRICT"),
+    ("evidence_candidates", "identity_id"): ("identities", "RESTRICT"),
+    ("identity_person_associations", "identity_id"): ("identities", "RESTRICT"),
+    ("identity_person_associations", "person_id"): ("people", "RESTRICT"),
+    ("identity_person_associations", "evidence_id"): ("evidence", "RESTRICT"),
 }
 
 # table -> required non-partial indexes from §21 as (columns, unique). Partial indexes are
@@ -70,6 +110,33 @@ EXPECTED_INDEXES: dict[str, set[tuple[tuple[str, ...], bool]]] = {
     },
     "execution_segments": {(("processing_run_id", "ordinal"), True)},
     "processing_checkpoints": {(("processing_run_id", "ordinal"), True)},
+    "observations": {
+        (("processing_run_id", "sequence_in_run"), True),
+        (("source_id", "state", "created_at"), False),
+        (("face_crop_artifact_id",), False),
+    },
+    "representations": {
+        (("ann_key",), True),
+        (("representation_space_id", "state", "ann_key"), False),
+        (("identity_id", "state"), False),
+        (("processing_run_id", "state"), False),
+    },
+    "occurrences": {
+        (("source_id", "state", "created_at"), False),
+        (("identity_id", "state", "created_at"), False),
+        (("processing_run_id", "state"), False),
+    },
+    "evidence": {
+        (("subject_identity_id", "created_at"), False),
+        (("processing_run_id", "created_at"), False),
+        (("kind", "created_at"), False),
+    },
+    "index_operations": {
+        (("state", "not_before_at", "created_at"), False),
+        (("representation_space_id", "state"), False),
+    },
+    "people": {(("state", "normalized_name"), False)},
+    "identity_person_associations": {(("person_id", "state"), False)},
 }
 
 EXPECTED_PARTIAL_INDEXES = {
@@ -83,6 +150,12 @@ EXPECTED_PARTIAL_INDEXES = {
         "processing_checkpoints",
         True,
         "kind = 'FINAL' AND state = 'VALID'",
+    ),
+    "uq_identity_person_active": ("identity_person_associations", True, "state = 'ACTIVE'"),
+    "uq_index_operations_one_pending_per_representation_operation": (
+        "index_operations",
+        True,
+        "state = 'PENDING'",
     ),
 }
 
@@ -127,22 +200,27 @@ def test_required_partial_indexes_exist(sqlite_engine: Engine) -> None:
             assert f"WHERE {predicate}" in sql, name
 
 
-# Columns with a spec-required database DEFAULT (§2: `revision INTEGER NOT NULL DEFAULT 1`).
-# Checked in the DDL itself: ORM and Core inserts both apply the Python-side default, so an
-# insert-based test cannot tell whether the DEFAULT exists.
-EXPECTED_DEFAULT_ONE = {
-    ("sources", "revision"),
-    ("processing_runs", "revision"),
-    ("jobs", "attempt_number"),
-    ("processing_settings", "revision"),
-    ("storage_settings", "revision"),
-    ("runtime_settings", "revision"),
+# Columns with a required database DEFAULT: `revision INTEGER NOT NULL DEFAULT 1` (§2),
+# `attempt_number` (§15) and `attempt_count` (starts at zero). Checked in the DDL itself: ORM
+# and Core inserts both apply the Python-side default, so an insert-based test cannot tell
+# whether the DEFAULT exists.
+EXPECTED_DEFAULTS = {
+    ("sources", "revision"): "1",
+    ("processing_runs", "revision"): "1",
+    ("jobs", "attempt_number"): "1",
+    ("processing_settings", "revision"): "1",
+    ("storage_settings", "revision"): "1",
+    ("runtime_settings", "revision"): "1",
+    ("identities", "revision"): "1",
+    ("people", "revision"): "1",
+    ("identity_person_associations", "revision"): "1",
+    ("index_operations", "attempt_count"): "0",
 }
 
 
-def test_revision_columns_default_to_one_in_the_ddl(sqlite_engine: Engine) -> None:
+def test_counter_columns_have_ddl_defaults(sqlite_engine: Engine) -> None:
     with sqlite_engine.connect() as conn:
-        for table, column in sorted(EXPECTED_DEFAULT_ONE):
+        for (table, column), default in sorted(EXPECTED_DEFAULTS.items()):
             info = {row[1]: row for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
             assert info[column][3] == 1, f"{table}.{column} must be NOT NULL"
-            assert info[column][4] == "1", f"{table}.{column} must DEFAULT 1"
+            assert info[column][4] == default, f"{table}.{column} must DEFAULT {default}"
