@@ -34,10 +34,15 @@ forbids without approval.
   experiment manifests and dataset versions. Keeping it outside `tests/` stops it running in
   ordinary test runs, and outside `benchmarks/` keeps quality apart from performance. Datasets
   are biometric data (§12), so Git ignores them.
-- **Identifier:** a reverse-DNS identifier should belong to a domain the owner controls;
-  `com.faceidentify.desktop` implied `faceidentify.com`. GitHub Pages
-  (`sodiqabdulwaris.github.io`) is controlled by the owner. Windows app-data paths derive from
-  the identifier, so it must be fixed before the first release and never changed after.
+- **Identifier:** a reverse-DNS identifier should come from a namespace the project can claim.
+  `com.faceidentify.desktop` implied ownership of `faceidentify.com`, which the owner does not
+  hold. `io.github.sodiqabdulwaris` is the owner's GitHub account namespace
+  (`sodiqabdulwaris.github.io`). GitHub owns the domain, but that subdomain is tied to this
+  account, the common convention for projects without their own domain. If the project later
+  acquires its own domain, the identifier may switch to it only **before** the first release.
+  Windows app-data paths derive from the identifier, so it must never change after release.
+  (Corrected wording after the Codex review of PR #2, which rightly noted that `github.io` is
+  not an owned domain.)
 - **Not changed:** `docs/research/tech-stack.md` stays in `research/`, the layout the user
   chose, even though it holds locked decisions (CONTEXT open question 6).
 

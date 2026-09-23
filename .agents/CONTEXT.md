@@ -67,7 +67,8 @@ Unresolved items need the user's decision. Do not settle them silently.
    `tests/` (correctness) and `benchmarks/` (performance). Datasets go in the Git-ignored
    `evaluation/datasets/`, never committed.
 3. ~~Tauri identifier~~ **Resolved 2026-09-23:** `io.github.sodiqabdulwaris.faceidentify`
-   (reverse-DNS of a domain the owner controls). **Never change it after the first release:**
+   (the owner's GitHub account namespace; the project owns no domain). **Never change it after
+   the first release:**
    Windows app-data paths derive from it.
 4. ~~Product name~~ **Resolved 2026-09-23:** "FaceIdentify". Read `<App>` in the specs as
    FaceIdentify.
