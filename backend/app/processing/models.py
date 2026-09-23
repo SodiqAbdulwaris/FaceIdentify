@@ -93,7 +93,7 @@ class ProcessingRun(Base):
     current_checkpoint_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("processing_checkpoints.id", ondelete="SET NULL", use_alter=True)
     )
-    revision: Mapped[int] = mapped_column(Integer, default=1)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
@@ -145,7 +145,7 @@ class ExecutionSegment(Base):
     started_at: Mapped[datetime] = mapped_column(UTCDateTime)
     ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     ended_reason: Mapped[str | None] = mapped_column(String)
-    runtime_details_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    runtime_details_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
