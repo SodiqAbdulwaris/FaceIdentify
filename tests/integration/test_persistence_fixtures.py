@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from usearch.index import Index
 
+from backend.app.models import Base
 from tests.fixtures.persistence import AppDirs
 
 # Test-local tables only: these are not production models.
@@ -62,8 +63,9 @@ def test_session_commits_are_durable_across_connections(
 @pytest.mark.parametrize("run", ["first", "second"])
 def test_each_test_gets_a_fresh_database(run: str, sqlite_engine: Engine, tmp_path: Path) -> None:
     with sqlite_engine.begin() as conn:
-        tables = conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").all()
-        assert tables == []  # nothing left behind by the other parametrised run
+        tables = conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")
+        # Exactly the schema, and nothing (e.g. `parent`) left behind by the other parametrised run.
+        assert {name for (name,) in tables} == set(Base.metadata.tables)
         conn.exec_driver_sql(PARENT_CHILD_DDL[0])
     assert sqlite_engine.url.database is not None
     database = Path(sqlite_engine.url.database)
