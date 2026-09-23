@@ -13,9 +13,9 @@ _Last updated: 2026-09-23_
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
   ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
-- **Backend:** the SQLite engine/session factory plus the M1 PR 1 models (sources, processing
-  provenance, jobs, runtime catalog, representation spaces, settings; registry
-  `backend/app/models.py`). Identity/observation models come in PR 2. The remaining backend
+- **Backend:** the SQLite engine/session factory and models for all 33 `0001_initial_schema`
+  tables (registry `backend/app/models.py`). Tests build rows with the shared `build` factory
+  and assert constraints with `tests/fixtures/constraints.py`. The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There are no use cases, no
   FastAPI app and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
@@ -88,8 +88,9 @@ Unresolved items need the user's decision. Do not settle them silently.
 11. **Open: unconstrained model columns.** No spec gives the complete value sets for
     `Component.kind` (the API lists examples only), every runtime-catalog `state`,
     `ModelExport.format`/`precision`, `RuntimeVariant.provider`/`device_kind` or
-    `RepresentationSpace.normalization`. They are plain strings until decided (before the M2
-    migration). The transient run-state list for the partial index is inferred from recovery
+    `RepresentationSpace.normalization`, `EvidenceCandidate.decision`, and the contents of
+    `Observation.landmarks_json`/`quality_json`. They are plain strings or free JSON until decided
+    (before the M2 migration). The transient run-state list for the partial index is inferred from recovery
     (§28).
 12. **Open (M6): job claim order.** `jobs.priority` is a string, so `ORDER BY priority` is
     alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
@@ -101,11 +102,10 @@ Unresolved items need the user's decision. Do not settle them silently.
 M1 is delivered as a series of small PRs, each reviewed and green before the next (agreed
 2026-09-23):
 
-1. Provenance and runtime-catalog models: artifacts, sources, snapshots, runs, segments,
-   checkpoints, jobs, components, representation spaces, calibration, settings. Constraint tests.
-2. Memory models: observations, representations, ann-key sequences, identities, lineage,
-   people, associations, evidence, occurrences, index operations. Constraint tests.
-3. `tests/factories/` for those models. This completes TST-008, carried over from M0.
+1. ~~Provenance and runtime-catalog models~~ Done (PR #4).
+2. ~~Memory, identity and people models~~ Done, with the shared `build` factory
+   (`tests/factories/models.py`), which also covers step 3 and completes TST-008.
+3. ~~Factories~~ Folded into step 2.
 4. Identity Manager core: create/activate, assign, observation provenance, Evidence
    (TST-011, 012, 017, 018).
 5. Corrections and rename via Person association (TST-013, 014).
