@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     JSON,
@@ -18,10 +18,15 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.infrastructure.db.engine import Base
 from backend.infrastructure.db.types import UTCDateTime, enum_check, uuid_pk
+
+if TYPE_CHECKING:
+    from backend.app.identities.models import Identity
+    from backend.app.processing.models import ExecutionSegment, ProcessingRun
+    from backend.app.sources.models import Source
 
 
 class RepresentationSpaceState(StrEnum):
@@ -140,6 +145,11 @@ class Observation(Base):
         ForeignKey("processing_runs.id", ondelete="RESTRICT")
     )
 
+    # §22: bounded to-one navigation only.
+    source: Mapped["Source"] = relationship()
+    processing_run: Mapped["ProcessingRun"] = relationship(foreign_keys=[processing_run_id])
+    execution_segment: Mapped["ExecutionSegment"] = relationship()
+
 
 class RepresentationState(StrEnum):
     PENDING = "PENDING"
@@ -207,6 +217,13 @@ class Representation(Base):
     activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     erased_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
+    # §22: bounded to-one navigation only.
+    observation: Mapped["Observation"] = relationship()
+    identity: Mapped["Identity | None"] = relationship()
+    representation_space: Mapped["RepresentationSpace"] = relationship()
+    processing_run: Mapped["ProcessingRun"] = relationship()
+    execution_segment: Mapped["ExecutionSegment"] = relationship()
+
 
 class OccurrenceKind(StrEnum):
     IMAGE = "IMAGE"
@@ -266,6 +283,12 @@ class Occurrence(Base):
     # "Lifecycle timestamps" (§11), decision 2026-09-23: creation and acceptance.
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    # §22: bounded to-one navigation only.
+    source: Mapped["Source"] = relationship()
+    identity: Mapped["Identity"] = relationship()
+    processing_run: Mapped["ProcessingRun"] = relationship()
+    representative_observation: Mapped["Observation | None"] = relationship()
 
 
 class OccurrenceObservation(Base):

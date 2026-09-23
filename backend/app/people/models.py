@@ -3,12 +3,16 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.infrastructure.db.engine import Base
 from backend.infrastructure.db.types import UTCDateTime, enum_check, uuid_pk
+
+if TYPE_CHECKING:
+    from backend.app.identities.models import Evidence, Identity
 
 
 class PersonState(StrEnum):
@@ -80,3 +84,8 @@ class IdentityPersonAssociation(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     ended_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
+
+    # §22: bounded to-one navigation only.
+    identity: Mapped["Identity"] = relationship()
+    person: Mapped["Person"] = relationship()
+    evidence: Mapped["Evidence | None"] = relationship()
