@@ -724,7 +724,7 @@ False temporary fragmentation is generally safer than contaminating two differen
 
 ## 18. Merge Semantics
 
-> **Superseded in part (decision 2026-09-23):** merge is implemented at the **Identity** level: `identities.state = MERGED`, `merged_into_identity_id`, an `identity_lineage` `MERGED_INTO` edge, and Evidence (PERSISTENCE_IMPLEMENTATION.md §7, API and Contracts §8.1/§114). `people` has no `MERGED` state. The Person-level `status: MERGED` / `canonical_person` example below is conceptual only. Attaching several Identities to one Person is done through `identity_person_associations`.
+> **Decision 2026-09-23:** merge is **Identity-level**: `identities.state = MERGED`, `merged_into_identity_id`, an `identity_lineage` `MERGED_INTO` edge and Evidence (PERSISTENCE_IMPLEMENTATION.md §7; API and Contracts §8.1/§114). `people` has no `MERGED` state. Person-level combining or separating is done by changing `identity_person_associations`. The Person-level example below is conceptual only.
 
 Merging should normally preserve underlying Identities.
 
@@ -769,6 +769,8 @@ Undo/reversal should generate a compensating historical event rather than deleti
 There are two distinct split operations.
 
 ### 19.1 Person-level split
+
+> **Decision 2026-09-23:** a Person-level split is an association change: end the Identity's active `identity_person_associations` row and create one to another Person, with Evidence. It is not a Person state.
 
 Detach an entire Identity from the wrong Person.
 
@@ -1685,6 +1687,8 @@ Identity Events include meaningful transitions such as:
 - IDENTITY_SPLIT
 - IDENTITY_RECONCILED
 
+> **Decision 2026-09-23:** `PERSON_MERGED`/`PERSON_SPLIT` are conceptual. Durable history uses the Evidence kinds in PERSISTENCE_IMPLEMENTATION.md §10 (e.g. `IDENTITY_MERGED`, `IDENTITY_SPLIT`, `IDENTITY_ASSIGNED_TO_PERSON`), not a generic event table.
+
 ### Semantic
 
 - PERSON_RENAMED
@@ -1900,6 +1904,7 @@ The following decisions are locked for Identity & Memory Model v1.0:
 21. Memory retains rich history while active recognition uses curated evidence.
 22. Automatic reconciliation is allowed but is conservative, especially for established identities.
 23. Person-level merge preserves underlying Identity provenance.
+    > **Decision 2026-09-23:** read as Identity-level merge (see §18).
 24. Merge and split operations are reversible where data permits and trigger affected derived-state rebuilds.
 25. Movie processing may use temporary/local clusters before global identity commitment.
 26. Camera memory should consolidate useful evidence rather than learning independently from every frame.

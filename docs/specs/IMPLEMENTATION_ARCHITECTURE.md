@@ -2351,3 +2351,5 @@ specifying:
 Only after those contracts are defined should the ERD be mapped into the
 concrete SQLAlchemy/Alembic implementation plan and the first ML
 components selected for the initial vertical slice.
+
+> **Decision 2026-09-23:** the concrete schema is `PERSISTENCE_IMPLEMENTATION.md`, not a mapping of `ERD.md`, which is conceptual.
