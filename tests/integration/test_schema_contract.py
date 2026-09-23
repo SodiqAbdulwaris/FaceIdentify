@@ -231,28 +231,44 @@ def test_counter_columns_have_ddl_defaults(sqlite_engine: Engine) -> None:
 # §22: to-one relationships only, exactly these. Unbounded collections (Source.observations,
 # Identity.representations, ...) must not exist; code uses explicit queries instead.
 EXPECTED_RELATIONSHIPS = {
+    # table -> {relationship: the foreign-key column it follows}
     "representations": {
-        "observation",
-        "identity",
-        "representation_space",
-        "processing_run",
-        "execution_segment",
+        "observation": "observation_id",
+        "identity": "identity_id",
+        "representation_space": "representation_space_id",
+        "processing_run": "processing_run_id",
+        "execution_segment": "execution_segment_id",
     },
-    "observations": {"source", "processing_run", "execution_segment"},
-    "occurrences": {"source", "identity", "processing_run", "representative_observation"},
-    "processing_runs": {"source", "configuration_snapshot"},
-    "execution_segments": {"processing_run", "runtime_variant"},
-    "identity_person_associations": {"identity", "person", "evidence"},
+    "observations": {
+        "source": "source_id",
+        # Not superseded_by_run_id, which also references processing_runs.
+        "processing_run": "processing_run_id",
+        "execution_segment": "execution_segment_id",
+    },
+    "occurrences": {
+        "source": "source_id",
+        "identity": "identity_id",
+        "processing_run": "processing_run_id",
+        "representative_observation": "representative_observation_id",
+    },
+    "processing_runs": {
+        # Not sources.current_processing_run_id, which links the same tables the other way.
+        "source": "source_id",
+        "configuration_snapshot": "configuration_snapshot_id",
+    },
+    "execution_segments": {
+        "processing_run": "processing_run_id",
+        "runtime_variant": "runtime_variant_id",
+    },
+    "identity_person_associations": {
+        "identity": "identity_id",
+        "person": "person_id",
+        "evidence": "evidence_id",
+    },
 }
 
 
 def test_orm_relationships_are_exactly_the_bounded_to_one_set() -> None:
-    actual = {
-        mapper.class_.__tablename__: {
-            rel.key for rel in mapper.relationships if rel.direction is MANYTOONE
-        }
-        for mapper in Base.registry.mappers
-    }
     collections = [
         f"{mapper.class_.__name__}.{rel.key}"
         for mapper in Base.registry.mappers
@@ -260,4 +276,9 @@ def test_orm_relationships_are_exactly_the_bounded_to_one_set() -> None:
         if rel.direction is not MANYTOONE
     ]
     assert collections == []
-    assert {table: keys for table, keys in actual.items() if keys} == EXPECTED_RELATIONSHIPS
+    actual: dict[str, dict[str, str]] = {}
+    for mapper in Base.registry.mappers:
+        for rel in mapper.relationships:
+            (column,) = rel.local_columns  # every relationship follows exactly one FK column
+            actual.setdefault(mapper.class_.__tablename__, {})[rel.key] = column.name
+    assert actual == EXPECTED_RELATIONSHIPS
