@@ -3,7 +3,7 @@
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** M1 (TST-011, TST-012, TST-017, TST-018)
 - **Status:** done
-- **Commits:** PR #6: `feat(identities): add identity manager core use cases`, `test(identities): add identity manager use-case tests`, `docs: record m1 identity manager core`
+- **Commits:** PR #6: `feat(identities): add identity manager core use cases`, `test(identities): add identity manager use-case tests`, `docs: record m1 identity manager core`, then the review fixes `fix(identities): address identity manager review findings`, `docs: record identity manager review outcomes`
 
 ## What changed
 
@@ -48,15 +48,36 @@ a future decision engine calls into this same Identity Manager.
   `test_activation_changes_state_but_never_the_identifier` before the fix went in.
 - **A real design tension, found while testing, not fixed here:** `representations.ann_key` has
   a table-wide `UNIQUE` constraint (PR #4), but `ann_key_sequences` allocates independently per
-  `representation_space_id`, so two different spaces can legitimately both allocate key 1. V1's
-  single-preferred-space scope makes this unreachable today. Recorded as CONTEXT open question
-  12, not fixed, since it would mean changing already-merged PR #4 schema — a decision for the
-  owner before M3.
+  `representation_space_id`, so two different spaces can legitimately both allocate key 1.
+  Nothing in the current backend can construct two simultaneously-`ACTIVE` spaces outside of
+  tests, but if it happened, `assign_representation_to_identity` would surface a raw
+  `sqlite3.IntegrityError` rather than a domain error — not a safely-guarded rejection. Fixing
+  it (either a composite `UNIQUE(representation_space_id, ann_key)`, changing already-merged PR
+  #4 schema, or a single global sequence) is a schema decision for the owner, out of this PR's
+  scope; recorded as CONTEXT open question 12 with that honest failure-mode description.
+
+## Independent review (subagent, disposable worktree): 5 findings
+
+| # | Sev | Finding | Resolution |
+|---|---|---|---|
+| 1 | Medium | `_raise_activation_conflict`'s diagnostic read used `session.get()` without `populate_existing`, so it could compare against the caller's own stale cached copy instead of the database, misdiagnosing which conflict occurred | **Fixed.** Same `populate_existing=True` as the success branch. New regression test deliberately desyncs the cached copy from the database and asserts the correct exception, and that the object is not left showing a status it doesn't have |
+| 2 | Medium | `evidence_kind=IDENTITY_CREATED` was a fully-trusted, unverified caller input: nothing stopped marking a second assignment to an already-created identity as another "creation," corrupting the historical record | **Fixed.** An identity may receive `IDENTITY_CREATED` evidence at most once (`_has_creation_evidence`); a later assignment must be `IDENTITY_MATCHED`. New test, ordering-checked to consume no `ann_key` on rejection |
+| 3 | Low | `allocate_ann_key`'s `RETURNING` read had no defensive handling for an empty result | **Reverted after investigation**, not fixed: the guarded row cannot disappear (its FK to `representation_spaces` is `RESTRICT` and nothing deletes `ann_key_sequences` rows), so a check there would be untestable dead code, which would also have broken 100% coverage. `scalar_one()` already fails loudly if that ever stops being true |
+| 4 | Medium | Open question 12's "unreachable in V1" wording read as a safety guarantee, when no code enforces it | **Docs fixed**, not code: strengthened the entry and CONTEXT to state the actual failure mode (a raw `IntegrityError`, not a guarded rejection) instead of implying safety. No functional guard added — one would mean deciding `RepresentationSpace` lifecycle policy the specs don't define, out of this PR's scope |
+| 5 | Low | The `identity()` factory stamped `activated_at` even for non-`ACTIVE` requested states, producing unrepresentative rows | **Fixed** in `tests/factories/models.py`: `activated_at` defaults to `None` unless `state="ACTIVE"` |
+
+While fixing finding 1, mutation-testing surfaced that `activate_identity`'s guarded `UPDATE`
+relied on SQLAlchemy's default ORM-session-sync fallback behaviour for an already-loaded
+`Identity`. A direct probe confirmed today's SQLAlchemy version safely declines to sync when a
+`SET` value is an expression (`revision=Identity.revision + 1`) rather than a literal, so no
+corruption was reproduced — but relying on that undocumented fallback was itself a risk. The
+`UPDATE` now explicitly disables session sync (`synchronize_session=False`) and depends only on
+the already-present `populate_existing` re-fetch, removing the dependency on that fallback.
 
 ## Verification
 
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov`: 164 passed; `backend/` coverage 100%; strict mypy
-  and ruff clean.
+- After the review fixes: `HYPOTHESIS_PROFILE=ci uv run pytest --cov`: 166 passed (164
+  before); `backend/` coverage 100%; strict mypy and ruff clean.
 - Mutation checks (each reverted afterwards), all caught:
   - removing `populate_existing=True` → the stale-`activated_at` test fails;
   - removing the PENDING-representation guard → a DB-level UNIQUE violation surfaces instead of
