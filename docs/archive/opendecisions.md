@@ -1,0 +1,28 @@
+actual primary database technology;
+exact vector backend after benchmarking, although Qdrant remains initial candidate;
+ORM;
+exact detector/tracker/representation/recognizer/reasoner implementations;
+model frameworks;
+representation payload encoding;
+whether some representations live inline or Artifact-backed;
+exact checksum algorithm;
+storage root/path layout;
+exact component activation scopes;
+exact Search ranking weights/models;
+exact identity thresholds;
+maturity promotion/demotion thresholds;
+evidence promotion policy;
+scene-detection implementation;
+natural-language query implementation;
+exact Search retention periods;
+exact backup rotation schedule;
+DestructiveJournal physical technology;
+exact WorkUnit boundary serialization;
+CPU/GPU scheduling formula;
+batch sizes;
+processing chunk sizes/overlap;
+exact quality metrics;
+exact co-occurrence thresholds;
+exact evaluation metrics/suites;
+exact training methodology;
+exact artifact garbage-collection timings.
