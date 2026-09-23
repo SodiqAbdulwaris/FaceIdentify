@@ -77,6 +77,18 @@ def test_observation_frame_and_time_come_together(build: ModelFactory) -> None:
     )
 
 
+def test_factory_recovers_when_a_runs_first_segment_was_rolled_back(build: ModelFactory) -> None:
+    # The run's segment is first created inside the rejected write's savepoint and rolled back
+    # with it. The factory must not reuse that cached, no-longer-persistent segment.
+    run = build.run()
+    rejected(
+        build.session,
+        lambda: build.observation(run, sequence_in_run=-1),
+        check("ck_observations_sequence_non_negative"),
+    )
+    assert build.observation(run).processing_run_id == run.id
+
+
 def test_observation_sequence_is_unique_within_a_run(build: ModelFactory) -> None:
     run = build.run()
     build.observation(run, sequence_in_run=0)
