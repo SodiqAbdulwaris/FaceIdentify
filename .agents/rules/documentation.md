@@ -28,8 +28,28 @@
 
 - `docs/specs/` contains the authoritative architecture and contracts. **Do not edit specs
   without the user's explicit approval.**
-- If implementation reveals a conflict or gap in a spec, record it in the implementation entry
-  and in `CONTEXT.md` under *Known conflicts*, then ask the user how to resolve it.
+- If implementation reveals a gap in a spec, record it in the implementation entry and in
+  `CONTEXT.md` under *Known conflicts*, then ask the user how to fill it.
+
+## When documents conflict
+
+Specs, plans and other docs sometimes disagree (for example an ERD against the persistence
+contract, or a roadmap against the testing tracker). **Never silently pick one.**
+
+1. **Stop and ask the user for a decision** before building on either version.
+2. **Always include your recommendation.** For each conflict, quote or cite both sides
+   (file and section), list the options, say which one you recommend and why (e.g. newer,
+   more specific, matches the other contracts), and note the consequences of each option.
+3. **Once the user decides, update the docs** so they agree, in the same PR as the change or a
+   dedicated `docs:` PR:
+   - edit the losing passage in place with a dated note, e.g.
+     `> **Decision YYYY-MM-DD:** … (supersedes the text below)`, rather than deleting the
+     history;
+   - update every other document that states the losing version (search for it);
+   - record the decision in `.agents/CONTEXT.md` (*Known conflicts*, marked resolved) and in the
+     implementation entry for the work.
+4. A decision the user delegates ("do what you think is best") counts as approval of your
+   recommendation, including the spec edits it needs. Say in the docs that it was delegated.
 - Do not create new top-level documents when an existing one covers the topic. Place new
   documents in the matching `docs/` folder: `specs/`, `plans/`, `guides/`, `strategy/`,
   `research/` or `archive/`.

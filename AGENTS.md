@@ -30,3 +30,6 @@ authoritative, USearch is a rebuildable index, ONNX Runtime runs inference.
 - **Verify before claiming.** Run the checks, report real results, and never weaken a test to
   get a pass. See [`rules/testing.md`](.agents/rules/testing.md).
 - **Ask when unsure.** A question is cheaper than a wrong assumption baked into the codebase.
+- **Docs conflict? Ask, with a recommendation.** When documents disagree, ask the user to decide,
+  give your recommendation, then update every affected doc to match the decision. See
+  [`rules/documentation.md`](.agents/rules/documentation.md#when-documents-conflict).
