@@ -29,7 +29,10 @@
 - `docs/specs/` contains the authoritative architecture and contracts. **Do not edit specs
   without the user's explicit approval.**
 - If implementation reveals a gap in a spec, record it in the implementation entry and in
-  `CONTEXT.md` under *Known conflicts*, then ask the user how to fill it.
+  `CONTEXT.md` under *Known conflicts and open questions*, then ask the user how to fill it.
+- Do not create new top-level documents when an existing one covers the topic. Place new
+  documents in the matching `docs/` folder: `specs/`, `plans/`, `guides/`, `strategy/`,
+  `research/` or `archive/`.
 
 ## When documents conflict
 
@@ -42,14 +45,14 @@ contract, or a roadmap against the testing tracker). **Never silently pick one.*
    more specific, matches the other contracts), and note the consequences of each option.
 3. **Once the user decides, update the docs** so they agree, in the same PR as the change or a
    dedicated `docs:` PR:
-   - edit the losing passage in place with a dated note, e.g.
-     `> **Decision YYYY-MM-DD:** … (supersedes the text below)`, rather than deleting the
-     history;
-   - update every other document that states the losing version (search for it);
+   - keep the losing passage and add a note directly after it (or after its heading), always in
+     this exact format: `> **Decision YYYY-MM-DD:** <what was decided, and the authoritative
+     source>`. Never delete the superseded text. Put notes at the end of a paragraph or list,
+     never inside one;
+   - update every other document that states the losing version. Search for all its
+     wordings and related terms, not just one phrase (e.g. for a merge-level decision:
+     `merge`, `MERGED`, `split`, `canonical_person`, `PERSON_`);
    - record the decision in `.agents/CONTEXT.md` (*Known conflicts*, marked resolved) and in the
      implementation entry for the work.
 4. A decision the user delegates ("do what you think is best") counts as approval of your
    recommendation, including the spec edits it needs. Say in the docs that it was delegated.
-- Do not create new top-level documents when an existing one covers the topic. Place new
-  documents in the matching `docs/` folder: `specs/`, `plans/`, `guides/`, `strategy/`,
-  `research/` or `archive/`.
