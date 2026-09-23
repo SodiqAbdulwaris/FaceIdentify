@@ -3,7 +3,7 @@
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** M1 (groundwork for TST-011–020); completes TST-008 (factories)
 - **Status:** done
-- **Commits:** PR #5: `feat(db): add memory, identity and people models`, `docs(specs): record memory model decisions`, `docs: record m1 memory persistence models`, then the review fixes `fix(db): make savepoints safe on the sqlite driver`, `feat(db): add bounded to-one relationships`, `fix(db): relax the merged-identity check to the spec` (which also closes the review's test gaps), `docs: record memory model review outcomes`
+- **Commits:** PR #5: `feat(db): add memory, identity and people models`, `docs(specs): record memory model decisions`, `docs: record m1 memory persistence models`, then the review fixes `fix(db): make savepoints safe on the sqlite driver`, `feat(db): add bounded to-one relationships`, `fix(db): relax the merged-identity check to the spec` (which also closes the review's test gaps), `docs: record memory model review outcomes`, `fix(db): keep autocommit connections outside transactions`, `test(db): pin relationship columns and the stale-segment fix`
 
 ## What changed
 
@@ -105,6 +105,18 @@ Mutation checks on the fixes: removing the explicit `BEGIN` hook fails
 relationship contract. Removing only the driver-autocommit half of the recipe fails no test:
 it is kept as the documented recipe's safeguard against the driver's own transaction
 handling, and is **not independently tested**.
+
+## Re-review (subagent): 9 of 11 confirmed; 5 further points
+
+| Point | Resolution |
+|---|---|
+| The duplicate-PK membership test might hit a SAWarning, not IntegrityError | **No change needed**, verified: run alone with `-W error` it passes, and a direct reproduction raises `IntegrityError: UNIQUE constraint failed: occurrence_observations…` |
+| The explicit BEGIN also hit AUTOCOMMIT connections (VACUUM, Alembic batch PRAGMAs) | **Fixed.** `_begin` skips AUTOCOMMIT connections. The new test failed before the fix (`cannot VACUUM from within a transaction`) |
+| The relationship contract pinned names, not FK columns | **Fixed.** Each relationship's FK column is asserted (mutation: pointing `Observation.processing_run` at `superseded_by_run_id` fails) |
+| Stale-segment fix untested | **Fixed.** `test_factory_recovers_when_a_runs_first_segment_was_rolled_back` (mutation: undoing the fix fails it) |
+| The tracker header claimed M0 complete early | **Fixed.** Now "complete once PR #5 merges" |
+
+Totals after the re-review fixes: 140 tests; strict mypy and ruff clean; 100% `backend/` coverage.
 
 ## Open issues / follow-ups
 

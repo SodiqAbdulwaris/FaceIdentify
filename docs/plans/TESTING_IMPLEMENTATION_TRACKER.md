@@ -1,7 +1,7 @@
 # FaceIdentify — Testing Implementation Tracker
 
 **Version:** 1.0  
-**Status:** M0 complete (TST-008 factories delivered in M1 PR #5); M1 in progress  
+**Status:** M0 complete once M1 PR #5 merges (TST-008 factories); M1 in progress  
 **Related document:** `TESTING_STRATEGY.md`
 
 ## 1. Tracking conventions
