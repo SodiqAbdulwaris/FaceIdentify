@@ -2,8 +2,8 @@
 
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** M0 · TST-009, TST-010 (plus repository conventions)
-- **Status:** done locally; remote CI not yet observed
-- **Commits:** not yet committed
+- **Status:** done; CI green on PR #1
+- **Commits:** `eecae41` docs layout, `662b995` agent files, `445970c`/`2c44b53`/`8bc983b` Python + M0 (see the M0 entry), `c667ff9` backend scaffold, `1689044` frontend, `d04a54c` desktop, `6cf150d` CI + ruleset, `0efa0a0` this entry (all on `chore/project-foundation`, PR #1)
 
 ## What changed
 
@@ -84,10 +84,8 @@ structure.
   1 passed; `npm run build` ok.
 - `npx tauri build --debug --no-bundle` (from the repo root): built `faceidentify.exe` in
   2m 46s. This also exercised `beforeBuildCommand`.
-- `ci.yml` parses (4 jobs). The JSON configs parse.
-- **Not verified:** `npm run tauri dev` (needs an interactive desktop session), the CI
-  `commit-messages` range logic (needs real commits and a push), and any remote CI run.
-
+- `ci.yml` parses (5 jobs after the branch-name job was added). The JSON configs parse.
+- **Not verified:** `npm run tauri dev` (needs an interactive desktop session).
 - **Remote CI (2026-09-23):** PR #1, run `35902624488`: all five jobs passed on GitHub Actions
   (backend on `windows-latest`: 19 passed; frontend: 1 passed; coverage artifact uploaded).
 
@@ -98,6 +96,5 @@ structure.
 2. The ML evaluation code location is unspecified.
 3. The Tauri identifier and product name need confirmation before release (the identifier
    determines Windows app-data paths).
-4. After the first commit, mark `.githooks/commit-msg` executable in the index
-   (`git update-index --chmod=+x .githooks/commit-msg`) so it works on macOS/Linux clones.
-   `core.fileMode` is off on Windows.
+4. ~~Mark the hooks executable in the index~~ Done in the bootstrap commit `887307c` (all four
+   `.githooks/*` files are mode `100755`).
