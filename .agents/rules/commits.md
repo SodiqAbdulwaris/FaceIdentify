@@ -25,7 +25,8 @@ Every commit header follows [Conventional Commits](https://www.conventionalcommi
 - Scope is lowercase and names the area: `feat(identities): …`, `fix(db): …`, `ci(frontend): …`.
 - `!` marks a breaking change. Explain it in the body.
 - Header ≤ 72 characters, imperative mood ("add", not "added"), no trailing period.
-- The body explains **why**, not what. The diff shows what.
+- The body explains **why**, not what. The diff shows what. Omit it only when the header
+  already makes the reason obvious (e.g. a one-line status or typo fix).
 
 This is enforced by [`.githooks/commit-msg`](../../.githooks/commit-msg) locally
 (`git config core.hooksPath .githooks`) and by the `commit-messages` CI job on every pull request.

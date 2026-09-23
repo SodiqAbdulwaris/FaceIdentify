@@ -48,7 +48,7 @@ _Last updated: 2026-09-23_
 uv sync && npm install                 # install everything
 git config core.hooksPath .githooks   # enable commit-msg + pre-push hooks (once per clone)
 git switch -c feat/short-description  # every change starts on a branch (rules/branches.md)
-codex exec -s read-only -C "$dir" -o "$result" - < "$prompt"  # PR review in a disposable worktree (full procedure: rules/branches.md)
+# PR review: follow the procedure in .agents/rules/branches.md (Review section)
 uv run pytest                          # fast backend tests
 uv run ruff format --check . && uv run ruff check . && uv run mypy
 npm test && npm run typecheck && npm run lint && npm run build
@@ -78,7 +78,10 @@ Unresolved items need the user's decision. Do not settle them silently.
 
 ## Next steps (M1)
 
-1. Add Alembic at `backend/alembic/` and the models for `0001_initial_schema` per PERSISTENCE_IMPLEMENTATION.md.
-   Switch the `sqlite_engine` fixture from `create_all` to migrations.
+1. Add the persistence models for `0001_initial_schema` per PERSISTENCE_IMPLEMENTATION.md. Test
+   fixtures keep using `create_all` until M2.
 2. Add `tests/factories/` for the new models (completes TST-008, carried over from M0).
 3. Write the Identity Manager invariant tests (TST-011 to TST-020).
+
+Deferred to M2: Alembic at `backend/alembic/` (revision `0001_initial_schema`), switching the
+`sqlite_engine` fixture from `create_all` to migrations, and migration tests (TST-032).

@@ -48,19 +48,31 @@ git fetch origin
 tmp="$(mktemp -d)"
 dir="$tmp/worktree"; prompt="$tmp/prompt.md"; result="$tmp/review.md"
 git worktree add --detach "$dir" "origin/<branch>"
-# Write the instructions (below) to "$prompt", then run an approved reviewer:
+# Write the instructions (below) to "$prompt", then run an approved reviewer (Codex shown):
 codex exec -s read-only -C "$dir" -o "$result" - < "$prompt" > "$tmp/reviewer.log" 2>&1
-echo "reviewer exit: $?"; test -s "$result" || echo "NO REVIEW PRODUCED"
+rc=$?
+if [ "$rc" -ne 0 ] || [ ! -s "$result" ]; then
+  echo "REVIEW FAILED (exit $rc): read $tmp/reviewer.log; do not post or clean up yet"
+fi
+git -C "$dir" status --short   # must print nothing: the reviewer changed no files
+git status --short             # the author's checkout must be unchanged too
+```
 
-git -C "$dir" status --short          # must print nothing: the reviewer changed no files
-gh pr comment <n> --body-file "$result" # record the review (after resolving local paths)
+Only after a successful run, and after replacing local absolute paths in `$result` with
+repository-relative ones:
+
+```bash
+gh pr comment <n> --body-file "$result"
 git worktree remove --force "$dir" && rm -rf "$tmp"
 ```
+
+With a **subagent** reviewer, skip the `codex exec` line: give the subagent the instructions
+and `$dir`, save its report to `$result`, then continue from the two `git status` checks.
 
 | Reviewer | Status | Read-only invocation |
 |---|---|---|
 | Codex CLI | **Approved** (used on PR #2) | `codex exec -s read-only -C "$dir" -o "$result" - < "$prompt"` |
-| Subagent | **Approved** (used on PR #2) | A fresh-context subagent without edit tools, told to work only in `$dir`. It may still have a shell, so this is *detected*, not sandboxed: check `git -C "$dir" status --short` **and** the author's own `git status` afterwards |
+| Subagent | **Approved** (used on PR #2, final review) | A fresh-context subagent without edit tools, told to work only in `$dir`. It may still have a shell, so this is *detected*, not sandboxed: check `git -C "$dir" status --short` **and** the author's own `git status` afterwards |
 | Antigravity CLI (`agy`) | Not yet approved | Candidate: `agy --sandbox --mode plan -p …`, run in `$dir`. Test that it cannot write before approving |
 | OpenCode CLI | Not yet approved | `--agent plan` only selects an agent and is not a sandbox. Needs a tested read-only configuration |
 | Cursor CLI (`agent`) | Not yet approved | Not installed on the current machine. Identify and test its read-only flag first |
