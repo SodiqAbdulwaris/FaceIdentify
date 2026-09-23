@@ -3,7 +3,7 @@
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** M1 (groundwork for TST-011–020); partial persistence for M2 (TST-021/022)
 - **Status:** done
-- **Commits:** PR #4: `feat(db): add utc datetime type and constraint naming`, `feat(sources): add artifact and source models`, `feat(processing): add run provenance and job models`, `feat(runtime): add component catalog and settings models`, `test(db): add constraint tests for core models`, `docs: record m1 core persistence models`
+- **Commits:** PR #4: `feat(db): add utc datetime type and constraint naming`, `feat(sources): add artifact and source models`, `feat(processing): add run provenance and job models`, `feat(runtime): add component catalog and settings models`, `test(db): add constraint tests for core models`, `docs: record m1 core persistence models`, then the review fixes `fix(db): align core models with the persistence spec`, `test(db): assert the schema contract and exact constraint failures`, `docs: record core model review outcomes`, `test(db): pin spec value sets and cover remaining checks`
 
 ## What changed
 
@@ -51,7 +51,9 @@ This is the first slice of the M1 plan in `.agents/CONTEXT.md`. Identity and obs
 - `revision` and `jobs.attempt_number` have a database `DEFAULT 1` (§2), as well as the ORM default.
 - Integrity checks the spec implies but does not state, listed here because nothing is meant to
   be invented silently: `revision >= 1`, `attempt_number >= 1`, segment/checkpoint
-  `ordinal >= 0`, and `display_name` not blank after `trim()`.
+  `ordinal >= 0`, `display_name` not blank after `trim()`, and 32-byte lengths for
+  `processing_configuration_snapshots.fingerprint_sha256` and `model_exports.sha256`
+  (a SHA-256 digest is 32 bytes).
 - Not built yet: the package-membership association tables (§18 adds them only "when the trusted
   manifest needs relational querying"), and typed settings columns (no settings are defined yet).
 - Circular foreign keys (`sources` ↔ `processing_runs`, `processing_runs` ↔
@@ -84,8 +86,29 @@ This is the first slice of the M1 plan in `.agents/CONTEXT.md`. Identity and obs
   - dropping the `server_default` on `sources.revision` failed the DEFAULT test. An earlier
     insert-based test did **not** catch it (Core inserts apply the Python default), so it was
     replaced.
-- Independent review (subagent, disposable worktree): changes requested, 10 findings, all
-  addressed. See the PR #4 comments.
+- `test_enums_match_the_spec_value_sets` pins every StrEnum to the spec's literal list. Dropping
+  `SourceKind.VIDEO` made it fail.
+- Final state: 79 tests pass; strict mypy and ruff are clean; `backend/` coverage is 100%.
+
+### Independent reviews (subagent, disposable worktree; full text on PR #4)
+
+| Round | Finding | Resolution |
+|---|---|---|
+| 1 | CHECK on `Component.kind` (spec lists examples only) | Removed; open question 11 |
+| 1 | `variant_key` unique without spec basis | Not unique |
+| 1 | `runtime_details_json` nullable | NOT NULL |
+| 1 | No DB `DEFAULT 1` on `revision`/`attempt_number` | `server_default`, asserted in the DDL |
+| 1 | No tests of §21 indexes or §20 ON DELETE | `test_schema_contract.py` (PRAGMA-based) |
+| 1 | Weak `match=` patterns | `check()`/`unique()` exact matchers |
+| 1 | Implied checks undocumented | Listed under Decisions |
+| 1 | String `priority` breaks the claim order | Open question 12 (M6) |
+| 1 | Thin enum coverage | Invalid-literal cases for every spec value set |
+| 1 | Commit hygiene | Acknowledged; history not rewritten |
+| 2 (approved) | No test that the enums equal the spec lists | `test_enums_match_the_spec_value_sets` |
+| 2 | Some named checks never broken | `test_remaining_integrity_checks` and parametrized singletons |
+| 2 | Transient-index predicate only prefix-checked | Full predicate built from `TRANSIENT_RUN_STATES` |
+| 2 | Two hash-length checks undocumented | Listed under Decisions |
+| 2 | Stale commit list, no findings table | This table and the updated Commits line |
 
 ## Open issues / follow-ups
 
