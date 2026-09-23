@@ -2,8 +2,8 @@
 
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** M0 · TST-001 to TST-010, SEC-001
-- **Status:** done; CI green on PR #1 (tasks become `COMPLETE` when it merges)
-- **Commits:** `445970c` build, `2c44b53` engine, `8bc983b` tests (on `chore/project-foundation`, PR #1)
+- **Status:** done; merged to `main` via PR #1 (2026-09-23)
+- **Commits:** PR #1: `build: add python project managed by uv`, `feat(db): add sqlite engine and session factory`, `test: add m0 testing foundation`
 
 ## What changed
 

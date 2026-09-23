@@ -20,6 +20,9 @@
 - Separate what was **verified** (you ran it and saw the result) from what is **assumed**.
 - Record failures, skips, workarounds and open questions. Do not smooth them over.
 - Write dates as absolute dates (`2026-09-23`), never "today" or "last week".
+- Cite commits by PR number and commit subject, not SHA. Rebase merges rewrite SHAs, so a SHA
+  cited before merging no longer exists on `main`. SHAs are fine only for commits already on
+  `main`.
 
 ## Authoritative specs
 

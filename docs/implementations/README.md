@@ -17,7 +17,7 @@ exist; this log says what *does*.
 - **Date:** YYYY-MM-DD
 - **Milestone / tracker IDs:** e.g. M1 · TST-011, TST-012
 - **Status:** done | partial | blocked
-- **Commits:** <sha> <header> (fill in once committed)
+- **Commits:** PR #<n>: `<commit subject>`, … (not SHAs: rebase merge rewrites them)
 
 ## What changed
 Files and behaviour, briefly.
@@ -39,7 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
-| 2026-09-23 | [M0 testing foundation](2026-09-23-m0-testing-foundation.md) | done; CI green on PR #1 |
-| 2026-09-23 | [Repository structure, agent files and scaffolding](2026-09-23-repo-structure-and-scaffolding.md) | done; CI green on PR #1 |
+| 2026-09-23 | [M0 testing foundation](2026-09-23-m0-testing-foundation.md) | done; merged in PR #1 |
+| 2026-09-23 | [Repository structure, agent files and scaffolding](2026-09-23-repo-structure-and-scaffolding.md) | done; merged in PR #1 |
 | 2026-09-23 | [Branch workflow and main protection](2026-09-23-branch-workflow.md) | done; ruleset active |
 | 2026-09-23 | [Resolve open repository decisions](2026-09-23-resolve-open-decisions.md) | done |

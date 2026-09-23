@@ -2,8 +2,8 @@
 
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** M0 · TST-009, TST-010 (plus repository conventions)
-- **Status:** done; CI green on PR #1
-- **Commits:** `eecae41` docs layout, `662b995` agent files, `445970c`/`2c44b53`/`8bc983b` Python + M0 (see the M0 entry), `c667ff9` backend scaffold, `1689044` frontend, `d04a54c` desktop, `6cf150d` CI + ruleset, `0efa0a0` this entry (all on `chore/project-foundation`, PR #1)
+- **Status:** done; merged to `main` via PR #1 (2026-09-23)
+- **Commits:** PR #1: `docs: organize project documentation under docs/`, `docs(agents): add agent entry point, rules and context`, `feat(backend): scaffold package structure`, `feat(frontend): scaffold react app with vitest`, `feat(desktop): scaffold tauri shell`, `ci: add ci workflow and main branch ruleset`, `docs: record repository structure and scaffolding work` (Python/M0 commits: see the M0 entry)
 
 ## What changed
 
