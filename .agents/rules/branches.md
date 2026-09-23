@@ -49,7 +49,8 @@ tmp="$(mktemp -d)"
 dir="$tmp/worktree"; prompt="$tmp/prompt.md"; result="$tmp/review.md"
 git worktree add --detach "$dir" "origin/<branch>"
 # Write the instructions (below) to "$prompt", then run an approved reviewer:
-codex exec -s read-only -C "$dir" -o "$result" - < "$prompt"
+codex exec -s read-only -C "$dir" -o "$result" - < "$prompt" > "$tmp/reviewer.log" 2>&1
+echo "reviewer exit: $?"; test -s "$result" || echo "NO REVIEW PRODUCED"
 
 git -C "$dir" status --short          # must print nothing: the reviewer changed no files
 gh pr comment <n> --body-file "$result" # record the review (after resolving local paths)
@@ -59,10 +60,15 @@ git worktree remove --force "$dir" && rm -rf "$tmp"
 | Reviewer | Status | Read-only invocation |
 |---|---|---|
 | Codex CLI | **Approved** (used on PR #2) | `codex exec -s read-only -C "$dir" -o "$result" - < "$prompt"` |
-| Subagent | **Approved** | A fresh-context subagent whose tools cannot edit (e.g. a read-only explore type), pointed at `$dir` |
+| Subagent | **Approved** (used on PR #2) | A fresh-context subagent without edit tools, told to work only in `$dir`. It may still have a shell, so this is *detected*, not sandboxed: check `git -C "$dir" status --short` **and** the author's own `git status` afterwards |
 | Antigravity CLI (`agy`) | Not yet approved | Candidate: `agy --sandbox --mode plan -p …`, run in `$dir`. Test that it cannot write before approving |
 | OpenCode CLI | Not yet approved | `--agent plan` only selects an agent and is not a sandbox. Needs a tested read-only configuration |
 | Cursor CLI (`agent`) | Not yet approved | Not installed on the current machine. Identify and test its read-only flag first |
+
+**A failed run is not a review.** If the reviewer exits non-zero or `$result` is empty, read
+`$tmp/reviewer.log` *before* cleaning up, fix the cause or switch to another approved reviewer,
+and never report the PR as reviewed. For example, on 2026-09-23 Codex stopped with a usage-limit
+error, and the review was redone with a subagent.
 
 To approve a reviewer, run it in a disposable worktree, ask it to modify a file, confirm that
 `git -C "$dir" status --short` stays empty, then update this table. `codex review --base` does
