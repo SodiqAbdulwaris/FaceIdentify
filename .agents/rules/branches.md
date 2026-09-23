@@ -32,6 +32,35 @@
 - Keep PRs small and focused, following the same size guidance as commits
   ([`commits.md`](commits.md)).
 
+## Review: every PR, before it is reported ready
+
+When you open a PR, get an **independent review**. The PR author must never be its only
+reviewer. Use one of these reviewers:
+
+| Reviewer | Command (run from the repository, on the PR branch) |
+|---|---|
+| Codex CLI | `codex review --base main "<instructions>"` |
+| OpenCode CLI | `opencode run "<instructions>"` |
+| Antigravity CLI | `agy -p "<instructions>"` |
+| Cursor CLI | `agent -p "<instructions>"` (not installed on the current machine) |
+| Subagent | A fresh-context subagent given the PR number and these instructions |
+
+The instructions give the reviewer the PR number, tell it to read `gh pr diff <n>`, `AGENTS.md`,
+`.agents/rules/` and the specs the change touches, and ask for findings on correctness, spec
+conformance and rule compliance, ranked by severity. Reviewers only read and report: they
+never edit, push, comment or merge.
+
+Then:
+
+1. **Record the review** as a PR comment (`gh pr comment <n> --body-file …`), naming the reviewer
+   used.
+2. **Check for all feedback:** the review, other PR comments (`gh pr view <n> --comments`), line
+   comments (`gh api repos/{owner}/{repo}/pulls/<n>/comments`) and CI status.
+3. **Address every finding.** Fix it in a new commit, or reply on the PR explaining why it
+   stands. Do not silently ignore any finding.
+4. Re-review after substantial changes. Report the PR as ready only when the findings are
+   resolved and CI is green.
+
 ## Enforcement
 
 | Where | What |

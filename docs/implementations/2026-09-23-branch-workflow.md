@@ -74,3 +74,14 @@ that disallows pushing directly to `main`.
 3. ~~Choose a merge method~~ **Decided by the user (2026-09-23): rebase merge only.** It keeps
    the small commits and a linear history. It is set in the ruleset (`allowed_merge_methods`) and in
    the repository settings.
+
+## Update 2026-09-23: independent PR review
+
+The user asked that every PR opened by an agent is reviewed by a subagent or by the OpenCode,
+Antigravity (`agy`), Codex or Cursor (`agent`) CLI, and that feedback is checked. Added a
+*Review* section to `.agents/rules/branches.md`, covering the reviewer commands, read-only
+reviewers, recording the review as a PR comment, checking all feedback channels and addressing
+every finding. It is also summarised in `AGENTS.md` and the `CONTEXT.md` commands. Installed on
+this machine: `codex` 0.154.0 (`codex review --base <branch>`), `opencode` 1.18.31 and `agy`
+1.2.7. The Cursor CLI is not installed. Shipped in PR #2 (`docs: require independent review of
+every pull request`).

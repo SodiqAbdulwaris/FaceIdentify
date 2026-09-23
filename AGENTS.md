@@ -19,7 +19,9 @@ authoritative, USearch is a rebuildable index, ONNX Runtime runs inference.
   [`docs/implementations/`](docs/implementations/), and `.agents/CONTEXT.md` is updated before you
   finish. See [`rules/documentation.md`](.agents/rules/documentation.md).
 - **Never commit to `main`.** Work on a `<type>/<short-kebab-description>` branch and open a pull
-  request. See [`rules/branches.md`](.agents/rules/branches.md).
+  request. Every PR gets an independent review (subagent or `codex`/`opencode`/`agy`/`agent`
+  CLI), and all feedback is addressed before it is reported ready. See
+  [`rules/branches.md`](.agents/rules/branches.md).
 - **Small, meaningfully scoped commits** in Conventional Commits format (`feat:`, `fix:`,
   `docs:`, `chore:` …). See [`rules/commits.md`](.agents/rules/commits.md).
 - **Stay in scope.** Do not add features, models, dependencies or abstractions the task does not
