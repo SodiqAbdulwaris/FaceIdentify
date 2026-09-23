@@ -39,7 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
-| 2026-09-23 | [M0 testing foundation](2026-09-23-m0-testing-foundation.md) | done (remote CI pending) |
-| 2026-09-23 | [Repository structure, agent files and scaffolding](2026-09-23-repo-structure-and-scaffolding.md) | done (remote CI pending) |
+| 2026-09-23 | [M0 testing foundation](2026-09-23-m0-testing-foundation.md) | done; CI green on PR #1 |
+| 2026-09-23 | [Repository structure, agent files and scaffolding](2026-09-23-repo-structure-and-scaffolding.md) | done; CI green on PR #1 |
 | 2026-09-23 | [Branch workflow and main protection](2026-09-23-branch-workflow.md) | done; ruleset active |
 | 2026-09-23 | [Resolve open repository decisions](2026-09-23-resolve-open-decisions.md) | done |
