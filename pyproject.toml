@@ -1,0 +1,78 @@
+[project]
+name = "faceidentify"
+version = "0.0.0"
+description = "Local Windows desktop application for visual identity recognition and persistent face memory."
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "usearch>=2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "httpx>=0.27",
+    "hypothesis>=6.100",
+    "ruff>=0.8",
+    "numpy>=2.0",
+    "mypy>=1.13",
+]
+
+# ponytail: no build-system yet; `backend` is imported via pytest's pythonpath.
+# Add one when PyInstaller packaging (M8) needs an installable distribution.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Expensive/hardware suites never run by default; select them explicitly with -m.
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "-m", "not (e2e or ml_eval or benchmark or hardware)",
+]
+xfail_strict = true
+tmp_path_retention_policy = "failed"
+filterwarnings = ["error"]
+markers = [
+    "unit: isolated component behaviour (tests/unit)",
+    "contract: API, IPC and component interface contracts (tests/contracts)",
+    "property: Hypothesis invariants over generated inputs (tests/property)",
+    "integration: real SQLite, USearch and filesystem (tests/integration)",
+    "recovery: interrupted operations and restart behaviour (tests/recovery)",
+    "security: trust boundaries and data protection (tests/security)",
+    "concurrency: scheduling, races and resource coordination (tests/concurrency)",
+    "e2e: complete application workflows (tests/e2e); excluded by default",
+    "ml_eval: ML component quality evaluation (evaluation/); excluded by default",
+    "benchmark: performance and resource measurement (benchmarks/); excluded by default",
+    "hardware: requires GPU or other specialised hardware; excluded by default",
+]
+
+[tool.coverage.run]
+source = ["backend"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.mypy]
+python_version = "3.12"
+files = ["backend", "tests"]
+strict = true
+warn_unreachable = true
+# usearch is only partially annotated (e.g. Index.reset); don't let that force Any-casts.
+untyped_calls_exclude = ["usearch"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# Python only: the architecture .md files are authoritative and must not be auto-formatted.
+include = ["*.py", "*.pyi", "pyproject.toml"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "PT"]
