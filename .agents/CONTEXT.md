@@ -85,11 +85,16 @@ Unresolved items need the user's decision. Do not settle them silently.
 10. ~~Merge/split in M1 (tracker) vs after the first milestone (roadmap)~~ **Resolved 2026-09-23:**
     domain-level merge/split and TST-015/016 are in M1; roadmap Phases D/E keep the API/UI/ML
     integration.
-11. **Open: unconstrained model columns.** No spec gives the complete value sets for every
-    runtime-catalog `state`, `ModelExport.format`/`precision`, `RuntimeVariant.provider`/
-    `device_kind` or `RepresentationSpace.normalization`. They are plain strings until decided
-    (before the M2 migration). The transient run-state list for the partial index is inferred
-    from recovery (§28).
+11. **Open: unconstrained model columns.** No spec gives the complete value sets for
+    `Component.kind` (the API lists examples only), every runtime-catalog `state`,
+    `ModelExport.format`/`precision`, `RuntimeVariant.provider`/`device_kind` or
+    `RepresentationSpace.normalization`. They are plain strings until decided (before the M2
+    migration). The transient run-state list for the partial index is inferred from recovery
+    (§28).
+12. **Open (M6): job claim order.** `jobs.priority` is a string, so `ORDER BY priority` is
+    alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
+    claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
+    priority.
 
 ## Next steps (M1)
 
