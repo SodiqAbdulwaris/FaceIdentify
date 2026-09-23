@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, MetaData, create_engine, event
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry
@@ -18,8 +18,25 @@ SQLITE_PRAGMAS = (
 )
 
 
+# Deterministic constraint names. SQLite can only change constraints by recreating the table
+# (Alembic batch mode), which needs every constraint to have a stable name.
+NAMING_CONVENTION = {
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+
 class Base(DeclarativeBase):
-    """Declarative registry for persistence models. Tables arrive with 0001_initial_schema."""
+    """The single declarative registry for persistence models (PERSISTENCE_IMPLEMENTATION.md §1).
+
+    Feature packages define their models against this Base; `backend.app.models` imports them
+    all so the metadata is complete.
+    """
+
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 def _apply_pragmas(
