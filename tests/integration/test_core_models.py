@@ -141,8 +141,12 @@ def test_segment_end_reason_is_optional_but_constrained(build: ModelFactory) -> 
     assert segment.ended_reason is None
     segment.state, segment.ended_reason = "COMPLETED", "NORMAL"
     build.session.flush()
-    segment.ended_reason = "BORED"
-    rejected(build.session, build.session.flush, check("ck_execution_segments_ended_reason"))
+
+    def bored() -> None:
+        segment.ended_reason = "BORED"
+        build.session.flush()
+
+    rejected(build.session, bored, check("ck_execution_segments_ended_reason"))
 
 
 def test_managed_artifact_requires_storage_key_and_no_external_path(build: ModelFactory) -> None:

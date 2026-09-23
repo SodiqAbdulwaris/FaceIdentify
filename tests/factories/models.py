@@ -12,11 +12,13 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
-from backend.app.identities.models import Evidence, Identity
+from backend.app.identities.models import Evidence, Identity, IdentityLineage
 from backend.app.jobs.models import Job
 from backend.app.memory.models import (
+    IndexOperation,
     Observation,
     Occurrence,
     Representation,
@@ -56,9 +58,9 @@ class ModelFactory:
         return row
 
     def _parent(self, kw: dict[str, Any], key: str, make: Callable[[], Any]) -> uuid.UUID:
-        """Use kw[key] if given, otherwise build the parent with `make()`."""
-        given: uuid.UUID | None = kw.pop(key, None)
-        if given is not None:
+        """Use kw[key] if present (even None), otherwise build the parent with `make()`."""
+        if key in kw:  # an explicit None is kept, so NOT NULL rules can be tested
+            given: uuid.UUID = kw.pop(key)
             return given
         made: uuid.UUID = make().id
         return made
@@ -172,9 +174,11 @@ class ModelFactory:
         return self.add(Observation(**(fields | kw)))
 
     def _run_segment(self, run: ProcessingRun) -> ExecutionSegment:
-        if run.id not in self._segments:
-            self._segments[run.id] = self.segment(run)
-        return self._segments[run.id]
+        cached = self._segments.get(run.id)
+        # A segment created inside a rolled-back savepoint is no longer persistent.
+        if cached is None or not inspect(cached).persistent:
+            cached = self._segments[run.id] = self.segment(run)
+        return cached
 
     def _next_sequence(self, run: ProcessingRun) -> int:
         self._sequences[run.id] = self._sequences.get(run.id, -1) + 1
@@ -219,6 +223,29 @@ class ModelFactory:
             payload_json={}, created_at=self.clock(),
         )  # fmt: skip
         return self.add(Evidence(**(fields | kw)))
+
+    def lineage(
+        self, from_identity_id: uuid.UUID, to_identity_id: uuid.UUID, kind: str
+    ) -> IdentityLineage:
+        return self.add(
+            IdentityLineage(
+                id=self.new_id(), from_identity_id=from_identity_id,
+                to_identity_id=to_identity_id, kind=kind,
+                evidence_id=self.evidence(kind="IDENTITY_MERGED").id, created_at=self.clock(),
+            )
+        )  # fmt: skip
+
+    def index_operation(
+        self, representation: Representation | None = None, /, **kw: Any
+    ) -> IndexOperation:
+        representation = representation or self.representation()
+        fields: dict[str, Any] = dict(
+            id=self.new_id(), representation_id=representation.id,
+            representation_space_id=representation.representation_space_id,
+            operation="ADD", state="PENDING", not_before_at=self.clock(),
+            created_at=self.clock(), updated_at=self.clock(),
+        )  # fmt: skip
+        return self.add(IndexOperation(**(fields | kw)))
 
     # --- people -------------------------------------------------------------------------
 
