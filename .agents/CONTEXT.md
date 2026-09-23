@@ -38,7 +38,7 @@ _Last updated: 2026-09-23_
 | `frontend/` | React app (`src/app`, `features`, `components`, `api`, `native`, `stores`, `hooks`, `lib`) |
 | `desktop/src-tauri/` | Tauri shell (Rust) |
 | `tests/` | Python tests. Directory decides the marker (`unit/`, `contracts/`, `integration/`, …) |
-| `runtime/`, `benchmarks/`, `scripts/`, `packaging/` | Empty scaffolds from architecture §24 |
+| `runtime/`, `benchmarks/`, `evaluation/`, `scripts/`, `packaging/` | Empty scaffolds from architecture §24 (`evaluation/` = ML quality evaluation; `evaluation/datasets/` is Git-ignored) |
 | `.githooks/` | `commit-msg` (Conventional Commits), `pre-commit` (no commits on `main`), `pre-push` (no pushes to `main`, branch naming) and `check-branch-name`. CI runs the same scripts |
 | `.github/rulesets/main.json` | Source of GitHub ruleset `23894323` protecting `main`; after editing, re-apply with `gh api -X PUT …/rulesets/23894323` |
 
@@ -62,8 +62,9 @@ Unresolved items need the user's decision. Do not settle them silently.
 1. ~~Migrations directory~~ **Resolved 2026-09-23:** `backend/alembic/` with revisions in
    `backend/alembic/versions/`, as PERSISTENCE_IMPLEMENTATION.md specifies. The architecture spec
    was aligned. The folder is created by `alembic init` in M2.
-2. **ML evaluation location:** only `benchmarks/` is specified. Where `ml_eval` code lives is
-   undecided.
+2. ~~ML evaluation location~~ **Resolved 2026-09-23:** top-level `evaluation/`, separate from
+   `tests/` (correctness) and `benchmarks/` (performance). Datasets go in the Git-ignored
+   `evaluation/datasets/`, never committed.
 3. **Tauri identifier:** `com.faceidentify.desktop` is a placeholder chosen during scaffolding.
    Confirm before any release build (it determines app-data paths on Windows).
 4. **Product name:** the specs use `<App>` and the architecture's repo example is named

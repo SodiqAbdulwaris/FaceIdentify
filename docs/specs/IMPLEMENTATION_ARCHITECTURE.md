@@ -1641,6 +1641,7 @@ visual-memory/
 │   ├── fixtures/
 │   └── e2e/
 │
+├── evaluation/         # ML quality evaluation (datasets kept outside Git)
 ├── benchmarks/
 ├── scripts/
 ├── packaging/
