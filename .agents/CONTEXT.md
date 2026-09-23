@@ -48,6 +48,7 @@ _Last updated: 2026-09-23_
 uv sync && npm install                 # install everything
 git config core.hooksPath .githooks   # enable commit-msg + pre-push hooks (once per clone)
 git switch -c feat/short-description  # every change starts on a branch (rules/branches.md)
+codex review --base main "<instructions>"  # independent PR review (or opencode / agy / subagent)
 uv run pytest                          # fast backend tests
 uv run ruff format --check . && uv run ruff check . && uv run mypy
 npm test && npm run typecheck && npm run lint && npm run build
