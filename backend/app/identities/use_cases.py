@@ -17,7 +17,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, insert, update
+from sqlalchemy import CursorResult, exists, insert, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import (
@@ -96,15 +96,23 @@ def activate_identity(
                 activated_at=now,
                 updated_at=now,
                 revision=Identity.revision + 1,
-            )
+            ),
+            # The default "auto" strategy would otherwise try to sync this statement's effect
+            # into any already-loaded Identity by evaluating the WHERE/SET clauses against that
+            # Python object's own (possibly stale) attributes. `revision=Identity.revision + 1`
+            # is an expression, not a literal, which SQLAlchemy's in-Python evaluator cannot
+            # simulate — verified it safely declines to touch the cached object rather than
+            # guessing. Disabling sync here removes the dependency on that fallback behaviour;
+            # populate_existing (both branches below) is what actually keeps the caller's
+            # object correct.
+            execution_options={"synchronize_session": False},
         ),
     )
     if result.rowcount == 0:
         _raise_activation_conflict(session, identity_id, expected_revision)
     session.flush()
-    # This bypasses the ORM's normal attribute tracking, so an already-loaded Identity in the
-    # session's identity map (e.g. the one this same caller just created) would otherwise keep
-    # showing its pre-update values. `populate_existing` forces a fresh read.
+    # populate_existing forces a fresh read; see the execution_options comment above for why
+    # this session's cached copy cannot be trusted otherwise.
     identity = session.get(Identity, identity_id, populate_existing=True)
     assert identity is not None  # the UPDATE above just matched this row
     return identity
@@ -113,8 +121,14 @@ def activate_identity(
 def _raise_activation_conflict(
     session: Session, identity_id: uuid.UUID, expected_revision: int
 ) -> None:
-    """Distinguish a stale revision from an identity that was never PENDING."""
-    identity = session.get(Identity, identity_id)
+    """Distinguish a stale revision from an identity that was never PENDING.
+
+    `populate_existing=True` for the same reason as the successful branch above: the caller
+    almost always already holds this row (it read `expected_revision` from it), and without
+    forcing a fresh read this would compare against the caller's own stale in-memory copy
+    rather than what is actually in the database right now.
+    """
+    identity = session.get(Identity, identity_id, populate_existing=True)
     if identity is None:
         raise IdentityManagerError(f"identity {identity_id} does not exist")
     if identity.revision != expected_revision:
@@ -139,13 +153,29 @@ def allocate_ann_key(session: Session, representation_space_id: uuid.UUID) -> in
         .prefix_with("OR IGNORE")
         .values(representation_space_id=representation_space_id, next_ann_key=1)
     )
-    allocated = session.execute(
+    # scalar_one() is intentional, not scalar_one_or_none(): nothing deletes ann_key_sequences
+    # rows and its FK to representation_spaces is RESTRICT, so the row this UPDATE targets
+    # (just INSERT-OR-IGNORE'd above) cannot be missing. If that ever stops being true, this
+    # fails loudly with NoResultFound rather than silently returning a wrong key.
+    return session.execute(
         update(AnnKeySequence)
         .where(AnnKeySequence.representation_space_id == representation_space_id)
         .values(next_ann_key=AnnKeySequence.next_ann_key + 1)
         .returning(AnnKeySequence.next_ann_key - 1)
     ).scalar_one()
-    return allocated
+
+
+def _has_creation_evidence(session: Session, identity_id: uuid.UUID) -> bool:
+    return bool(
+        session.scalar(
+            select(
+                exists().where(
+                    Evidence.subject_identity_id == identity_id,
+                    Evidence.kind == EvidenceKind.IDENTITY_CREATED,
+                )
+            )
+        )
+    )
 
 
 def assign_representation_to_identity(
@@ -189,6 +219,16 @@ def assign_representation_to_identity(
         raise IdentityManagerError(
             f"identity {identity_id} is {identity.state}, not ACTIVE; only an active identity"
             " can receive a new assignment"
+        )
+    if evidence_kind == EvidenceKind.IDENTITY_CREATED and _has_creation_evidence(
+        session, identity_id
+    ):
+        # IDENTITY_CREATED is the founding evidence for an identity, recorded once. Every later
+        # assignment to that identity, even moments afterwards in the same run, is a match
+        # against an identity that already exists by the time this call happens.
+        raise IdentityManagerError(
+            f"identity {identity_id} already has IDENTITY_CREATED evidence;"
+            " use IDENTITY_MATCHED for a later assignment to an existing identity"
         )
 
     ann_key = allocate_ann_key(session, representation.representation_space_id)

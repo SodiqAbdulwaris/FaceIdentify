@@ -9,7 +9,7 @@ and JOB-independent "a failed operation is not represented as committed" for ide
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import (
@@ -99,6 +99,34 @@ def test_activation_rejects_an_already_active_identity_even_with_the_current_rev
         activate_identity(
             build.session, identity.id, expected_revision=activated.revision, clock=build.clock
         )
+
+
+def test_conflict_diagnosis_reflects_the_database_not_a_stale_cached_copy(
+    build: ModelFactory,
+) -> None:
+    """Regression: `_raise_activation_conflict` must re-read the row itself. The identity map can
+    hold a stale copy of it (here, deliberately desynced from the database), and diagnosing the
+    conflict from that stale copy instead of the database would misreport it: a stale-but-still-
+    matching-`expected_revision` cached object would wrongly reach the "not PENDING" branch
+    instead of correctly raising `StaleRevisionError`."""
+    identity = _pending(build)
+    # Simulate a concurrent writer: change the row in the database without touching this
+    # session's in-memory copy of it (synchronize_session=False suppresses the ORM's own sync).
+    build.session.execute(
+        update(Identity).where(Identity.id == identity.id).values(revision=2),
+        execution_options={"synchronize_session": False},
+    )
+    build.session.flush()
+
+    with pytest.raises(StaleRevisionError, match="expected 1"):
+        activate_identity(build.session, identity.id, expected_revision=1, clock=build.clock)
+
+    # The in-memory object must reflect reality (still PENDING, revision 2 — activation did not
+    # happen), not a phantom ACTIVE/revision-3 state synthesised from its own stale attributes.
+    build.session.expire_all()
+    reloaded = build.session.get(Identity, identity.id)
+    assert reloaded is not None
+    assert (reloaded.state, reloaded.revision) == ("PENDING", 2)
 
 
 def test_activation_rejects_an_unknown_identity(build: ModelFactory) -> None:
@@ -241,6 +269,30 @@ def test_assignment_rejects_a_non_active_identity(build: ModelFactory, identity_
             clock=build.clock,
             evidence_kind=EvidenceKind.IDENTITY_CREATED,
         )
+
+
+def test_an_identity_can_only_be_created_once(build: ModelFactory) -> None:
+    identity = _active_identity(build)
+    space = build.representation_space()
+    first = build.representation(representation_space_id=space.id)
+    second = build.representation(representation_space_id=space.id)
+
+    assign_representation_to_identity(
+        build.session, first.id, identity.id, new_id=build.new_id, clock=build.clock,
+        evidence_kind=EvidenceKind.IDENTITY_CREATED,
+    )  # fmt: skip
+    with pytest.raises(IdentityManagerError, match="already has IDENTITY_CREATED"):
+        assign_representation_to_identity(
+            build.session, second.id, identity.id, new_id=build.new_id, clock=build.clock,
+            evidence_kind=EvidenceKind.IDENTITY_CREATED,
+        )  # fmt: skip
+
+    # The rejection left the second representation untouched and consumed no ann_key for it.
+    build.session.expire_all()
+    unchanged = build.session.get(Representation, second.id)
+    assert unchanged is not None
+    assert unchanged.state == "PENDING"
+    assert allocate_ann_key(build.session, space.id) == 2  # only the first assignment used key 1
 
 
 def test_assignment_rejects_an_evidence_kind_outside_the_two_it_authors(

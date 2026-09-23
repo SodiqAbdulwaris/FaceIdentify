@@ -185,9 +185,12 @@ class ModelFactory:
         return self._sequences[run.id]
 
     def identity(self, **kw: Any) -> Identity:
+        # A non-ACTIVE identity was never (visibly) activated; default activated_at accordingly
+        # so tests building e.g. a PENDING identity get representative data, not a contradiction.
+        state = kw.get("state", "ACTIVE")
         fields: dict[str, Any] = dict(
-            id=self.new_id(), state="ACTIVE", created_at=self.clock(), updated_at=self.clock(),
-            activated_at=self.clock(),
+            id=self.new_id(), state=state, created_at=self.clock(), updated_at=self.clock(),
+            activated_at=self.clock() if state == "ACTIVE" else None,
         )  # fmt: skip
         return self.add(Identity(**(fields | kw)))
 
