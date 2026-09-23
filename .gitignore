@@ -19,6 +19,8 @@ htmlcov/
 *.db-wal
 *.db-shm
 *.usearch
+# Evaluation datasets contain biometric data and are never committed
+evaluation/datasets/
 
 # Node / frontend
 node_modules/

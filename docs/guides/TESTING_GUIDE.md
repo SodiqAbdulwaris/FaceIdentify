@@ -41,9 +41,11 @@ The default run excludes `e2e`, `ml_eval`, `benchmark` and `hardware` through `a
 Markers come from the directory: every test under `tests/unit/` gets `unit`,
 `tests/integration/` gets `integration`, `tests/contracts/` gets `contract`, and so on (see `DIRECTORY_MARKERS` in
 `tests/conftest.py`). Mark tests explicitly only for cross-cutting markers such as `hardware`.
-Benchmarks live in `benchmarks/` (IMPLEMENTATION_ARCHITECTURE.md §24) and must carry
-`benchmark` explicitly. No spec defines a location for ML evaluation code yet. Decide it with the
-user before adding `ml_eval` tests.
+Benchmarks live in `benchmarks/` and ML quality evaluation in `evaluation/`
+(IMPLEMENTATION_ARCHITECTURE.md §24). Neither is under `testpaths`, so run them explicitly, e.g.
+`uv run pytest evaluation -m ml_eval`, and mark every test in them `benchmark` or `ml_eval`.
+Evaluation datasets never go in Git: `evaluation/datasets/` is ignored, and results must not
+include biometric data (TESTING_STRATEGY.md §12).
 
 Warnings are errors (`filterwarnings = ["error"]`), and markers are strict. A misspelled marker
 or a new deprecation fails the run instead of scrolling past.
