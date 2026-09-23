@@ -88,6 +88,9 @@ structure.
 - **Not verified:** `npm run tauri dev` (needs an interactive desktop session), the CI
   `commit-messages` range logic (needs real commits and a push), and any remote CI run.
 
+- **Remote CI (2026-09-23):** PR #1, run `35902624488`: all five jobs passed on GitHub Actions
+  (backend on `windows-latest`: 19 passed; frontend: 1 passed; coverage artifact uploaded).
+
 ## Open issues / follow-ups
 
 1. Migrations folder: `backend/migrations/` (architecture) vs `backend/alembic/`

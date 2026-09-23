@@ -54,6 +54,9 @@ fixture's configuration rather than the application's.
 - No `*.db`/`*.usearch` files appeared outside pytest's temp directory, and nothing was created
   in the real `%LOCALAPPDATA%`/`%APPDATA%`.
 
+- **Remote CI (2026-09-23):** PR #1, run `35902624488`: all five jobs passed on GitHub Actions
+  (backend on `windows-latest`: 19 passed; frontend: 1 passed; coverage artifact uploaded).
+
 ## Open issues / follow-ups
 
 - Domain factories are blocked until models exist (M1/M2).
