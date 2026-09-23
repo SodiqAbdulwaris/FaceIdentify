@@ -5,12 +5,19 @@ constraint. The local builders are replaced by tests/factories/ in M1 PR 3.
 """
 
 import hashlib
+import re
 import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint, delete, select
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKeyConstraint,
+    UniqueConstraint,
+    delete,
+    select,
+)
 from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
 
@@ -29,6 +36,16 @@ from backend.app.sources.models import Artifact, Source
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 
 SHA = hashlib.sha256(b"bytes").digest()
+
+
+def check(name: str) -> str:
+    """Regex for exactly this CHECK constraint failing (not one whose name merely starts so)."""
+    return re.escape(name) + r"(\n|$)"
+
+
+def unique(*columns: str) -> str:
+    """Regex for exactly this UNIQUE column set failing, in SQLite's message format."""
+    return "UNIQUE constraint failed: " + re.escape(", ".join(columns)) + r"(\n|$)"
 
 
 class Builder:
@@ -80,7 +97,7 @@ class Builder:
         return self.add(
             ExecutionSegment(
                 id=self.new_id(), processing_run_id=run.id, ordinal=ordinal, state=state,
-                started_at=self.clock(), created_at=self.clock(),
+                runtime_details_json={}, started_at=self.clock(), created_at=self.clock(),
             )
         )  # fmt: skip
 
@@ -178,14 +195,65 @@ def test_primary_keys_are_uuid4_by_default(db_session: Session, clock: FrozenClo
 # --- artifacts and sources -------------------------------------------------------------------
 
 
-def test_state_must_be_a_known_literal(build: Builder) -> None:
-    rejected(build, lambda: build.source(state="ARCHIVED"), "ck_sources_state")
+@pytest.mark.parametrize(
+    ("row", "column"),
+    [
+        ("artifact", "kind"),
+        ("artifact", "storage_mode"),
+        ("artifact", "state"),
+        ("source", "kind"),
+        ("source", "state"),
+        ("run", "state"),
+        ("job", "type"),
+        ("job", "state"),
+        ("job", "priority"),
+        ("job", "progress_mode"),
+        ("representation_space", "state"),
+        ("representation_space", "metric"),
+    ],
+)
+def test_spec_defined_value_sets_reject_unknown_literals(
+    build: Builder, row: str, column: str
+) -> None:
+    table = {"artifact": "artifacts", "source": "sources", "run": "processing_runs",
+             "job": "jobs", "representation_space": "representation_spaces"}[row]  # fmt: skip
+    make = getattr(build, row)
+    rejected(build, lambda: make(**{column: "NOT_A_VALUE"}), check(f"ck_{table}_{column}"))
+
+
+def test_segment_and_checkpoint_value_sets(build: Builder) -> None:
+    run = build.run()
+    rejected(build, lambda: build.segment(run, 0, "PAUSED"), check("ck_execution_segments_state"))
+    run = build.run()
+    rejected(
+        build,
+        lambda: build.checkpoint(run, 0, "PARTIAL", "VALID"),
+        check("ck_processing_checkpoints_kind"),
+    )
+    run = build.run()
+    rejected(
+        build,
+        lambda: build.checkpoint(run, 0, "FINAL", "STALE"),
+        check("ck_processing_checkpoints_state"),
+    )
+
+
+def test_segment_end_reason_is_optional_but_constrained(build: Builder) -> None:
+    run = build.run()
+    segment = build.segment(run, 0, "RUNNING")
+    assert segment.ended_reason is None
+    segment.state, segment.ended_reason = "COMPLETED", "NORMAL"
+    build.session.flush()
+    segment.ended_reason = "BORED"
+    rejected(build, build.session.flush, check("ck_execution_segments_ended_reason"))
 
 
 def test_managed_artifact_requires_storage_key_and_no_external_path(build: Builder) -> None:
-    rejected(build, lambda: build.artifact(storage_key=None), "ck_artifacts_location")
+    rejected(build, lambda: build.artifact(storage_key=None), check("ck_artifacts_location"))
     rejected(
-        build, lambda: build.artifact(external_path="C:/photos/a.jpg"), "ck_artifacts_location"
+        build,
+        lambda: build.artifact(external_path="C:/photos/a.jpg"),
+        check("ck_artifacts_location"),
     )
 
 
@@ -197,32 +265,42 @@ def test_referenced_artifact_requires_external_path_and_no_storage_key(build: Bu
     rejected(
         build,
         lambda: build.artifact(storage_mode="REFERENCED", external_path="C:/photos/b.jpg"),
-        "ck_artifacts_location",
+        check("ck_artifacts_location"),
     )
 
 
 def test_available_managed_artifact_must_be_verified(build: Builder) -> None:
     pending = build.artifact(state="PENDING", sha256=None, size_bytes=None)
     assert pending.sha256 is None
-    rejected(build, lambda: build.artifact(sha256=None), "ck_artifacts_available_managed_verified")
-    rejected(build, lambda: build.artifact(size_bytes=None), "available_managed_verified")
+    rejected(
+        build, lambda: build.artifact(sha256=None), check("ck_artifacts_available_managed_verified")
+    )
+    rejected(
+        build,
+        lambda: build.artifact(size_bytes=None),
+        check("ck_artifacts_available_managed_verified"),
+    )
 
 
 def test_artifact_hash_must_be_32_bytes(build: Builder) -> None:
-    rejected(build, lambda: build.artifact(sha256=b"short"), "ck_artifacts_sha256_length")
+    rejected(build, lambda: build.artifact(sha256=b"short"), check("ck_artifacts_sha256_length"))
 
 
 def test_managed_storage_keys_are_unique(build: Builder) -> None:
     build.artifact(storage_key="originals/one")
-    rejected(build, lambda: build.artifact(storage_key="originals/one"), "UNIQUE")
+    rejected(
+        build, lambda: build.artifact(storage_key="originals/one"), unique("artifacts.storage_key")
+    )
 
 
 def test_source_display_name_must_not_be_blank(build: Builder) -> None:
-    rejected(build, lambda: build.source(display_name="   "), "display_name_not_empty")
+    rejected(
+        build, lambda: build.source(display_name="   "), check("ck_sources_display_name_not_empty")
+    )
 
 
 def test_source_media_facts_must_not_be_negative(build: Builder) -> None:
-    rejected(build, lambda: build.source(width=-1), "ck_sources_width_non_negative")
+    rejected(build, lambda: build.source(width=-1), check("ck_sources_width_non_negative"))
 
 
 def test_source_original_artifact_cannot_be_deleted(build: Builder) -> None:
@@ -253,7 +331,7 @@ def test_each_snapshot_belongs_to_exactly_one_run(build: Builder) -> None:
     rejected(
         build,
         lambda: build.run(configuration_snapshot_id=run.configuration_snapshot_id),
-        "UNIQUE",
+        unique("processing_runs.configuration_snapshot_id"),
     )
 
 
@@ -261,13 +339,22 @@ def test_only_one_running_segment_per_run(build: Builder) -> None:
     run = build.run()
     build.segment(run, 0, "COMPLETED")
     build.segment(run, 1, "RUNNING")
-    rejected(build, lambda: build.segment(run, 2, "RUNNING"), "UNIQUE")
+    # The partial index (one running per run), not the (run, ordinal) index.
+    rejected(
+        build,
+        lambda: build.segment(run, 2, "RUNNING"),
+        unique("execution_segments.processing_run_id"),
+    )
 
 
 def test_segment_ordinals_are_unique_within_a_run(build: Builder) -> None:
     run = build.run()
     build.segment(run, 0, "COMPLETED")
-    rejected(build, lambda: build.segment(run, 0, "FAILED"), "UNIQUE")
+    rejected(
+        build,
+        lambda: build.segment(run, 0, "FAILED"),
+        unique("execution_segments.processing_run_id", "execution_segments.ordinal"),
+    )
 
 
 def test_only_one_valid_final_checkpoint_per_run(build: Builder) -> None:
@@ -275,7 +362,11 @@ def test_only_one_valid_final_checkpoint_per_run(build: Builder) -> None:
     build.checkpoint(run, 0, "FINAL", "INVALIDATED")
     build.checkpoint(run, 1, "FINAL", "VALID")
     build.checkpoint(run, 2, "INTERMEDIATE", "VALID")
-    rejected(build, lambda: build.checkpoint(run, 3, "FINAL", "VALID"), "UNIQUE")
+    rejected(
+        build,
+        lambda: build.checkpoint(run, 3, "FINAL", "VALID"),
+        unique("processing_checkpoints.processing_run_id"),
+    )
 
 
 def test_run_cannot_point_at_a_missing_checkpoint(build: Builder) -> None:
@@ -285,13 +376,20 @@ def test_run_cannot_point_at_a_missing_checkpoint(build: Builder) -> None:
 # --- jobs, catalog, settings -----------------------------------------------------------------
 
 
+def test_job_progress_cannot_be_negative(build: Builder) -> None:
+    rejected(
+        build, lambda: build.job(progress_completed=-1), check("ck_jobs_completed_non_negative")
+    )
+    rejected(build, lambda: build.job(progress_total=-1), check("ck_jobs_total_non_negative"))
+
+
 def test_job_progress_cannot_exceed_total(build: Builder) -> None:
     job = build.job(progress_completed=3, progress_total=3)
     assert job.progress_completed == job.progress_total
     rejected(
         build,
         lambda: build.job(progress_completed=4, progress_total=3),
-        "ck_jobs_completed_within_total",
+        check("ck_jobs_completed_within_total"),
     )
 
 
@@ -303,13 +401,21 @@ def test_job_retry_links_to_an_existing_previous_job(build: Builder) -> None:
 
 
 def test_representation_space_rules(build: Builder) -> None:
-    rejected(build, lambda: build.representation_space(dimension=0), "dimension_positive")
-    rejected(build, lambda: build.representation_space(metric="L2"), "ck_representation_spaces")
+    rejected(
+        build,
+        lambda: build.representation_space(dimension=0),
+        check("ck_representation_spaces_dimension_positive"),
+    )
+    rejected(
+        build,
+        lambda: build.representation_space(metric="L2"),
+        check("ck_representation_spaces_metric"),
+    )
 
 
 def test_settings_tables_are_singletons(db_session: Session, clock: FrozenClock) -> None:
     db_session.add(ProcessingSettings(id=1, updated_at=clock()))
     db_session.flush()
     db_session.add(ProcessingSettings(id=2, updated_at=clock()))
-    with pytest.raises(IntegrityError, match="ck_processing_settings_singleton"):
+    with pytest.raises(IntegrityError, match=check("ck_processing_settings_singleton")):
         db_session.flush()
