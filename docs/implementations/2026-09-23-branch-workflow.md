@@ -3,7 +3,7 @@
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** repository conventions (supports CI-001 to CI-005)
 - **Status:** done; ruleset active on GitHub
-- **Commits:** `887307c` chore: initialize repository with git conventions (bootstrap, on `main`); the rest arrive via the `chore/project-foundation` PR
+- **Commits:** `887307c` chore: initialize repository with git conventions (bootstrap, on `main`); the rest merged via PR #1
 
 ## What changed
 
@@ -83,7 +83,8 @@ applies to every PR an agent opens. Added a
 *Review* section to `.agents/rules/branches.md`, covering the reviewer commands, read-only
 reviewers, recording the review as a PR comment, checking all feedback channels and addressing
 every finding. It is also summarised in `AGENTS.md` and the `CONTEXT.md` commands. Installed on
-this machine: `codex` 0.154.0, `opencode` 1.18.31 and `agy` 1.2.7.
+this machine: `codex` 0.154.0, `opencode` 1.18.31 and `agy` 1.2.7. The Cursor CLI is not
+installed. Shipped in PR #2 (`docs: require independent review of every pull request`).
 
 The first run, on PR #2, exposed two problems, both now fixed in the rule:
 `codex review --base` rejects custom instructions (use `codex exec -s read-only`), and the
@@ -95,8 +96,7 @@ A re-review ran with that exact worktree procedure (reviewer changed 0 files; wo
 It flagged three more problems, all fixed:
 - only Codex had a proven read-only invocation, so the rest are "not yet approved" until tested;
 - the prompt and result files had no location, and the result was written into the author's checkout;
-- the network fetch was inside the reviewer procedure. The Cursor CLI is not installed. Shipped in PR #2 (`docs: require independent review of
-every pull request`).
+- the network fetch was inside the reviewer procedure.
 
 The final re-review attempt with Codex exited 1 and produced no review. The procedure then
 deleted the temp directory together with the log. A probe run showed the cause: the Codex
@@ -105,3 +105,10 @@ in `$tmp/reviewer.log`, checks the exit code and that the result is non-empty *b
 states that a failed run is not a review. The subagent entry was also corrected: subagents
 can have a shell, so their confinement is detected (`git status` in the worktree and in the
 author's checkout) rather than sandboxed. The final review of PR #2 used the subagent fallback.
+
+The final review (subagent, in a disposable worktree; worktree and author checkout both
+unchanged afterwards) requested changes. Ten findings, all addressed in `docs(agents): address
+subagent review of pr #2`: the review block no longer posts or cleans up after a failed run; the
+subagent path saves its report to `$result`; Alembic is consistently M2; the CONTEXT quick command
+points to the rule; and several stale lines in the implementation entries were corrected. The
+review and its resolutions are recorded on PR #2.

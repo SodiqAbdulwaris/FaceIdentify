@@ -91,10 +91,10 @@ structure.
 
 ## Open issues / follow-ups
 
-1. Migrations folder: `backend/migrations/` (architecture) vs `backend/alembic/`
-   (persistence). Needs a user decision before M2.
-2. The ML evaluation code location is unspecified.
-3. The Tauri identifier and product name need confirmation before release (the identifier
-   determines Windows app-data paths).
+1. ~~Migrations folder~~ Resolved: `backend/alembic/` (see
+   [resolve-open-decisions](2026-09-23-resolve-open-decisions.md)).
+2. ~~ML evaluation location~~ Resolved: `evaluation/` (same entry).
+3. ~~Tauri identifier and product name~~ Resolved: `io.github.sodiqabdulwaris.faceidentify`,
+   "FaceIdentify" (same entry).
 4. ~~Mark the hooks executable in the index~~ Done in the bootstrap commit `887307c` (all four
    `.githooks/*` files are mode `100755`).
