@@ -89,5 +89,11 @@ The first run, on PR #2, exposed two problems, both now fixed in the rule:
 `codex review --base` rejects custom instructions (use `codex exec -s read-only`), and the
 reviewer's sandbox may have no network (use local `git diff` rather than `gh pr diff`). The
 Codex review then requested changes. Two of its findings led to reviewers running in a
-disposable worktree in their read-only mode, and to one consistent scope (agent-opened PRs). The Cursor CLI is not installed. Shipped in PR #2 (`docs: require independent review of
+disposable worktree in their read-only mode, and to one consistent scope (agent-opened PRs).
+
+A re-review ran with that exact worktree procedure (reviewer changed 0 files; worktree removed).
+It flagged three more problems, all fixed:
+- only Codex had a proven read-only invocation, so the rest are "not yet approved" until tested;
+- the prompt and result files had no location, and the result was written into the author's checkout;
+- the network fetch was inside the reviewer procedure. The Cursor CLI is not installed. Shipped in PR #2 (`docs: require independent review of
 every pull request`).

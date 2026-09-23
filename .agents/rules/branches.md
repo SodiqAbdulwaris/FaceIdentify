@@ -38,32 +38,40 @@ When an agent opens a PR, it gets an **independent review**. The authoring agent
 its only reviewer. PRs opened by humans may use the same process but are not required to.
 
 **Isolation.** Run the reviewer in a disposable worktree, never in the author's checkout, and
-always in the tool's read-only mode. "Only read" is then enforced rather than merely requested:
+only through a tested read-only invocation. "Only read" is then enforced rather than requested.
+All scratch files live in one temporary directory:
 
 ```bash
+# Author, before the review: refresh local refs. The reviewer itself never uses the network.
 git fetch origin
-dir="$(mktemp -d)/review-pr-<n>"
+
+tmp="$(mktemp -d)"
+dir="$tmp/worktree"; prompt="$tmp/prompt.md"; result="$tmp/review.md"
 git worktree add --detach "$dir" "origin/<branch>"
-# … run one reviewer below with $dir as its working directory …
-git worktree remove --force "$dir"
+# Write the instructions (below) to "$prompt", then run an approved reviewer:
+codex exec -s read-only -C "$dir" -o "$result" - < "$prompt"
+
+git -C "$dir" status --short          # must print nothing: the reviewer changed no files
+gh pr comment <n> --body-file "$result" # record the review (after resolving local paths)
+git worktree remove --force "$dir" && rm -rf "$tmp"
 ```
 
-| Reviewer | Command (read-only mode) |
-|---|---|
-| Codex CLI | `codex exec -s read-only -C "$dir" -o review.md - < prompt.txt` |
-| OpenCode CLI | `cd "$dir" && opencode run --agent plan "<instructions>"` |
-| Antigravity CLI | `cd "$dir" && agy --mode plan -p "<instructions>"` |
-| Cursor CLI | `cd "$dir" && agent -p "<instructions>"` in its read-only mode (not installed on the current machine; check its flags before first use) |
-| Subagent | A fresh-context, read-only subagent (no edit tools) pointed at `$dir` |
+| Reviewer | Status | Read-only invocation |
+|---|---|---|
+| Codex CLI | **Approved** (used on PR #2) | `codex exec -s read-only -C "$dir" -o "$result" - < "$prompt"` |
+| Subagent | **Approved** | A fresh-context subagent whose tools cannot edit (e.g. a read-only explore type), pointed at `$dir` |
+| Antigravity CLI (`agy`) | Not yet approved | Candidate: `agy --sandbox --mode plan -p …`, run in `$dir`. Test that it cannot write before approving |
+| OpenCode CLI | Not yet approved | `--agent plan` only selects an agent and is not a sandbox. Needs a tested read-only configuration |
+| Cursor CLI (`agent`) | Not yet approved | Not installed on the current machine. Identify and test its read-only flag first |
 
-Only the Codex command has been exercised so far (PR #2). Verify the others on first use and
-correct this table if needed. `codex review --base` does **not** accept custom instructions, so
-use `codex exec`.
+To approve a reviewer, run it in a disposable worktree, ask it to modify a file, confirm that
+`git -C "$dir" status --short` stays empty, then update this table. `codex review --base` does
+**not** accept custom instructions, so use `codex exec`.
 
-The instructions (`prompt.txt`) give the PR number and branch and tell the reviewer to:
+The instructions in `$prompt` give the PR number and branch and tell the reviewer to:
 
 - read the change with `git log --oneline origin/main..HEAD` and `git diff origin/main...HEAD`
-  (local git, because sandboxed reviewers may have no network);
+  (local refs only; no network);
 - read `AGENTS.md`, `.agents/rules/` and the specs the change touches;
 - report findings on correctness, spec conformance and rule compliance, each with severity,
   `file:line` and a concrete fix;
@@ -71,8 +79,8 @@ The instructions (`prompt.txt`) give the PR number and branch and tell the revie
 
 Then:
 
-1. **Record the review** as a PR comment (`gh pr comment <n> --body-file …`), naming the reviewer
-   used.
+1. **Record the review** as a PR comment (as in the block above), naming the reviewer used.
+   Replace local absolute paths with repository-relative ones before posting.
 2. **Check for all feedback:** the review, other PR comments (`gh pr view <n> --comments`), line
    comments (`gh api repos/{owner}/{repo}/pulls/<n>/comments`) and CI status.
 3. **Address every finding.** Fix it in a new commit, or reply on the PR explaining why it
