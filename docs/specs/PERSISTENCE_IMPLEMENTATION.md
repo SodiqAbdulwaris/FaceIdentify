@@ -164,6 +164,8 @@ An `Identity` is the persistent visual subject, named or unknown. It is the targ
 
 Only an accepted run may activate a pending identity. An active identity must not point to a merged/forgotten target. Recognition selects an existing active identity or creates a pending one; it never assigns a Person directly. Merge, split, and forget are later explicit use cases. They change current associations/representation eligibility with durable Evidence and IndexOperations; they do not rewrite historical Evidence.
 
+> **Decision 2026-09-23:** domain-level merge and split (with correction and Person association) are built in testing milestone M1; "later" below refers to their UI and integration. Forget is still later. They remain outside the first vertical slice (§30).
+
 `identity_lineage` preserves structural history: `id`, `from_identity_id`, `to_identity_id`, `kind` (`MERGED_INTO`, `SPLIT_FROM`), non-null `evidence_id`, `created_at`. It has `UNIQUE(from_identity_id, to_identity_id, kind)` and restricts deletion of referenced history. A lineage edge is not a replacement for current identity state.
 
 ## 8. Person persistence

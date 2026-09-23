@@ -1,12 +1,13 @@
 # ERD --- Local Visual Identity & Face-Memory System
 
-**Status:** Conceptual architecture reference. **Not the implementation schema.**\
-**Superseded for implementation (decision 2026-09-23):** tables, columns and states are defined by `PERSISTENCE_IMPLEMENTATION.md`. Where this ERD differs, for example `processing_manifest`/`task`/`work_unit`, `identity_operation`, `domain_event`, `feedback_event`, search-history tables or Person-level merge (`canonical_person_id`), the persistence spec wins. Keep this document for domain concepts and rationale.\
+**Status:** Canonical architecture reference\
 **Schema stage:** Final consolidated model after eight locked design
 clusters\
 **Purpose:** Handoff reference for implementation in Codex/Claude
 without requiring them to infer relationship semantics from diagrams
 alone.
+
+> **Decision 2026-09-23:** this ERD is a **conceptual** reference, not the implementation schema. Tables, columns and states are defined by `PERSISTENCE_IMPLEMENTATION.md`. Where this ERD differs, the persistence spec wins; examples are `processing_manifest`/`task`/`work_unit`, `identity_operation`, `domain_event`, `feedback_event`, search-history tables, and Person-level merge (`canonical_person_id`). Keep this document for domain concepts and rationale.
 
 ------------------------------------------------------------------------
 

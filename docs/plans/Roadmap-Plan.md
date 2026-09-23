@@ -454,10 +454,10 @@ Re-embedding creates new Representations.
 Canonical Representation identifier:
 
 ```text
-UUID (uuid4)
+UUIDv7
 ```
 
-> **Decision 2026-09-23:** identifiers are `uuid.uuid4()` stored as SQLAlchemy `Uuid` (CHAR(32)), per PERSISTENCE_IMPLEMENTATION.md §2. This replaces the earlier UUIDv7.
+> **Decision 2026-09-23:** identifiers are `uuid.uuid4()` stored as SQLAlchemy `Uuid` (CHAR(32)), per PERSISTENCE_IMPLEMENTATION.md §2. This supersedes UUIDv7 above.
 
 USearch key:
 
@@ -1443,7 +1443,7 @@ Implement:
 
 ```text
 SQLAlchemy Base
-UUID (uuid4) primary keys (decision 2026-09-23; was UUIDv7)
+UUIDv7 TypeDecorator
 UTCDateTime
 enum conventions
 engine
@@ -1454,6 +1454,8 @@ Alembic
 constraints
 indexes
 ```
+
+> **Decision 2026-09-23:** primary keys are uuid4 (`Uuid`), not a UUIDv7 TypeDecorator (PERSISTENCE_IMPLEMENTATION.md §2).
 
 Then prove:
 
@@ -1778,6 +1780,8 @@ network disconnected
 
 # 60. What Comes Immediately After First Development Milestone
 
+> **Decision 2026-09-23:** the **domain-level** use cases and invariant tests for Person naming (Phase A), the query-only recognition guard (Phase B), corrections (Phase C), merge (Phase D) and split (Phase E) are built in testing milestone M1 (TST-011 to TST-020), before the ML pipeline. These phases still cover their API, UI and ML-state integration after the first milestone.
+
 Once unknown visual memory is reliable:
 
 ## Phase A — Person Naming
@@ -1850,8 +1854,6 @@ This also begins collecting useful future training/evaluation feedback.
 ---
 
 # 63. Phase D — Identity Merge
-
-> **Decision 2026-09-23:** the domain-level merge and split use cases and their invariant tests (TST-015, TST-016) are built in testing milestone M1, before the ML pipeline. Phases D and E below still cover the API, UI and ML-state integration (index, recognition memory) for these operations.
 
 Implement:
 
