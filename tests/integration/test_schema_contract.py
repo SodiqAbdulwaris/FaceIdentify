@@ -9,7 +9,9 @@ apart from `RESTRICT`.
 """
 
 from sqlalchemy import Engine
+from sqlalchemy.orm import MANYTOONE
 
+from backend.app.models import Base
 from backend.app.processing.models import TRANSIENT_RUN_STATES
 
 # (table, column) -> (referenced table, ON DELETE), for every foreign key in the schema.
@@ -224,3 +226,38 @@ def test_counter_columns_have_ddl_defaults(sqlite_engine: Engine) -> None:
             info = {row[1]: row for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
             assert info[column][3] == 1, f"{table}.{column} must be NOT NULL"
             assert info[column][4] == default, f"{table}.{column} must DEFAULT {default}"
+
+
+# §22: to-one relationships only, exactly these. Unbounded collections (Source.observations,
+# Identity.representations, ...) must not exist; code uses explicit queries instead.
+EXPECTED_RELATIONSHIPS = {
+    "representations": {
+        "observation",
+        "identity",
+        "representation_space",
+        "processing_run",
+        "execution_segment",
+    },
+    "observations": {"source", "processing_run", "execution_segment"},
+    "occurrences": {"source", "identity", "processing_run", "representative_observation"},
+    "processing_runs": {"source", "configuration_snapshot"},
+    "execution_segments": {"processing_run", "runtime_variant"},
+    "identity_person_associations": {"identity", "person", "evidence"},
+}
+
+
+def test_orm_relationships_are_exactly_the_bounded_to_one_set() -> None:
+    actual = {
+        mapper.class_.__tablename__: {
+            rel.key for rel in mapper.relationships if rel.direction is MANYTOONE
+        }
+        for mapper in Base.registry.mappers
+    }
+    collections = [
+        f"{mapper.class_.__name__}.{rel.key}"
+        for mapper in Base.registry.mappers
+        for rel in mapper.relationships
+        if rel.direction is not MANYTOONE
+    ]
+    assert collections == []
+    assert {table: keys for table, keys in actual.items() if keys} == EXPECTED_RELATIONSHIPS

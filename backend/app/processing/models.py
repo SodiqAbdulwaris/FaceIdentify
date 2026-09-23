@@ -3,13 +3,17 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, Integer, LargeBinary, String, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.infrastructure.db.engine import Base
 from backend.infrastructure.db.types import UTCDateTime, enum_check, uuid_pk
+
+if TYPE_CHECKING:
+    from backend.app.runtime.models import RuntimeVariant
+    from backend.app.sources.models import Source
 
 
 class ProcessingConfigurationSnapshot(Base):
@@ -97,6 +101,11 @@ class ProcessingRun(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
+    # §22: bounded to-one navigation only. `source_id` is named explicitly because
+    # sources.current_processing_run_id links the same two tables the other way.
+    source: Mapped["Source"] = relationship(foreign_keys=[source_id])
+    configuration_snapshot: Mapped["ProcessingConfigurationSnapshot"] = relationship()
+
 
 class ExecutionSegmentState(StrEnum):
     RUNNING = "RUNNING"
@@ -147,6 +156,10 @@ class ExecutionSegment(Base):
     ended_reason: Mapped[str | None] = mapped_column(String)
     runtime_details_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    # §22: bounded to-one navigation only.
+    processing_run: Mapped["ProcessingRun"] = relationship()
+    runtime_variant: Mapped["RuntimeVariant | None"] = relationship()
 
 
 class CheckpointKind(StrEnum):
