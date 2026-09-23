@@ -454,8 +454,10 @@ Re-embedding creates new Representations.
 Canonical Representation identifier:
 
 ```text
-UUIDv7
+UUID (uuid4)
 ```
+
+> **Decision 2026-09-23:** identifiers are `uuid.uuid4()` stored as SQLAlchemy `Uuid` (CHAR(32)), per PERSISTENCE_IMPLEMENTATION.md §2. This replaces the earlier UUIDv7.
 
 USearch key:
 
@@ -1441,7 +1443,7 @@ Implement:
 
 ```text
 SQLAlchemy Base
-UUIDv7 TypeDecorator
+UUID (uuid4) primary keys (decision 2026-09-23; was UUIDv7)
 UTCDateTime
 enum conventions
 engine
@@ -1848,6 +1850,8 @@ This also begins collecting useful future training/evaluation feedback.
 ---
 
 # 63. Phase D — Identity Merge
+
+> **Decision 2026-09-23:** the domain-level merge and split use cases and their invariant tests (TST-015, TST-016) are built in testing milestone M1, before the ML pipeline. Phases D and E below still cover the API, UI and ML-state integration (index, recognition memory) for these operations.
 
 Implement:
 
