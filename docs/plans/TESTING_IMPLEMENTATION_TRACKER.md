@@ -1,7 +1,7 @@
 # FaceIdentify — Testing Implementation Tracker
 
 **Version:** 1.0  
-**Status:** M0 in progress  
+**Status:** M0 complete except TST-008 factories (carried into M1)  
 **Related document:** `TESTING_STRATEGY.md`
 
 ## 1. Tracking conventions
@@ -53,21 +53,21 @@ All tasks below begin as `PLANNED`. This document does not claim that their impl
 
 ### M0 status (2026-09-23)
 
-Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions: PR #1, run `35902624488` (2026-09-23), all five jobs green, 19 backend and 1 frontend tests passed. Tasks move to `COMPLETE` once PR #1 is reviewed and merged.
+Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, run `35902624488`: all five jobs green, 19 backend and 1 frontend tests passed). PR #1 was reviewed and merged by the owner on 2026-09-23, which completes the review criterion for `COMPLETE`.
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
-| TST-001 | `PASSING` | `pyproject.toml` pytest config; unit, integration and security suites execute |
-| TST-002 | `PASSING` | pytest-asyncio `auto` mode; async + HTTPX tests in `tests/unit/test_test_infrastructure.py` |
-| TST-003 | `PASSING` | pytest-cov with branch coverage; term/XML/HTML reports generated. No threshold (per strategy §19) |
-| TST-004 | `PASSING` | 11 strict markers; directory-based auto-marking (`tests/contracts/` → `contract`); expensive suites excluded by default; `-m` selection verified |
-| TST-005 | `PASSING` | `sqlite_engine`/`db_session` use the production engine factory (Persistence §24/§25); pragmas, FK enforcement and per-test isolation tested; leak detection verified by mutation. Schema initialisation is `Base.metadata.create_all` until Alembic `0001_initial_schema` exists (M2) |
-| TST-006 | `PASSING` | `app_dirs` + `_require_inside` guard; session-wide user-data env sandbox |
-| TST-007 | `PASSING` | `make_usearch_index` with real USearch 2.26: add/search/save/restore/remove tested |
-| TST-008 | `IN_PROGRESS` | Deterministic clock/UUID/RNG utilities done and tested. Domain factories `BLOCKED` until Identity/Observation/Source/Job models exist (M1/M2); location documented in `docs/guides/TESTING_GUIDE.md` |
-| TST-009 | `PASSING` | Vitest 5 + React Testing Library + jsdom in `frontend/`; `src/app/App.test.tsx` passes; typecheck, lint and build pass |
-| TST-010 | `PASSING` | `.github/workflows/ci.yml`: branch name, commit messages, static (ruff, mypy), backend tests + coverage artifact (Windows), frontend. Observed green on GitHub (run `35902624488`) |
-| SEC-001 | `PASSING` | `tests/security/test_test_data_isolation.py` |
+| TST-001 | `COMPLETE` | `pyproject.toml` pytest config; unit, integration and security suites execute |
+| TST-002 | `COMPLETE` | pytest-asyncio `auto` mode; async + HTTPX tests in `tests/unit/test_test_infrastructure.py` |
+| TST-003 | `COMPLETE` | pytest-cov with branch coverage; term/XML/HTML reports generated. No threshold (per strategy §19) |
+| TST-004 | `COMPLETE` | 11 strict markers; directory-based auto-marking (`tests/contracts/` → `contract`); expensive suites excluded by default; `-m` selection verified |
+| TST-005 | `COMPLETE` | `sqlite_engine`/`db_session` use the production engine factory (Persistence §24/§25); pragmas, FK enforcement and per-test isolation tested; leak detection verified by mutation. Schema initialisation is `Base.metadata.create_all` until Alembic `0001_initial_schema` exists (M2) |
+| TST-006 | `COMPLETE` | `app_dirs` + `_require_inside` guard; session-wide user-data env sandbox |
+| TST-007 | `COMPLETE` | `make_usearch_index` with real USearch 2.26: add/search/save/restore/remove tested |
+| TST-008 | `IN_PROGRESS` | Deterministic clock/UUID/RNG utilities done, tested and merged. Domain factories are `BLOCKED` until Identity/Observation/Source/Job models exist and are **carried into M1** (first M1 next step in `.agents/CONTEXT.md`). Location documented in `docs/guides/TESTING_GUIDE.md` |
+| TST-009 | `COMPLETE` | Vitest 5 + React Testing Library + jsdom in `frontend/`; `src/app/App.test.tsx` passes; typecheck, lint and build pass |
+| TST-010 | `COMPLETE` | `.github/workflows/ci.yml`: branch name, commit messages, static (ruff, mypy), backend tests + coverage artifact (Windows), frontend. Observed green on GitHub (run `35902624488`) |
+| SEC-001 | `COMPLETE` | `tests/security/test_test_data_isolation.py` |
 
 ---
 
