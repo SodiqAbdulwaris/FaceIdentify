@@ -13,9 +13,11 @@ _Last updated: 2026-09-23_
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
   ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
-- **Backend:** the SQLite engine/session factory and models for all 33 `0001_initial_schema`
-  tables (registry `backend/app/models.py`). Tests build rows with the shared `build` factory
-  and assert constraints with `tests/fixtures/constraints.py`. The remaining backend
+- **Backend:** the SQLite engine/session factory, models for all 33 `0001_initial_schema`
+  tables (registry `backend/app/models.py`), and the Identity Manager core use cases
+  (`backend/app/identities/use_cases.py`): create/activate an identity, assign a representation
+  with Evidence and an index intent. Tests build rows with the shared `build` factory and assert
+  constraints with `tests/fixtures/constraints.py`. The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There are no use cases, no
   FastAPI app and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
@@ -92,7 +94,16 @@ Unresolved items need the user's decision. Do not settle them silently.
     `Observation.landmarks_json`/`quality_json`. They are plain strings or free JSON until decided
     (before the M2 migration). The transient run-state list for the partial index is inferred from recovery
     (§28).
-12. **Open (M6): job claim order.** `jobs.priority` is a string, so `ORDER BY priority` is
+12. **Open: `representations.ann_key` global uniqueness vs per-space sequences.**
+    PERSISTENCE_IMPLEMENTATION.md §21 says "unique `ann_key`" as a plain table-wide index, but
+    §6.3's `ann_key_sequences` allocates independently per `representation_space_id`, each
+    starting at 1. Two different ACTIVE spaces can therefore legitimately both allocate key 1,
+    which the current global `UNIQUE(ann_key)` (PR #4) would reject. V1's "one preferred
+    evaluated RepresentationSpace" scope (§30) means this is unreachable today; a future
+    multi-space scenario (e.g. a model upgrade with two ACTIVE spaces briefly overlapping) would
+    need either `UNIQUE(representation_space_id, ann_key)` or a single global sequence. Decide
+    before M3 introduces a second concurrently-active space.
+13. **Open (M6): job claim order.** `jobs.priority` is a string, so `ORDER BY priority` is
     alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
     claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
     priority.
@@ -106,8 +117,8 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 2. ~~Memory, identity and people models~~ Done, with the shared `build` factory
    (`tests/factories/models.py`), which also covers step 3 and completes TST-008.
 3. ~~Factories~~ Folded into step 2.
-4. Identity Manager core: create/activate, assign, observation provenance, Evidence
-   (TST-011, 012, 017, 018).
+4. ~~Identity Manager core~~ Done (PR #6): create/activate, assign representation with Evidence
+   and an index intent, observation provenance preserved (TST-011, 012, 017, 018).
 5. Corrections and rename via Person association (TST-013, 014).
 6. Query-only recognition guard (TST-019).
 7. Merge, then split, at the domain level (TST-015, 016).

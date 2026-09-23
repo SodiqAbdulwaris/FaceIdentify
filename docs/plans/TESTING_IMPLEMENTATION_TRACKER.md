@@ -1,7 +1,7 @@
 # FaceIdentify — Testing Implementation Tracker
 
 **Version:** 1.0  
-**Status:** M0 complete once M1 PR #5 merges (TST-008 factories); M1 in progress  
+**Status:** M0 complete (TST-008 factories, PR #5); M1 in progress  
 **Related document:** `TESTING_STRATEGY.md`
 
 ## 1. Tracking conventions
@@ -64,7 +64,7 @@ Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, ru
 | TST-005 | `COMPLETE` | `sqlite_engine`/`db_session` use the production engine factory (Persistence §24/§25); pragmas, FK enforcement and per-test isolation tested; leak detection verified by mutation. Schema initialisation is `Base.metadata.create_all` until Alembic `0001_initial_schema` exists (M2) |
 | TST-006 | `COMPLETE` | `app_dirs` + `_require_inside` guard; session-wide user-data env sandbox |
 | TST-007 | `COMPLETE` | `make_usearch_index` with real USearch 2.26: add/search/save/restore/remove tested |
-| TST-008 | `PASSING` | Deterministic clock/UUID/RNG utilities (M0) plus `tests/factories/models.py` (M1 PR #5): builders for sources, runs, jobs, observations, representations, identities, evidence, lineage, index operations, occurrences, people and associations. Link and catalog rows are built inline (see TESTING_GUIDE.md). `COMPLETE` once PR #5 merges |
+| TST-008 | `COMPLETE` | Deterministic clock/UUID/RNG utilities (M0) plus `tests/factories/models.py` (M1 PR #5, merged): builders for sources, runs, jobs, observations, representations, identities, evidence, lineage, index operations, occurrences, people and associations. Link and catalog rows are built inline (see TESTING_GUIDE.md) |
 | TST-009 | `COMPLETE` | Vitest 5 + React Testing Library + jsdom in `frontend/`; `src/app/App.test.tsx` passes; typecheck, lint and build pass |
 | TST-010 | `COMPLETE` | `.github/workflows/ci.yml`: branch name, commit messages, static (ruff, mypy), backend tests + coverage artifact (Windows), frontend. Observed green on GitHub (run `35902624488`) |
 | SEC-001 | `COMPLETE` | `tests/security/test_test_data_isolation.py` |
@@ -91,6 +91,21 @@ Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, ru
 **Dependencies:** M0, authoritative identity and observation contracts.
 
 **Milestone gate:** Applicable identity and observation invariants pass.
+
+### M1 status (2026-09-23)
+
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 164 passed, 0 skipped, 0
+warnings, `backend/` coverage 100%. Remote CI observed green on PR #4 and PR #5. PR #6 (this
+Identity Manager slice) has not been observed on GitHub yet at the time of writing; see its own
+implementation entry for that result.
+
+| ID | Status | Evidence / remaining work |
+|---|---|---|
+| TST-011 | `PASSING` | `backend/app/identities/use_cases.py`: `create_pending_identity` and `activate_identity`. Stable UUID identifier verified across the PENDING→ACTIVE transition; optimistic-locking (stale `revision`) and invalid-transition rejection tested and mutation-checked |
+| TST-012 | `PASSING` | `assign_representation_to_identity`: a PENDING representation can only be assigned once; many representations may authoritatively point to one ACTIVE identity; an inactive identity cannot receive a new assignment. All four rejection paths are tested for leaving no partial state (no leaked `ann_key`, `Evidence` or `IndexOperation`) |
+| TST-017 | `PASSING` | `test_assigning_an_identity_never_touches_observation_provenance` and `test_each_observation_keeps_its_own_run_and_source` in `tests/integration/test_identity_manager.py` |
+| TST-018 | `PASSING` | `test_evidence_is_append_only_across_later_operations` (an Evidence row is byte-identical after a later, unrelated operation) and `test_evidence_kind_records_whether_the_identity_was_new_or_matched` (IDENTITY_CREATED vs IDENTITY_MATCHED) |
+| TST-013, 014, 015, 016, 019, 020 | `PLANNED` | Not started; remaining M1 PRs (plan in `.agents/CONTEXT.md`) |
 
 ---
 
