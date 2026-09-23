@@ -724,6 +724,8 @@ False temporary fragmentation is generally safer than contaminating two differen
 
 ## 18. Merge Semantics
 
+> **Superseded in part (decision 2026-09-23):** merge is implemented at the **Identity** level: `identities.state = MERGED`, `merged_into_identity_id`, an `identity_lineage` `MERGED_INTO` edge, and Evidence (PERSISTENCE_IMPLEMENTATION.md §7, API and Contracts §8.1/§114). `people` has no `MERGED` state. The Person-level `status: MERGED` / `canonical_person` example below is conceptual only. Attaching several Identities to one Person is done through `identity_person_associations`.
+
 Merging should normally preserve underlying Identities.
 
 Before:
