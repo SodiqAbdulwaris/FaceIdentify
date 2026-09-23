@@ -3,7 +3,7 @@
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** prerequisites for M2 (migrations), M3 (TST-044 ML evaluation) and M8 (packaging)
 - **Status:** done
-- **Commits:** `4170c75` migrations location, `fe6937e` evaluation location, `f1f455f` bundle identifier (branch `docs/resolve-open-decisions`)
+- **Commits:** PR #2 (`docs/resolve-open-decisions`): `docs(specs): place the alembic environment at backend/alembic`, `docs: set evaluation/ as the ml evaluation location`, `build(desktop): use an owner-scoped bundle identifier`, `docs: record resolution of open repository decisions`
 
 ## What changed
 
@@ -51,5 +51,7 @@ forbids without approval.
 
 ## Open issues / follow-ups
 
-- This branch is stacked on PR #1 (`chore/project-foundation`). Once #1 is rebase-merged, rebase
-  this branch onto `main` because the SHAs change, then retarget or re-run its PR.
+- ~~Stacked on PR #1~~ PR #1 merged 2026-09-23. This branch was rebased onto `main` and the PR
+  retargeted.
+- Commit SHAs cited in implementation entries went stale after PR #1's rebase merge. They are now
+  cited by PR and subject, and `rules/documentation.md` requires this from now on.
