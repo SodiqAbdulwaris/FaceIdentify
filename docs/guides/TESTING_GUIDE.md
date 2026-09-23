@@ -31,12 +31,15 @@ npm install
 | One category | `uv run pytest -m unit` (or `contract`, `property`, `integration`, `recovery`, `security`, `concurrency`) |
 | Everything except integration | `uv run pytest -m "not integration"` |
 | Integration tests only | `uv run pytest -m integration` |
-| Expensive suites (explicit only) | `uv run pytest -m e2e`, `-m ml_eval`, `-m benchmark`, `-m hardware` |
+| End-to-end / hardware (explicit only) | `uv run pytest -m e2e`, `uv run pytest -m hardware` |
+| ML evaluation (explicit only) | `uv run pytest evaluation -m ml_eval` |
+| Benchmarks (explicit only) | `uv run pytest benchmarks -m benchmark` |
 | Coverage report | `uv run pytest --cov --cov-report=term-missing --cov-report=html` → `htmlcov/index.html` |
 | Deterministic Hypothesis (as CI) | set `HYPOTHESIS_PROFILE=ci`, then `uv run pytest` |
 
 The default run excludes `e2e`, `ml_eval`, `benchmark` and `hardware` through `addopts` in
-`pyproject.toml`. Passing `-m` on the command line replaces that filter.
+`pyproject.toml`. Passing `-m` on the command line replaces that filter. `testpaths` is only
+`tests/`, so `evaluation/` and `benchmarks/` must also be named as paths, as in the table.
 
 Markers come from the directory: every test under `tests/unit/` gets `unit`,
 `tests/integration/` gets `integration`, `tests/contracts/` gets `contract`, and so on (see `DIRECTORY_MARKERS` in
