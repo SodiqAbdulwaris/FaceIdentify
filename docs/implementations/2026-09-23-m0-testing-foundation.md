@@ -2,8 +2,8 @@
 
 - **Date:** 2026-09-23
 - **Milestone / tracker IDs:** M0 · TST-001 to TST-010, SEC-001
-- **Status:** done locally; remote CI not yet observed
-- **Commits:** not yet committed
+- **Status:** done; CI green on PR #1 (tasks become `COMPLETE` when it merges)
+- **Commits:** `445970c` build, `2c44b53` engine, `8bc983b` tests (on `chore/project-foundation`, PR #1)
 
 ## What changed
 
@@ -53,7 +53,6 @@ fixture's configuration rather than the application's.
   teardown with `PermissionError [WinError 32]`.
 - No `*.db`/`*.usearch` files appeared outside pytest's temp directory, and nothing was created
   in the real `%LOCALAPPDATA%`/`%APPDATA%`.
-
 - **Remote CI (2026-09-23):** PR #1, run `35902624488`: all five jobs passed on GitHub Actions
   (backend on `windows-latest`: 19 passed; frontend: 1 passed; coverage artifact uploaded).
 
@@ -61,4 +60,3 @@ fixture's configuration rather than the application's.
 
 - Domain factories are blocked until models exist (M1/M2).
 - Schema initialisation uses `create_all` until Alembic `0001_initial_schema` exists.
-- CI needs a pushed repository and an observed run.
