@@ -1,6 +1,6 @@
 """Imports every feature's persistence models so `Base.metadata` is complete.
 
-Import this module wherever the full schema is needed (test fixtures now, Alembic in M2).
+Import this module wherever the full schema is needed (Alembic's env.py, test fixtures).
 """
 
 from backend.app.identities import models as identities
