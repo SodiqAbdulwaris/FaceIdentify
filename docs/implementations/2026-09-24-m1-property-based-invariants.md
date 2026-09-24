@@ -86,10 +86,23 @@ under many generated interleavings, rather than one use case in isolation.
     `Evidence` row, so there is no real line to break; the invariant exists to catch a future
     regression, not to close an existing gap.
 
-## Independent review
+## Independent review (subagent, disposable worktree): approve, 1 finding addressed, 1 more found during the fix
 
-Not yet run at the time of writing this entry; see the PR for the review outcome and any
-follow-up this entry doesn't yet reflect.
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | The reviewer traced every rule's effect on the mirrored state against the real use cases and found `split()` marked its new identity as already having `IDENTITY_CREATED` evidence, when `split_identity` actually records `IDENTITY_SPLIT` — not a false failure (the real `_has_creation_evidence` check would still permit `IDENTITY_CREATED` on that identity), but a coverage gap: `assign_representation` would then only ever try `IDENTITY_MATCHED` on a post-split identity, never exercising the valid `IDENTITY_CREATED` path | Changed `has_creation_evidence[new_identity.id]` to `False` |
+| 2 | Applying fix #1 and re-running immediately surfaced a second, unrelated bug the reviewer's read-only pass didn't hit: `PERSON_NAMES` allowed arbitrary Unicode, including control characters; a generated name of `'\x00'` made `rename_person` fail with `CHECK constraint failed: ck_people_display_name_not_empty` — a pysqlite/SQLite C-string binding quirk (the NUL byte truncates the bound TEXT parameter to nothing) unrelated to identity-lifecycle invariants | `PERSON_NAMES` now excludes Unicode categories `Cc`/`Cs` (control and surrogate characters); this is a *valid*-operation-sequence property test, and `TESTING_STRATEGY.md` §6.3 keeps invalid-input generators separate for negative testing, so narrowing the generator is the right scope boundary, not a workaround |
+
+The reviewer also confirmed, independently: every rule's model of its real use case's revision
+bump, ACTIVE-representation tracking, and Person-association carry-over is correct, including the
+zero-representations-at-merge/split-away-everything edge cases; `rename_person` is the only call
+site that bumps `Person.revision` (`assign_identity_to_person`/`remove_identity_from_person` only
+bump `IdentityPersonAssociation.revision`, correctly untracked here); and the "no code path deletes
+Evidence" claim for `evidence_is_append_only` is accurate.
+
+Both fixes were verified with the same stress run used during development
+(`max_examples=300`, `stateful_step_count=40`, ~86s) before landing, in addition to the default
+CI-budget run.
 
 ## Open issues / follow-ups
 
