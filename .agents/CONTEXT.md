@@ -3,12 +3,13 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-24 (PR #10)_
+_Last updated: 2026-09-24 (PR #11)_
 
 ## Current state
 
-- **Milestone:** M0 and M1 (domain integrity) are both complete and merged. Next is M2 (Alembic
-  migrations). Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
+- **Milestone:** M0 and M1 (domain integrity) are complete and merged. M2 (persistence) has
+  started: Alembic and the initial migration are done (TST-032, in progress); TST-021 to TST-031
+  are next. Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
   ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
@@ -20,7 +21,9 @@ _Last updated: 2026-09-24 (PR #10)_
   search), and Person/association use cases
   (`backend/app/people/use_cases.py`: assign/reassign/remove an Identity's Person link, rename a
   Person). `backend/infrastructure/db/optimistic.py` holds the one shared optimistic-locked
-  `UPDATE` helper both feature modules use. Tests build rows with the shared `build` factory and
+  `UPDATE` helper both feature modules use. The schema is created only by Alembic
+  (`backend/alembic/`, revision `0001_initial_schema`); every persistence test runs on the migrated
+  schema. Tests build rows with the shared `build` factory and
   assert constraints with `tests/fixtures/constraints.py`. The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There are no use cases, no
   FastAPI app and no ML worker yet.
@@ -57,6 +60,7 @@ git config core.hooksPath .githooks   # enable commit-msg + pre-push hooks (once
 git switch -c feat/short-description  # every change starts on a branch (rules/branches.md)
 # PR review: follow the procedure in .agents/rules/branches.md (Review section)
 uv run pytest                          # fast backend tests
+uv run alembic upgrade head           # migrate the DB at $env:FACEIDENTIFY_DATABASE_PATH (backend/alembic/README)
 uv run ruff format --check . && uv run ruff check . && uv run mypy
 npm test && npm run typecheck && npm run lint && npm run build
 npm run tauri dev                      # desktop app with frontend dev server
@@ -69,7 +73,7 @@ Unresolved items need the user's decision. Do not settle them silently.
 
 1. ~~Migrations directory~~ **Resolved 2026-09-23:** `backend/alembic/` with revisions in
    `backend/alembic/versions/`, as PERSISTENCE_IMPLEMENTATION.md specifies. The architecture spec
-   was aligned. The folder is created by `alembic init` in M2.
+   was aligned. Created in M2 (PR #11).
 2. ~~ML evaluation location~~ **Resolved 2026-09-23:** top-level `evaluation/`, separate from
    `tests/` (correctness) and `benchmarks/` (performance). Datasets go in the Git-ignored
    `evaluation/datasets/`, never committed.
@@ -121,6 +125,14 @@ Unresolved items need the user's decision. Do not settle them silently.
     alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
     claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
     priority.
+17. **Open: where the library database path comes from.** No Storage Manager or app-data path
+    resolver exists yet, so `backend/alembic/env.py` reads `FACEIDENTIFY_DATABASE_PATH` and
+    refuses to run without it, rather than inventing a default location no spec sanctions. Replace
+    it (or keep it as an override) when the Storage Manager (TST-025) defines the library root.
+18. **Open: batch-mode migrations are unproven.** `env.py` enables `render_as_batch` from the
+    first revision because SQLite needs table recreation for most constraint changes, but revision
+    `0001` only creates tables, so batch mode is exercised by no test yet. The second revision must add a populated-database upgrade test (and check that
+    recreating a table with `PRAGMA foreign_keys = ON` behaves).
 15. **Open: `IdentityState.SPLIT` is never assigned.** The enum (persistence §7) lists a `SPLIT`
     state, but no spec text says which of a split's two resulting identities (if either) should
     receive it. `split_identity` (PR #8) reads `identity-and-memory-model-v1.md` §19.2's
@@ -133,7 +145,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     reassign `Representation.identity_id` only. Decide, before a production path creates
     `Occurrence` rows, whether merge/split must also move `Occurrence.identity_id`.
 
-## Next steps (M1)
+## M1 delivery (complete)
 
 M1 is delivered as a series of small PRs, each reviewed and green before the next (agreed
 2026-09-23):
@@ -153,11 +165,18 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 8. ~~Hypothesis property tests over operation sequences~~ Done (PR #10):
    `tests/property/test_identity_lifecycle_invariants.py` (TST-020).
 
-**M1 (domain integrity) is complete: TST-011 through TST-020 all `PASSING`.** Next milestone is
-M2 (Alembic migrations), per `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`.
+**M1 (domain integrity) is complete: TST-011 through TST-020 all `PASSING`.**
+
+## Next steps (M2)
+
+1. ~~Alembic and `0001_initial_schema`~~ Done (PR #11): `backend/alembic/`, the `sqlite_engine`
+   fixture copies a database migrated to `head` (no more `create_all` in fixtures), migration tests
+   (TST-032, `IN_PROGRESS`: the populated-schema criterion needs a second revision).
+2. The rest of M2 in `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`: TST-021 to TST-031 (SQLite
+   configuration, repository contract, transaction rollback, optimistic concurrency, Storage
+   Manager, artifact finalization, USearch integration, IndexOperation replay, cross-storage
+   failure, startup recovery, deletion).
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
-plain string, listed as an open question. Test fixtures keep using `create_all` until M2.
-
-Deferred to M2: Alembic at `backend/alembic/` (revision `0001_initial_schema`), switching the
-`sqlite_engine` fixture from `create_all` to migrations, and migration tests (TST-032).
+plain string, listed as an open question. Every schema change is now a reviewed Alembic revision
+(see `backend/alembic/README`).
