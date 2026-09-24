@@ -3,7 +3,7 @@
 - **Date:** 2026-09-24
 - **Milestone / tracker IDs:** M1 (TST-013, TST-014)
 - **Status:** done
-- **Commits:** PR #7: `refactor(identities): share the optimistic-locked update helper`, `feat(people): add person and association use cases`, `test(people): add person use-case tests`, `docs: record m1 person corrections and rename`
+- **Commits:** PR #7: `refactor(identities): share the optimistic-locked update helper`, `feat(people): add person and association use cases`, `test(people): add person use-case tests`, `docs: record m1 person corrections and rename`, then the review follow-up `docs(people): clarify locking choices found by review`
 
 ## What changed
 
@@ -68,7 +68,23 @@ so no separate "correction" function was built; `assign_identity_to_person` alre
   - disabling `optimistic_locked_update`'s revision check entirely → 2 tests fail (proving the
     shared helper, not just its callers, is exercised).
 
+## Independent review (subagent, disposable worktree): approve, 2 minor findings
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | The association's own `revision` is bumped by a plain `current.revision += 1`, not through `optimistic_locked_update`, despite the PR's stated purpose being a shared, correct locking helper | **Documented, not changed.** `current` is fetched by a plain `select` moments earlier in the *same* transaction, so under SQLite's single-writer model there is nothing to race against. Added a comment at both call sites (`assign_identity_to_person`, `remove_identity_from_person`) saying so and flagging that a future multi-writer backend would need this guarded |
+| 2 | `assign_identity_to_person` checks the identity's state via a plain `session.get`, not `expected_revision` as §9's literal "lock/reload the identity" wording suggests | **Documented, not changed.** This matches `assign_representation_to_identity`'s already-established, reviewed precedent (PR #6) for the same reason: the identity's own revision isn't the caller's concern here, only its state is, and the unique active-association index still rejects a genuine race. Added to the function's docstring |
+
+The reviewer confirmed the `activate_identity` refactor is behaviour-preserving, the correction
+test is non-vacuous, and the Person-association reading of "corrections" is a supported (if
+narrow) reading of the M1 plan and §9 — explicitly noting the "wrong face match" case
+(reassigning a representation between identities, not persons) remains unaddressed. That gap was
+already out of this PR's stated scope and is not a new finding.
+
 ## Open issues / follow-ups
+
+- The representation-level "wrong face match" correction (as opposed to a wrong Person link)
+  remains unbuilt; noted by the review as a real, already-acknowledged gap, not attempted here.
 
 - The rename-Evidence gap (CONTEXT open question 12).
 - Merge/split (TST-015/016), the query-only recognition guard (TST-019) and property tests
