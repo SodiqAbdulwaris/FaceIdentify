@@ -13,7 +13,7 @@ Functions flush but do not commit: the caller owns the transaction boundary
 """
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 
 from sqlalchemy import exists, insert, select, update
@@ -25,6 +25,8 @@ from backend.app.identities.models import (
     EvidenceRepresentation,
     EvidenceRepresentationRole,
     Identity,
+    IdentityLineage,
+    IdentityLineageKind,
     IdentityState,
 )
 from backend.app.memory.models import (
@@ -33,6 +35,7 @@ from backend.app.memory.models import (
     Representation,
     RepresentationState,
 )
+from backend.app.people.models import AssociationState, IdentityPersonAssociation
 from backend.infrastructure.db.optimistic import optimistic_locked_update
 
 
@@ -251,3 +254,290 @@ def assign_representation_to_identity(
     )
     session.flush()
     return representation
+
+
+# --- merge -----------------------------------------------------------------------------------
+
+
+def _active_association(
+    session: Session, identity_id: uuid.UUID
+) -> IdentityPersonAssociation | None:
+    return session.scalar(
+        select(IdentityPersonAssociation).where(
+            IdentityPersonAssociation.identity_id == identity_id,
+            IdentityPersonAssociation.state == AssociationState.ACTIVE,
+        )
+    )
+
+
+def _reconcile_person_on_merge(
+    session: Session,
+    losing_identity_id: uuid.UUID,
+    surviving_identity_id: uuid.UUID,
+    *,
+    new_id: Callable[[], uuid.UUID],
+    clock: Callable[[], datetime],
+) -> None:
+    """§114 "reconcile Person relationship": the survivor's own naming always wins.
+
+    If only the losing identity had an active Person link, that naming carries over to the
+    survivor (a fresh association + `Evidence`, exactly as `assign_identity_to_person` would
+    create — duplicated in miniature here rather than imported, to avoid a circular import
+    between `identities.use_cases` and `people.use_cases`, which itself imports this module).
+    Either way, the losing identity's own association can no longer be current once its identity
+    is merged away.
+    """
+    loser_association = _active_association(session, losing_identity_id)
+    if loser_association is None:
+        return
+    now = clock()
+    if _active_association(session, surviving_identity_id) is None:
+        evidence = Evidence(
+            id=new_id(),
+            kind=EvidenceKind.IDENTITY_ASSIGNED_TO_PERSON,
+            subject_identity_id=surviving_identity_id,
+            subject_person_id=loser_association.person_id,
+            payload_schema_version=1,
+            payload_json={"carried_over_from_identity_id": str(losing_identity_id)},
+            created_at=now,
+        )
+        session.add(evidence)
+        session.flush()
+        session.add(
+            IdentityPersonAssociation(
+                id=new_id(),
+                identity_id=surviving_identity_id,
+                person_id=loser_association.person_id,
+                state=AssociationState.ACTIVE,
+                evidence_id=evidence.id,
+                created_at=now,
+            )
+        )
+    # A plain increment: freshly fetched in this same transaction (see people/use_cases.py's
+    # matching comment for why that is safe under SQLite's single-writer model).
+    loser_association.state = AssociationState.SUPERSEDED
+    loser_association.ended_at = now
+    loser_association.revision += 1
+
+
+def merge_identities(
+    session: Session,
+    losing_identity_id: uuid.UUID,
+    surviving_identity_id: uuid.UUID,
+    *,
+    expected_revision: int,
+    new_id: Callable[[], uuid.UUID],
+    clock: Callable[[], datetime],
+    payload_schema_version: int = 1,
+) -> Identity:
+    """Merge one Identity into another (§114). The losing identity keeps its row and history.
+
+    Merge is Identity-level (identity-and-memory-model-v1.md §18, decision 2026-09-23): the
+    losing identity becomes `MERGED` with `merged_into_identity_id` set and an `identity_lineage`
+    `MERGED_INTO` edge, never deleted. Its active representations move to the survivor (their
+    `ann_key` is untouched — merge does not change ANN eligibility, only ownership, so no
+    `IndexOperation` is created). A three-or-more-way merge is done by calling this once per
+    losing identity: each call is independently atomic and history-preserving, so composing them
+    reaches the same end state as a single N-way operation without this function having to
+    arbitrate which of several losing identities' Person links should win.
+
+    `expected_revision` guards the losing identity only: it is the one whose own row changes.
+    The survivor's row is not touched by a merge (only its representations/associations), so it
+    takes no revision.
+    """
+    if losing_identity_id == surviving_identity_id:
+        raise IdentityManagerError("cannot merge an identity into itself")
+
+    survivor = session.get(Identity, surviving_identity_id)
+    if survivor is None:
+        raise IdentityManagerError(f"identity {surviving_identity_id} does not exist")
+    if survivor.state != IdentityState.ACTIVE:
+        raise IdentityManagerError(
+            f"identity {surviving_identity_id} is {survivor.state}, not ACTIVE;"
+            " only an active identity can survive a merge"
+        )
+    loser = session.get(Identity, losing_identity_id)
+    if loser is None:
+        raise IdentityManagerError(f"identity {losing_identity_id} does not exist")
+    if loser.state != IdentityState.ACTIVE:
+        raise IdentityManagerError(
+            f"identity {losing_identity_id} is {loser.state}, not ACTIVE;"
+            " only an active identity can be merged away"
+        )
+
+    _reconcile_person_on_merge(
+        session, losing_identity_id, surviving_identity_id, new_id=new_id, clock=clock
+    )
+
+    now = clock()
+    moved_representation_ids = session.scalars(
+        select(Representation.id).where(
+            Representation.identity_id == losing_identity_id,
+            Representation.state == RepresentationState.ACTIVE,
+        )
+    ).all()
+    session.execute(
+        update(Representation)
+        .where(
+            Representation.identity_id == losing_identity_id,
+            Representation.state == RepresentationState.ACTIVE,
+        )
+        .values(identity_id=surviving_identity_id),
+        execution_options={"synchronize_session": False},
+    )
+
+    evidence = Evidence(
+        id=new_id(),
+        kind=EvidenceKind.IDENTITY_MERGED,
+        subject_identity_id=losing_identity_id,
+        payload_schema_version=payload_schema_version,
+        payload_json={
+            "merged_into_identity_id": str(surviving_identity_id),
+            "moved_representation_ids": [str(rep_id) for rep_id in moved_representation_ids],
+        },
+        created_at=now,
+    )
+    session.add(evidence)
+    session.flush()
+    for representation_id in moved_representation_ids:
+        session.add(
+            EvidenceRepresentation(
+                evidence_id=evidence.id,
+                representation_id=representation_id,
+                role=EvidenceRepresentationRole.SUBJECT,
+            )
+        )
+    session.add(
+        IdentityLineage(
+            id=new_id(),
+            from_identity_id=losing_identity_id,
+            to_identity_id=surviving_identity_id,
+            kind=IdentityLineageKind.MERGED_INTO,
+            evidence_id=evidence.id,
+            created_at=now,
+        )
+    )
+
+    rowcount = optimistic_locked_update(
+        session,
+        Identity,
+        losing_identity_id,
+        expected_revision=expected_revision,
+        values={
+            "state": IdentityState.MERGED,
+            "merged_into_identity_id": surviving_identity_id,
+            "updated_at": now,
+        },
+        extra_where=(Identity.state == IdentityState.ACTIVE,),
+    )
+    if rowcount == 0:
+        # Re-validated above under the same transaction; only a concurrent revision change
+        # between that check and here can land here (single-writer SQLite makes this
+        # unreachable in practice, but the guard is cheap and matches activate_identity's).
+        raise StaleRevisionError(
+            f"identity {losing_identity_id} changed since it was read for this merge"
+        )
+    session.flush()
+    return survivor
+
+
+# --- split -----------------------------------------------------------------------------------
+
+
+def split_identity(
+    session: Session,
+    source_identity_id: uuid.UUID,
+    representation_ids: Sequence[uuid.UUID],
+    *,
+    new_id: Callable[[], uuid.UUID],
+    clock: Callable[[], datetime],
+    payload_schema_version: int = 1,
+) -> Identity:
+    """Split selected representations of one Identity into a new one (§19.2, §115).
+
+    `representation_ids` is the caller's decision (API and Contracts §8.2: "A split identifies
+    selected observations/evidence that should form a new Identity" — the backend does not
+    decide which). The source identity keeps everything not listed and stays `ACTIVE`; nothing
+    requires it to retain at least one representation, so the caller may split away all of them.
+    The new identity is created directly `ACTIVE` (not `PENDING`): unlike recognition-created
+    identities (§7, "only an accepted processing run may activate a pending identity"), this is
+    an already-decided human action with no processing run to accept it.
+
+    `identities.state = SPLIT` is not used here: neither identity stops being independently
+    current (the conceptual example in identity-and-memory-model-v1.md §19.2 has the source keep
+    some evidence), so nothing here warrants a terminal state. See `.agents/CONTEXT.md` for this
+    as an open question if that reading is wrong.
+    """
+    source = session.get(Identity, source_identity_id)
+    if source is None:
+        raise IdentityManagerError(f"identity {source_identity_id} does not exist")
+    if source.state != IdentityState.ACTIVE:
+        raise IdentityManagerError(
+            f"identity {source_identity_id} is {source.state}, not ACTIVE;"
+            " only an active identity can be split"
+        )
+    if not representation_ids:
+        raise IdentityManagerError("split requires at least one representation to move")
+
+    representations = [session.get(Representation, rep_id) for rep_id in representation_ids]
+    for representation_id, representation in zip(representation_ids, representations, strict=True):
+        if representation is None:
+            raise IdentityManagerError(f"representation {representation_id} does not exist")
+        if representation.identity_id != source_identity_id:
+            raise IdentityManagerError(
+                f"representation {representation_id} does not belong to identity"
+                f" {source_identity_id}"
+            )
+        if representation.state != RepresentationState.ACTIVE:
+            raise IdentityManagerError(
+                f"representation {representation_id} is {representation.state}, not ACTIVE"
+            )
+
+    now = clock()
+    new_identity = Identity(
+        id=new_id(),
+        state=IdentityState.ACTIVE,
+        created_by_processing_run_id=None,
+        created_at=now,
+        activated_at=now,
+        updated_at=now,
+    )
+    session.add(new_identity)
+    session.flush()
+
+    evidence = Evidence(
+        id=new_id(),
+        kind=EvidenceKind.IDENTITY_SPLIT,
+        subject_identity_id=new_identity.id,
+        payload_schema_version=payload_schema_version,
+        payload_json={
+            "split_from_identity_id": str(source_identity_id),
+            "moved_representation_ids": [str(rep_id) for rep_id in representation_ids],
+        },
+        created_at=now,
+    )
+    session.add(evidence)
+    session.flush()
+
+    for representation_id, representation in zip(representation_ids, representations, strict=True):
+        assert representation is not None  # validated above
+        representation.identity_id = new_identity.id
+        session.add(
+            EvidenceRepresentation(
+                evidence_id=evidence.id,
+                representation_id=representation_id,
+                role=EvidenceRepresentationRole.SUBJECT,
+            )
+        )
+    session.add(
+        IdentityLineage(
+            id=new_id(),
+            from_identity_id=source_identity_id,
+            to_identity_id=new_identity.id,
+            kind=IdentityLineageKind.SPLIT_FROM,
+            evidence_id=evidence.id,
+            created_at=now,
+        )
+    )
+    session.flush()
+    return new_identity
