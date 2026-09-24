@@ -57,6 +57,12 @@ def test_drops_a_deleted_candidate(build: ModelFactory) -> None:
     assert result == []
 
 
+def test_drops_a_split_candidate(build: ModelFactory) -> None:
+    split = build.identity(state="SPLIT")
+    result = resolve_recognition_candidates(build.session, [split.id])
+    assert result == []
+
+
 def test_resolves_a_merged_candidate_to_its_survivor(build: ModelFactory) -> None:
     survivor = build.identity()
     loser = build.identity()
