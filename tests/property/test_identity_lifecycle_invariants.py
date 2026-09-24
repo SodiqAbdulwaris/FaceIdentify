@@ -50,7 +50,14 @@ from backend.infrastructure.db.engine import Base, create_session_factory, creat
 from tests.factories.models import ModelFactory
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 
-PERSON_NAMES = st.text(min_size=1, max_size=20).map(str.strip).filter(bool)
+# Printable text only: a name with an embedded NUL byte hits a pysqlite/SQLite C-string binding
+# quirk unrelated to identity-lifecycle invariants — out of scope for a *valid*-sequence property
+# test (TESTING_STRATEGY.md §6.3 keeps invalid-input generators separate for negative testing).
+PERSON_NAMES = (
+    st.text(alphabet=st.characters(blacklist_categories=("Cc", "Cs")), min_size=1, max_size=20)
+    .map(str.strip)
+    .filter(bool)
+)
 
 
 class IdentityLifecycleMachine(RuleBasedStateMachine):
@@ -197,7 +204,9 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
         self.active_reps_by_identity[source_id] -= set(to_move)
         self.active_reps_by_identity[new_identity.id] = set(to_move)
         self.revision[new_identity.id] = new_identity.revision
-        self.has_creation_evidence[new_identity.id] = True
+        # split_identity records IDENTITY_SPLIT, not IDENTITY_CREATED, for the new identity, so
+        # assign_representation may still validly use IDENTITY_CREATED on it afterwards.
+        self.has_creation_evidence[new_identity.id] = False
         self.has_person[new_identity.id] = False
         return new_identity.id
 
