@@ -94,7 +94,7 @@ Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, ru
 
 ### M1 status (2026-09-23)
 
-Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 236 passed, 0 skipped, 0
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 237 passed, 0 skipped, 0
 warnings, `backend/` coverage 100%. Remote CI observed green on PR #4 through PR #8.
 
 | ID | Status | Evidence / remaining work |

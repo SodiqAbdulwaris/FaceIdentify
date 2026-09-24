@@ -15,7 +15,7 @@
   dropping a candidate that resolves to nothing or to a non-`ACTIVE` identity, preserving input
   order, and de-duplicating candidates that resolve to the same identity. It performs no writes
   at all — no `session.add`, no `update()`, nothing.
-- `tests/integration/test_query_only_recognition.py`: 13 tests.
+- `tests/integration/test_query_only_recognition.py`: 14 tests.
 
 ## Why
 
@@ -55,7 +55,7 @@ step.
 
 ## Verification
 
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 236 passed (13 new,
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 237 passed (14 new,
   no regressions in the prior 223); `backend/` coverage 100%; strict mypy and ruff clean.
 - Mutation checks (each reverted immediately afterwards, confirmed byte-identical to the original
   via `diff`), all caught:
@@ -64,10 +64,24 @@ step.
   - removing the merge-chain walk (`while` loop) entirely → 2 tests fail;
   - dropping `populate_existing=True` from both `session.get` calls → 4 tests fail.
 
-## Independent review
+## Independent review (subagent, disposable worktree): approve, 1 finding addressed
 
-Not yet run at the time of writing this entry; see the PR for the review outcome and any
-follow-up this entry doesn't yet reflect.
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | `PENDING`, `MERGED` (terminal), `FORGOTTEN`, and `DELETED` each had their own dropped-candidate test, but `SPLIT` — the fifth non-`ACTIVE` state — did not | Added `test_drops_a_split_candidate` |
+
+The reviewer also confirmed, independently: `session.get()` bypasses autoflush entirely, so
+`populate_existing=True` cannot leak an unrelated pending write from elsewhere in the session; the
+merge-chain walk cannot cycle because `merge_identities` requires both the survivor and the loser
+to be `ACTIVE`, and a `MERGED` row can never be reactivated, so an already-merged identity can
+never later become a survivor; and the stale-read bug this PR's mutation testing found is real and
+`populate_existing=True` is the correct, minimal fix (matching `activate_identity`'s existing
+precedent), not merely a workaround.
+
+A second, informational-only suggestion (a defensive max-hops cap on the merge-chain walk against
+a future invariant violation) was not applied, consistent with this project's established pattern
+(CONTEXT.md open question 13) of documenting an invariant rather than defensively coding against a
+state no current code path can produce.
 
 ## Open issues / follow-ups
 
