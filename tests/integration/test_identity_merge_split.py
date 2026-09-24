@@ -155,6 +155,51 @@ def test_merge_carries_over_the_losers_person_when_the_survivor_has_none(
     assert loser_associations[0].person_id == alice.id  # still records who it WAS
 
 
+def test_merge_when_both_identities_already_point_at_the_same_person(
+    build: ModelFactory,
+) -> None:
+    """Not a special case in the code: the survivor already having an active link (to anyone,
+    including the loser's own person) is what skips the carry-over branch. No duplicate
+    association or Evidence should appear."""
+    survivor = build.identity()
+    loser = build.identity()
+    alice = build.person(display_name="Alice")
+    assign_identity_to_person(
+        build.session, survivor.id, alice.id, new_id=build.new_id, clock=build.clock
+    )
+    assign_identity_to_person(
+        build.session, loser.id, alice.id, new_id=build.new_id, clock=build.clock
+    )
+
+    merge_identities(
+        build.session, loser.id, survivor.id, expected_revision=loser.revision,
+        new_id=build.new_id, clock=build.clock,
+    )  # fmt: skip
+
+    build.session.expire_all()
+    survivor_active = build.session.scalars(
+        select(IdentityPersonAssociation).where(
+            IdentityPersonAssociation.identity_id == survivor.id,
+            IdentityPersonAssociation.state == "ACTIVE",
+        )
+    ).all()
+    assert len(survivor_active) == 1
+    assert survivor_active[0].person_id == alice.id
+    loser_association = build.session.scalars(
+        select(IdentityPersonAssociation).where(IdentityPersonAssociation.identity_id == loser.id)
+    ).one()
+    assert loser_association.state == "SUPERSEDED"
+    survivor_evidence = build.session.scalars(
+        select(Evidence).where(
+            Evidence.subject_identity_id == survivor.id,
+            Evidence.kind == "IDENTITY_ASSIGNED_TO_PERSON",
+        )
+    ).all()
+    # Exactly the initial assignment's own Evidence — merge creates no second, carry-over one,
+    # since the survivor's own active link already existed.
+    assert len(survivor_evidence) == 1
+
+
 def test_merge_keeps_the_survivors_own_person_when_it_already_has_one(
     build: ModelFactory,
 ) -> None:
@@ -240,6 +285,36 @@ def test_merge_rejects_a_stale_revision(build: ModelFactory) -> None:
             build.session, loser.id, survivor.id, expected_revision=99,
             new_id=build.new_id, clock=build.clock,
         )  # fmt: skip
+
+
+def test_a_stale_revision_merge_still_flushes_its_reconciliation_before_raising(
+    build: ModelFactory,
+) -> None:
+    """Unlike the other rejection paths (`test_a_rejected_merge_leaves_no_partial_state`), a
+    stale-revision merge is caught last: the revision check on the loser's own row is the final
+    step (matching §114's ordering), so the representation move and the Evidence/Lineage rows are
+    already flushed to this session by the time `StaleRevisionError` is raised. This is documented,
+    known behaviour (see the implementation entry) — a caller must roll back its transaction on
+    any `IdentityManagerError`, which discards this flushed-but-uncommitted work; this test only
+    pins down that the flush happens, so a future refactor can't silently change the ordering."""
+    survivor = build.identity()
+    loser = build.identity()
+    space = build.representation_space()
+    representation = build.representation(
+        representation_space_id=space.id, identity_id=loser.id, state="ACTIVE", ann_key=1
+    )
+
+    with pytest.raises(StaleRevisionError):
+        merge_identities(
+            build.session, loser.id, survivor.id, expected_revision=99,
+            new_id=build.new_id, clock=build.clock,
+        )  # fmt: skip
+
+    build.session.expire_all()
+    moved = build.session.get(Representation, representation.id)
+    assert moved is not None
+    assert moved.identity_id == survivor.id  # already flushed, pending the caller's rollback
+    assert build.session.scalars(select(Evidence)).all() != []
 
 
 @pytest.mark.parametrize(
