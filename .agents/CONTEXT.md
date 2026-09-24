@@ -3,13 +3,12 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-24 (PR #9)_
+_Last updated: 2026-09-24 (PR #10)_
 
 ## Current state
 
-- **Milestone:** M0 (testing foundation) is complete and merged, except the domain-factory part
-  of TST-008. That part is blocked until domain models exist and is carried into M1. Next is M1
-  (domain integrity). Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
+- **Milestone:** M0 and M1 (domain integrity) are both complete and merged. Next is M2 (Alembic
+  migrations). Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
   ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
@@ -151,7 +150,11 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 6. ~~Merge, then split, at the domain level~~ Done (PR #8): `merge_identities`,
    `split_identity` (TST-015, 016), done ahead of step 7 per the user's explicit sequencing.
 7. ~~Query-only recognition guard~~ Done (PR #9): `resolve_recognition_candidates` (TST-019).
-8. Hypothesis property tests over operation sequences (TST-020).
+8. ~~Hypothesis property tests over operation sequences~~ Done (PR #10):
+   `tests/property/test_identity_lifecycle_invariants.py` (TST-020).
+
+**M1 (domain integrity) is complete: TST-011 through TST-020 all `PASSING`.** Next milestone is
+M2 (Alembic migrations), per `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`.
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
 plain string, listed as an open question. Test fixtures keep using `create_all` until M2.

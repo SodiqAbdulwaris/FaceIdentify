@@ -1,7 +1,7 @@
 # FaceIdentify — Testing Implementation Tracker
 
 **Version:** 1.0  
-**Status:** M0 complete (TST-008 factories, PR #5); M1 in progress  
+**Status:** M0 complete (TST-008 factories, PR #5); M1 complete (TST-011 through TST-020, PR #10)  
 **Related document:** `TESTING_STRATEGY.md`
 
 ## 1. Tracking conventions
@@ -94,8 +94,9 @@ Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, ru
 
 ### M1 status (2026-09-23)
 
-Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 237 passed, 0 skipped, 0
-warnings, `backend/` coverage 100%. Remote CI observed green on PR #4 through PR #8.
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 238 passed, 0 skipped, 0
+warnings, `backend/` coverage 100%. Remote CI observed green on PR #4 through PR #9. M1 is
+complete: TST-011 through TST-020 all `PASSING`.
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
@@ -108,7 +109,7 @@ warnings, `backend/` coverage 100%. Remote CI observed green on PR #4 through PR
 | TST-015 | `PASSING` | `backend/app/identities/use_cases.py`: `merge_identities`. Identity-level merge (§18): the losing identity keeps its row (`MERGED`, `merged_into_identity_id` set), never deleted; its ACTIVE representations move to the survivor with `ann_key` untouched; the Person link is reconciled (survivor's own link always wins, the loser's is carried over only if the survivor has none); one `Evidence(IDENTITY_MERGED)` and one `identity_lineage` `MERGED_INTO` edge are recorded. Self-merge, a non-ACTIVE survivor or loser, and a stale revision are all rejected; rejection leaves no partial state |
 | TST-016 | `PASSING` | `split_identity`: creates a new, directly-`ACTIVE` identity (§19.2) and moves the caller-selected representations to it, `ann_key` untouched; the source keeps everything else and stays `ACTIVE`. One `Evidence(IDENTITY_SPLIT)` and one `identity_lineage` `SPLIT_FROM` edge are recorded. An empty selection, an unknown/foreign/non-ACTIVE representation, and a non-ACTIVE or unknown source are all rejected; rejection creates no identity and moves nothing |
 | TST-019 | `PASSING` | `backend/app/identities/use_cases.py`: `resolve_recognition_candidates` (`API and Contracts.md` §12.2: "ANN candidate retrieval -> authoritative SQLite revalidation"). Read-only: a candidate is resolved through any merge chain to its current identity, dropped if missing or not ACTIVE, and de-duplicated; the function never creates or updates any row, proven for a mix of known/unknown/merged/forgotten/deleted/duplicated candidates in the same call |
-| TST-020 | `PLANNED` | Not started; remaining M1 PR (plan in `.agents/CONTEXT.md`) |
+| TST-020 | `PASSING` | `tests/property/test_identity_lifecycle_invariants.py`: a Hypothesis `RuleBasedStateMachine` generates sequences of create/activate/assign/assign-person/remove-person/rename/merge/split calls against a real SQLite database, checking after every step that each identifier's revision matches an independently predicted count of bumps, Evidence only grows, every ACTIVE representation stays ANN-eligible, and a query never writes anything |
 
 ---
 
