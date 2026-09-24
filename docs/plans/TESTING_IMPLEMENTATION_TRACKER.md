@@ -138,13 +138,16 @@ complete: TST-011 through TST-020 all `PASSING`.
 
 ### M2 status (2026-09-24)
 
-Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 249 passed, 0 skipped, 0
-warnings, `backend/` coverage 100%. Only the migration slice of M2 has been started.
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 272 passed, 0 skipped, 0
+warnings, `backend/` coverage 100%. Remote CI observed green on PR #11. Only part of M2 has been
+started.
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
 | TST-032 | `IN_PROGRESS` | `backend/alembic/` with revision `0001_initial_schema`; `tests/integration/test_migrations.py`: a fresh upgrade produces exactly the models' tables, indexes (including partial-index `WHERE` clauses), columns and named CHECK/FK/UNIQUE constraints; `alembic check` reports no drift; head is a single linear chain; upgrade is idempotent; downgrade removes every table and round-trips; a failed migration leaves an existing database untouched (no partial schema, data intact); offline `--sql` works. Every other persistence test also runs on the migrated schema. **Remaining:** "supported populated schemas migrate correctly" needs a second revision to migrate *from* `0001` |
-| TST-021 to TST-031 | `PLANNED` | Not started |
+| TST-021 | `PASSING` | Pragmas (`foreign_keys`, WAL, `synchronous`, `busy_timeout`, `temp_store`) and per-connection FK enforcement: `test_persistence_fixtures.py`; required constraints: `test_schema_contract.py`, `test_core_models.py`; WAL *behaviour*: `test_sqlite_wal_behaviour.py` (WAL persisted in the file itself, a reader is not blocked by an open write transaction, a second writer is refused while the lock is held, and a reader-turned-writer fails immediately once another writer has committed — see CONTEXT open question 20) |
+| TST-024 | `PASSING` | `tests/concurrency/test_optimistic_concurrency.py`: with separate sessions, a stale rename, activation and merge are each rejected and change nothing; with simultaneous threads (5 rounds each) exactly one rename lands (revision bumped once, never per writer), exactly one activation, and exactly one merge of a shared loser. Mutation-checked, and stable over 25 repeated runs. Only Person and Identity have revision-guarded use cases so far |
+| TST-022, 023, 025 to 031 | `PLANNED` | Not started |
 
 ---
 
