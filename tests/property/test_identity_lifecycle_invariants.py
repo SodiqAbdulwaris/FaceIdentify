@@ -9,14 +9,18 @@ assign/remove/rename a Person, merge, and split. A query (`resolve_recognition_c
 exercised as an invariant, run after every operation, rather than as a mutating rule — it must
 never be one.
 
-Each example gets its own real, file-backed SQLite database (production engine/pragmas), so this
-is an integration-style stateful test, not an in-memory model check.
+Each example gets its own copy of a real, file-backed SQLite database migrated to Alembic `head`
+(production engine/pragmas), so this is an integration-style stateful test, not an in-memory
+model check.
 """
 
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
+from typing import ClassVar
 
+import pytest
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import (
@@ -46,7 +50,7 @@ from backend.app.people.use_cases import (
     remove_identity_from_person,
     rename_person,
 )
-from backend.infrastructure.db.engine import Base, create_session_factory, create_sqlite_engine
+from backend.infrastructure.db.engine import create_session_factory, create_sqlite_engine
 from tests.factories.models import ModelFactory
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 
@@ -66,11 +70,15 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
     pending_representations: Bundle = Bundle("pending_representations")
     people: Bundle = Bundle("people")
 
+    # Set by the autouse fixture below: a database already migrated to Alembic `head`.
+    template_db: ClassVar[Path]
+
     def __init__(self) -> None:
         super().__init__()
         self._tmpdir = tempfile.TemporaryDirectory()
-        self.engine = create_sqlite_engine(Path(self._tmpdir.name) / "state.db")
-        Base.metadata.create_all(self.engine)
+        database = Path(self._tmpdir.name) / "state.db"
+        shutil.copyfile(self.template_db, database)
+        self.engine = create_sqlite_engine(database)
         self.session = create_session_factory(self.engine)()
         self.clock = FrozenClock()
         self.new_id = SeededUUIDs()
@@ -262,6 +270,11 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
             len(self.session.scalars(select(IndexOperation)).all()),
             len(self.session.scalars(select(IdentityPersonAssociation)).all()),
         )
+
+
+@pytest.fixture(autouse=True)
+def _use_the_migrated_template(migrated_template_db: Path) -> None:
+    IdentityLifecycleMachine.template_db = migrated_template_db
 
 
 TestIdentityLifecycle = IdentityLifecycleMachine.TestCase
