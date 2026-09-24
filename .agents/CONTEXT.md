@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-23_
+_Last updated: 2026-09-24_
 
 ## Current state
 
@@ -16,7 +16,8 @@ _Last updated: 2026-09-23_
 - **Backend:** the SQLite engine/session factory, models for all 33 `0001_initial_schema`
   tables (registry `backend/app/models.py`), the Identity Manager core use cases
   (`backend/app/identities/use_cases.py`: create/activate an identity, assign a representation
-  with Evidence and an index intent), and Person/association use cases
+  with Evidence and an index intent, merge one identity into another, split selected
+  representations into a new identity), and Person/association use cases
   (`backend/app/people/use_cases.py`: assign/reassign/remove an Identity's Person link, rename a
   Person). `backend/infrastructure/db/optimistic.py` holds the one shared optimistic-locked
   `UPDATE` helper both feature modules use. Tests build rows with the shared `build` factory and
@@ -120,6 +121,17 @@ Unresolved items need the user's decision. Do not settle them silently.
     alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
     claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
     priority.
+15. **Open: `IdentityState.SPLIT` is never assigned.** The enum (persistence §7) lists a `SPLIT`
+    state, but no spec text says which of a split's two resulting identities (if either) should
+    receive it. `split_identity` (PR #8) reads `identity-and-memory-model-v1.md` §19.2's
+    conceptual example — the source keeps some of its own evidence — as meaning neither identity
+    is retired by a split, so it leaves the source `ACTIVE` and creates the new identity directly
+    `ACTIVE`, using `SPLIT` nowhere. Decide whether `SPLIT` should mark the source, the new
+    identity, or is dead enum space.
+16. **Open: merge/split do not move `Occurrence` rows.** Only test factories create `Occurrence`
+    rows today (no production pathway does), so `merge_identities`/`split_identity` (PR #8)
+    reassign `Representation.identity_id` only. Decide, before a production path creates
+    `Occurrence` rows, whether merge/split must also move `Occurrence.identity_id`.
 
 ## Next steps (M1)
 
@@ -135,8 +147,9 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 5. ~~Corrections and rename via Person association~~ Done (PR #7): `assign_identity_to_person`
    (reassignment is the correction), `remove_identity_from_person`, `rename_person`
    (TST-013, 014).
-6. Query-only recognition guard (TST-019).
-7. Merge, then split, at the domain level (TST-015, 016).
+6. ~~Merge, then split, at the domain level~~ Done (PR #8): `merge_identities`,
+   `split_identity` (TST-015, 016), done ahead of step 7 per the user's explicit sequencing.
+7. Query-only recognition guard (TST-019).
 8. Hypothesis property tests over operation sequences (TST-020).
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
