@@ -541,3 +541,44 @@ def split_identity(
     )
     session.flush()
     return new_identity
+
+
+# --- query-only recognition --------------------------------------------------------------------
+
+
+def resolve_recognition_candidates(
+    session: Session, candidate_identity_ids: Sequence[uuid.UUID]
+) -> list[Identity]:
+    """Revalidate ANN-retrieved candidates against authoritative SQLite state (`API and
+    Contracts.md` §12.2: "ANN candidate retrieval -> authoritative SQLite revalidation"), for a
+    face *query* (`POST /api/v1/search/face`). A query is read-only by contract: it "creates no
+    Source, Observation, Identity, Evidence, persistent memory" — this function only ever reads
+    (`session.get`), never writes, so it cannot violate that regardless of what candidates it is
+    given (IMPLEMENTATION_ARCHITECTURE.md §32 rule 7: "never allow query-only recognition to
+    silently become ingest").
+
+    The derived ANN index can be stale relative to SQLite: a candidate identity may since have
+    been merged away, forgotten, or deleted. Each candidate is resolved to its current, ACTIVE
+    identity or dropped; input order is preserved and duplicate resolutions collapse to one.
+
+    `populate_existing=True` forces a fresh read on every fetch: "authoritative revalidation" is
+    the function's entire purpose, so it must not answer from a stale, already-cached copy of a
+    row this same session merged, forgot, or deleted moments earlier.
+    """
+    resolved: list[Identity] = []
+    seen: set[uuid.UUID] = set()
+    for candidate_id in candidate_identity_ids:
+        identity = session.get(Identity, candidate_id, populate_existing=True)
+        while identity is not None and identity.state == IdentityState.MERGED:
+            identity = (
+                session.get(Identity, identity.merged_into_identity_id, populate_existing=True)
+                if identity.merged_into_identity_id is not None
+                else None
+            )
+        if identity is None or identity.state != IdentityState.ACTIVE:
+            continue
+        if identity.id in seen:
+            continue
+        seen.add(identity.id)
+        resolved.append(identity)
+    return resolved
