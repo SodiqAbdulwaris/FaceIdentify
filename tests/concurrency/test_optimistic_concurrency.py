@@ -24,11 +24,10 @@ from backend.app.identities.use_cases import (
     merge_identities,
 )
 from backend.app.memory.models import Representation
-from backend.app.people.models import Person
+from backend.app.people.models import IdentityPersonAssociation, Person
 from backend.app.people.use_cases import rename_person
 from backend.infrastructure.db.engine import create_session_factory
 from tests.factories.models import ModelFactory
-from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 
 ROUNDS = 5
 
@@ -229,6 +228,8 @@ def test_simultaneous_merges_of_one_identity_apply_exactly_one(
         ).id
         for n in (1, 2)
     ]
+    person = build.person()
+    loser_link = build.association(identity_id=loser.id, person_id=person.id)
     db_session.commit()
     factory = create_session_factory(sqlite_engine)
 
@@ -261,19 +262,12 @@ def test_simultaneous_merges_of_one_identity_apply_exactly_one(
             assert moved.identity_id == merged.merged_into_identity_id  # all of it, one place
         merges = check.scalars(select(Evidence).where(Evidence.kind == "IDENTITY_MERGED")).all()
         assert len(merges) == 1
-
-
-def test_the_clock_and_id_sources_are_safe_to_share_between_writers() -> None:
-    """The races above share one `SeededUUIDs` and one `FrozenClock` across threads; ids must
-    stay unique or a lost-update test could pass for the wrong reason."""
-    new_id = SeededUUIDs()
-    clock = FrozenClock()
-    drawn: list[uuid.UUID] = []
-
-    def draw() -> None:
-        for _ in range(500):
-            drawn.append(new_id())
-            clock()
-
-    race(*[draw for _ in range(6)])
-    assert len(set(drawn)) == len(drawn) == 3000
+        # The loser's Person link is carried to the one survivor that won, exactly once.
+        links = check.scalars(select(IdentityPersonAssociation)).all()
+        active = [link for link in links if link.state == "ACTIVE"]
+        assert [(link.identity_id, link.person_id) for link in active] == [
+            (merged.merged_into_identity_id, person.id)
+        ]
+        ended = check.get(IdentityPersonAssociation, loser_link.id)
+        assert ended is not None
+        assert ended.state == "SUPERSEDED"

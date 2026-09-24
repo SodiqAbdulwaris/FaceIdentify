@@ -83,40 +83,39 @@ def test_a_reader_turned_writer_fails_at_once_if_another_writer_committed_in_bet
     sqlite_engine: Engine, build: ModelFactory
 ) -> None:
     """SQLite's BUSY_SNAPSHOT: a transaction that has already read cannot upgrade to a write once
-    another connection has committed, and waiting does not help — the busy handler is not even
-    invoked. Every use case that reads before it writes (merge, split, assignment) is exposed to
-    this, and a retry has to redo the whole transaction, not the failed statement."""
+    another connection has committed. Waiting does not help: it fails at once instead of waiting
+    out the busy timeout. Every use case that reads before it writes (merge, split, assignment) is
+    exposed to this, and a retry has to redo the whole transaction, not the failed statement."""
     factory = create_session_factory(sqlite_engine)
-    stale = factory()
-    stale.connection().exec_driver_sql("PRAGMA busy_timeout = 5000")  # generous: must NOT be waited
-    assert snapshot_count(stale) == 0  # takes the read snapshot
+    with factory() as stale:
+        stale.connection().exec_driver_sql("PRAGMA busy_timeout = 5000")  # generous: not waited
+        assert snapshot_count(stale) == 0  # takes the read snapshot
 
-    with factory() as other:
-        other.add(
+        with factory() as other:
+            other.add(
+                ProcessingConfigurationSnapshot(
+                    id=build.new_id(),
+                    schema_version=1,
+                    canonical_json={},
+                    fingerprint_sha256=b"" * 32,
+                    created_at=build.clock(),
+                )
+            )
+            other.commit()
+
+        stale.add(
             ProcessingConfigurationSnapshot(
                 id=build.new_id(),
                 schema_version=1,
                 canonical_json={},
-                fingerprint_sha256=b"\x01" * 32,
+                fingerprint_sha256=b"" * 32,
                 created_at=build.clock(),
             )
         )
-        other.commit()
+        started = time.monotonic()
+        with pytest.raises(OperationalError, match="database is locked"):
+            stale.flush()
+        assert time.monotonic() - started < 2  # far below the 5 s timeout: it did not wait
+        stale.rollback()
 
-    stale.add(
-        ProcessingConfigurationSnapshot(
-            id=build.new_id(),
-            schema_version=1,
-            canonical_json={},
-            fingerprint_sha256=b"\x02" * 32,
-            created_at=build.clock(),
-        )
-    )
-    started = time.monotonic()
-    with pytest.raises(OperationalError, match="database is locked"):
-        stale.flush()
-    assert time.monotonic() - started < 2  # far below the 5 s timeout: it did not wait
-    stale.rollback()
-
-    assert snapshot_count(stale) == 1  # a fresh transaction sees the other writer's row
-    stale.close()
+        assert snapshot_count(stale) == 1  # a fresh transaction sees the other writer's row
