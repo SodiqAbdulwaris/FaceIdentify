@@ -15,9 +15,8 @@ Functions flush but do not commit: the caller owns the transaction boundary
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, cast
 
-from sqlalchemy import CursorResult, exists, insert, select, update
+from sqlalchemy import exists, insert, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import (
@@ -34,6 +33,7 @@ from backend.app.memory.models import (
     Representation,
     RepresentationState,
 )
+from backend.infrastructure.db.optimistic import optimistic_locked_update
 
 
 class IdentityManagerError(Exception):
@@ -80,39 +80,19 @@ def activate_identity(
     silently overwriting a concurrent change.
     """
     now = clock()
-    # session.execute() on a Core UPDATE always returns a CursorResult; the ORM's general
-    # overload just can't express that statically.
-    result = cast(
-        "CursorResult[Any]",
-        session.execute(
-            update(Identity)
-            .where(
-                Identity.id == identity_id,
-                Identity.revision == expected_revision,
-                Identity.state == IdentityState.PENDING,
-            )
-            .values(
-                state=IdentityState.ACTIVE,
-                activated_at=now,
-                updated_at=now,
-                revision=Identity.revision + 1,
-            ),
-            # The default "auto" strategy would otherwise try to sync this statement's effect
-            # into any already-loaded Identity by evaluating the WHERE/SET clauses against that
-            # Python object's own (possibly stale) attributes. `revision=Identity.revision + 1`
-            # is an expression, not a literal, which SQLAlchemy's in-Python evaluator cannot
-            # simulate — verified it safely declines to touch the cached object rather than
-            # guessing. Disabling sync here removes the dependency on that fallback behaviour;
-            # populate_existing (both branches below) is what actually keeps the caller's
-            # object correct.
-            execution_options={"synchronize_session": False},
-        ),
+    rowcount = optimistic_locked_update(
+        session,
+        Identity,
+        identity_id,
+        expected_revision=expected_revision,
+        values={"state": IdentityState.ACTIVE, "activated_at": now, "updated_at": now},
+        extra_where=(Identity.state == IdentityState.PENDING,),
     )
-    if result.rowcount == 0:
+    if rowcount == 0:
         _raise_activation_conflict(session, identity_id, expected_revision)
     session.flush()
-    # populate_existing forces a fresh read; see the execution_options comment above for why
-    # this session's cached copy cannot be trusted otherwise.
+    # populate_existing forces a fresh read; optimistic_locked_update disables session-sync
+    # (see its docstring), so this session's cached copy cannot be trusted otherwise.
     identity = session.get(Identity, identity_id, populate_existing=True)
     assert identity is not None  # the UPDATE above just matched this row
     return identity
@@ -123,10 +103,10 @@ def _raise_activation_conflict(
 ) -> None:
     """Distinguish a stale revision from an identity that was never PENDING.
 
-    `populate_existing=True` for the same reason as the successful branch above: the caller
-    almost always already holds this row (it read `expected_revision` from it), and without
-    forcing a fresh read this would compare against the caller's own stale in-memory copy
-    rather than what is actually in the database right now.
+    `populate_existing=True`, for the same reason as `activate_identity`'s own re-fetch: the
+    caller almost always already holds this row (it read `expected_revision` from it), and
+    without forcing a fresh read this would compare against the caller's own stale in-memory
+    copy rather than what is actually in the database right now.
     """
     identity = session.get(Identity, identity_id, populate_existing=True)
     if identity is None:
