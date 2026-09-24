@@ -8,9 +8,14 @@ The library database's path comes from the FACEIDENTIFY_DATABASE_PATH environmen
 
     $env:FACEIDENTIFY_DATABASE_PATH = "C:\path\to\library.db"
     uv run alembic upgrade head                 # create/upgrade the schema
-    uv run alembic upgrade head --sql           # print the SQL instead (no database needed)
-    uv run alembic downgrade base               # drop every table (development only)
+    uv run alembic upgrade head --sql           # print the SQL to review (it has no BEGIN/COMMIT:
+                                                # do not pipe it into a database)
+    uv run alembic downgrade base               # drop every table: DEVELOPMENT ONLY
     uv run alembic check                        # fail if the models drifted from the migrations
+
+`downgrade base` destroys the library. Foreign keys sometimes stop it on a database that has rows
+(atomically), but whether they do is data-dependent, so never rely on that. Production only
+upgrades.
 
 Changing a model means adding a reviewed revision:
 

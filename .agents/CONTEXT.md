@@ -125,14 +125,6 @@ Unresolved items need the user's decision. Do not settle them silently.
     alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
     claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
     priority.
-17. **Open: where the library database path comes from.** No Storage Manager or app-data path
-    resolver exists yet, so `backend/alembic/env.py` reads `FACEIDENTIFY_DATABASE_PATH` and
-    refuses to run without it, rather than inventing a default location no spec sanctions. Replace
-    it (or keep it as an override) when the Storage Manager (TST-025) defines the library root.
-18. **Open: batch-mode migrations are unproven.** `env.py` enables `render_as_batch` from the
-    first revision because SQLite needs table recreation for most constraint changes, but revision
-    `0001` only creates tables, so batch mode is exercised by no test yet. The second revision must add a populated-database upgrade test (and check that
-    recreating a table with `PRAGMA foreign_keys = ON` behaves).
 15. **Open: `IdentityState.SPLIT` is never assigned.** The enum (persistence §7) lists a `SPLIT`
     state, but no spec text says which of a split's two resulting identities (if either) should
     receive it. `split_identity` (PR #8) reads `identity-and-memory-model-v1.md` §19.2's
@@ -144,6 +136,22 @@ Unresolved items need the user's decision. Do not settle them silently.
     rows today (no production pathway does), so `merge_identities`/`split_identity` (PR #8)
     reassign `Representation.identity_id` only. Decide, before a production path creates
     `Occurrence` rows, whether merge/split must also move `Occurrence.identity_id`.
+17. **Open: where the library database path comes from.** No Storage Manager or app-data path
+    resolver exists yet, so `backend/alembic/env.py` reads `FACEIDENTIFY_DATABASE_PATH` and
+    refuses to run without it, rather than inventing a default location no spec sanctions. Replace
+    it (or keep it as an override) when the Storage Manager (TST-025) defines the library root.
+18. **Open: batch-mode migrations and multi-revision failure atomicity are unproven.** `env.py`
+    enables `render_as_batch` from the first revision because SQLite needs table recreation for
+    most constraint changes, but revision `0001` only creates tables, so batch mode is exercised
+    by no test yet. The second revision must add a populated-database upgrade test (and check
+    that recreating a table with `PRAGMA foreign_keys = ON` behaves), a test that a failing
+    *second* revision leaves `0001` applied as intended, and one for a Python error raised
+    inside `upgrade()`; today only one failure shape is tested.
+19. **Open: what `alembic downgrade` should do to a populated library.** It destroys data, and
+    whether foreign keys stop it is data-dependent (a richly populated database fails
+    atomically; a simple one is dropped without complaint). Production never downgrades, and
+    the README marks it development-only. Decide whether to leave it, or refuse to downgrade a
+    non-empty database unless explicitly forced.
 
 ## M1 delivery (complete)
 
