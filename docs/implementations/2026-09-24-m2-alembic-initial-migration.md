@@ -18,7 +18,8 @@
 - `backend/alembic/versions/0001_initial_schema.py`: the baseline revision, generated with
   `alembic revision --autogenerate --rev-id 0001` against an empty database and then reviewed: all
   33 tables, every index (including the partial ones) and every CHECK/FK/UNIQUE constraint, and
-  nothing from §27's exclusion list. Reversible (`downgrade` drops everything).
+  nothing from §27's exclusion list. `downgrade` drops everything (see Decisions: it is
+  development-only and data-dependent on a populated database).
 - `backend/alembic/env.py`: target metadata is the full model registry (`backend.app.models`); the
   online engine is the production `create_sqlite_engine` (same pragmas and transaction hooks as the
   application); `render_as_batch=True`; the engine is disposed
@@ -67,9 +68,22 @@ upgrade).
   with no version stamp — the opposite of "existing databases are never destroyed because migration
   failed". Checked empirically: a deliberately failing migration rolls back completely, because
   `create_sqlite_engine`'s explicit-`BEGIN` hooks make DDL transactional. Alembic's
-  `transactional_ddl=True` was tried and found to add nothing observable (see Verification), so it
-  is **not** set: a flag claiming a safeguard it doesn't provide would mislead. The failure-safety
-  test pins the behavior instead, and fails if the hooks regress.
+  `transactional_ddl=True` was tried and found to add nothing observable for a failing revision
+  (see Verification), so it is **not** set: a flag claiming a safeguard it doesn't provide would
+  mislead. The failure-safety test pins the behavior instead, and fails if the hooks regress. It
+  covers one failure shape (a `CREATE TABLE` collision reached late); a failing *second* revision
+  after `0001` applied, or a Python error inside `upgrade()`, are untested until a second revision
+  exists (CONTEXT open question 18).
+- **`downgrade base` is development-only, and on a populated database its outcome is
+  data-dependent.** Found by the review and confirmed by hand: with a richly populated database
+  (evidence, lineage, index operations, associations) it fails with `FOREIGN KEY constraint failed`
+  — atomically, everything intact — but with a simpler population (an identity, its evidence and a
+  representation) it *succeeds* and drops every table with the data in it. So it must not be
+  described as "refusing to destroy data", and no test pins either outcome (a test would lock in an
+  incidental drop-order accident). Production never downgrades; the empty-database round trip is
+  what is tested. `backend/alembic/README` says so. Recorded as CONTEXT open question 19.
+- **Offline `--sql` output is for review, not execution:** it has no `BEGIN`/`COMMIT`, so piping it
+  into a database is not atomic (README says so).
 - **`render_as_batch=True` from the first revision.** SQLite can only change most constraints by
   recreating the table (§27), so every future ALTER-shaped revision needs batch mode. It has no
   effect on `0001` (create-only), so **it is exercised by no test yet** (CONTEXT open question 18).
@@ -106,12 +120,25 @@ upgrade).
   - `alembic check` alone does **not** notice a missing CHECK constraint (a known Alembic
     limitation); that is why the equivalence test compares DDL rather than relying on it.
 
-## Independent review
+## Independent review (subagent, disposable worktree): request-changes (minor), all addressed
 
-Not yet run at the time of writing this entry; see the PR for the outcome.
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | The downgrade is only proven on an empty database; the review predicted a populated one would fail on the circular `sources`/`processing_runs` FKs, so "reversible" overclaims | Verified by hand, and the truth was more awkward than predicted: the circular case itself is fine, a richly populated database fails atomically on an FK, but a simpler populated one *succeeds* and silently drops everything. So the outcome is data-dependent; **no test added** (it would pin an accident), "reversible" reworded, README warns, CONTEXT open question 19 records the decision for the user |
+| 2 | The failed-migration test covers one failure shape; a multi-revision chain, a Python error in `upgrade()` and a failure stamping the version are untested; "adds nothing" was too strong | Wording softened to "nothing observable for a failing revision"; the untested shapes are stated in Decisions and CONTEXT open question 18 (they need a second revision to exist) |
+| 3 | Offline `--sql` output has no `BEGIN`/`COMMIT`, so piping it into `sqlite3` is not atomic | Confirmed (zero `BEGIN`/`COMMIT` lines); README now says the output is for review only |
+| 4 | Nothing checks the once-per-session template is complete before tests copy just the `.db` file | Added an assertion in `migrated_template_db` that no `-wal` file is left (a leaked connection would otherwise silently truncate every copy); today none is left |
+| 5 | Equivalence-test blind spots | Two of the reviewer's points were mistaken and one is intentional: constraints are compared as *sorted lists*, not sets (a duplicate would show; the docstring said "set" and was corrected), and foreign-key/delete-rule and partial-index verification after upgrade are provided by the existing `test_schema_contract.py`, which now runs on the migrated schema. `"`-quoted identifiers are not handled by the comma-splitter; nothing in the schema uses them |
+| 6 | Docs overclaim ("reversible") | Fixed as above |
+
+The reviewer also confirmed, independently: the upgrade path and the equivalence comparison had no
+defects; `MonkeyPatch.context()` restores `FACEIDENTIFY_DATABASE_PATH`; the `configure_logger`
+gate works because `env.py` re-executes on every `command.*` call; Windows-style paths are fine in
+the SQLite URL; and the dummy `sqlite:///offline` URL and `literal_binds` are harmless here.
 
 ## Open issues / follow-ups
 
-- CONTEXT open questions 17 (where the database path really comes from) and 18 (batch-mode
-  migrations unproven until revision 0002).
+- CONTEXT open questions 17 (where the database path really comes from), 18 (batch-mode
+  migrations and multi-revision failure atomicity unproven until revision 0002) and 19 (what
+  `downgrade` should do to a populated library).
 - The rest of M2: TST-021 to TST-031.
