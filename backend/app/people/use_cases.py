@@ -54,6 +54,11 @@ def assign_identity_to_person(
     is how a wrong link gets corrected: the old association becomes `SUPERSEDED`, never deleted,
     and its own `Evidence` row is untouched — only a new `Evidence` row is added, explaining the
     change.
+
+    Deliberately does not take an `expected_revision` for the identity, so it checks state
+    (`session.get` + a plain read) rather than §9's literal "lock/reload" wording. This matches
+    `assign_representation_to_identity`'s already-established precedent (PR #6); the unique
+    active-association index still rejects a genuine race.
     """
     identity = session.get(Identity, identity_id)
     if identity is None:
@@ -80,6 +85,9 @@ def assign_identity_to_person(
     now = clock()
     previous_person_id = current.person_id if current is not None else None
     if current is not None:
+        # A plain increment, not optimistic_locked_update: `current` was fetched by this same
+        # transaction moments ago, so there is nothing to race against under SQLite's
+        # single-writer model. A future multi-writer backend would need this guarded too.
         current.state = AssociationState.SUPERSEDED
         current.ended_at = now
         current.revision += 1
@@ -141,6 +149,8 @@ def remove_identity_from_person(
     session.add(evidence)
     session.flush()
 
+    # A plain increment; see the matching comment in assign_identity_to_person for why an
+    # optimistic-locked UPDATE isn't needed here under SQLite's single-writer model.
     current.state = AssociationState.REMOVED
     current.ended_at = now
     current.revision += 1
