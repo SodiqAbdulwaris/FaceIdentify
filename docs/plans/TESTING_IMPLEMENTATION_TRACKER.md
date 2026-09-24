@@ -94,8 +94,8 @@ Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, ru
 
 ### M1 status (2026-09-23)
 
-Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 223 passed, 0 skipped, 0
-warnings, `backend/` coverage 100%. Remote CI observed green on PR #4, PR #5, PR #6 and PR #7.
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 236 passed, 0 skipped, 0
+warnings, `backend/` coverage 100%. Remote CI observed green on PR #4 through PR #8.
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
@@ -107,7 +107,8 @@ warnings, `backend/` coverage 100%. Remote CI observed green on PR #4, PR #5, PR
 | TST-014 | `PASSING` | `rename_person`: changes only `display_name`/`normalized_name`; the Person's own id, and any linked Identity's id/state/Evidence, are unaffected. Optimistic-locked (stale `revision` rejected), mutation-checked |
 | TST-015 | `PASSING` | `backend/app/identities/use_cases.py`: `merge_identities`. Identity-level merge (§18): the losing identity keeps its row (`MERGED`, `merged_into_identity_id` set), never deleted; its ACTIVE representations move to the survivor with `ann_key` untouched; the Person link is reconciled (survivor's own link always wins, the loser's is carried over only if the survivor has none); one `Evidence(IDENTITY_MERGED)` and one `identity_lineage` `MERGED_INTO` edge are recorded. Self-merge, a non-ACTIVE survivor or loser, and a stale revision are all rejected; rejection leaves no partial state |
 | TST-016 | `PASSING` | `split_identity`: creates a new, directly-`ACTIVE` identity (§19.2) and moves the caller-selected representations to it, `ann_key` untouched; the source keeps everything else and stays `ACTIVE`. One `Evidence(IDENTITY_SPLIT)` and one `identity_lineage` `SPLIT_FROM` edge are recorded. An empty selection, an unknown/foreign/non-ACTIVE representation, and a non-ACTIVE or unknown source are all rejected; rejection creates no identity and moves nothing |
-| TST-019, 020 | `PLANNED` | Not started; remaining M1 PRs (plan in `.agents/CONTEXT.md`) |
+| TST-019 | `PASSING` | `backend/app/identities/use_cases.py`: `resolve_recognition_candidates` (`API and Contracts.md` §12.2: "ANN candidate retrieval -> authoritative SQLite revalidation"). Read-only: a candidate is resolved through any merge chain to its current identity, dropped if missing or not ACTIVE, and de-duplicated; the function never creates or updates any row, proven for a mix of known/unknown/merged/forgotten/deleted/duplicated candidates in the same call |
+| TST-020 | `PLANNED` | Not started; remaining M1 PR (plan in `.agents/CONTEXT.md`) |
 
 ---
 

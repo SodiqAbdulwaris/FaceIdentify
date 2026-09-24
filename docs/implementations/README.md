@@ -49,3 +49,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-09-23 | [M1 PR 3: Identity Manager core](2026-09-23-m1-identity-manager-core.md) | done |
 | 2026-09-24 | [M1 PR 4: corrections and rename via Person association](2026-09-24-m1-person-corrections-rename.md) | done |
 | 2026-09-24 | [M1 PR 5: merge and split](2026-09-24-m1-identity-merge-split.md) | done |
+| 2026-09-24 | [M1 PR 6: query-only recognition guard](2026-09-24-m1-query-only-recognition-guard.md) | done |

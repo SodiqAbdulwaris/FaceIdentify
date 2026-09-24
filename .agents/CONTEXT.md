@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-24_
+_Last updated: 2026-09-24 (PR #9)_
 
 ## Current state
 
@@ -17,7 +17,8 @@ _Last updated: 2026-09-24_
   tables (registry `backend/app/models.py`), the Identity Manager core use cases
   (`backend/app/identities/use_cases.py`: create/activate an identity, assign a representation
   with Evidence and an index intent, merge one identity into another, split selected
-  representations into a new identity), and Person/association use cases
+  representations into a new identity, resolve stale ANN candidates for a query-only face
+  search), and Person/association use cases
   (`backend/app/people/use_cases.py`: assign/reassign/remove an Identity's Person link, rename a
   Person). `backend/infrastructure/db/optimistic.py` holds the one shared optimistic-locked
   `UPDATE` helper both feature modules use. Tests build rows with the shared `build` factory and
@@ -149,7 +150,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    (TST-013, 014).
 6. ~~Merge, then split, at the domain level~~ Done (PR #8): `merge_identities`,
    `split_identity` (TST-015, 016), done ahead of step 7 per the user's explicit sequencing.
-7. Query-only recognition guard (TST-019).
+7. ~~Query-only recognition guard~~ Done (PR #9): `resolve_recognition_candidates` (TST-019).
 8. Hypothesis property tests over operation sequences (TST-020).
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
