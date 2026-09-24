@@ -4,18 +4,29 @@ Everything lives under pytest's per-test `tmp_path`; nothing here can resolve to
 library or %LOCALAPPDATA% directory (see `_require_inside`).
 """
 
+import shutil
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 from usearch.index import Index
 
-from backend.app.models import Base
 from backend.infrastructure.db.engine import create_session_factory, create_sqlite_engine
+
+ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
+
+
+def alembic_config() -> Config:
+    """The project's real Alembic config, safe to run inside a host process (no logging reset)."""
+    config = Config(str(ALEMBIC_INI))
+    config.attributes["configure_logger"] = False
+    return config
 
 
 @dataclass(frozen=True)
@@ -61,13 +72,29 @@ def app_dirs(tmp_path: Path) -> AppDirs:
     return dirs
 
 
+@pytest.fixture(scope="session")
+def migrated_template_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A database migrated to Alembic `head` once per session; each test copies it.
+
+    Every persistence test therefore runs against the real migration's schema, not
+    `Base.metadata.create_all()`'s (PERSISTENCE_IMPLEMENTATION.md §27: "Fresh databases also run
+    Alembic"), without paying for a migration per test.
+    """
+    path = tmp_path_factory.mktemp("migrated-template") / "library.db"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("FACEIDENTIFY_DATABASE_PATH", str(path))
+        command.upgrade(alembic_config(), "head")
+    return path
+
+
 @pytest.fixture
-def sqlite_engine(app_dirs: AppDirs, tmp_path: Path) -> Iterator[Engine]:
-    """Real file-backed SQLite with production pragmas and the full model registry."""
+def sqlite_engine(
+    app_dirs: AppDirs, tmp_path: Path, migrated_template_db: Path
+) -> Iterator[Engine]:
+    """Real file-backed SQLite with production pragmas and the migrated schema."""
     db_path = _require_inside(app_dirs.database_path, tmp_path)
+    shutil.copyfile(migrated_template_db, db_path)
     engine = create_sqlite_engine(db_path)
-    # ponytail: create_all until Alembic 0001_initial_schema exists (M2); then run migrations here.
-    Base.metadata.create_all(engine)
     yield engine
     engine.dispose()
     # Deleting fails on Windows if any connection leaked, which surfaces the leak as a test error.

@@ -113,7 +113,14 @@ def test_spec_defined_value_sets_reject_unknown_literals(
     table = {"artifact": "artifacts", "source": "sources", "run": "processing_runs",
              "job": "jobs", "representation_space": "representation_spaces"}[row]  # fmt: skip
     make = getattr(build, row)
-    rejected(build.session, lambda: make(**{column: "NOT_A_VALUE"}), check(f"ck_{table}_{column}"))
+    expected = check(f"ck_{table}_{column}")
+    if (row, column) == ("artifact", "storage_mode"):
+        # ck_artifacts_location also depends on storage_mode, so an unknown mode violates both,
+        # and SQLite reports whichever CHECK is listed first in the table DDL (not a meaningful
+        # order: the migration and create_all list them differently). That each constraint exists
+        # by name is proven exactly by test_migrations.py's schema-equivalence test.
+        expected = f"{expected}|{check('ck_artifacts_location')}"
+    rejected(build.session, lambda: make(**{column: "NOT_A_VALUE"}), expected)
 
 
 def test_segment_and_checkpoint_value_sets(build: ModelFactory) -> None:

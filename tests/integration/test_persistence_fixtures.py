@@ -64,8 +64,9 @@ def test_session_commits_are_durable_across_connections(
 def test_each_test_gets_a_fresh_database(run: str, sqlite_engine: Engine, tmp_path: Path) -> None:
     with sqlite_engine.begin() as conn:
         tables = conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")
-        # Exactly the schema, and nothing (e.g. `parent`) left behind by the other parametrised run.
-        assert {name for (name,) in tables} == set(Base.metadata.tables)
+        # Exactly the migrated schema (the models' tables plus Alembic's own version table), and
+        # nothing (e.g. `parent`) left behind by the other parametrised run.
+        assert {name for (name,) in tables} == {*Base.metadata.tables, "alembic_version"}
         conn.exec_driver_sql(PARENT_CHILD_DDL[0])
     assert sqlite_engine.url.database is not None
     database = Path(sqlite_engine.url.database)
