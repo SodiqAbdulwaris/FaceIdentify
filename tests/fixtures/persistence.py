@@ -84,6 +84,9 @@ def migrated_template_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("FACEIDENTIFY_DATABASE_PATH", str(path))
         command.upgrade(alembic_config(), "head")
+    # Tests copy only the main file. That is complete only if nothing still holds the template
+    # open, so a leaked connection (a leftover WAL) must fail loudly rather than truncate copies.
+    assert not path.with_name(path.name + "-wal").exists()
     return path
 
 
