@@ -1,0 +1,22 @@
+FaceIdentify schema migrations (PERSISTENCE_IMPLEMENTATION.md §27).
+
+Alembic is the only way the production schema is created or changed: never call
+`Base.metadata.create_all()` outside a test that is comparing against it.
+
+The library database's path comes from the FACEIDENTIFY_DATABASE_PATH environment variable
+(no Storage Manager exists yet to resolve it). Run from the repository root:
+
+    $env:FACEIDENTIFY_DATABASE_PATH = "C:\path\to\library.db"
+    uv run alembic upgrade head                 # create/upgrade the schema
+    uv run alembic upgrade head --sql           # print the SQL instead (no database needed)
+    uv run alembic downgrade base               # drop every table (development only)
+    uv run alembic check                        # fail if the models drifted from the migrations
+
+Changing a model means adding a reviewed revision:
+
+    uv run alembic revision --autogenerate --rev-id 0002 -m "short description"
+
+Then read the generated file: autogenerate does not detect CHECK-constraint changes, and it does
+not know about data. SQLite can only change most constraints by recreating the table, so use
+`op.batch_alter_table` (batch mode is already on in env.py). tests/integration/test_migrations.py
+fails if the models and the migrations disagree.
