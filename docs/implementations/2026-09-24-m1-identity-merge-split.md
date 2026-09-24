@@ -23,7 +23,7 @@
     One `Evidence(IDENTITY_SPLIT)` and one `IdentityLineage(SPLIT_FROM)` record the split.
   - `_active_association` (private duplicate of `people/use_cases.py`'s helper, to avoid a
     circular import) and `_reconcile_person_on_merge`.
-- `tests/integration/test_identity_merge_split.py`: 34 tests.
+- `tests/integration/test_identity_merge_split.py`: 36 tests.
 
 ## Why
 
@@ -66,7 +66,7 @@ input rather than computing one.
 
 ## Verification
 
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 221 passed (34 new,
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 223 passed (36 new,
   no regressions in the prior 187); `backend/` coverage 100%; strict mypy and ruff clean.
 - Mutation checks (each reverted immediately afterwards, confirmed byte-identical to the original
   via `diff`), all caught by the test suite:
@@ -88,10 +88,18 @@ input rather than computing one.
   - dropping the representation-`ACTIVE` guard → 1 test fails;
   - creating the new split identity as `PENDING` instead of `ACTIVE` → 1 test fails.
 
-## Independent review
+## Independent review (subagent, disposable worktree): approve, 2 minor findings
 
-Not yet run at the time of writing this entry; see the PR for the review outcome and any
-follow-up this table doesn't yet reflect.
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | A stale-revision merge is caught last (the loser's own revision check is the final step, matching §114's ordering), so Person reconciliation, the representation move, and the Evidence/Lineage inserts are already flushed to the session by the time `StaleRevisionError` is raised — but this ordering had no test coverage | Added `test_a_stale_revision_merge_still_flushes_its_reconciliation_before_raising`, documenting and pinning down the known ordering (the caller's rollback discards the flushed-but-uncommitted work) rather than treating it as a bug to fix |
+| 2 | No test covered `merge_identities` when both the losing and surviving identity already point at the *same* Person (traced by the reviewer to be handled correctly — the survivor's own active-association check short-circuits regardless of which person it's linked to — but uncovered) | Added `test_merge_when_both_identities_already_point_at_the_same_person`, asserting exactly one ACTIVE association survives and no duplicate carry-over `Evidence` is created |
+
+The reviewer also confirmed: the `moved_representation_ids` select-then-bulk-update pair cannot
+observe a different row set between the two statements (SQLite single-writer, no yield point
+between them), and the "create required IndexOperations" step from §114/§115 is a disclosed,
+justified deviation (ownership changes without `ann_key` changing, so nothing is ANN-eligible
+differently), not an oversight.
 
 ## Open issues / follow-ups
 
