@@ -3,13 +3,14 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-24 (PR #11)_
+_Last updated: 2026-09-24 (PR #12)_
 
 ## Current state
 
 - **Milestone:** M0 and M1 (domain integrity) are complete and merged. M2 (persistence) has
-  started: Alembic and the initial migration are done (TST-032, in progress); TST-021 to TST-031
-  are next. Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
+  started: Alembic and the initial migration (TST-032, in progress), SQLite WAL behaviour
+  (TST-021) and optimistic concurrency (TST-024) are done; TST-022, 023 and 025 to 031 are next.
+  Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
   ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
@@ -152,6 +153,19 @@ Unresolved items need the user's decision. Do not settle them silently.
     atomically; a simple one is dropped without complaint). Production never downgrades, and
     the README marks it development-only. Decide whether to leave it, or refuse to downgrade a
     non-empty database unless explicitly forced.
+20. **Open: `SQLITE_BUSY` handling does not exist yet.** Persistence §25 requires the application
+    to "retry a small bounded number of times for known transient write conflicts, and return a
+    diagnostic/retryable error rather than spin forever". Nothing does. What
+    `test_sqlite_wal_behaviour.py` and `test_optimistic_concurrency.py` show: a second writer waits
+    up to `busy_timeout` and then fails with `database is locked`; and a transaction that has
+    **read before writing** (merge, split, assignment all do) fails *immediately*, ignoring the
+    timeout, if another writer committed in between (`BUSY_SNAPSHOT`), which no retry of the
+    single statement can fix. The engine begins deferred transactions (`BEGIN`), so the loser of a
+    simultaneous merge gets a raw `OperationalError`, not a domain error. **Recommendation:** write
+    use-case transactions start with `BEGIN IMMEDIATE` (writers queue for `busy_timeout` instead of
+    failing at once), plus a bounded whole-transaction retry in the future unit-of-work, mapping
+    a final failure to a retryable API error. Decide when the unit-of-work / API layer is designed;
+    until then callers of use cases must treat `OperationalError` as retryable.
 
 ## M1 delivery (complete)
 
@@ -180,10 +194,13 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 1. ~~Alembic and `0001_initial_schema`~~ Done (PR #11): `backend/alembic/`, the `sqlite_engine`
    fixture copies a database migrated to `head` (no more `create_all` in fixtures), migration tests
    (TST-032, `IN_PROGRESS`: the populated-schema criterion needs a second revision).
-2. The rest of M2 in `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`: TST-021 to TST-031 (SQLite
-   configuration, repository contract, transaction rollback, optimistic concurrency, Storage
-   Manager, artifact finalization, USearch integration, IndexOperation replay, cross-storage
-   failure, startup recovery, deletion).
+2. ~~SQLite WAL behaviour and optimistic concurrency~~ Done (PR #12): TST-021
+   (`tests/integration/test_sqlite_wal_behaviour.py`) and TST-024
+   (`tests/concurrency/test_optimistic_concurrency.py`).
+3. The rest of M2 in `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`: TST-022 (repository
+   contract), TST-023 (use-case transaction rollback: next), TST-025 to TST-031 (Storage Manager,
+   artifact finalization, USearch integration, IndexOperation replay, cross-storage failure,
+   startup recovery, deletion).
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
 plain string, listed as an open question. Every schema change is now a reviewed Alembic revision
