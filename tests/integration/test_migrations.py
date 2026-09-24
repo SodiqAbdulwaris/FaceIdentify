@@ -2,10 +2,10 @@
 
 Revision `0001_initial_schema` is the only revision so far, so there is no earlier populated
 schema to migrate *from*: these tests pin what a fresh database gets (it must be exactly what the
-models describe), that the revision is reversible, and that a failed migration never damages an
-existing database ("Existing databases are never automatically deleted because migration
-failed", Roadmap-Plan §37). Every other persistence test also runs on the migrated schema, via the
-`sqlite_engine` fixture.
+models describe), that an empty database round-trips through downgrade, and that a failed
+migration never damages an existing database ("Existing databases are never automatically
+deleted because migration failed", Roadmap-Plan §37). Every other persistence test also runs on
+the migrated schema, via the `sqlite_engine` fixture.
 """
 
 import io
@@ -117,9 +117,10 @@ def test_migrated_indexes_match_create_all_exactly(
 
 
 def test_migrated_tables_match_create_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Same columns in the same order, and the same set of named constraints (CHECK, FOREIGN KEY
-    with its ON DELETE rule, UNIQUE, PRIMARY KEY). The constraints are compared as a set because
-    Alembic and create_all list them in different orders inside the same CREATE TABLE."""
+    """Same columns in the same order, and the same named constraints (CHECK, FOREIGN KEY with
+    its ON DELETE rule, UNIQUE, PRIMARY KEY). The constraints are compared as sorted lists (so
+    a duplicate would still show) because Alembic and create_all list them in different
+    orders inside the same CREATE TABLE."""
     migrate(monkeypatch, tmp_path / "migrated.db")
     migrated = schema_objects(tmp_path / "migrated.db")
     created = schema_objects(create_all_database(tmp_path / "created.db"))
