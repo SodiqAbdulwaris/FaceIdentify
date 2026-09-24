@@ -61,7 +61,7 @@ Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, ru
 | TST-002 | `COMPLETE` | pytest-asyncio `auto` mode; async + HTTPX tests in `tests/unit/test_test_infrastructure.py` |
 | TST-003 | `COMPLETE` | pytest-cov with branch coverage; term/XML/HTML reports generated. No threshold (per strategy §19) |
 | TST-004 | `COMPLETE` | 11 strict markers; directory-based auto-marking (`tests/contracts/` → `contract`); expensive suites excluded by default; `-m` selection verified |
-| TST-005 | `COMPLETE` | `sqlite_engine`/`db_session` use the production engine factory (Persistence §24/§25); pragmas, FK enforcement and per-test isolation tested; leak detection verified by mutation. Schema initialisation is `Base.metadata.create_all` until Alembic `0001_initial_schema` exists (M2) |
+| TST-005 | `COMPLETE` | `sqlite_engine`/`db_session` use the production engine factory (Persistence §24/§25); pragmas, FK enforcement and per-test isolation tested; leak detection verified by mutation. Schema initialisation was `Base.metadata.create_all` until M2; it is now a per-test copy of a database migrated to Alembic `head` (`migrated_template_db`) |
 | TST-006 | `COMPLETE` | `app_dirs` + `_require_inside` guard; session-wide user-data env sandbox |
 | TST-007 | `COMPLETE` | `make_usearch_index` with real USearch 2.26: add/search/save/restore/remove tested |
 | TST-008 | `COMPLETE` | Deterministic clock/UUID/RNG utilities (M0) plus `tests/factories/models.py` (M1 PR #5, merged): builders for sources, runs, jobs, observations, representations, identities, evidence, lineage, index operations, occurrences, people and associations. Link and catalog rows are built inline (see TESTING_GUIDE.md) |
@@ -135,6 +135,16 @@ complete: TST-011 through TST-020 all `PASSING`.
 **Dependencies:** M0, applicable M1 domain contracts, Persistence Implementation.
 
 **Milestone gate:** Representative identity and observation records can be committed, retrieved and recovered without violating authoritative-state invariants.
+
+### M2 status (2026-09-24)
+
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 249 passed, 0 skipped, 0
+warnings, `backend/` coverage 100%. Only the migration slice of M2 has been started.
+
+| ID | Status | Evidence / remaining work |
+|---|---|---|
+| TST-032 | `IN_PROGRESS` | `backend/alembic/` with revision `0001_initial_schema`; `tests/integration/test_migrations.py`: a fresh upgrade produces exactly the models' tables, indexes (including partial-index `WHERE` clauses), columns and named CHECK/FK/UNIQUE constraints; `alembic check` reports no drift; head is a single linear chain; upgrade is idempotent; downgrade removes every table and round-trips; a failed migration leaves an existing database untouched (no partial schema, data intact); offline `--sql` works. Every other persistence test also runs on the migrated schema. **Remaining:** "supported populated schemas migrate correctly" needs a second revision to migrate *from* `0001` |
+| TST-021 to TST-031 | `PLANNED` | Not started |
 
 ---
 
