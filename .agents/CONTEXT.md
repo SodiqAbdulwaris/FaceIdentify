@@ -161,11 +161,16 @@ Unresolved items need the user's decision. Do not settle them silently.
     **read before writing** (merge, split, assignment all do) fails *immediately*, ignoring the
     timeout, if another writer committed in between (`BUSY_SNAPSHOT`), which no retry of the
     single statement can fix. The engine begins deferred transactions (`BEGIN`), so the loser of a
-    simultaneous merge gets a raw `OperationalError`, not a domain error. **Recommendation:** write
+    simultaneous merge *can* get a raw `OperationalError` instead of a domain error (or a domain
+    error, if it happened to start after the winner committed). **Recommendation:** write
     use-case transactions start with `BEGIN IMMEDIATE` (writers queue for `busy_timeout` instead of
     failing at once), plus a bounded whole-transaction retry in the future unit-of-work, mapping
-    a final failure to a retryable API error. Decide when the unit-of-work / API layer is designed;
-    until then callers of use cases must treat `OperationalError` as retryable.
+    a final failure to a retryable API error. Note `engine.py`'s `_begin` hook hard-codes plain
+    `BEGIN` for every transaction, so this needs an execution option (set on the session's
+    connection before its first statement) or a second engine for writers. Decide when the
+    unit-of-work / API layer is designed; until then callers of use cases must treat an
+    `OperationalError` whose message says the database is locked or busy as retryable (other
+    `OperationalError`s, such as I/O errors, are not).
 
 ## M1 delivery (complete)
 

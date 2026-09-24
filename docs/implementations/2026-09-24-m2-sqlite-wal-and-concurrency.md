@@ -16,13 +16,12 @@ Tests only; no production code changed.
   with `database is locked` while the first holds the write lock; and a transaction that has
   already read fails **immediately** if another writer commits before it writes (`BUSY_SNAPSHOT`),
   ignoring a generous `busy_timeout`.
-- `tests/concurrency/test_optimistic_concurrency.py` (19 tests, TST-024): with separate sessions, a
+- `tests/concurrency/test_optimistic_concurrency.py` (18 tests, TST-024): with separate sessions, a
   stale rename, activation and merge are rejected and change nothing; with threads released
   together by a barrier (5 rounds each), simultaneous renames (6 writers), activations (4) and merges
   of one shared loser into two different survivors each land exactly once, completely (revision
   bumped once, all representations in one place, one lineage row, one `IDENTITY_MERGED` evidence
-  row). One more test checks that the shared clock/id sources are thread-safe, so the races cannot
-  pass because two writers drew the same id.
+  row, and the loser's Person link carried to the winning survivor exactly once).
 
 ## Why
 
@@ -38,8 +37,8 @@ writes; it does not permit multiple writers to hold long transactions."
 - **The tests state SQLite's real behaviour, including the awkward part.** A transaction that reads
   and then writes fails at once, with `database is locked`, if another connection committed in
   between — waiting does not help. Merge, split and assignment all read first. So the loser of a
-  simultaneous merge gets a raw `OperationalError`, not a domain error, and the merge race test
-  accepts either (`IdentityManagerError | OperationalError`) while insisting that exactly one merge
+  simultaneous merge *can* get a raw `OperationalError` rather than a domain error (or a domain
+  error, if it started after the winner committed), and the merge race test accepts either (`IdentityManagerError | OperationalError`) while insisting that exactly one merge
   lands completely. The rename and activation races, whose first statement is the guarded `UPDATE`,
   are asserted stricter: every loser must be a `StaleRevisionError`.
 - **No retry/`BEGIN IMMEDIATE` was implemented.** Persistence §25 requires bounded retry of transient
@@ -51,7 +50,9 @@ writes; it does not permit multiple writers to hold long transactions."
   is waited (it asserts the failure arrives in under 2 s).
 - **Threads, not processes.** Each writer has its own session and its own pooled connection to the
   same file, which is what SQLite's locking cares about. One `SeededUUIDs`/`FrozenClock` is shared
-  across writers by design; a test proves its ids stay unique under 6 threads.
+  across writers; `random.Random.getrandbits` is atomic under the GIL, so ids stay unique (a test
+  for that was written, found unable to fail on a GIL build, and removed rather than kept as
+  decoration).
 - **Only Person and Identity are covered for TST-024** because they are the only aggregates with
   revision-guarded use cases so far (jobs, runs, sources arrive with later milestones).
 - A raw `sqlite3.connect` must be wrapped in `contextlib.closing`: its `with` block commits but does
@@ -60,9 +61,9 @@ writes; it does not permit multiple writers to hold long transactions."
 
 ## Verification
 
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 272 passed (23 new, no
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 271 passed (22 new, no
   regressions in the prior 249); `backend/` coverage 100%; strict mypy and ruff clean.
-- **Stability:** the new tests were run 25 times in a row: 0 failures.
+- **Stability:** the new tests were run 25 times in a row before review and 20 after: 0 failures.
 - Mutation checks against the real helper `backend/infrastructure/db/optimistic.py` (each reverted,
   restore confirmed byte-identical via `diff`):
   - dropping only the `revision = :expected_revision` condition → 6 tests fail (the stale-rename
@@ -78,9 +79,28 @@ writes; it does not permit multiple writers to hold long transactions."
     repository to mutate for them. (The engine's pragma values, which would change the outcome,
     are asserted by `test_production_pragmas_are_applied`; that assertion was not re-mutated here.)
 
-## Independent review
+## Independent review (subagent, disposable worktree): approve, minor changes, all addressed
 
-Not yet run at the time of writing this entry; see the PR for the outcome.
+The reviewer read the code and traced SQLite's locking by hand but could not run the tests (its
+worktree had no installed dependencies), so none of its claims about *running* are independent; the
+runs above are mine.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | Docs overclaimed that the merge loser "gets" an `OperationalError`; it can also get a domain error if it started after the winner committed | Reworded ("can get") in CONTEXT and here |
+| 2 | "Treat `OperationalError` as retryable" is too broad (it also covers I/O errors) | Narrowed to locked/busy `OperationalError`s in CONTEXT question 20 |
+| 3 | The `BEGIN IMMEDIATE` recommendation is sound but omits that `engine.py`'s `_begin` hook hard-codes plain `BEGIN` | Added to question 20: needs an execution option set before the first statement, or a second engine |
+| 4 | The `stale` session in the `BUSY_SNAPSHOT` test isn't in a `with`, so an early failure would leak a connection and Windows teardown would raise a second, masking error | Wrapped in `with factory() as stale` |
+| 5 | The `< 2 s` assertion proves "did not wait", not "the busy handler was never invoked" | Docstring reworded to what is actually shown |
+| 6 | The clock/id thread-safety test cannot fail meaningfully on a GIL build | Deleted, and the doc no longer claims it |
+| 7 | `_reconcile_person_on_merge` is not exercised under the merge race | The race now gives the loser a Person link and asserts it is carried to the winner exactly once and the loser's is superseded; mutation-checked (disabling the carry-over fails all 5 rounds) |
+
+Not changed: `PRAGMA busy_timeout` set on pooled connections (harmless, the engine is per-test), and
+the non-daemon-thread residual if a worker hung (a 30 s join timeout already fails the test first).
+The reviewer also confirmed by reading that the rename/activation losers are guaranteed to be
+`StaleRevisionError` (their first statement is the guarded `UPDATE`, so they wait for the lock rather
+than hit `BUSY_SNAPSHOT`), that the WAL tests really hold and observe the locks they claim to, and
+that the pool (5 + 10) comfortably covers 6 writers.
 
 ## Open issues / follow-ups
 
