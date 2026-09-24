@@ -94,8 +94,8 @@ Verified locally on Windows 11 (Python 3.12.14) and on GitHub Actions (PR #1, ru
 
 ### M1 status (2026-09-23)
 
-Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 189 passed, 0 skipped, 0
-warnings, `backend/` coverage 100%. Remote CI observed green on PR #4, PR #5 and PR #6.
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 221 passed, 0 skipped, 0
+warnings, `backend/` coverage 100%. Remote CI observed green on PR #4, PR #5, PR #6 and PR #7.
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
@@ -105,7 +105,9 @@ warnings, `backend/` coverage 100%. Remote CI observed green on PR #4, PR #5 and
 | TST-018 | `PASSING` | `test_evidence_is_append_only_across_later_operations` (an Evidence row is byte-identical after a later, unrelated operation) and `test_evidence_kind_records_whether_the_identity_was_new_or_matched` (IDENTITY_CREATED vs IDENTITY_MATCHED) |
 | TST-013 | `PASSING` | `backend/app/people/use_cases.py`: `assign_identity_to_person` calling itself again with a different person is the correction — the old association becomes `SUPERSEDED` (never deleted) and its `Evidence` is untouched; a new `Evidence` row explains the change. `test_reassigning_to_a_different_person_corrects_the_link_and_preserves_history` |
 | TST-014 | `PASSING` | `rename_person`: changes only `display_name`/`normalized_name`; the Person's own id, and any linked Identity's id/state/Evidence, are unaffected. Optimistic-locked (stale `revision` rejected), mutation-checked |
-| TST-015, 016, 019, 020 | `PLANNED` | Not started; remaining M1 PRs (plan in `.agents/CONTEXT.md`) |
+| TST-015 | `PASSING` | `backend/app/identities/use_cases.py`: `merge_identities`. Identity-level merge (§18): the losing identity keeps its row (`MERGED`, `merged_into_identity_id` set), never deleted; its ACTIVE representations move to the survivor with `ann_key` untouched; the Person link is reconciled (survivor's own link always wins, the loser's is carried over only if the survivor has none); one `Evidence(IDENTITY_MERGED)` and one `identity_lineage` `MERGED_INTO` edge are recorded. Self-merge, a non-ACTIVE survivor or loser, and a stale revision are all rejected; rejection leaves no partial state |
+| TST-016 | `PASSING` | `split_identity`: creates a new, directly-`ACTIVE` identity (§19.2) and moves the caller-selected representations to it, `ann_key` untouched; the source keeps everything else and stays `ACTIVE`. One `Evidence(IDENTITY_SPLIT)` and one `identity_lineage` `SPLIT_FROM` edge are recorded. An empty selection, an unknown/foreign/non-ACTIVE representation, and a non-ACTIVE or unknown source are all rejected; rejection creates no identity and moves nothing |
+| TST-019, 020 | `PLANNED` | Not started; remaining M1 PRs (plan in `.agents/CONTEXT.md`) |
 
 ---
 
