@@ -54,3 +54,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-09-24 | [M2: Alembic and the initial migration](2026-09-24-m2-alembic-initial-migration.md) | done; TST-032 in progress |
 | 2026-09-24 | [M2: SQLite WAL behaviour and optimistic concurrency](2026-09-24-m2-sqlite-wal-and-concurrency.md) | done |
 | 2026-09-25 | [M2: use-case transaction rollback](2026-09-25-m2-use-case-transaction-rollback.md) | done |
+| 2026-09-25 | [M2: Storage Manager, managed core](2026-09-25-m2-storage-manager-managed-core.md) | done; TST-025 in progress |
