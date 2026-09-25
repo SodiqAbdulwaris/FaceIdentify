@@ -69,6 +69,7 @@ git switch -c feat/short-description  # every change starts on a branch (rules/b
 uv run pytest                          # fast backend tests
 uv run alembic upgrade head           # migrate the DB at $env:FACEIDENTIFY_DATABASE_PATH (backend/alembic/README)
 uv run ruff format --check . && uv run ruff check . && uv run mypy
+uv run mypy --platform linux          # CI's static job runs on Linux; Windows-only APIs need sys.platform guards
 npm test && npm run typecheck && npm run lint && npm run build
 npm run tauri dev                      # desktop app with frontend dev server
 npx tauri build --debug --no-bundle    # desktop build check (~3 min cold)
