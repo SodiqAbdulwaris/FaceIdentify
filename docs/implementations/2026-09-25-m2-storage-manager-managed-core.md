@@ -105,6 +105,11 @@ meaning. The filesystem owns bytes.").
   regressions in the prior 288); `backend/` coverage 100%; strict mypy and ruff clean.
 - The new tests were run 10 times in a row before review, and 10 after each review round: 0
   failures.
+- CI's static job runs mypy on **Linux**, where `_winapi.CreateJunction` is not declared, so a test
+  helper branching on `os.name` failed there while passing locally on Windows. It now branches on
+  `sys.platform` (which mypy narrows), `uv run mypy --platform linux` passes, and that command was
+  added to CONTEXT's local checks. The PR's first push had the same problem and it went unnoticed
+  because its CI result was not checked before moving on to review.
 - Coverage first showed two unreachable branches (an error path after a transition had already
   proved the row, and a redundant `is_dir` check); they were removed rather than tested.
 - Mutation checks. Before review, 12; one ("scan reports rows in any state as missing")
