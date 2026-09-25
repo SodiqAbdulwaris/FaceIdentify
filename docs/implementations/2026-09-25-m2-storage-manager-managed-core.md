@@ -30,14 +30,15 @@
     bytes → DELETED → commit).
   - `recover_artifacts` (startup): finishes a PENDING artifact whose file reached its final key,
     marks one whose write never completed `MISSING`/`WRITE_NOT_COMPLETED`, completes or retries
-    `DELETING`/`DELETE_FAILED`, and removes the staging files of the PENDING artifacts it settled.
-    Idempotent, and tolerant: an unreadable file or unusable key is reported (`skipped`) and left
-    for the next start; a staging file it does not own, or cannot remove, is reported
+    `DELETING`/`DELETE_FAILED`, and removes a staging file only when it belongs to a managed
+    artifact that is no longer PENDING (its write is settled; ids are never reused). Idempotent, and
+    tolerant: an unreadable file or unusable key (including a junction loop) is reported (`skipped`)
+    and left for the next start; a staging file it does not own, or cannot remove, is reported
     (`staging_left`), never deleted.
   - `verify_artifact` (hash and size) and `scan_storage` (AVAILABLE artifacts with no file, files no
     live artifact owns, stray staging files, rows with an unusable key — reported, never repaired).
-- Tests: `tests/integration/test_storage_files.py` (45) and `tests/integration/test_artifact_storage.py`
-  (33), plus `storage_roots`/`file_store` fixtures on the existing sandboxed roots.
+- Tests: `tests/integration/test_storage_files.py` (47) and `tests/integration/test_artifact_storage.py`
+  (34), plus `storage_roots`/`file_store` fixtures on the existing sandboxed roots.
 - Specs: persistence §1 and architecture §16.3 aligned to tech-stack §15, which gains `staging/`
   (owner decision, below).
 
@@ -79,9 +80,9 @@ meaning. The filesystem owns bytes.").
   the real `<library>/<directory>`; tests plant a junction in place of `crops/` (pointing into
   `database/`) and a junction at a key's own path.
 - **Recovery never deletes what it does not own, and never aborts on one bad row.** Per §28 ("clean
-  owned temp data") it removes only the `.part` files of the PENDING artifacts it settled. A file it
-  cannot read is left PENDING for the next start rather than guessed MISSING (an antivirus lock would
-  otherwise lose a complete import).
+  owned temp data") it removes a `.part` file only when its artifact's write is settled (any state
+  but PENDING). A file it cannot read is left PENDING for the next start rather than guessed MISSING
+  (an antivirus lock would otherwise lose a complete import), and its staging file is kept.
 - **`RUNTIME_PACKAGE` artifacts are refused:** API §54 keeps runtime/model packages in "the
   specialized runtime package layer", and runtime packages are machine-local.
 - **Known ceilings:** the rename is atomic on NTFS but not write-through, so a power cut immediately
@@ -100,9 +101,10 @@ meaning. The filesystem owns bytes.").
 
 ## Verification
 
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 366 passed (78 new, no
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 369 passed (81 new, no
   regressions in the prior 288); `backend/` coverage 100%; strict mypy and ruff clean.
-- The new tests were run 10 times in a row before review and 10 after: 0 failures.
+- The new tests were run 10 times in a row before review, and 10 after each review round: 0
+  failures.
 - Coverage first showed two unreachable branches (an error path after a transition had already
   proved the row, and a redundant `is_dir` check); they were removed rather than tested.
 - Mutation checks. Before review, 12; one ("scan reports rows in any state as missing")
@@ -114,7 +116,10 @@ meaning. The filesystem owns bytes.").
   (caught by the junction-into-`database/` test), deleting a REFERENCED artifact, AVAILABLE from any
   state, recovery ignoring a completed final file, recovery deleting unowned staging files, recovery
   keeping its own, recovery aborting on a bad row, not settling a reservation after a write error,
-  and the scan reporting rows in any state.
+  and the scan reporting rows in any state. After the second review, 6 more, all caught: the old
+  check-then-replace code restored (now caught by the corrected race test, which did *not* catch it
+  before), `os.replace` again, the cleanup's error hiding the real one, a junction loop escaping
+  `path_for`, staging owners including PENDING rows, and owners limited to this run.
 
 ## Independent review (subagent, disposable worktree): request-changes, addressed
 
@@ -137,6 +142,20 @@ correct; the monkeypatched orchestrator steps are looked up at call time, so tho
 genuine; "complete by construction" holds under a single writer; recovery is idempotent if it crashes
 itself; no filesystem work happens inside a transaction in the orchestrators; and the three spec
 edits agree with each other and with the code.
+
+### Re-review of the fixes (subagent, fresh worktree): request-changes (minor), addressed
+
+Scoped to the fix commits only. It verified from CPython's `ntpath`/`pathlib` that the new
+containment check cannot falsely refuse legitimate keys (8.3 short names, case, `\\?\` prefixes and
+a junctioned library root are normalised the same way on both sides) and confirmed the author's
+point that the first reviewer's suggested check would have passed a junctioned directory.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | Regression from the M1 fix: a staging file whose artifact had already settled (e.g. a failed write left a locked `.part`) could never be removed, so the scan stayed unclean forever | Recovery now owns the staging file of any managed artifact that is not PENDING, looked up by id; the test now shows the next start removing it, and a skipped PENDING artifact keeping its own |
+| 2 | `path_for` could raise `RuntimeError("Symlink loop")` or a stray `OSError`, which escape recovery's and the scan's handlers, contradicting the M3 fix | Confirmed on this machine with a mutual junction loop, then translated to `UnsafeStorageKeyError` in `path_for`; a test builds the loop with `mklink /J` |
+| 3 | The write-race test injected the file inside `fsync`, which the old check-then-replace code also survived | The file is now injected inside `os.rename`, just before the real rename; restoring the old code now fails the test |
+| 4 | A failed cleanup unlink in `finally` replaced the real error | The cleanup's `OSError` is suppressed; a test holds the staging file open and asserts the surfaced error is the rename's (it names both paths) |
 
 ## Open issues / follow-ups
 
