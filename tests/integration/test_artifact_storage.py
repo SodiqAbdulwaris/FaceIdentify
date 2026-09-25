@@ -475,8 +475,33 @@ def test_a_staging_file_that_cannot_be_removed_is_reported_not_fatal(
     assert report.staging_left == [staged.name]
     assert load(reserved.id).state == "MISSING"
 
-    assert recover(factory, file_store, build).staging_left == [staged.name]  # still unowned now
-    staged.unlink()
+    # Once the handle is gone, the next start removes it: its artifact is settled, so it is ours.
+    later = recover(factory, file_store, build)
+    assert later.staging_removed == [staged.name]
+    assert file_store.staging_files() == []
+
+
+def test_a_skipped_pending_artifact_keeps_its_staging_file(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, db_session: Session,
+    build: ModelFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """Its write may still be completable, so its staging file is not ours to delete yet."""
+    reserved = reserve_managed_artifact(
+        db_session, "SOURCE_ORIGINAL", new_id=build.new_id, clock=build.clock
+    )
+    db_session.commit()
+    assert reserved.storage_key is not None
+    staged = file_store.staging_path(reserved.storage_key)
+    staged.write_bytes(DATA[:10])
+
+    def locked(_key: str) -> StoredBytes:
+        raise PermissionError("in use by another process")
+
+    monkeypatch.setattr(file_store, "digest", locked)
+    report = recover(factory, file_store, build)
+
+    assert report.staging_left == [staged.name]
+    assert staged.exists()
 
 
 def test_a_failed_available_commit_leaves_pending_bytes_that_recovery_finalizes(
