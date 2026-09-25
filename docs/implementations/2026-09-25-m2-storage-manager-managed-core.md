@@ -12,12 +12,14 @@
 
 - `backend/infrastructure/storage/layout.py`: `StorageRoots` (the user-selected library root and
   machine-local state), `ensure_layout()`, `database_path` (`<Library>/database/library.db`), and
-  `path_for(key)`, which turns a storage key into a path only if the key is canonical, relative,
-  inside a managed directory (`originals/`, `crops/`, `thumbnails/`, `models/`) and still inside the
-  library after resolving links.
+  `path_for(key)`, which turns a storage key into a path only if it is exactly the generated form
+  `<originals|crops|thumbnails|models>/<32 lower-case hex>` and, after resolving links, still sits
+  in that real managed directory.
 - `backend/infrastructure/storage/files.py`: `ManagedFileStore`. `store()` writes to
-  `staging/<artifact-id>.part`, hashes (SHA-256) while streaming, fsyncs, then `os.replace`s onto the
-  final key; it never overwrites different content, and storing identical content again is a no-op.
+  `staging/<artifact-id>.part` (the name derived from the key), hashes (SHA-256) while streaming,
+  fsyncs, then `os.rename`s onto the final key. On Windows that rename refuses an existing
+  destination atomically, so different content is never overwritten, and storing identical content
+  again is a no-op.
   Also `open`, `digest`, idempotent `delete`, `managed_files`, `staging_files`. No database code.
 - `backend/app/sources/artifact_storage.py`: the managed artifact lifecycle.
   - Flush-only primitives: `reserve_managed_artifact` (PENDING row owning its final key),
@@ -28,11 +30,14 @@
     bytes → DELETED → commit).
   - `recover_artifacts` (startup): finishes a PENDING artifact whose file reached its final key,
     marks one whose write never completed `MISSING`/`WRITE_NOT_COMPLETED`, completes or retries
-    `DELETING`/`DELETE_FAILED`, and removes leftover staging files. Idempotent.
+    `DELETING`/`DELETE_FAILED`, and removes the staging files of the PENDING artifacts it settled.
+    Idempotent, and tolerant: an unreadable file or unusable key is reported (`skipped`) and left
+    for the next start; a staging file it does not own, or cannot remove, is reported
+    (`staging_left`), never deleted.
   - `verify_artifact` (hash and size) and `scan_storage` (AVAILABLE artifacts with no file, files no
-    live artifact owns, stray staging files — reported, never repaired).
-- Tests: `tests/integration/test_storage_files.py` (32) and `tests/integration/test_artifact_storage.py`
-  (27), plus `storage_roots`/`file_store` fixtures on the existing sandboxed roots.
+    live artifact owns, stray staging files, rows with an unusable key — reported, never repaired).
+- Tests: `tests/integration/test_storage_files.py` (45) and `tests/integration/test_artifact_storage.py`
+  (33), plus `storage_roots`/`file_store` fixtures on the existing sandboxed roots.
 - Specs: persistence §1 and architecture §16.3 aligned to tech-stack §15, which gains `staging/`
   (owner decision, below).
 
@@ -65,40 +70,73 @@ meaning. The filesystem owns bytes.").
   nothing references such a row (a Source is only created with AVAILABLE). A write that fails in a
   running process is settled the same way immediately; a crash is settled by recovery.
 - **`DELETE_FAILED` is retried by recovery** (§28: "retain retryable failure").
-- **Storage keys are canonical and ID-oriented:** `<kind directory>/<artifact id hex>`, no
-  extension (the MIME type is on the row). Writing tests found that `PurePosixPath` silently
-  normalizes `originals/./x` to `originals/x`, which `path_for` would have accepted; the scan compares
-  key strings, so one file could have been reported as both orphaned and present. Non-canonical keys
-  are now refused.
-- **Links cannot escape the library.** After the lexical checks, the resolved path must still be
-  inside the library root; a test plants a directory junction in `originals/` pointing outside.
+- **A storage key must be exactly the generated form**, `<kind directory>/<artifact id hex>`, no
+  extension (the MIME type is on the row). The first version validated keys leniently: writing tests
+  found `PurePosixPath` silently normalizing `originals/./x`, and the review then showed Windows
+  aliases (`<key>.`, `<key> `, upper case, device names such as `NUL`, `:stream`) passing the check
+  while opening another file. An exact pattern leaves no room for any of that.
+- **Links cannot escape a managed directory.** After the pattern check, the resolved file must sit in
+  the real `<library>/<directory>`; tests plant a junction in place of `crops/` (pointing into
+  `database/`) and a junction at a key's own path.
+- **Recovery never deletes what it does not own, and never aborts on one bad row.** Per §28 ("clean
+  owned temp data") it removes only the `.part` files of the PENDING artifacts it settled. A file it
+  cannot read is left PENDING for the next start rather than guessed MISSING (an antivirus lock would
+  otherwise lose a complete import).
 - **`RUNTIME_PACKAGE` artifacts are refused:** API §54 keeps runtime/model packages in "the
   specialized runtime package layer", and runtime packages are machine-local.
-- **Known ceilings (marked `ponytail:` in code):** `os.replace` is atomic on NTFS but not
-  write-through, so a power cut immediately after it can lose the rename (never tear the file); one
-  flat directory per kind (shard by id prefix if a directory grows past ~100k files).
+- **Known ceilings:** the rename is atomic on NTFS but not write-through, so a power cut immediately
+  after it can lose the rename (never tear the file), and that import is then lost; one flat
+  directory per kind (shard by id prefix past ~100k files) — both marked `ponytail:` in code. If the
+  final AVAILABLE commit *fails* (e.g. "database is locked"), the caller sees an error but recovery
+  later finishes the artifact, which may then be referenced by nothing; finding unreferenced
+  artifacts belongs with conservative cleanup (a test pins the current behaviour). No retry is made
+  when antivirus briefly holds a new file during the rename; a failed rename fails that import.
+- **`recover_artifacts` assumes no other process is using the library.** Single-instance per
+  machine is the desktop shell's job (tech-stack §2); a library on a shared drive opened from two
+  machines is CONTEXT open question 23.
 - **Not decided here:** whether an artifact *should* be deleted (API §51: the caller decides), and
   where the library root itself comes from (CONTEXT open question 17, narrowed: the database path is
   now defined relative to it).
 
 ## Verification
 
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 347 passed (59 new, no
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov --cov-report=term-missing -q`: 366 passed (78 new, no
   regressions in the prior 288); `backend/` coverage 100%; strict mypy and ruff clean.
-- The new tests were run 10 more times in a row: 0 failures.
+- The new tests were run 10 times in a row before review and 10 after: 0 failures.
 - Coverage first showed two unreachable branches (an error path after a transition had already
   proved the row, and a redundant `is_dir` check); they were removed rather than tested.
-- Mutation checks, 12 in total, each reverted (byte-identical via `diff`): writing straight to the
-  final path (21 tests fail), overwriting different content, skipping the fsync, accepting
-  non-canonical keys, accepting `..`, dropping the resolved-path containment check, letting a
-  REFERENCED artifact be deleted, allowing AVAILABLE from any state, recovery ignoring a completed
-  final file, recovery keeping staging files, not settling a reservation after a write error — all
-  caught. The twelfth, "scan reports rows in any state as missing", **survived** at first; the
-  clean-scan test now includes a MISSING and a PENDING artifact with no file, and catches it.
+- Mutation checks. Before review, 12; one ("scan reports rows in any state as missing")
+  **survived** at first, and the clean-scan test was strengthened to catch it. After the review
+  changes, 15 against the final code, each reverted (byte-identical via `diff`), **all caught**:
+  writing straight to the final path (23 tests fail), `os.rename` becoming `os.replace` (caught by
+  the write-race test), overwriting different content, skipping the fsync, a lenient key pattern,
+  dropping the directory containment check, checking containment against the library root only
+  (caught by the junction-into-`database/` test), deleting a REFERENCED artifact, AVAILABLE from any
+  state, recovery ignoring a completed final file, recovery deleting unowned staging files, recovery
+  keeping its own, recovery aborting on a bad row, not settling a reservation after a write error,
+  and the scan reporting rows in any state.
 
-## Independent review
+## Independent review (subagent, disposable worktree): request-changes, addressed
 
-Not yet run at the time of writing this entry; see the PR for the outcome.
+The reviewer read the code, the specs and the relevant CPython `ntpath`/`pathlib` source, and probed
+`resolve()`/`is_file()` read-only; it could not run the tests.
+
+| # | Finding | Resolution |
+|---|---|---|
+| M1 | Nothing enforces "recovery runs before anything writes", and recovery deleted *every* staging file; a second instance (or a second machine on a shared-drive library) would destroy another writer's in-flight file and mark its row MISSING | Recovery now removes only the staging files of the PENDING artifacts it settles (§28: "owned temp data") and reports the rest. The single-writer assumption is stated on the function. A library lock for shared drives is **CONTEXT open question 23** (a decision, not built here) |
+| M2 | A *failed* AVAILABLE commit leaves PENDING bytes that recovery later finalizes, possibly referenced by nothing | Recorded as a ceiling; a test pins the behaviour; detecting unreferenced artifacts goes with conservative cleanup |
+| M3 | One locked file or bad key aborted recovery (and the scan) on every start | Per-row tolerance: `skipped` / `staging_left` in the report, `unsafe_keys` in the scan; tests include a real open handle blocking a delete on Windows |
+| L1 | `path_for` accepted Windows aliases (trailing dot/space, case, device names, `:stream`); containment was against the library root, not the managed directory | Exact generated-key pattern; containment per managed directory. The reviewer's suggested check (`is_relative_to((root / dir).resolve())`) would itself pass a junctioned directory, since resolving the directory follows the junction, so the resolved file's parent is compared with the *unresolved* directory instead; a test proves it |
+| L2 | "Never overwrites" was check-then-act | `os.rename` (atomic refusal on Windows) replaces the pre-check; a test injects a file between write and rename |
+| L3 | `staging_name` unvalidated | Parameter removed; derived from the key |
+| L4 | No retry when antivirus briefly holds a new file | Recorded as a ceiling / follow-up (unverified on this machine) |
+| L5 | Test gaps | Added, as above, plus `DELETE_FAILED` in the not-pending parametrisation |
+
+The reviewer also confirmed by reading: the normal create/delete paths and every state guard are
+correct; the monkeypatched orchestrator steps are looked up at call time, so those crash tests are
+genuine; "complete by construction" holds under a single writer; recovery is idempotent if it crashes
+itself; no filesystem work happens inside a transaction in the orchestrators; and the three spec
+edits agree with each other and with the code.
 
 ## Open issues / follow-ups
 
@@ -106,4 +144,6 @@ Not yet run at the time of writing this entry; see the PR for the outcome.
   workspaces, recycle/restore, storage usage, conservative cleanup.
 - Wiring `recover_artifacts` into application startup (after migrations, per §28's ordering) belongs
   with the startup/lifespan work, which does not exist yet.
-- CONTEXT open question 17 (narrowed).
+- CONTEXT open questions 17 (narrowed) and 23 (library lock for shared drives).
+- Conservative cleanup must include AVAILABLE managed artifacts that nothing references (review M2).
+- Consider a bounded retry of the rename/unlink on a sharing violation (review L4) once measured.
