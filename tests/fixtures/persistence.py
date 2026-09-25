@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session
 from usearch.index import Index
 
 from backend.infrastructure.db.engine import create_session_factory, create_sqlite_engine
+from backend.infrastructure.storage.files import ManagedFileStore
+from backend.infrastructure.storage.layout import StorageRoots
 
 ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
 
@@ -70,6 +72,19 @@ def app_dirs(tmp_path: Path) -> AppDirs:
     for directory in (dirs.database_path.parent, dirs.indexes, dirs.temp, dirs.logs):
         directory.mkdir(parents=True)
     return dirs
+
+
+@pytest.fixture
+def storage_roots(app_dirs: AppDirs) -> StorageRoots:
+    """The real storage layout on the sandboxed roots (TESTING_STRATEGY.md §7.2)."""
+    roots = StorageRoots(library_root=app_dirs.library_root, local_state_root=app_dirs.local_state)
+    roots.ensure_layout()
+    return roots
+
+
+@pytest.fixture
+def file_store(storage_roots: StorageRoots) -> ManagedFileStore:
+    return ManagedFileStore(storage_roots)
 
 
 @pytest.fixture(scope="session")
