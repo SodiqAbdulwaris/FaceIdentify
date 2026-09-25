@@ -375,10 +375,13 @@ A model-only update must not require a complete application reinstall.
 ├── models/
 ├── derived/
 ├── backups/
-└── recovery/
+├── recovery/
+└── staging/
 ```
 
 The authoritative database lives with the library so the user's library can be backed up or moved coherently.
+
+> **Decision 2026-09-25:** this is the authoritative storage layout (persistence §1 and architecture §16.3 were aligned to it). `staging/` holds managed writes in flight; it sits inside the library root, not in machine-local `temp/`, because the final rename must stay on one volume to be atomic. (Owner decision, M2 PR #14.)
 
 ### Machine-local state
 

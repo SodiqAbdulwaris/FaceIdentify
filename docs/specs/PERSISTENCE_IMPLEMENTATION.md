@@ -8,16 +8,18 @@ The first implementation uses SQLite, SQLAlchemy 2, Alembic, a single FastAPI-ow
 
 ## 1. Persistence principles and database layout
 
-The database is one application-owned SQLite file under the application data directory, for example `data/identity-memory.sqlite3`. Its sibling directories are application-owned:
+The database is one application-owned SQLite file inside the user-selected library root, at `<Library Root>/database/library.db`, beside the managed bytes it describes. Derived and disposable state lives in machine-local state (`%LOCALAPPDATA%/<App>`):
 
 ```text
-data/
-  identity-memory.sqlite3
-  artifacts/
-  indexes/representations/<space-key>/
-  processing-tmp/
-  runtime/
+<Library Root>/                        %LOCALAPPDATA%/<App>/
+  database/library.db                    indexes/          (e.g. representations/<space-key>/)
+  originals/  crops/  thumbnails/        cache/
+  models/     derived/                   temp/             (processing scratch)
+  backups/    recovery/                  logs/
+  staging/    (managed writes in flight) runtime/  installation/
 ```
+
+> **Decision 2026-09-25:** the storage layout is tech-stack.md §15's two roots, and this section, which previously showed a single `data/` directory as an example, was aligned to it. Managed writes stage in `<Library Root>/staging/`, on the same volume as their final directory, so the final rename is atomic even when the library is on another drive. (Owner decision, M2 PR #14.)
 
 The database stores semantic facts, lifecycle state, immutable provenance, durable work intent, canonical vectors, and settings. It does not store derived ANN files, temporary decoded frames, shared-memory names, or WebSocket events.
 

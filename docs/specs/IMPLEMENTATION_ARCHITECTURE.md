@@ -845,23 +845,29 @@ initial import UI.
 
 ### 16.3 Managed filesystem
 
-The exact physical layout may evolve behind Storage Manager, but the
-architectural categories are:
+The exact physical layout may evolve behind Storage Manager. It follows
+tech-stack.md §15: a user-selected library root holding the database and
+every managed byte, and machine-local state for derived data:
 
 ``` text
-library/
-├── sources/
-├── artifacts/
-├── derived/
-│   ├── crops/
-│   ├── previews/
-│   └── thumbnails/
-├── runtime/
-│   ├── blobs/
-│   └── manifests/
-├── recycle/
-└── temp/
+<Library Root>/                 %LOCALAPPDATA%/<App>/
+├── database/library.db         ├── indexes/
+├── originals/                  ├── cache/
+├── crops/                      ├── temp/
+├── thumbnails/                 ├── logs/
+├── models/                     ├── runtime/
+├── derived/                    └── installation/
+├── backups/
+├── recovery/
+└── staging/
 ```
+
+> **Decision 2026-09-25:** this layout replaces the earlier `library/`
+> tree (with `sources/`, `artifacts/`, `recycle/`, `temp/`). There is no
+> `recycle/` directory: recycling a Source is database state and never
+> moves bytes (API and Contracts §60, persistence §4.2). Managed writes
+> stage in `staging/` inside the library root so the final rename stays
+> on one volume. (Owner decision, M2 PR #14.)
 
 Paths are ID/content-oriented, never Person/name-oriented. Renaming,
 merging, or splitting identities must not reorganize storage by human
