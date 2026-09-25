@@ -7,6 +7,7 @@ Nothing here touches the database: `backend/infrastructure/storage` only knows a
 import hashlib
 import io
 import os
+import subprocess
 import uuid
 from pathlib import Path
 from typing import BinaryIO, cast
@@ -166,6 +167,24 @@ def test_a_file_linked_out_of_its_directory_is_refused(
         storage_roots.path_for(f"originals/{HEX}")
 
 
+def test_a_link_loop_is_an_unusable_key_not_a_crash(storage_roots: StorageRoots) -> None:
+    """Resolving a junction loop raises RuntimeError("Symlink loop"); recovery and the scan only
+    tolerate UnsafeStorageKeyError, so path_for must translate it."""
+    other = "b" * 32
+    first, second = (storage_roots.library_root / "originals" / n for n in (HEX, other))
+    second.mkdir()
+    _link_directory(first, second)
+    second.rmdir()
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(second), str(first)], check=True,
+                   capture_output=True)  # fmt: skip
+    try:
+        with pytest.raises(UnsafeStorageKeyError, match="cannot resolve"):
+            storage_roots.path_for(f"originals/{HEX}")
+    finally:
+        os.rmdir(first)
+        os.rmdir(second)
+
+
 # --- writing -----------------------------------------------------------------------------------
 
 
@@ -214,13 +233,13 @@ def test_a_file_appearing_at_the_key_during_the_write_is_not_overwritten(
     """The no-overwrite check is the rename itself, not a check made before it."""
     key = new_key()
     final = file_store.roots.path_for(key)
-    real_fsync = os.fsync
+    real_rename = os.rename
 
-    def fsync_then_race(fd: int) -> None:
-        real_fsync(fd)
-        final.write_bytes(b"arrived first")  # between our write and our rename
+    def race_then_rename(src: Path, dst: Path) -> None:
+        final.write_bytes(b"arrived first")  # after any pre-check, just before the rename
+        real_rename(src, dst)
 
-    monkeypatch.setattr(os, "fsync", fsync_then_race)
+    monkeypatch.setattr(os, "rename", race_then_rename)
     with pytest.raises(ExistingContentError):
         file_store.store(key, io.BytesIO(b"ours"))
     assert final.read_bytes() == b"arrived first"
@@ -284,6 +303,21 @@ def test_the_write_is_fsynced_before_the_rename(
     monkeypatch.setattr(os, "rename", rename)
     file_store.store(new_key(), io.BytesIO(b"data"))
     assert events == ["fsync", "rename"]
+
+
+def test_a_locked_staging_file_does_not_hide_the_real_error(
+    file_store: ManagedFileStore,
+) -> None:
+    """An open handle (antivirus, indexer) blocks both the rename and the cleanup; the caller must
+    see the rename's error, not the cleanup's."""
+    key = new_key()
+    staged = file_store.staging_path(key)
+    staged.write_bytes(b"")
+    with staged.open("rb"), pytest.raises(PermissionError) as raised:
+        file_store.store(key, io.BytesIO(b"data"))
+    assert raised.value.filename2 is not None  # the rename's error names both paths
+    assert not file_store.roots.path_for(key).exists()
+    staged.unlink()
 
 
 # --- reading, deleting, listing ----------------------------------------------------------------
