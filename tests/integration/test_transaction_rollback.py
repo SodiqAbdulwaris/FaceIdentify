@@ -90,14 +90,19 @@ class Case:
 # --- the use cases, each set up with enough data to reach its every write ---------------------
 
 
-def assign_representation(build: ModelFactory) -> Operation:
+def assign_created(build: ModelFactory) -> Operation:
+    """First assignment to a new identity: also reads for existing IDENTITY_CREATED evidence."""
     identity = build.identity()
-    space = build.representation_space()
-    # ann_key 1000: the factory bypasses the ann-key sequence, which will hand out 1 next.
-    build.representation(representation_space_id=space.id, identity_id=identity.id,
-                         state="ACTIVE", ann_key=1000)  # fmt: skip
-    build.evidence(kind="IDENTITY_CREATED", subject_identity_id=identity.id)
-    pending = build.representation(representation_space_id=space.id, state="PENDING")
+    pending = build.representation(state="PENDING")
+    return lambda s: assign_representation_to_identity(
+        s, pending.id, identity.id, new_id=build.new_id, clock=build.clock,
+        evidence_kind=EvidenceKind.IDENTITY_CREATED,
+    )  # fmt: skip
+
+
+def assign_matched(build: ModelFactory) -> Operation:
+    identity = build.identity()
+    pending = build.representation(state="PENDING")
     return lambda s: assign_representation_to_identity(
         s, pending.id, identity.id, new_id=build.new_id, clock=build.clock,
         evidence_kind=EvidenceKind.IDENTITY_MATCHED,
@@ -158,7 +163,8 @@ def rename(build: ModelFactory) -> Operation:
 
 
 CASES = [
-    Case("assign_representation", assign_representation),
+    Case("assign_created", assign_created),
+    Case("assign_matched", assign_matched),
     Case("activate", activate),
     Case("merge", merge),
     Case("split", split),
@@ -204,10 +210,12 @@ def test_a_fault_at_any_statement_then_rollback_leaves_the_database_unchanged(
             session.commit()
         assert committed_state(sqlite_engine) == before, f"fault at statement {fail_at}"
 
-    # And the faults were injected into a path that really does succeed.
-    with factory() as session:
+    # And the faults were injected into a path that really does succeed, and that sends exactly
+    # the statements the loop covered (a longer path would leave its extra statements untested).
+    with factory() as session, statement_counter(sqlite_engine) as final_statements:
         operation(session)
         session.commit()
+    assert final_statements == statements  # COMMIT is a DBAPI call, not a cursor statement
     assert committed_state(sqlite_engine) != before
 
 
