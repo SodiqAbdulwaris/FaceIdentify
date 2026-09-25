@@ -7,6 +7,7 @@ Nothing here touches the database: `backend/infrastructure/storage` only knows a
 import hashlib
 import io
 import os
+import uuid
 from pathlib import Path
 from typing import BinaryIO, cast
 
@@ -26,6 +27,8 @@ from backend.infrastructure.storage.layout import (
     UnsafeStorageKeyError,
 )
 from tests.fixtures.persistence import AppDirs
+
+HEX = "0123456789abcdef0123456789abcdef"
 
 
 class SimulatedCrash(BaseException):
@@ -47,6 +50,20 @@ class ExplodingStream:
 
 def expected(data: bytes) -> StoredBytes:
     return StoredBytes(hashlib.sha256(data).digest(), len(data))
+
+
+def new_key(directory: str = "originals") -> str:
+    return f"{directory}/{uuid.uuid4().hex}"
+
+
+def _link_directory(link: Path, target: Path) -> None:
+    """A directory link: a junction on Windows (no privilege needed), a symlink elsewhere."""
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    else:  # pragma: no cover - the suite runs on Windows
+        link.symlink_to(target, target_is_directory=True)
 
 
 # --- layout ------------------------------------------------------------------------------------
@@ -77,10 +94,16 @@ def test_staging_is_inside_the_library_root(storage_roots: StorageRoots) -> None
     assert storage_roots.staging.parent == storage_roots.library_root
 
 
-@pytest.mark.parametrize("key", ["originals/abc", "crops/abc", "thumbnails/a/b", "models/abc"])
-def test_valid_keys_resolve_inside_the_library(storage_roots: StorageRoots, key: str) -> None:
+# --- key validation ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("directory", ["originals", "crops", "thumbnails", "models"])
+def test_generated_keys_resolve_inside_their_directory(
+    storage_roots: StorageRoots, directory: str
+) -> None:
+    key = f"{directory}/{HEX}"
     path = storage_roots.path_for(key)
-    assert path.is_relative_to(storage_roots.library_root)
+    assert path == storage_roots.library_root / directory / HEX
     assert storage_roots.key_for(path) == key
 
 
@@ -88,94 +111,131 @@ def test_valid_keys_resolve_inside_the_library(storage_roots: StorageRoots, key:
     "key",
     [
         "",
-        "originals",  # a directory, not a file key
-        "/originals/abc",
-        "C:/originals/abc",
-        "originals\\abc",
-        "originals/../database/library.db",
-        "../outside",
-        "originals/./abc",  # non-canonical: would name the same file under a second key
-        "originals//abc",
-        "originals/abc/",
-        "database/library.db",  # exists in the library, but is not managed artifact storage
-        "staging/abc.part",
-        "derived/abc",
+        "originals",
+        f"/originals/{HEX}",
+        f"C:/originals/{HEX}",
+        f"originals\\{HEX}",
+        f"originals/../database/{HEX}",
+        f"originals/./{HEX}",
+        f"originals//{HEX}",
+        f"originals/{HEX}/",
+        f"originals/sub/{HEX}",  # one flat directory per kind
+        f"database/{HEX}",  # exists in the library, but is not managed artifact storage
+        f"staging/{HEX}",
+        f"derived/{HEX}",
+        # Windows aliases of `originals/<hex>` or of devices, which a lenient check would accept:
+        f"originals/{HEX}.",
+        f"originals/{HEX} ",
+        f"originals/{HEX.upper()}",
+        f"ORIGINALS/{HEX}",
+        f"originals/{HEX}:stream",
+        "originals/NUL",
+        "originals/CON",
+        f"originals/{HEX[:-1]}",  # not a full id
+        f"originals/{HEX}\x00",
+        f"\\\\?\\C:\\originals\\{HEX}",
     ],
 )
-def test_unsafe_or_unmanaged_keys_are_refused(storage_roots: StorageRoots, key: str) -> None:
+def test_anything_but_a_generated_key_is_refused(storage_roots: StorageRoots, key: str) -> None:
     with pytest.raises(UnsafeStorageKeyError):
         storage_roots.path_for(key)
 
 
-def _link_directory(link: Path, target: Path) -> None:
-    """A directory link: a junction on Windows (no privilege needed), a symlink elsewhere."""
-    if os.name == "nt":
-        import _winapi
-
-        _winapi.CreateJunction(str(target), str(link))
-    else:  # pragma: no cover - the suite runs on Windows
-        link.symlink_to(target, target_is_directory=True)
-
-
-def test_a_key_that_resolves_through_a_link_to_outside_the_library_is_refused(
+def test_a_managed_directory_redirected_by_a_junction_is_refused(
     storage_roots: StorageRoots, tmp_path: Path
 ) -> None:
-    """A junction planted inside originals/ must not let reads, writes or deletes escape."""
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "victim").write_bytes(b"not ours")
-    _link_directory(storage_roots.library_root / "originals" / "escape", outside)
+    """A junction in place of `crops/` must not let reads, writes or deletes land elsewhere, even
+    somewhere else inside the library (here: the database directory)."""
+    crops = storage_roots.library_root / "crops"
+    crops.rmdir()
+    _link_directory(crops, storage_roots.library_root / "database")
+    (storage_roots.library_root / "database" / HEX).write_bytes(b"not a crop")
 
     with pytest.raises(UnsafeStorageKeyError, match="escapes"):
-        storage_roots.path_for("originals/escape/victim")
-    assert (outside / "victim").read_bytes() == b"not ours"
+        storage_roots.path_for(f"crops/{HEX}")
+
+
+def test_a_file_linked_out_of_its_directory_is_refused(
+    storage_roots: StorageRoots, tmp_path: Path
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _link_directory(storage_roots.library_root / "originals" / HEX, outside)
+
+    with pytest.raises(UnsafeStorageKeyError, match="escapes"):
+        storage_roots.path_for(f"originals/{HEX}")
 
 
 # --- writing -----------------------------------------------------------------------------------
 
 
 def test_store_writes_hashes_and_leaves_no_staging_file(file_store: ManagedFileStore) -> None:
-    data = b"face image bytes"
-    stored = file_store.store("originals/a1", io.BytesIO(data), staging_name="a1")
+    key, data = new_key(), b"face image bytes"
+    stored = file_store.store(key, io.BytesIO(data))
 
     assert stored == expected(data)
-    assert file_store.roots.path_for("originals/a1").read_bytes() == data
+    assert file_store.roots.path_for(key).read_bytes() == data
     assert file_store.staging_files() == []
 
 
+def test_the_staging_name_is_the_artifact_id(file_store: ManagedFileStore) -> None:
+    assert file_store.staging_path(f"crops/{HEX}") == file_store.roots.staging / f"{HEX}.part"
+
+
 def test_store_streams_content_larger_than_one_chunk(file_store: ManagedFileStore) -> None:
-    data = os.urandom(3 * CHUNK_SIZE + 17)
-    stored = file_store.store("originals/big", io.BytesIO(data), staging_name="big")
+    key, data = new_key(), os.urandom(3 * CHUNK_SIZE + 17)
+    stored = file_store.store(key, io.BytesIO(data))
     assert stored == expected(data)
-    assert file_store.digest("originals/big") == stored
+    assert file_store.digest(key) == stored
 
 
 def test_storing_identical_bytes_again_is_a_no_op(file_store: ManagedFileStore) -> None:
     """A retried finalization must succeed rather than fail on its own earlier write."""
-    first = file_store.store("originals/a1", io.BytesIO(b"same"), staging_name="a1")
-    again = file_store.store("originals/a1", io.BytesIO(b"same"), staging_name="a1")
+    key = new_key()
+    first = file_store.store(key, io.BytesIO(b"same"))
+    again = file_store.store(key, io.BytesIO(b"same"))
     assert first == again
     assert file_store.staging_files() == []
 
 
 def test_different_bytes_never_overwrite_managed_content(file_store: ManagedFileStore) -> None:
-    file_store.store("originals/a1", io.BytesIO(b"original"), staging_name="a1")
+    key = new_key()
+    file_store.store(key, io.BytesIO(b"original"))
     with pytest.raises(ExistingContentError):
-        file_store.store("originals/a1", io.BytesIO(b"imposter"), staging_name="a1")
+        file_store.store(key, io.BytesIO(b"imposter"))
 
-    assert file_store.roots.path_for("originals/a1").read_bytes() == b"original"
+    assert file_store.roots.path_for(key).read_bytes() == b"original"
     assert file_store.staging_files() == []
+
+
+def test_a_file_appearing_at_the_key_during_the_write_is_not_overwritten(
+    file_store: ManagedFileStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The no-overwrite check is the rename itself, not a check made before it."""
+    key = new_key()
+    final = file_store.roots.path_for(key)
+    real_fsync = os.fsync
+
+    def fsync_then_race(fd: int) -> None:
+        real_fsync(fd)
+        final.write_bytes(b"arrived first")  # between our write and our rename
+
+    monkeypatch.setattr(os, "fsync", fsync_then_race)
+    with pytest.raises(ExistingContentError):
+        file_store.store(key, io.BytesIO(b"ours"))
+    assert final.read_bytes() == b"arrived first"
 
 
 @pytest.mark.parametrize("error", [OSError("drive disconnected"), SimulatedCrash()])
 def test_a_failed_write_leaves_neither_a_final_nor_a_staging_file(
     file_store: ManagedFileStore, error: BaseException
 ) -> None:
+    key = new_key()
     source = cast("BinaryIO", ExplodingStream(b"x" * (CHUNK_SIZE + 5), error))
     with pytest.raises(type(error)):
-        file_store.store("originals/a1", source, staging_name="a1")
+        file_store.store(key, source)
 
-    assert not file_store.roots.path_for("originals/a1").exists()
+    assert not file_store.roots.path_for(key).exists()
     assert file_store.staging_files() == []
 
 
@@ -187,66 +247,75 @@ def test_a_failed_rename_leaves_no_final_file(
     def refuse(*_: object) -> None:
         raise PermissionError("rename refused")
 
-    monkeypatch.setattr(os, "replace", refuse)
+    monkeypatch.setattr(os, "rename", refuse)
+    key = new_key()
     with pytest.raises(PermissionError):
-        file_store.store("originals/a1", io.BytesIO(b"data"), staging_name="a1")
+        file_store.store(key, io.BytesIO(b"data"))
 
-    assert not file_store.roots.path_for("originals/a1").exists()
+    assert not file_store.roots.path_for(key).exists()
     assert file_store.staging_files() == []
 
 
 def test_a_staging_file_left_by_an_earlier_crash_is_overwritten(
     file_store: ManagedFileStore,
 ) -> None:
-    file_store.staging_path("a1").write_bytes(b"torn half of an old write")
-    stored = file_store.store("originals/a1", io.BytesIO(b"new"), staging_name="a1")
+    key = new_key()
+    file_store.staging_path(key).write_bytes(b"torn half of an old write")
+    stored = file_store.store(key, io.BytesIO(b"new"))
     assert stored == expected(b"new")
-    assert file_store.roots.path_for("originals/a1").read_bytes() == b"new"
+    assert file_store.roots.path_for(key).read_bytes() == b"new"
 
 
 def test_the_write_is_fsynced_before_the_rename(
     file_store: ManagedFileStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     events: list[str] = []
-    real_fsync, real_replace = os.fsync, os.replace
+    real_fsync, real_rename = os.fsync, os.rename
 
     def fsync(fd: int) -> None:
         events.append("fsync")
         real_fsync(fd)
 
-    def replace(src: Path, dst: Path) -> None:
-        events.append("replace")
-        real_replace(src, dst)
+    def rename(src: Path, dst: Path) -> None:
+        events.append("rename")
+        real_rename(src, dst)
 
     monkeypatch.setattr(os, "fsync", fsync)
-    monkeypatch.setattr(os, "replace", replace)
-    file_store.store("originals/a1", io.BytesIO(b"data"), staging_name="a1")
-    assert events == ["fsync", "replace"]
+    monkeypatch.setattr(os, "rename", rename)
+    file_store.store(new_key(), io.BytesIO(b"data"))
+    assert events == ["fsync", "rename"]
 
 
 # --- reading, deleting, listing ----------------------------------------------------------------
 
 
 def test_open_digest_and_delete(file_store: ManagedFileStore) -> None:
-    file_store.store("crops/c1", io.BytesIO(b"crop"), staging_name="c1")
-    with file_store.open("crops/c1") as stream:
+    key = new_key("crops")
+    file_store.store(key, io.BytesIO(b"crop"))
+    with file_store.open(key) as stream:
         assert stream.read() == b"crop"
 
-    file_store.delete("crops/c1")
-    file_store.delete("crops/c1")  # idempotent
+    file_store.delete(key)
+    file_store.delete(key)  # idempotent
 
-    assert file_store.digest("crops/c1") is None
+    assert file_store.digest(key) is None
     with pytest.raises(BytesMissingError):
-        file_store.open("crops/c1")
+        file_store.open(key)
 
 
 def test_managed_files_lists_only_managed_directories(file_store: ManagedFileStore) -> None:
     roots = file_store.roots
-    file_store.store("originals/o1", io.BytesIO(b"o"), staging_name="o1")
-    file_store.store("thumbnails/t/1", io.BytesIO(b"t"), staging_name="t1")
+    original, thumbnail = f"originals/{HEX}", f"thumbnails/{HEX}"
+    file_store.store(original, io.BytesIO(b"o"))
+    file_store.store(thumbnail, io.BytesIO(b"t"))
     (roots.library_root / "derived" / "cache.bin").write_bytes(b"d")
     (roots.library_root / "backups" / "old.db").write_bytes(b"b")
-    file_store.staging_path("x").write_bytes(b"s")
+    file_store.staging_path(new_key()).write_bytes(b"s")
+    stray_folder = roots.library_root / "originals" / "copied-by-hand"
+    stray_folder.mkdir()
+    (stray_folder / "photo.jpg").write_bytes(b"p")  # surfaces, so the scan can call it an orphan
 
-    assert list(file_store.managed_files()) == ["originals/o1", "thumbnails/t/1"]
-    assert [p.name for p in file_store.staging_files()] == ["x.part"]
+    assert list(file_store.managed_files()) == [
+        original, "originals/copied-by-hand/photo.jpg", thumbnail,
+    ]  # fmt: skip
+    assert len(file_store.staging_files()) == 1

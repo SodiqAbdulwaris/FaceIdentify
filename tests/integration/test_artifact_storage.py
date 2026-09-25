@@ -152,7 +152,7 @@ def test_the_primitives_let_a_caller_commit_available_and_its_source_together(
         artifact_id, key = reserved.id, reserved.storage_key
         session.commit()
     assert key is not None
-    stored = file_store.store(key, io.BytesIO(DATA), staging_name=artifact_id.hex)
+    stored = file_store.store(key, io.BytesIO(DATA))
 
     with factory() as session:
         mark_artifact_available(session, artifact_id, stored, clock=build.clock)
@@ -166,7 +166,7 @@ def test_the_primitives_let_a_caller_commit_available_and_its_source_together(
     assert load(artifact_id).state == "AVAILABLE"
 
 
-@pytest.mark.parametrize("state", ["AVAILABLE", "MISSING", "DELETING", "DELETED"])
+@pytest.mark.parametrize("state", ["AVAILABLE", "MISSING", "DELETING", "DELETE_FAILED", "DELETED"])
 def test_only_a_pending_artifact_can_become_available(
     factory: sessionmaker[Session], db_session: Session, build: ModelFactory, state: str
 ) -> None:
@@ -222,7 +222,8 @@ def test_crash_mid_write_leaves_a_staging_file_that_recovery_removes(
         db_session, "SOURCE_ORIGINAL", new_id=build.new_id, clock=build.clock
     )
     db_session.commit()
-    file_store.staging_path(reserved.id.hex).write_bytes(DATA[:10])
+    assert reserved.storage_key is not None
+    file_store.staging_path(reserved.storage_key).write_bytes(DATA[:10])
 
     report = recover(factory, file_store, build)
 
@@ -396,19 +397,109 @@ def test_recovery_is_idempotent_and_leaves_settled_artifacts_alone(
         db_session, "THUMBNAIL", new_id=build.new_id, clock=build.clock
     )
     db_session.commit()
-    file_store.staging_path("unrelated").write_bytes(b"left by a dead process")
+    unowned = file_store.roots.staging / "unrelated.part"
+    unowned.write_bytes(b"not a staging file of any PENDING artifact")
     before_available = load(available)
 
     first = recover(factory, file_store, build)
     second = recover(factory, file_store, build)
 
     assert first.write_not_completed == [pending.id]
-    assert first.staging_removed == ["unrelated.part"]
-    assert second == RecoveryReport()  # nothing left to do
+    assert first.staging_left == ["unrelated.part"]
+    # Nothing left to do, and a staging file recovery does not own is reported, never deleted.
+    assert second == RecoveryReport(staging_left=["unrelated.part"])
+    assert unowned.exists()
     after = load(available)
     assert (after.state, after.sha256, after.available_at) == (
         before_available.state, before_available.sha256, before_available.available_at,
     )  # fmt: skip
+
+
+def test_recovery_skips_an_unusable_row_and_settles_the_rest(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, db_session: Session,
+    build: ModelFactory, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    """One tampered key must not stop startup: the row is reported and left for a person."""
+    tampered_pending = build.artifact(state="PENDING", storage_key="originals/NUL")
+    tampered_deleting = build.artifact(state="DELETING", storage_key="../../elsewhere")
+    fine = reserve_managed_artifact(db_session, "THUMBNAIL", new_id=build.new_id, clock=build.clock)
+    db_session.commit()
+
+    report = recover(factory, file_store, build)
+
+    assert [artifact_id for artifact_id, _ in report.skipped] == [
+        tampered_pending.id, tampered_deleting.id,
+    ]  # fmt: skip
+    assert all("UnsafeStorageKeyError" in reason for _, reason in report.skipped)
+    assert report.write_not_completed == [fine.id]
+    assert load(tampered_pending.id).state == "PENDING"
+    assert load(tampered_deleting.id).state == "DELETING"
+
+
+def test_recovery_leaves_a_pending_artifact_whose_file_cannot_be_read_for_next_time(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, db_session: Session,
+    build: ModelFactory, load: Callable[[uuid.UUID], Artifact], monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """E.g. an antivirus scanner holding the file: guessing MISSING would lose a complete import."""
+    reserved = reserve_managed_artifact(
+        db_session, "SOURCE_ORIGINAL", new_id=build.new_id, clock=build.clock
+    )
+    db_session.commit()
+
+    def locked(_key: str) -> StoredBytes:
+        raise PermissionError("in use by another process")
+
+    monkeypatch.setattr(file_store, "digest", locked)
+    report = recover(factory, file_store, build)
+
+    assert [artifact_id for artifact_id, _ in report.skipped] == [reserved.id]
+    assert load(reserved.id).state == "PENDING"
+
+
+def test_a_staging_file_that_cannot_be_removed_is_reported_not_fatal(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, db_session: Session,
+    build: ModelFactory, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    reserved = reserve_managed_artifact(
+        db_session, "SOURCE_ORIGINAL", new_id=build.new_id, clock=build.clock
+    )
+    db_session.commit()
+    assert reserved.storage_key is not None
+    staged = file_store.staging_path(reserved.storage_key)
+    staged.write_bytes(DATA[:10])
+
+    with staged.open("rb"):  # an open handle: Windows refuses to delete the file
+        report = recover(factory, file_store, build)
+
+    assert report.write_not_completed == [reserved.id]
+    assert report.staging_left == [staged.name]
+    assert load(reserved.id).state == "MISSING"
+
+    assert recover(factory, file_store, build).staging_left == [staged.name]  # still unowned now
+    staged.unlink()
+
+
+def test_a_failed_available_commit_leaves_pending_bytes_that_recovery_finalizes(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, build: ModelFactory,
+    load: Callable[[uuid.UUID], Artifact], monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """A known ceiling: when the last commit fails (e.g. "database is locked"), the artifact is
+    finished at the next start even though its caller saw a failure and may never reference it.
+    Finding such unreferenced artifacts belongs with conservative cleanup (TST-025 remaining)."""
+
+    def locked(*_: object, **__: object) -> None:
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(artifact_storage, "mark_artifact_available", locked)
+    with pytest.raises(OSError, match="locked"):
+        create(factory, file_store, build)
+    monkeypatch.undo()
+    with factory() as session:
+        artifact_id = session.query(Artifact).one().id
+    assert load(artifact_id).state == "PENDING"
+
+    assert recover(factory, file_store, build).finalized == [artifact_id]
+    assert load(artifact_id).state == "AVAILABLE"
 
 
 # --- integrity and the consistency scan ----------------------------------------------------------
@@ -467,7 +558,7 @@ def test_scan_reports_missing_orphan_and_stray_files_and_changes_nothing(
     file_store.roots.path_for(lost_key).unlink()  # deleted behind the application's back
     orphan = file_store.roots.library_root / "crops" / "stray-crop"
     orphan.write_bytes(b"no artifact row owns this")
-    file_store.staging_path("half-written").write_bytes(b"x")
+    (file_store.roots.staging / "half-written.part").write_bytes(b"x")
 
     with factory() as session:
         scan = scan_storage(session, file_store)
@@ -475,9 +566,24 @@ def test_scan_reports_missing_orphan_and_stray_files_and_changes_nothing(
     assert scan.missing == [lost]
     assert scan.orphans == ["crops/stray-crop"]
     assert scan.stray_staging == ["half-written.part"]
+    assert scan.unsafe_keys == []
     assert not scan.clean
     # Report only: the row, the orphan and the staging file are all untouched.
     assert load(lost).state == "AVAILABLE"
     assert load(kept).state == "AVAILABLE"
     assert orphan.exists()
     assert file_store.staging_files() != []
+
+
+def test_scan_reports_an_unusable_key_instead_of_failing(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, db_session: Session,
+    build: ModelFactory,
+) -> None:  # fmt: skip
+    tampered = build.artifact(storage_key="originals/../../escape")
+    db_session.commit()
+
+    with factory() as session:
+        scan = scan_storage(session, file_store)
+
+    assert scan.unsafe_keys == [tampered.id]
+    assert not scan.clean
