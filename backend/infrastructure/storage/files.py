@@ -13,7 +13,7 @@ import hashlib
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import BinaryIO
 
 from backend.infrastructure.storage.layout import MANAGED_DIRECTORIES, StorageRoots
@@ -49,23 +49,27 @@ class ManagedFileStore:
     def __init__(self, roots: StorageRoots) -> None:
         self.roots = roots
 
-    def staging_path(self, staging_name: str) -> Path:
-        return self.roots.staging / f"{staging_name}{STAGING_SUFFIX}"
+    def staging_path(self, storage_key: str) -> Path:
+        """Where an in-flight write for `storage_key` lives: `staging/<artifact id hex>.part`.
 
-    def store(self, storage_key: str, source: BinaryIO, *, staging_name: str) -> StoredBytes:
+        Derived from the key (whose last part is the artifact id), so startup recovery can find
+        what an interrupted write for a given artifact left behind.
+        """
+        return self.roots.staging / f"{PurePosixPath(storage_key).name}{STAGING_SUFFIX}"
+
+    def store(self, storage_key: str, source: BinaryIO) -> StoredBytes:
         """Write `source` to `storage_key` atomically and return its hash and size.
 
-        `staging_name` names the in-flight `.part` file (callers use the artifact id), so startup
-        recovery can find what an interrupted write left behind. Storing identical bytes to a key
-        that already holds them is a no-op, which makes a retried finalization safe.
+        Storing identical bytes to a key that already holds them is a no-op, which makes a retried
+        finalization safe; different bytes are refused (`ExistingContentError`).
         """
         final = self.roots.path_for(storage_key)
-        staged = self.staging_path(staging_name)
+        staged = self.staging_path(storage_key)
         try:
             digest = hashlib.sha256()
             size = 0
-            # "wb", not "xb": the name is the caller's own (its artifact id), so a leftover .part
-            # from an earlier crash of the same write is ours to overwrite.
+            # "wb", not "xb": the name is this artifact's own, so a leftover .part from an earlier
+            # crash of the same write is ours to overwrite.
             with staged.open("wb") as out:
                 while chunk := source.read(CHUNK_SIZE):
                     out.write(chunk)
@@ -75,15 +79,18 @@ class ManagedFileStore:
                 os.fsync(out.fileno())
             stored = StoredBytes(digest.digest(), size)
 
-            if final.exists():
-                if self.digest(storage_key) != stored:
-                    raise ExistingContentError(f"different content already at {storage_key!r}")
-                staged.unlink()
-                return stored
             final.parent.mkdir(parents=True, exist_ok=True)
-            # ponytail: os.replace is atomic on NTFS but not write-through; a power cut just after
-            # it can lose the rename (never tear the file). Use MoveFileEx(WRITE_THROUGH) if needed.
-            os.replace(staged, final)
+            try:
+                # os.rename, not os.replace: on Windows (the only supported platform) it refuses an
+                # existing destination atomically, so "never overwrite" is not a check-then-act.
+                # ponytail: atomic on NTFS but not write-through; a power cut just after it can
+                # lose the rename (never tear the file). Use MoveFileEx(WRITE_THROUGH) if needed.
+                os.rename(staged, final)
+            except FileExistsError:
+                if self.digest(storage_key) != stored:
+                    raise ExistingContentError(
+                        f"different content already at {storage_key!r}"
+                    ) from None
             return stored
         finally:
             staged.unlink(missing_ok=True)
