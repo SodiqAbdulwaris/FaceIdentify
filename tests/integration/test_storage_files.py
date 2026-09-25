@@ -8,6 +8,7 @@ import hashlib
 import io
 import os
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import BinaryIO, cast
@@ -59,7 +60,7 @@ def new_key(directory: str = "originals") -> str:
 
 def _link_directory(link: Path, target: Path) -> None:
     """A directory link: a junction on Windows (no privilege needed), a symlink elsewhere."""
-    if os.name == "nt":
+    if sys.platform == "win32":  # not os.name: mypy narrows on sys.platform, e.g. in Linux CI
         import _winapi
 
         _winapi.CreateJunction(str(target), str(link))
