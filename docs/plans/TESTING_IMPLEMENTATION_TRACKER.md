@@ -136,9 +136,9 @@ complete: TST-011 through TST-020 all `PASSING`.
 
 **Milestone gate:** Representative identity and observation records can be committed, retrieved and recovered without violating authoritative-state invariants.
 
-### M2 status (2026-09-24)
+### M2 status (2026-09-25)
 
-Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 286 passed, 0 skipped, 0
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 288 passed, 0 skipped, 0
 warnings, `backend/` coverage 100%. Remote CI observed green on PR #11. Only part of M2 has been
 started.
 
@@ -146,7 +146,7 @@ started.
 |---|---|---|
 | TST-032 | `IN_PROGRESS` | `backend/alembic/` with revision `0001_initial_schema`; `tests/integration/test_migrations.py`: a fresh upgrade produces exactly the models' tables, indexes (including partial-index `WHERE` clauses), columns and named CHECK/FK/UNIQUE constraints; `alembic check` reports no drift; head is a single linear chain; upgrade is idempotent; downgrade removes every table and round-trips; a failed migration leaves an existing database untouched (no partial schema, data intact); offline `--sql` works. Every other persistence test also runs on the migrated schema. **Remaining:** "supported populated schemas migrate correctly" needs a second revision to migrate *from* `0001` |
 | TST-021 | `PASSING` | Pragmas (`foreign_keys`, WAL, `synchronous`, `busy_timeout`, `temp_store`) and per-connection FK enforcement: `test_persistence_fixtures.py`; required constraints: `test_schema_contract.py`, `test_core_models.py`; WAL *behaviour*: `test_sqlite_wal_behaviour.py` (WAL persisted in the file itself, a reader is not blocked by an open write transaction, a second writer is refused while the lock is held, and a reader-turned-writer fails immediately once another writer has committed — see CONTEXT open question 20) |
-| TST-023 | `PASSING` | `tests/integration/test_transaction_rollback.py`: for each of the 7 multi-row use cases (assign representation, activate, merge, split, correct/remove a Person link, rename), a fault is injected at *every* SQL statement it sends (49 points, 26 of them writes); after the caller's rollback the same session commits, and every row of every table is unchanged. Also: closing the session without committing discards a successful use case's writes, and a merge that flushed before its stale-revision check commits nothing. Mutation-checked: a use case committing mid-way is caught in all four places it was injected |
+| TST-023 | `PASSING` | `tests/integration/test_transaction_rollback.py`: for 8 use-case paths (assign a representation as CREATED and as MATCHED, activate, merge, split, correct/remove a Person link, rename), a fault is injected at *every* SQL statement each sends (59 points, 32 of them writes; a final unfaulted run must send exactly the same statements); after the caller's rollback the same session commits, and every row of every table is unchanged. Also: closing the session without committing discards a successful use case's writes, and a merge that flushed before its stale-revision check commits nothing. Mutation-checked: a use case committing mid-way is caught in all four places it was injected. See CONTEXT open question 21 on `ann_key` reuse after rollback |
 | TST-024 | `PASSING` | `tests/concurrency/test_optimistic_concurrency.py`: with separate sessions, a stale rename, activation and merge are each rejected and change nothing; with simultaneous threads (5 rounds each) exactly one rename lands (revision bumped once, never per writer), exactly one activation, and exactly one merge of a shared loser (with its Person link carried over once). Mutation-checked, and stable over 25 repeated runs. Only Person and Identity have revision-guarded use cases so far |
 | TST-022, 025 to 031 | `PLANNED` | Not started |
 

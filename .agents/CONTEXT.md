@@ -172,6 +172,21 @@ Unresolved items need the user's decision. Do not settle them silently.
     unit-of-work / API layer is designed; until then callers of use cases must treat an
     `OperationalError` whose message says the database is locked or busy as retryable (other
     `OperationalError`s, such as I/O errors, are not).
+21. **Open: when `ann_key` is allocated, and whether a rolled-back key may be reused.** Two spec
+    passages pull apart. Persistence §6.3 allocates "in the same short transaction that creates
+    representations... keys are never reused", and the run-local pending index (§23, "Recognition
+    searches global active vectors plus a run-local pending index... ANN output is only candidate
+    `ann_key` values") implies PENDING representations carry keys. But the §6.2 column table says
+    `ann_key` is "required while ANN-eligible", and the code (PR #6) allocates only when a
+    representation is assigned and becomes ACTIVE; PENDING representations have none. Separately,
+    because allocation is inside the transaction, a rolled-back allocation is handed out again
+    (TST-023 pins that). That is harmless while only committed keys are ever indexed (INDEX-01),
+    but a run-local index holding a key from a transaction that then rolled back could later return
+    that key for a *different* representation, and revalidation (space, state, identity,
+    eligibility) would not notice. **Recommendation:** keep allocation at ANN-eligibility time as
+    now, change §6.3 to say so, and give the run-local pending index its own ephemeral labels
+    (e.g. a per-run integer mapped to `representation_id`) so it never depends on `ann_key`.
+    Decide before the processing pipeline (M3) builds the run-local index.
 
 ## M1 delivery (complete)
 
