@@ -198,6 +198,13 @@ Unresolved items need the user's decision. Do not settle them silently.
     `%LOCALAPPDATA%` for derived data). Managed writes stage in `<Library Root>/staging/` so the
     final rename stays on one volume. Persistence §1 and architecture §16.3 (and its `recycle/`
     directory, which contradicted "recycling never moves bytes") were aligned.
+23. **Open: a library opened by two processes at once.** `recover_artifacts` (PR #14) assumes no
+    other process uses the library: single-instance per machine is specified for the desktop shell
+    (tech-stack §2, not built yet), but a library on a shared or removable drive could be opened from
+    two machines. Recovery now deletes only staging files it owns, but it would still mark another
+    live writer's PENDING artifact MISSING. **Recommendation:** the backend takes an exclusive lock
+    on a file in the library (e.g. `<Library>/database/.lock`) for its whole lifetime and refuses to
+    start without it, before migrations and recovery. Decide with the startup/lifespan work.
 
 ## M1 delivery (complete)
 
