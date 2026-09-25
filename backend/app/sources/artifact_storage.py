@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, BinaryIO, cast
 
 from sqlalchemy import CursorResult, select, update
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.sources.models import Artifact, ArtifactKind, ArtifactState, StorageMode
 from backend.infrastructure.storage.files import ManagedFileStore, StoredBytes
+from backend.infrastructure.storage.layout import UnsafeStorageKeyError
 
 KIND_DIRECTORIES = {
     ArtifactKind.SOURCE_ORIGINAL: "originals",
@@ -173,7 +175,7 @@ def create_managed_artifact(
     assert storage_key is not None  # set by reserve_managed_artifact
 
     try:
-        stored = store.store(storage_key, source, staging_name=artifact_id.hex)
+        stored = store.store(storage_key, source)
     except Exception as error:
         with session_factory() as session:
             _mark_write_not_completed(session, artifact_id, f"{type(error).__name__}: {error}")
@@ -293,6 +295,10 @@ class RecoveryReport:
     deleted: list[uuid.UUID] = field(default_factory=list)
     delete_failed: list[uuid.UUID] = field(default_factory=list)
     staging_removed: list[str] = field(default_factory=list)
+    # Rows left untouched because a file could not be read or a key is unusable; retried next start.
+    skipped: list[tuple[uuid.UUID, str]] = field(default_factory=list)
+    # Staging files recovery does not own (no PENDING artifact of its own), or could not remove.
+    staging_left: list[str] = field(default_factory=list)
 
 
 def _managed_in(session: Session, states: Collection[str]) -> list[tuple[uuid.UUID, str]]:
@@ -304,6 +310,10 @@ def _managed_in(session: Session, states: Collection[str]) -> list[tuple[uuid.UU
     return [(row.id, cast("str", row.storage_key)) for row in rows]
 
 
+def _describe(error: BaseException) -> str:
+    return f"{type(error).__name__}: {error}"
+
+
 def recover_artifacts(
     session_factory: sessionmaker[Session],
     store: ManagedFileStore,
@@ -312,19 +322,30 @@ def recover_artifacts(
 ) -> RecoveryReport:
     """Settle every interrupted managed write and deletion (PERSISTENCE_IMPLEMENTATION.md §28).
 
-    Must run at startup, before anything can write managed bytes: it treats every PENDING artifact
-    and every staging file as belonging to a process that no longer exists. Idempotent: running it
-    again after another crash, at any point, repeats nothing that already completed.
+    Precondition: runs at startup, before this process writes managed bytes, and with no other
+    process using the library (single-instance is the desktop shell's job, tech-stack.md §2; a
+    library shared between machines is CONTEXT open question 23). Under it, every PENDING artifact
+    belongs to a process that no longer exists.
+
+    Idempotent, and tolerant: one unreadable file or unusable key is reported in `skipped` and left
+    for the next start instead of aborting recovery. Only the staging files of the PENDING artifacts
+    it settles are removed ("clean owned temp data", §28); any other is reported, not deleted.
     """
     report = RecoveryReport()
     with session_factory() as session:
         pending = _managed_in(session, {ArtifactState.PENDING})
         deleting = _managed_in(session, {ArtifactState.DELETING, ArtifactState.DELETE_FAILED})
 
+    owned_staging: set[Path] = set()
     for artifact_id, storage_key in pending:
         # A file at the final key is complete by construction: only a finished, fsynced write is
         # ever renamed there. The lost step was the AVAILABLE commit, so hash it and finish it.
-        stored = store.digest(storage_key)
+        try:
+            stored = store.digest(storage_key)
+            staged = store.staging_path(storage_key)
+        except (OSError, UnsafeStorageKeyError) as error:
+            report.skipped.append((artifact_id, _describe(error)))
+            continue
         with session_factory() as session:
             if stored is not None:
                 mark_artifact_available(session, artifact_id, stored, clock=clock)
@@ -333,13 +354,17 @@ def recover_artifacts(
                 _mark_write_not_completed(session, artifact_id, "interrupted before finalization")
                 report.write_not_completed.append(artifact_id)
             session.commit()
+        owned_staging.add(staged)
 
     for artifact_id, storage_key in deleting:
         try:
             store.delete(storage_key)
+        except UnsafeStorageKeyError as error:
+            report.skipped.append((artifact_id, _describe(error)))
+            continue
         except OSError as error:
             with session_factory() as session:
-                _record_delete_failure(session, artifact_id, f"{type(error).__name__}: {error}")
+                _record_delete_failure(session, artifact_id, _describe(error))
                 session.commit()
             report.delete_failed.append(artifact_id)
             continue
@@ -349,7 +374,14 @@ def recover_artifacts(
         report.deleted.append(artifact_id)
 
     for staged in store.staging_files():
-        staged.unlink(missing_ok=True)
+        if staged not in owned_staging:
+            report.staging_left.append(staged.name)
+            continue
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            report.staging_left.append(staged.name)
+            continue
         report.staging_removed.append(staged.name)
     return report
 
@@ -361,15 +393,17 @@ class StorageScan:
     missing: list[uuid.UUID]
     orphans: list[str]
     stray_staging: list[str]
+    unsafe_keys: list[uuid.UUID]
 
     @property
     def clean(self) -> bool:
-        return not (self.missing or self.orphans or self.stray_staging)
+        return not (self.missing or self.orphans or self.stray_staging or self.unsafe_keys)
 
 
 def scan_storage(session: Session, store: ManagedFileStore) -> StorageScan:
-    """AVAILABLE managed artifacts with no file, files no live artifact owns, and leftover
-    staging files (processing-architecture-v1.md §19). Existence only; `verify_artifact` hashes."""
+    """AVAILABLE managed artifacts with no file, files no live artifact owns, leftover staging
+    files, and rows whose key is unusable (processing-architecture-v1.md §19). Existence only;
+    `verify_artifact` hashes."""
     rows = session.execute(
         select(Artifact.id, Artifact.state, Artifact.storage_key).where(
             Artifact.storage_mode == StorageMode.MANAGED,
@@ -377,12 +411,16 @@ def scan_storage(session: Session, store: ManagedFileStore) -> StorageScan:
         )
     ).all()
     owned = {cast("str", row.storage_key) for row in rows}
-    missing = [
-        row.id
-        for row in rows
-        if row.state == ArtifactState.AVAILABLE
-        and not store.roots.path_for(cast("str", row.storage_key)).is_file()
-    ]
+    missing: list[uuid.UUID] = []
+    unsafe: list[uuid.UUID] = []
+    for row in rows:
+        try:
+            path = store.roots.path_for(cast("str", row.storage_key))
+        except UnsafeStorageKeyError:
+            unsafe.append(row.id)
+            continue
+        if row.state == ArtifactState.AVAILABLE and not path.is_file():
+            missing.append(row.id)
     orphans = [key for key in store.managed_files() if key not in owned]
     stray = [path.name for path in store.staging_files()]
-    return StorageScan(sorted(missing), orphans, stray)
+    return StorageScan(sorted(missing), orphans, stray, sorted(unsafe))
