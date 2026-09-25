@@ -314,6 +314,29 @@ def _describe(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+def _settled_staging_owners(
+    session_factory: sessionmaker[Session], staging_files: list[Path]
+) -> set[Path]:
+    """The staging files named after a managed artifact whose write is settled (not PENDING)."""
+    by_id: dict[uuid.UUID, Path] = {}
+    for path in staging_files:
+        try:
+            by_id[uuid.UUID(hex=path.stem)] = path
+        except ValueError:
+            continue  # not named by this application: never ours to delete
+    if not by_id:
+        return set()
+    with session_factory() as session:
+        settled = session.scalars(
+            select(Artifact.id).where(
+                Artifact.id.in_(by_id),
+                Artifact.storage_mode == StorageMode.MANAGED,
+                Artifact.state != ArtifactState.PENDING,
+            )
+        ).all()
+    return {by_id[artifact_id] for artifact_id in settled}
+
+
 def recover_artifacts(
     session_factory: sessionmaker[Session],
     store: ManagedFileStore,
@@ -328,21 +351,20 @@ def recover_artifacts(
     belongs to a process that no longer exists.
 
     Idempotent, and tolerant: one unreadable file or unusable key is reported in `skipped` and left
-    for the next start instead of aborting recovery. Only the staging files of the PENDING artifacts
-    it settles are removed ("clean owned temp data", §28); any other is reported, not deleted.
+    for the next start instead of aborting recovery. A staging file is removed only when it belongs
+    to a managed artifact that is no longer PENDING ("clean owned temp data", §28): its write is
+    settled and its id is never reused. Any other staging file is reported, not deleted.
     """
     report = RecoveryReport()
     with session_factory() as session:
         pending = _managed_in(session, {ArtifactState.PENDING})
         deleting = _managed_in(session, {ArtifactState.DELETING, ArtifactState.DELETE_FAILED})
 
-    owned_staging: set[Path] = set()
     for artifact_id, storage_key in pending:
         # A file at the final key is complete by construction: only a finished, fsynced write is
         # ever renamed there. The lost step was the AVAILABLE commit, so hash it and finish it.
         try:
             stored = store.digest(storage_key)
-            staged = store.staging_path(storage_key)
         except (OSError, UnsafeStorageKeyError) as error:
             report.skipped.append((artifact_id, _describe(error)))
             continue
@@ -354,7 +376,6 @@ def recover_artifacts(
                 _mark_write_not_completed(session, artifact_id, "interrupted before finalization")
                 report.write_not_completed.append(artifact_id)
             session.commit()
-        owned_staging.add(staged)
 
     for artifact_id, storage_key in deleting:
         try:
@@ -373,8 +394,9 @@ def recover_artifacts(
             session.commit()
         report.deleted.append(artifact_id)
 
+    settled = _settled_staging_owners(session_factory, store.staging_files())
     for staged in store.staging_files():
-        if staged not in owned_staging:
+        if staged not in settled:
             report.staging_left.append(staged.name)
             continue
         try:

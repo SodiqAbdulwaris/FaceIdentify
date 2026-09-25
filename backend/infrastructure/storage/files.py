@@ -9,6 +9,7 @@ onto its final key (API and Contracts.md §55: "Never write directly to final de
 at a final path is therefore always complete; a `.part` file never is.
 """
 
+import contextlib
 import hashlib
 import os
 from collections.abc import Iterator
@@ -93,7 +94,10 @@ class ManagedFileStore:
                     ) from None
             return stored
         finally:
-            staged.unlink(missing_ok=True)
+            # A locked staging file must not replace the error that actually happened; recovery
+            # removes it once its artifact is settled.
+            with contextlib.suppress(OSError):
+                staged.unlink(missing_ok=True)
 
     def open(self, storage_key: str) -> BinaryIO:
         path = self.roots.path_for(storage_key)

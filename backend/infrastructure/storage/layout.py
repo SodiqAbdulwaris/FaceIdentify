@@ -73,7 +73,11 @@ class StorageRoots:
         path = self.library_root / directory / name
         # The managed directory itself could be a junction or symlink; the resolved file must
         # still sit in the real `<library>/<directory>`, not merely somewhere in the library.
-        if path.resolve().parent != self.library_root.resolve() / directory:
+        try:
+            escaped = path.resolve().parent != self.library_root.resolve() / directory
+        except (OSError, RuntimeError) as error:  # RuntimeError: a junction/symlink loop
+            raise UnsafeStorageKeyError(f"cannot resolve {storage_key!r}: {error}") from error
+        if escaped:
             raise UnsafeStorageKeyError(f"storage key escapes its directory: {storage_key!r}")
         return path
 
