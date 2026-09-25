@@ -126,7 +126,10 @@ def _raise_activation_conflict(
 
 
 def allocate_ann_key(session: Session, representation_space_id: uuid.UUID) -> int:
-    """Allocate the next positive ANN key for a space (§6.3). Guarded, race-safe, never reused.
+    """Allocate the next positive ANN key for a space (§6.3). Guarded and race-safe.
+
+    Allocation happens inside the caller's transaction, so a committed key is never handed out
+    again, but a rolled-back allocation is (see `.agents/CONTEXT.md` open question 21).
 
     The sequence row is created lazily on first allocation: no spec text assigns that
     responsibility elsewhere, and RepresentationSpace creation (PR #4) does not create it.
