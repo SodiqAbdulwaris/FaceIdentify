@@ -3,13 +3,14 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-24 (PR #12)_
+_Last updated: 2026-09-25 (PR #13)_
 
 ## Current state
 
 - **Milestone:** M0 and M1 (domain integrity) are complete and merged. M2 (persistence) has
   started: Alembic and the initial migration (TST-032, in progress), SQLite WAL behaviour
-  (TST-021) and optimistic concurrency (TST-024) are done; TST-022, 023 and 025 to 031 are next.
+  (TST-021), use-case transaction rollback (TST-023) and optimistic concurrency (TST-024) are done;
+  TST-022 and 025 to 031 are next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
@@ -202,10 +203,11 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 2. ~~SQLite WAL behaviour and optimistic concurrency~~ Done (PR #12): TST-021
    (`tests/integration/test_sqlite_wal_behaviour.py`) and TST-024
    (`tests/concurrency/test_optimistic_concurrency.py`).
-3. The rest of M2 in `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`: TST-022 (repository
-   contract), TST-023 (use-case transaction rollback: next), TST-025 to TST-031 (Storage Manager,
-   artifact finalization, USearch integration, IndexOperation replay, cross-storage failure,
-   startup recovery, deletion).
+3. ~~Use-case transaction rollback~~ Done (PR #13): TST-023
+   (`tests/integration/test_transaction_rollback.py`).
+4. The rest of M2 in `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`: TST-022 (repository
+   contract), TST-025 to TST-031 (Storage Manager, artifact finalization, USearch integration,
+   IndexOperation replay, cross-storage failure, startup recovery, deletion).
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
 plain string, listed as an open question. Every schema change is now a reviewed Alembic revision
