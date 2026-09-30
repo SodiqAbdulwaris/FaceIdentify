@@ -1,4 +1,4 @@
-"""Storage usage: what the library holds, what a Recycle Bin purge would free, and what is left.
+"""Storage usage: what the library holds, how much of it belongs to the Recycle Bin, what is left.
 
 processing-architecture-v1.md §11: "Storage Manager monitors free disk space and managed-storage
 usage... The user may free space, manage the Recycle Bin, remove media". This module only
@@ -35,27 +35,52 @@ class KindUsage:
 class StorageUsage:
     managed: list[KindUsage]  # AVAILABLE managed artifacts, by kind
     managed_bytes: int
-    recycled_bytes: int  # the part of `managed_bytes` held by Sources in the Recycle Bin
+    # The part of `managed_bytes` associated with Sources in the Recycle Bin (their originals and
+    # thumbnails, each once). An artifact another row also references is included, so this is an
+    # upper bound on what purging the bin frees: which bytes are freed is permanent deletion's
+    # rule (TST-031), not something a report can know.
+    recycled_bytes: int
     referenced_artifacts: int  # external originals: the user's, not ours to free
-    referenced_bytes: int
+    referenced_bytes: int  # only those whose size is known
+    referenced_size_unknown: int  # AVAILABLE referenced artifacts with no recorded size
     workspace_bytes: int  # machine-local scratch space, reclaimable by cleanup
+    workspace_unreadable: int  # workspace directories that could not be listed, so undercounted
     volume_total_bytes: int  # the volume the library lives on
     volume_free_bytes: int
 
 
-def directory_bytes(path: Path) -> int:
-    """Total size of the regular files under `path`. A link, junction or other reparse point is not
-    entered (`os.walk` would still descend into a Windows junction), so the total never counts
-    bytes the directory merely points at."""
-    total = 0
-    with os.scandir(path) as entries:
-        for entry in entries:
-            entry_path = Path(entry.path)
-            if entry.is_file(follow_symlinks=False):
-                total += entry.stat(follow_symlinks=False).st_size
-            elif is_plain_directory(entry_path):
-                total += directory_bytes(entry_path)
-    return total
+@dataclass(frozen=True)
+class Measured:
+    bytes: int
+    unreadable: int  # directories that could not be listed; what they hold is not in `bytes`
+
+
+def measure_directory(path: Path) -> Measured:
+    """Total size of the regular files under `path`.
+
+    A link, junction or other reparse point is not entered (`os.walk` would still descend into a
+    Windows junction), so the total never counts bytes the directory merely points at. The walk is
+    iterative, so depth cannot exhaust the stack. A directory that vanishes mid-walk (a job
+    finishing) is simply absent; one that cannot be listed (denied) is counted in `unreadable`
+    instead of crashing the report or being silently forgotten. (A file's size comes from the
+    listing itself, so a file vanishing mid-walk cannot fail here.)
+    """
+    total = unreadable = 0
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    if entry.is_file(follow_symlinks=False):
+                        total += entry.stat(follow_symlinks=False).st_size
+                    elif is_plain_directory(Path(entry.path)):
+                        pending.append(Path(entry.path))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            unreadable += 1
+    return Measured(total, unreadable)
 
 
 def storage_usage(
@@ -89,12 +114,19 @@ def storage_usage(
         )
     )
 
-    referenced_count, referenced_bytes = session.execute(
-        select(func.count(), func.coalesce(func.sum(Artifact.size_bytes), 0)).where(
+    # count(size_bytes) counts only the known sizes, so the difference is the unknown ones.
+    referenced_count, referenced_known, referenced_bytes = session.execute(
+        select(
+            func.count(), func.count(Artifact.size_bytes),
+            func.coalesce(func.sum(Artifact.size_bytes), 0),
+        ).where(
             Artifact.storage_mode == StorageMode.REFERENCED,
             Artifact.state == ArtifactState.AVAILABLE,
         )
-    ).one()
+    ).one()  # fmt: skip
+
+    # Only workspaces this manager made (marked, real directories), not whatever else is there.
+    measured = [measure_directory(workspaces.path_for(job)) for job in workspaces.existing()]
 
     volume = shutil.disk_usage(roots.library_root)
     return StorageUsage(
@@ -103,7 +135,9 @@ def storage_usage(
         recycled_bytes=int(recycled_bytes or 0),
         referenced_artifacts=referenced_count,
         referenced_bytes=int(referenced_bytes),
-        workspace_bytes=directory_bytes(workspaces.root) if workspaces.root.is_dir() else 0,
+        referenced_size_unknown=referenced_count - referenced_known,
+        workspace_bytes=sum(m.bytes for m in measured),
+        workspace_unreadable=sum(m.unreadable for m in measured),
         volume_total_bytes=volume.total,
         volume_free_bytes=volume.free,
     )
