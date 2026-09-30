@@ -40,7 +40,7 @@ _Last updated: 2026-09-30 (source recycle and restore)_
   workspaces under machine-local `temp/jobs/<job id>/`: allocate, release, and remove orphans given
   the live job ids; deletes only marked directories it made, never follows a link), and `backend/app/sources/lifecycle.py` (`recycle_source` /
   `restore_source`: revision-guarded `ACTIVE` ⇄ `RECYCLED` changes that touch only the `sources`
-  row; a restore is refused once the original's bytes are gone). Tests
+  row; neither move is made once permanent deletion of the original has begun). Tests
   build rows with the shared `build` factory and
   assert constraints with `tests/fixtures/constraints.py`. The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
