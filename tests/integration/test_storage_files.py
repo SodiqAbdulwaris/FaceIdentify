@@ -8,7 +8,6 @@ import hashlib
 import io
 import os
 import subprocess
-import sys
 import uuid
 from pathlib import Path
 from typing import BinaryIO, cast
@@ -28,6 +27,7 @@ from backend.infrastructure.storage.layout import (
     StorageRoots,
     UnsafeStorageKeyError,
 )
+from tests.fixtures.links import link_directory
 from tests.fixtures.persistence import AppDirs
 
 HEX = "0123456789abcdef0123456789abcdef"
@@ -56,16 +56,6 @@ def expected(data: bytes) -> StoredBytes:
 
 def new_key(directory: str = "originals") -> str:
     return f"{directory}/{uuid.uuid4().hex}"
-
-
-def _link_directory(link: Path, target: Path) -> None:
-    """A directory link: a junction on Windows (no privilege needed), a symlink elsewhere."""
-    if sys.platform == "win32":  # not os.name: mypy narrows on sys.platform, e.g. in Linux CI
-        import _winapi
-
-        _winapi.CreateJunction(str(target), str(link))
-    else:  # pragma: no cover - the suite runs on Windows
-        link.symlink_to(target, target_is_directory=True)
 
 
 # --- layout ------------------------------------------------------------------------------------
@@ -150,7 +140,7 @@ def test_a_managed_directory_redirected_by_a_junction_is_refused(
     somewhere else inside the library (here: the database directory)."""
     crops = storage_roots.library_root / "crops"
     crops.rmdir()
-    _link_directory(crops, storage_roots.library_root / "database")
+    link_directory(crops, storage_roots.library_root / "database")
     (storage_roots.library_root / "database" / HEX).write_bytes(b"not a crop")
 
     with pytest.raises(UnsafeStorageKeyError, match="escapes"):
@@ -162,7 +152,7 @@ def test_a_file_linked_out_of_its_directory_is_refused(
 ) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
-    _link_directory(storage_roots.library_root / "originals" / HEX, outside)
+    link_directory(storage_roots.library_root / "originals" / HEX, outside)
 
     with pytest.raises(UnsafeStorageKeyError, match="escapes"):
         storage_roots.path_for(f"originals/{HEX}")
@@ -174,7 +164,7 @@ def test_a_link_loop_is_an_unusable_key_not_a_crash(storage_roots: StorageRoots)
     other = "b" * 32
     first, second = (storage_roots.library_root / "originals" / n for n in (HEX, other))
     second.mkdir()
-    _link_directory(first, second)
+    link_directory(first, second)
     second.rmdir()
     subprocess.run(["cmd", "/c", "mklink", "/J", str(second), str(first)], check=True,
                    capture_output=True)  # fmt: skip
