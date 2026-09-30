@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-30 (index coordinator)_
+_Last updated: 2026-09-30 (startup recovery)_
 
 ## Current state
 
@@ -12,8 +12,9 @@ _Last updated: 2026-09-30 (index coordinator)_
   (TST-021), use-case transaction rollback (TST-023), optimistic concurrency (TST-024), managed
   artifact finalization (TST-026) and the Storage Manager (TST-025: managed core, referenced
   artifacts, relinking, temporary workspaces, Source recycle/restore, conservative cleanup and
-  storage usage) the per-space USearch index (TST-027) and the IndexCoordinator that replays
-  `IndexOperation`s into it (TST-028) are done; TST-022 and 029 to 031 are next.
+  storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
+  `IndexOperation`s into it (TST-028) are done; startup recovery (TST-030) is partly done (see
+  open question 26); TST-022, 029 and 031 are next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
@@ -65,7 +66,11 @@ _Last updated: 2026-09-30 (index coordinator)_
   desired state, persists one index generation and only then marks the operations `APPLIED`; the
   retry limit and backoff are caller-supplied, a rebuild skips and reports a corrupt vector,
   eligibility needs an ACTIVE identity, and an erased representation's vector is guaranteed gone
-  by a rebuild (open question 25). The remaining backend
+  by a rebuild (open question 25). `backend/app/recovery/startup.py` is startup recovery:
+  `recover_on_startup` settles artifacts and missing referenced originals (existence only), marks
+  `RUNNING` jobs, runs and segments `INTERRUPTED`, removes workspaces of finished jobs, validates
+  every active space's index and catches up pending `IndexOperation`s in bounded passes; idempotent,
+  and survives a crash after any step. Nothing calls it yet (no application lifespan). The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
   source-import use case and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
@@ -260,6 +265,19 @@ Unresolved items need the user's decision. Do not settle them silently.
     batch its erasures into one rebuild. **Recommendation:** (a) for single erasures with (c) for bulk
     forget. Also undecided: how long *quarantined* index generations, which may hold a vector from
     before an erasure, are kept. Decide with TST-031 (deletion).
+26. **Open: startup recovery of a run or job that was not plainly `RUNNING`.** Recovery marks
+    `RUNNING` work `INTERRUPTED` (architecture §23.2) and leaves everything else exactly as found.
+    Undecided, and needing the run lifecycle of M3: **`PAUSING`** (a pause was requested and the
+    worker died: `PAUSED`, since nothing runs, or `INTERRUPTED`, as for `RUNNING`), **`CANCELLING`**
+    (`CANCELLED`, since cancelling was the user's intent and its partial output stays private, or
+    `INTERRUPTED`), **`FINALIZING`** (a run with a final checkpoint that was not accepted: §28 says
+    revalidate and accept without redoing ML, which needs `AcceptProcessingRunUseCase`; meanwhile
+    it is left alone), a run with pending output and no final checkpoint ("resume from a supported
+    checkpoint or safely fail/not-resumable"), and an interrupted runtime installation ("verify
+    bytes/hash then finalize, remove partial managed bytes, or mark failed"). **Recommendation:**
+    `PAUSING` -> `PAUSED` and `CANCELLING` -> `CANCELLED` (finish the user's intent; nothing is
+    running), everything else decided with the M3 run lifecycle and the runtime installer. Jobs are
+    always `INTERRUPTED`, never requeued, because no spec defines when a requeue is safe.
 
 ## M1 delivery (complete)
 
@@ -298,8 +316,8 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    relinking, temporary workspaces, recycle/restore, conservative cleanup and storage usage (see
    above).
 6. The rest of M2: TST-022 (repository contract), ~~TST-027 (USearch integration)~~ done, ~~TST-028
-   (IndexOperation replay)~~ done, TST-029 (cross-storage failure), TST-030 (startup recovery beyond
-   artifacts), TST-031 (deletion).
+   (IndexOperation replay)~~ done, TST-029 (cross-storage failure), ~~TST-030 (startup recovery beyond
+   artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion).
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
 plain string, listed as an open question. Every schema change is now a reviewed Alembic revision
