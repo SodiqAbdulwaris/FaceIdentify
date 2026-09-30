@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-30 (source recycle and restore)_
+_Last updated: 2026-09-30 (conservative cleanup)_
 
 ## Current state
 
@@ -11,8 +11,8 @@ _Last updated: 2026-09-30 (source recycle and restore)_
   started: Alembic and the initial migration (TST-032, in progress), SQLite WAL behaviour
   (TST-021), use-case transaction rollback (TST-023), optimistic concurrency (TST-024), managed
   artifact finalization (TST-026), the Storage Manager's managed core, referenced artifacts, relinking and
-  temporary workspaces and Source recycle/restore (TST-025, in progress: usage and cleanup
-  remain) are done; TST-022 and 027 to 031 are next.
+  temporary workspaces, Source recycle/restore and conservative cleanup (TST-025, in progress:
+  storage usage remains) are done; TST-022 and 027 to 031 are next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
@@ -43,7 +43,11 @@ _Last updated: 2026-09-30 (source recycle and restore)_
   workspaces under machine-local `temp/jobs/<job id>/`: allocate, release, and remove orphans given
   the live job ids; deletes only marked directories it made, never follows a link), and `backend/app/sources/lifecycle.py` (`recycle_source` /
   `restore_source`: revision-guarded `ACTIVE` ⇄ `RECYCLED` changes that touch only the `sources`
-  row; neither move is made once permanent deletion of the original has begun). Tests
+  row; neither move is made once permanent deletion of the original has begun), and
+  `backend/app/sources/storage_cleanup.py` (deletes only `AVAILABLE` managed artifacts that no row
+  references, past a caller-supplied cutoff; the references are read from the schema in
+  `artifact_references.py`, and the check is part of the deletion-intent `UPDATE`; stray files are
+  reported, never deleted). Tests
   build rows with the shared `build` factory and
   assert constraints with `tests/fixtures/constraints.py`. The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
@@ -263,8 +267,8 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    (`tests/integration/test_transaction_rollback.py`).
 4. ~~Storage Manager, managed core~~ Done (PR #14): TST-026 passing, TST-025 in progress.
 5. Storage Manager follow-ups for TST-025: ~~referenced imports and missing-file detection for
-   referenced originals~~ relinking, temporary workspaces and recycle/restore (done, see above);
-   storage usage and conservative cleanup.
+   referenced originals~~ relinking, temporary workspaces, recycle/restore and conservative cleanup (done, see
+   above); storage usage.
 6. The rest of M2: TST-022 (repository contract), TST-027 (USearch integration), TST-028
    (IndexOperation replay), TST-029 (cross-storage failure), TST-030 (startup recovery beyond
    artifacts), TST-031 (deletion).
