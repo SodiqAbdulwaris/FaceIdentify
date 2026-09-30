@@ -13,15 +13,16 @@ because filesystem work must happen *between* transactions, never inside one (§
 """
 
 import uuid
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import ColumnElement, CursorResult, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from backend.app.sources.artifact_references import unreferenced_artifacts
 from backend.app.sources.models import Artifact, ArtifactKind, ArtifactState, StorageMode
 from backend.infrastructure.storage.files import ManagedFileStore, StoredBytes
 from backend.infrastructure.storage.layout import UnsafeStorageKeyError
@@ -65,8 +66,10 @@ def transition_artifact(
     values: dict[str, Any],
     *,
     storage_mode: str = StorageMode.MANAGED,
+    extra_where: Sequence[ColumnElement[bool]] = (),
 ) -> None:
-    """Move one artifact between states, guarded by its current state in the database."""
+    """Move one artifact between states, guarded by its current state in the database (and by
+    `extra_where`, evaluated there too)."""
     result = cast(
         "CursorResult[Any]",
         session.execute(
@@ -75,6 +78,7 @@ def transition_artifact(
                 Artifact.id == artifact_id,
                 Artifact.storage_mode == storage_mode,
                 Artifact.state.in_(from_states),
+                *extra_where,
             )
             .values(**values),
             execution_options={"synchronize_session": False},
@@ -196,15 +200,23 @@ DELETABLE_STATES = {ArtifactState.AVAILABLE, ArtifactState.MISSING, ArtifactStat
 
 
 def request_artifact_deletion(
-    session: Session, artifact_id: uuid.UUID, *, clock: Callable[[], datetime]
+    session: Session,
+    artifact_id: uuid.UUID,
+    *,
+    clock: Callable[[], datetime],
+    only_if_unreferenced: bool = False,
 ) -> None:
     """Step 1 of deletion: durable intent. Refuses REFERENCED artifacts: their bytes are the
-    user's, and this application never deletes them (API and Contracts.md §52)."""
+    user's, and this application never deletes them (API and Contracts.md §52).
+
+    `only_if_unreferenced` also requires, in the same UPDATE, that no row anywhere points at the
+    artifact, so one that became referenced after it was chosen for cleanup is left alone."""
     transition_artifact(
         session,
         artifact_id,
         DELETABLE_STATES,
         {"state": ArtifactState.DELETING, "delete_requested_at": clock()},
+        extra_where=[unreferenced_artifacts()] if only_if_unreferenced else (),
     )
 
 
@@ -249,12 +261,15 @@ def delete_managed_artifact(
     artifact_id: uuid.UUID,
     *,
     clock: Callable[[], datetime],
+    only_if_unreferenced: bool = False,
 ) -> None:
     """Intent, then bytes, then finalization. A filesystem failure leaves DELETE_FAILED (which
     recovery retries) and re-raises. Whether the artifact *should* be deleted is the caller's
     decision (API and Contracts.md §51)."""
     with session_factory() as session:
-        request_artifact_deletion(session, artifact_id, clock=clock)
+        request_artifact_deletion(
+            session, artifact_id, clock=clock, only_if_unreferenced=only_if_unreferenced
+        )
         storage_key = _storage_key(session, artifact_id)
         session.commit()
 
