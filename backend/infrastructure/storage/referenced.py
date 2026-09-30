@@ -41,6 +41,13 @@ def inspect_referenced_file(path: Path, roots: StorageRoots) -> ReferencedFile:
         for root in (roots.library_root, roots.local_state_root):
             if resolved.is_relative_to(root.resolve()):
                 raise ReferencedFileError(f"inside the application's own storage: {path}")
-        return ReferencedFile(resolved, digest_path(resolved))
+        before = resolved.stat()
+        stored = digest_path(resolved)
+        after = resolved.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise ReferencedFileError(f"{path} changed while it was being read")
+        # ponytail: the file can still change after this check and before the caller's commit;
+        # that is the same as changing any time later, which `reverify_referenced_artifact` finds.
+        return ReferencedFile(resolved, stored)
     except (OSError, RuntimeError) as error:  # RuntimeError: a symlink or junction loop
         raise ReferencedFileError(f"cannot read {path}: {error}") from error

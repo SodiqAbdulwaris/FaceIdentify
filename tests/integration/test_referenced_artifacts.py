@@ -6,6 +6,7 @@ never modifies, moves or deletes the external file.
 """
 
 import hashlib
+import os
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -27,7 +28,7 @@ from backend.app.sources.referenced_artifacts import (
 )
 from backend.infrastructure.db.engine import create_session_factory
 from backend.infrastructure.storage import referenced as referenced_module
-from backend.infrastructure.storage.files import digest_path
+from backend.infrastructure.storage.files import StoredBytes, digest_path
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.referenced import ReferencedFileError, inspect_referenced_file
 from tests.factories.models import ModelFactory
@@ -148,6 +149,40 @@ def test_a_link_loop_is_a_refusal_not_a_crash(storage_roots: StorageRoots, tmp_p
 
     with pytest.raises(ReferencedFileError, match="cannot read"):
         inspect_referenced_file(first / "holiday.jpg", storage_roots)
+
+
+@pytest.mark.parametrize("change", ["size-only", "mtime-only"])
+def test_a_file_that_changes_while_it_is_hashed_is_refused(
+    storage_roots: StorageRoots, photo: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    """A fingerprint of a half-written file would later make the real file look "changed"."""
+
+    def changes_while_read(path: Path) -> StoredBytes:
+        stored = digest_path(path)
+        before = path.stat()
+        if change == "size-only":
+            with path.open("ab") as out:
+                out.write(b"a download still in progress")
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))  # only the size differs
+        else:
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 10**9))
+        return stored
+
+    monkeypatch.setattr(referenced_module, "digest_path", changes_while_read)
+    with pytest.raises(ReferencedFileError, match="changed while it was being read"):
+        inspect_referenced_file(photo, storage_roots)
+
+
+def test_two_artifacts_may_reference_the_same_file(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    """The same photo imported twice is two Sources; nothing forbids duplicate references."""
+    first = import_file(factory, storage_roots, build, photo)
+    second = import_file(factory, storage_roots, build, photo)
+
+    assert first != second
+    assert load(first).external_path == load(second).external_path
 
 
 def test_a_file_that_cannot_be_read_is_a_refusal(
