@@ -165,15 +165,16 @@ def test_the_age_is_measured_from_when_the_artifact_became_available(
         assert find_unreferenced_artifacts(session, older_than=build.clock() + DAY) == [artifact.id]
 
 
-def test_an_artifact_with_no_availability_time_falls_back_to_its_creation_time(
+def test_an_artifact_with_no_availability_time_is_never_collected(
     factory: sessionmaker[Session], db_session: Session, build: ModelFactory
 ) -> None:
-    artifact = build.artifact()  # the factory leaves available_at unset
+    """Its creation time is when it was reserved: nothing says when it became available."""
+    artifact = build.artifact()  # AVAILABLE, but the factory leaves available_at unset
+    artifact.created_at = build.clock() - 10 * DAY
     db_session.commit()
 
     with factory() as session:
-        assert find_unreferenced_artifacts(session, older_than=build.clock()) == []
-        assert find_unreferenced_artifacts(session, older_than=build.clock() + DAY) == [artifact.id]
+        assert find_unreferenced_artifacts(session, older_than=build.clock() + 365 * DAY) == []
 
 
 # --- what is never removed -------------------------------------------------------------------
@@ -325,16 +326,19 @@ def test_a_file_no_row_owns_is_reported_and_kept(
 # --- races and failures ----------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("reference", sorted(REFERENCES))
 def test_an_artifact_referenced_after_it_was_chosen_is_skipped_not_deleted(
     factory: sessionmaker[Session], file_store: ManagedFileStore, db_session: Session,
     build: ModelFactory, load: Callable[[uuid.UUID], Artifact], monkeypatch: pytest.MonkeyPatch,
+    reference: str,
 ) -> None:  # fmt: skip
+    """Whatever kind of reference arrives in the window, the deletion intent itself refuses."""
     artifact_id = store_artifact(factory, file_store, build)
     key = load(artifact_id).storage_key
     assert key is not None
     chosen = find_unreferenced_artifacts_once(factory, build)
     assert chosen == [artifact_id]
-    build.source(original_artifact_id=artifact_id)  # the import's Source commits in the window
+    REFERENCES[reference](build, load(artifact_id))  # committed after the artifact was chosen
     db_session.commit()
     monkeypatch.setattr(storage_cleanup, "find_unreferenced_artifacts", lambda *_, **__: chosen)
 
@@ -380,6 +384,24 @@ def test_the_unreferenced_condition_matches_exactly_the_unreferenced_rows(
 
     assert free.id in chosen
     assert used.id not in chosen
+
+
+def test_an_unusable_stored_key_is_skipped_and_does_not_stop_the_rest(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, db_session: Session,
+    build: ModelFactory, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    """Checked before the intent is recorded, so the row is not left DELETING with no way out."""
+    bad = build.artifact(storage_key="originals/../../database/library.db", size_bytes=1)
+    bad.available_at = build.clock()
+    db_session.commit()
+    build.clock.advance(hours=1)
+    good = store_artifact(factory, file_store, build)
+
+    report = clean(factory, file_store, build)
+
+    assert (report.skipped, report.deleted) == ([bad.id], [good])
+    unchanged = load(bad.id)
+    assert (unchanged.state, unchanged.delete_requested_at) == ("AVAILABLE", None)
 
 
 def test_one_artifact_that_cannot_be_deleted_does_not_stop_the_rest(
