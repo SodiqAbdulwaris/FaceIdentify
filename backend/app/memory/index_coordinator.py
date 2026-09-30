@@ -36,6 +36,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -51,6 +52,7 @@ from backend.app.memory.models import (
     IndexOperationState,
     Representation,
     RepresentationSpace,
+    RepresentationSpaceState,
     RepresentationState,
 )
 from backend.infrastructure.indexing.representation_index import (
@@ -146,6 +148,42 @@ class IndexCoordinator:
             for space_id, operations in by_space.items():
                 self._apply_space(space_id, operations, report)
             return report
+
+    def validate_indexes(self) -> list[uuid.UUID]:
+        """Check the index of every ACTIVE space and rebuild any that is missing or unusable.
+
+        `apply_pending` only opens the index of a space that has pending operations, so an index
+        that went missing or corrupt while nothing was pending would go unnoticed until recognition
+        found it empty. Startup runs this after recovery (§28: "index validation/rebuild
+        scheduling"). Returns the spaces whose index was built or rebuilt from SQLite; a sound
+        index is left exactly as it is. Deprecated spaces are historical and are not indexed (§29).
+        """
+        rebuilt: list[uuid.UUID] = []
+        with self._lock:
+            with self._sessions() as session:
+                spaces = (
+                    session.execute(
+                        select(RepresentationSpace.id).where(
+                            RepresentationSpace.state == RepresentationSpaceState.ACTIVE
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            for space_id in spaces:
+                ndim, metric = self._space(space_id)
+                opened = open_or_rebuild(
+                    self.index_directory(space_id),
+                    representation_space_id=space_id,
+                    ndim=ndim,
+                    metric=metric,
+                    entries=partial(self._active_entries, space_id, ndim, []),
+                    clock=self._clock,
+                    new_id=self._new_id,
+                )
+                if opened.rebuilt:
+                    rebuilt.append(space_id)
+        return rebuilt
 
     def _claim(self, limit: int) -> list[_Claimed]:
         with self._sessions() as session:
