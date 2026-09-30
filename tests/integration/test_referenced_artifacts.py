@@ -15,12 +15,14 @@ from sqlalchemy import Engine, event, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.sources import referenced_artifacts
-from backend.app.sources.artifact_storage import ArtifactStateError
+from backend.app.sources.artifact_storage import ArtifactStateError, ArtifactStorageError
 from backend.app.sources.models import Artifact, Source
 from backend.app.sources.referenced_artifacts import (
     REFERENCED_CONTENT_CHANGED,
     REFERENCED_FILE_MISSING,
+    RelinkMismatchError,
     add_referenced_artifact,
+    relink_referenced_artifact,
     reverify_referenced_artifact,
 )
 from backend.infrastructure.db.engine import create_session_factory
@@ -508,3 +510,160 @@ def test_only_an_available_or_missing_reference_is_reverified(
     db_session.commit()
     with pytest.raises(ArtifactStateError, match=f"REFERENCED {state}"):
         reverify(factory, build, artifact.id)
+
+
+# --- relinking -------------------------------------------------------------------------------
+
+
+def relink(
+    factory: sessionmaker[Session], roots: StorageRoots, build: ModelFactory,
+    artifact_id: uuid.UUID, candidate: Path,
+) -> None:  # fmt: skip
+    relink_referenced_artifact(factory, roots, artifact_id, candidate, clock=build.clock)
+
+
+def missing_artifact(
+    factory: sessionmaker[Session], roots: StorageRoots, build: ModelFactory, photo: Path
+) -> uuid.UUID:
+    """An imported photo that was then moved away, so its artifact is MISSING."""
+    artifact_id = import_file(factory, roots, build, photo)
+    photo.unlink()
+    assert reverify(factory, build, artifact_id) == "MISSING"
+    return artifact_id
+
+
+def test_the_moved_file_relinks_and_the_artifact_is_available_again(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, tmp_path: Path, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    artifact_id = missing_artifact(factory, storage_roots, build, photo)
+    moved = tmp_path / "somewhere else" / "renamed.jpg"
+    moved.parent.mkdir()
+    moved.write_bytes(PHOTO)
+
+    relink(factory, storage_roots, build, artifact_id, moved)
+
+    artifact = load(artifact_id)
+    assert (artifact.state, artifact.failure_code, artifact.failure_detail) == (
+        "AVAILABLE", None, None,
+    )  # fmt: skip
+    assert artifact.external_path == str(moved.resolve())
+    assert artifact.original_filename == "holiday.jpg"  # provenance: what was imported
+    assert artifact.sha256 == hashlib.sha256(PHOTO).digest()
+    assert moved.read_bytes() == PHOTO
+    assert reverify(factory, build, artifact_id) == "AVAILABLE"
+
+
+def test_a_relink_records_the_real_file_behind_a_link(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, tmp_path: Path, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    artifact_id = missing_artifact(factory, storage_roots, build, photo)
+    real_folder = tmp_path / "real folder"
+    real_folder.mkdir()
+    (real_folder / "moved.jpg").write_bytes(PHOTO)
+    link = tmp_path / "shortcut"
+    link_directory(link, real_folder)
+
+    relink(factory, storage_roots, build, artifact_id, link / "moved.jpg")
+
+    assert load(artifact_id).external_path == str((real_folder / "moved.jpg").resolve())
+
+
+@pytest.mark.parametrize("other", [b"a different photo!!", PHOTO[:-1] + b"0"])
+def test_different_media_is_replacement_not_relinking(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, tmp_path: Path, load: Callable[[uuid.UUID], Artifact], other: bytes,
+) -> None:  # fmt: skip
+    """§59: different size or the same size with other content: nothing changes."""
+    artifact_id = missing_artifact(factory, storage_roots, build, photo)
+    before = load(artifact_id)
+    candidate = tmp_path / "candidate.jpg"
+    candidate.write_bytes(other)
+
+    with pytest.raises(RelinkMismatchError, match="not the media"):
+        relink(factory, storage_roots, build, artifact_id, candidate)
+
+    after = load(artifact_id)
+    assert (after.state, after.external_path, after.failure_code) == (
+        "MISSING", before.external_path, REFERENCED_FILE_MISSING,
+    )  # fmt: skip
+    assert candidate.read_bytes() == other
+
+
+def test_a_candidate_inside_the_application_or_unreadable_is_refused(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path,
+) -> None:  # fmt: skip
+    artifact_id = missing_artifact(factory, storage_roots, build, photo)
+    inside = storage_roots.library_root / "originals" / uuid.uuid4().hex
+    inside.write_bytes(PHOTO)
+
+    with pytest.raises(ReferencedFileError, match="own storage"):
+        relink(factory, storage_roots, build, artifact_id, inside)
+    with pytest.raises(ReferencedFileError, match="cannot read"):
+        relink(factory, storage_roots, build, artifact_id, photo)  # the old, vanished place
+
+
+@pytest.mark.parametrize("state", ["AVAILABLE", "PENDING", "DELETING", "DELETE_FAILED", "DELETED"])
+def test_only_a_missing_reference_is_relinked(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, db_session: Session,
+    build: ModelFactory, photo: Path, state: str,
+) -> None:  # fmt: skip
+    artifact = build.artifact(
+        storage_mode="REFERENCED", storage_key=None, external_path=str(photo), state=state
+    )
+    db_session.commit()
+    with pytest.raises(ArtifactStateError, match=f"REFERENCED {state}"):
+        relink(factory, storage_roots, build, artifact.id, photo)
+
+
+def test_a_managed_or_unknown_artifact_is_not_relinked(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, db_session: Session,
+    build: ModelFactory, photo: Path,
+) -> None:  # fmt: skip
+    managed = build.artifact(state="MISSING")
+    db_session.commit()
+    with pytest.raises(ArtifactStateError, match="expected REFERENCED"):
+        relink(factory, storage_roots, build, managed.id, photo)
+    with pytest.raises(ArtifactStateError, match="does not exist"):
+        relink(factory, storage_roots, build, uuid.uuid4(), photo)
+
+
+def test_nothing_can_be_relinked_without_a_recorded_fingerprint(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, db_session: Session,
+    build: ModelFactory, photo: Path, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    artifact = build.artifact(
+        storage_mode="REFERENCED", storage_key=None, external_path=str(photo / "gone"),
+        state="MISSING", sha256=None, size_bytes=None,
+    )  # fmt: skip
+    db_session.commit()
+    with pytest.raises(ArtifactStorageError, match="no recorded fingerprint"):
+        relink(factory, storage_roots, build, artifact.id, photo)
+    assert load(artifact.id).state == "MISSING"
+
+
+def test_a_relink_that_loses_a_race_does_not_overwrite(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, tmp_path: Path, load: Callable[[uuid.UUID], Artifact],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    artifact_id = missing_artifact(factory, storage_roots, build, photo)
+    candidate = tmp_path / "candidate.jpg"
+    candidate.write_bytes(PHOTO)
+    real = inspect_referenced_file
+
+    def another_relink_wins_first(path: Path, roots: StorageRoots) -> object:
+        with factory() as other:
+            other.execute(
+                update(Artifact).where(Artifact.id == artifact_id)
+                .values(state="AVAILABLE", external_path="C:/elsewhere.jpg")
+            )  # fmt: skip
+            other.commit()
+        return real(path, roots)
+
+    monkeypatch.setattr(referenced_artifacts, "inspect_referenced_file", another_relink_wins_first)
+    with pytest.raises(ArtifactStateError, match="AVAILABLE"):
+        relink(factory, storage_roots, build, artifact_id, candidate)
+    assert load(artifact_id).external_path == "C:/elsewhere.jpg"
