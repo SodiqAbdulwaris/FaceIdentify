@@ -6,7 +6,7 @@
   the startup wiring are later work
 - **Commits:** PR #23: `feat(memory): replay IndexOperations into the USearch index`,
   `test(memory): add index coordinator tests`, `docs: record the index coordinator`,
-  `fix(memory): guarantee an erased vector leaves the index and tighten eligibility`,
+  `fix(memory): purge erased vectors from the index; tighten eligibility`,
   `docs: record the index coordinator review`
 
 ## What changed
