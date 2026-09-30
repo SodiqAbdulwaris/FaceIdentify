@@ -5,6 +5,7 @@ anything missing, corrupt, mismatched or unsupported. USearch only ever yields c
 nothing here decides identity.
 """
 
+import hashlib
 import json
 import os
 import uuid
@@ -15,6 +16,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from backend.infrastructure.indexing import representation_index
 from backend.infrastructure.indexing.representation_index import (
     INDEX_FORMAT_VERSION,
     MANIFEST_NAME,
@@ -26,6 +28,7 @@ from backend.infrastructure.indexing.representation_index import (
     quarantine,
 )
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+from tests.fixtures.links import link_directory
 from tests.fixtures.persistence import AppDirs
 
 NDIM = 8
@@ -72,6 +75,18 @@ def unusable(directory: Path, space: uuid.UUID, **overrides: object) -> str:
     with pytest.raises(IndexUnusableError) as caught:
         RepresentationIndex.open(directory, **(arguments | overrides))  # type: ignore[arg-type]
     return str(caught.value)
+
+
+def sha_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def replace_index_file(directory: Path, index: RepresentationIndex, content: bytes) -> None:
+    """Put `content` where the live generation's file is and make the manifest agree about its
+    size and hash, so that only the content itself can be what is wrong."""
+    assert index.manifest is not None
+    (directory / index.manifest.index_file).write_bytes(content)
+    rewrite_manifest(directory, size_bytes=len(content), sha256=hashlib.sha256(content).hexdigest())
 
 
 def rewrite_manifest(directory: Path, **changes: object) -> None:
@@ -287,26 +302,121 @@ def test_a_crash_before_the_manifest_is_replaced_leaves_the_old_generation_live(
     opened = reopen(directory, space)
     assert opened.manifest == live
     assert opened.contains(1)  # the removal was never persisted: the old generation is intact
+    assert {p.name for p in directory.iterdir()} - {MANIFEST_NAME, live.index_file} == leftovers
+
+    opened.remove_leftovers()  # the writer's own cleanup
     assert {p.name for p in directory.iterdir()} == {MANIFEST_NAME, live.index_file}
 
 
-def test_opening_removes_only_files_it_owns_that_no_manifest_names(
-    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
-    clock: FrozenClock, new_id: SeededUUIDs,
-) -> None:  # fmt: skip
-    build(directory, space, vectors, clock, new_id)
+def stale_files(directory: Path) -> tuple[Path, Path, Path, Path]:
     stale = directory / f"index.{uuid.uuid4().hex}.usearch"
     stale.write_bytes(b"a superseded generation")
+    leftover_manifest = directory / f"{MANIFEST_NAME}.tmp"
+    leftover_manifest.write_text("{}")
     foreign = directory / "notes.txt"
     foreign.write_text("not ours")
     lookalike = directory / "index.not-a-generation.usearch"
     lookalike.write_bytes(b"not ours either")
+    return stale, leftover_manifest, foreign, lookalike
+
+
+def test_opening_is_read_only_and_never_removes_anything(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    """A reader that opened an older generation must not delete a newer one a writer published."""
+    build(directory, space, vectors, clock, new_id)
+    before = {p.name for p in directory.iterdir()}
+    stale, leftover_manifest, foreign, lookalike = stale_files(directory)
 
     reopen(directory, space)
 
+    assert {p.name for p in directory.iterdir()} == before | {
+        stale.name, leftover_manifest.name, foreign.name, lookalike.name
+    }  # fmt: skip
+
+
+def test_the_writers_cleanup_removes_only_files_it_owns_that_the_manifest_does_not_name(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    build(directory, space, vectors, clock, new_id)
+    stale, leftover_manifest, foreign, lookalike = stale_files(directory)
+
+    result = open_or_rebuild(
+        directory, representation_space_id=space, ndim=NDIM, metric=METRIC,
+        entries=lambda: [], clock=clock, new_id=new_id,
+    )  # fmt: skip
+
+    assert result.rebuilt is False
     assert not stale.exists()
+    assert not leftover_manifest.exists()
     assert foreign.read_text() == "not ours"
     assert lookalike.read_bytes() == b"not ours either"
+
+
+def test_cleanup_skips_a_locked_leftover_and_retries_later(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    index = build(directory, space, vectors, clock, new_id)
+    stale = directory / f"index.{uuid.uuid4().hex}.usearch"
+    stale.write_bytes(b"old generation")
+
+    with stale.open("rb"):  # an open handle: Windows refuses to delete the file
+        index.remove_leftovers()
+        assert stale.exists()
+
+    index.remove_leftovers()
+    assert not stale.exists()
+
+
+def test_persisting_flushes_the_generation_and_the_manifest_before_publishing(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """The commit point may only name a generation whose bytes have been flushed."""
+    index = RepresentationIndex.empty(
+        directory, representation_space_id=space, ndim=NDIM, metric=METRIC
+    )
+    for key, vector in vectors.items():
+        index.add(key, vector)
+    flushed: list[int] = []
+    real_fsync, real_replace = os.fsync, os.replace
+
+    def fsync(descriptor: int) -> None:
+        flushed.append(descriptor)
+        real_fsync(descriptor)
+
+    def replace(source: Path, target: Path) -> None:
+        assert len(flushed) == 2, "the generation and the staged manifest, both flushed first"
+        real_replace(source, target)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "replace", replace)
+
+    index.persist(clock=clock, new_id=new_id)
+
+    assert len(flushed) == 2
+
+
+def test_persisting_into_a_directory_that_is_a_link_is_refused(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    tmp_path: Path,
+) -> None:  # fmt: skip
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    link_directory(directory, elsewhere)
+    index = RepresentationIndex.empty(
+        directory, representation_space_id=space, ndim=NDIM, metric=METRIC
+    )
+    index.add(1, vectors[1])
+
+    with pytest.raises(ValueError, match="not a plain directory"):
+        index.persist(clock=FrozenClock(), new_id=SeededUUIDs())
+
+    assert list(elsewhere.iterdir()) == []
 
 
 # --- what makes a persisted index unusable ---------------------------------------------------
@@ -347,6 +457,9 @@ def test_an_unreadable_manifest(
         ("count", None),
         ("index_file", 5),
         ("metric", ["cos"]),
+        ("sha256", "not-a-digest"),
+        ("sha256", "A" * 64),  # the right length, but upper case
+        ("sha256", 12),
     ],
 )
 def test_a_manifest_with_a_badly_typed_field(
@@ -389,7 +502,13 @@ def test_a_different_dimension_or_metric(
     assert reason == f"index is {NDIM}-dimensional {METRIC}, expected {ndim}-dimensional {metric}"
 
 
-@pytest.mark.parametrize("name", ["../escape.usearch", "index.usearch", "C:/index.usearch", ""])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "../escape.usearch", "index.usearch", "C:/index.usearch", "",
+        f"index.{uuid.UUID(int=77).hex}.usearch",  # well formed, but another generation's file
+    ],
+)  # fmt: skip
 def test_a_manifest_naming_an_unexpected_file(
     directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
     clock: FrozenClock, new_id: SeededUUIDs, name: str,
@@ -397,7 +516,7 @@ def test_a_manifest_naming_an_unexpected_file(
     build(directory, space, vectors, clock, new_id)
     rewrite_manifest(directory, index_file=name)
 
-    assert "unexpected file" in unusable(directory, space)
+    assert "not its own generation's file" in unusable(directory, space)
 
 
 def test_a_missing_index_file(
@@ -432,7 +551,51 @@ def test_an_index_file_that_is_garbage_of_the_right_size(
     path = directory / index.manifest.index_file
     path.write_bytes(b"\x00" * index.manifest.size_bytes)
 
+    assert "SHA-256" in unusable(directory, space)
+
+
+def test_an_index_file_that_cannot_be_read_is_unusable_not_fatal(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    build(directory, space, vectors, clock, new_id)
+
+    def locked(_path: Path) -> str:
+        raise PermissionError("file is open in another program")
+
+    monkeypatch.setattr(representation_index, "_sha256", locked)
+
+    assert "cannot be read" in unusable(directory, space)
+
+
+def test_a_file_the_manifest_vouches_for_but_usearch_cannot_load(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    index = build(directory, space, vectors, clock, new_id)
+    replace_index_file(directory, index, b"\x00" * 4096)
+
     assert "cannot be loaded" in unusable(directory, space)
+
+
+def test_a_valid_index_of_the_same_size_and_count_but_another_generation_is_caught_by_hash(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs, np_rng: np.random.Generator,
+) -> None:  # fmt: skip
+    """The size and the entry count alone cannot tell these apart; only the content can."""
+    index = build(directory, space, vectors, clock, new_id)
+    assert index.manifest is not None
+    path = directory / index.manifest.index_file
+    original = path.read_bytes()
+    other = {key: -vector for key, vector in vectors.items()}  # same keys, different vectors
+    twin = build(directory.parent / "twin", space, other, clock, new_id)
+    assert twin.manifest is not None
+    twin_bytes = (directory.parent / "twin" / twin.manifest.index_file).read_bytes()
+    assert len(twin_bytes) == len(original)  # the same size...
+    assert twin_bytes != original  # ...and other content
+    path.write_bytes(twin_bytes)
+
+    assert "SHA-256" in unusable(directory, space)
 
 
 def test_an_index_file_from_another_generation_does_not_match_the_manifest(
@@ -461,19 +624,62 @@ def test_a_file_of_another_dimension_is_caught_even_though_usearch_adopts_it(
         other.add(key, np.ones(4, dtype=np.float32))
     other.persist(clock=clock, new_id=new_id)
     assert other.manifest is not None
-    wrong = (directory / "other" / other.manifest.index_file).read_bytes()
-    path = directory / index.manifest.index_file
-    path.write_bytes(wrong)
-    rewrite_manifest(directory, size_bytes=len(wrong))
+    replace_index_file(
+        directory, index, (directory / "other" / other.manifest.index_file).read_bytes()
+    )
 
     assert "4-dimensional, expected 8" in unusable(directory, space)
+
+
+def test_a_file_of_the_same_dimension_but_another_metric_is_caught(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    """`Index.load` also adopts the file's metric, so cosine distances could silently become L2."""
+    index = build(directory, space, vectors, clock, new_id)
+    other = RepresentationIndex.empty(
+        directory.parent / "l2", representation_space_id=space, ndim=NDIM, metric="l2sq"
+    )
+    for key, vector in vectors.items():
+        other.add(key, vector)
+    other.persist(clock=clock, new_id=new_id)
+    assert other.manifest is not None
+    replace_index_file(
+        directory, index, (directory.parent / "l2" / other.manifest.index_file).read_bytes()
+    )
+
+    assert "uses metric" in unusable(directory, space)
 
 
 def test_a_manifest_file_that_cannot_be_read(directory: Path, space: uuid.UUID) -> None:
     directory.mkdir(parents=True)
     (directory / MANIFEST_NAME).mkdir()  # a directory where the file should be
 
-    assert "cannot be read" in unusable(directory, space)
+    assert "not a plain file" in unusable(directory, space)
+
+
+def test_an_index_directory_that_is_a_link_is_not_used(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs, tmp_path: Path,
+) -> None:  # fmt: skip
+    real = directory.parent / "real"
+    build(real, space, vectors, clock, new_id)
+    link_directory(directory, real)
+
+    assert "not a plain directory" in unusable(directory, space)
+
+
+def test_an_index_file_that_is_not_a_plain_file_is_not_used(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs, tmp_path: Path,
+) -> None:  # fmt: skip
+    index = build(directory, space, vectors, clock, new_id)
+    assert index.manifest is not None
+    path = directory / index.manifest.index_file
+    path.unlink()
+    path.mkdir()  # a directory where the file should be
+
+    assert "missing or not a file" in unusable(directory, space)
 
 
 # --- quarantine and rebuild ------------------------------------------------------------------
@@ -498,6 +704,77 @@ def test_quarantine_moves_only_the_indexs_own_files_and_keeps_them(
     assert (
         quarantine(directory) == directory / "quarantine" / "2"
     )  # never overwrites an earlier one
+
+
+def test_a_locked_file_does_not_stop_the_quarantine_or_the_rebuild(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    """An antivirus scan holding the old index file must not leave startup unable to rebuild."""
+    old = build(directory, space, {1: vectors[1]}, clock, new_id)
+    assert old.manifest is not None
+    old_file = directory / old.manifest.index_file
+    (directory / MANIFEST_NAME).write_text("{broken")
+
+    with old_file.open("rb"):  # an open handle: Windows refuses to move the file
+        result = open_or_rebuild(
+            directory, representation_space_id=space, ndim=NDIM, metric=METRIC,
+            entries=lambda: list(vectors.items()), clock=clock, new_id=new_id,
+        )  # fmt: skip
+        assert old_file.exists()  # still there: locked
+
+    assert (result.rebuilt, len(result.index)) == (True, len(vectors))
+    assert result.reason is not None
+    assert (directory / "quarantine" / "1" / MANIFEST_NAME).exists()  # what could be kept was
+    assert len(reopen(directory, space)) == len(vectors)
+    result.index.remove_leftovers()  # the lock is gone, so the old generation's file goes
+    assert not old_file.exists()
+
+
+def test_a_quarantine_where_nothing_can_be_moved_reports_nothing_moved(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    index = build(directory, space, {1: vectors[1]}, clock, new_id)
+    assert index.manifest is not None
+    manifest = directory / MANIFEST_NAME
+    index_file = directory / index.manifest.index_file
+
+    with manifest.open("rb"), index_file.open("rb"):
+        assert quarantine(directory) is None
+
+    assert manifest.exists()
+    assert index_file.exists()
+
+
+def test_quarantining_through_a_link_to_the_directory_moves_nothing(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    real = directory.parent / "real"
+    build(real, space, {1: vectors[1]}, clock, new_id)
+    link_directory(directory, real)
+
+    assert quarantine(directory) is None
+
+    assert (real / MANIFEST_NAME).exists()
+    assert not (real / "quarantine").exists()
+
+
+def test_a_quarantine_folder_that_is_a_link_is_not_used(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs, tmp_path: Path,
+) -> None:  # fmt: skip
+    index = build(directory, space, {1: vectors[1]}, clock, new_id)
+    assert index.manifest is not None
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    link_directory(directory / "quarantine", elsewhere)
+
+    assert quarantine(directory) is None
+
+    assert list(elsewhere.iterdir()) == []
+    assert (directory / MANIFEST_NAME).exists()
 
 
 def test_quarantining_nothing_is_a_no_op(directory: Path, tmp_path: Path) -> None:
