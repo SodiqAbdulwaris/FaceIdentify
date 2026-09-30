@@ -17,7 +17,13 @@ What this never touches, by design:
 
 Deletion goes through the crash-safe protocol (intent, bytes, finalize), and the "nothing
 references it" test is part of the intent's UPDATE, so an artifact that gets referenced after it was
-chosen is skipped instead of deleted.
+chosen, but before the intent is recorded, is skipped instead of deleted.
+
+Contract for whatever creates a reference to an artifact (the import use case, later): do it in a
+transaction that first checks the artifact is still AVAILABLE. SQLite has one writer, so that check
+and the intent's UPDATE are serialized: either the reference commits first and the intent is
+refused, or the intent commits first and the reference is refused. Without the check, a reference
+made to an artifact already marked DELETING would lose its bytes.
 """
 
 import uuid
@@ -25,19 +31,21 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.sources.artifact_references import unreferenced_artifacts
 from backend.app.sources.artifact_storage import ArtifactStateError, delete_managed_artifact
 from backend.app.sources.models import Artifact, ArtifactState, StorageMode
 from backend.infrastructure.storage.files import ManagedFileStore
+from backend.infrastructure.storage.layout import UnsafeStorageKeyError
 
 
 @dataclass
 class CleanupReport:
     deleted: list[uuid.UUID] = field(default_factory=list)
-    # Chosen, then found referenced or changed by the time the intent was recorded: left alone.
+    # Chosen, then found referenced or changed by the time the intent was recorded, or with a
+    # stored key that is not a valid managed key: left alone.
     skipped: list[uuid.UUID] = field(default_factory=list)
     # The bytes could not be removed; the artifact is DELETE_FAILED and startup recovery retries it.
     failed: list[tuple[uuid.UUID, str]] = field(default_factory=list)
@@ -48,8 +56,11 @@ def find_unreferenced_artifacts(session: Session, *, older_than: datetime) -> li
 
     `older_than` has no default: it is the grace period that keeps a just-stored artifact, whose
     Source is about to be committed, from being collected, and the caller knows its own windows.
+    It is compared with when the artifact became available. One with no availability time is never
+    collected (a NULL comparison is false): nothing says how long ago it became available, and its
+    creation time is when it was *reserved*, possibly long before.
     """
-    available_since = func.coalesce(Artifact.available_at, Artifact.created_at)
+    available_since = Artifact.available_at
     return list(
         session.scalars(
             select(Artifact.id)
@@ -82,7 +93,7 @@ def cleanup_unreferenced_artifacts(
             delete_managed_artifact(
                 session_factory, store, artifact_id, clock=clock, only_if_unreferenced=True
             )
-        except ArtifactStateError:
+        except (ArtifactStateError, UnsafeStorageKeyError):
             report.skipped.append(artifact_id)
         except OSError as error:
             report.failed.append((artifact_id, f"{type(error).__name__}: {error}"))

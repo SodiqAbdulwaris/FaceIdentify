@@ -271,6 +271,9 @@ def delete_managed_artifact(
             session, artifact_id, clock=clock, only_if_unreferenced=only_if_unreferenced
         )
         storage_key = _storage_key(session, artifact_id)
+        # Before the intent is committed: a key that can never be resolved would otherwise leave
+        # the artifact DELETING with no way to finish.
+        store.roots.path_for(storage_key)
         session.commit()
 
     try:

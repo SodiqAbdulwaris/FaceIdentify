@@ -1,9 +1,13 @@
-"""Which rows point at an artifact, read from the schema rather than remembered.
+"""Which rows point at an artifact through a foreign key, read from the schema.
 
-An artifact that any row references is in use. Listing the referencing columns by hand would go
-stale the first time a table gains an `artifacts.id` foreign key, and a stale list means cleanup
-deleting bytes something still needs. So the columns are discovered from `Base.metadata`, and a
-test pins the current set so that a new reference has to be looked at.
+An artifact that a row references is in use. Listing the referencing columns by hand would go stale
+the first time a table gains an `artifacts.id` foreign key, and a stale list means cleanup deleting
+bytes something still needs. So the columns are discovered from `Base.metadata`, and a test pins the
+current set so that a new one has to be looked at.
+
+This covers *declared foreign keys only*. A reference that keeps an artifact's bytes alive must
+therefore be a foreign key: one hidden in a JSON payload, a storage-key string or a table outside
+this metadata is invisible here and would not protect the bytes. No such reference exists today.
 """
 
 from sqlalchemy import Column, ColumnElement, and_, exists
