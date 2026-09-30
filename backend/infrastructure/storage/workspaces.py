@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.infrastructure.storage.layout import StorageRoots
+from backend.infrastructure.storage.plain import is_plain_directory, is_plain_file
 
 WORKSPACE_SUBDIRECTORIES = ("decode", "frames", "crops", "intermediate")
 OWNERSHIP_MARKER = ".faceidentify-workspace"
@@ -38,39 +39,16 @@ class WorkspaceError(Exception):
     """The path is not a workspace this manager may use or delete."""
 
 
-def is_plain_directory(path: Path) -> bool:
-    """A real directory: not a symlink, a junction, a mount point, a cloud placeholder or any other
-    reparse point. `lstat` is used because `is_dir` follows links."""
-    try:
-        status = path.lstat()
-    except OSError:
-        return False
-    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    attributes = getattr(status, "st_file_attributes", 0)
-    return (
-        stat.S_ISDIR(status.st_mode)
-        and not stat.S_ISLNK(status.st_mode)
-        and not (attributes & reparse)
-    )
-
-
 def _clear_read_only_and_retry(
     function: Callable[[str], object], path: str, error: BaseException
 ) -> None:
     """`rmtree` hook: a read-only file (copied from a read-only source) is ours to remove, but a
     file that is locked stays an error."""
-    if isinstance(error, PermissionError) and _is_plain_file(Path(path)):
+    if isinstance(error, PermissionError) and is_plain_file(Path(path)):
         os.chmod(path, stat.S_IWRITE)
         function(path)
     else:
         raise error
-
-
-def _is_plain_file(path: Path) -> bool:
-    try:
-        return stat.S_ISREG(path.lstat().st_mode)
-    except OSError:
-        return False
 
 
 @dataclass
@@ -136,7 +114,7 @@ class WorkspaceManager:
 
     @staticmethod
     def _is_marked(entry: Path) -> bool:
-        return _is_plain_file(entry / OWNERSHIP_MARKER)
+        return is_plain_file(entry / OWNERSHIP_MARKER)
 
     def _is_workspace(self, entry: Path) -> bool:
         return (

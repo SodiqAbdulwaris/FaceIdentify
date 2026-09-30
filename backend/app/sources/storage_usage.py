@@ -21,7 +21,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.sources.models import Artifact, ArtifactState, Source, SourceState, StorageMode
 from backend.infrastructure.storage.layout import StorageRoots
-from backend.infrastructure.storage.workspaces import WorkspaceManager, is_plain_directory
+from backend.infrastructure.storage.plain import is_plain_directory
+from backend.infrastructure.storage.workspaces import WorkspaceManager
 
 
 @dataclass(frozen=True)

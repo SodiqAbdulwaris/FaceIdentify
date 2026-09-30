@@ -11,21 +11,30 @@ takes keys and vectors, and the coordinator (TST-028) decides what belongs in it
 On disk, one directory per space::
 
     <indexes>/<representation space id>/
-        manifest.json               # the commit point: names the live index file
+        manifest.json               # the commit point: names the live index file and its hash
         index.<generation id>.usearch
         quarantine/<n>/...          # files from an index found unusable, kept for diagnosis
 
-A generation's index file is written first and is invisible until `manifest.json` is atomically
-replaced to name it, so a crash at any point leaves either the old generation or the new one,
-never a half-written index that looks valid. Files no manifest names are leftovers and are
-removed on open.
+A generation's index file is written, flushed and hashed first, and is invisible until
+`manifest.json` is atomically replaced to name it, so a *process* crash at any point leaves either
+the old generation or the new one, never a half-written index that looks valid.
+
+Durability is deliberately weaker than that: after a power cut the new generation may be lost or the
+old one may be stale (Windows cannot flush a directory), which is acceptable because the index is
+derived and rebuildable (§23): whatever is found is checked against the manifest's size, hash,
+count, dimension and metric, and anything that does not match is rebuilt from SQLite.
+
+Concurrency: one process, one writer (the coordinator, §23). `open`, `persist`, `quarantine` and
+`remove_leftovers` must not run concurrently for one space. `open` is read-only, so opening never
+removes a file another call just published; leftovers are removed only by the writer's own paths
+(`persist` and `open_or_rebuild`).
 
 ponytail: quarantined indexes are kept and never pruned (they are rare and small next to the
-library); add a retention limit if they ever pile up. The manifest records size and count, not a
-hash, so a same-size corruption that still loads is not detected; add a SHA-256 if that matters.
+library); add a retention limit if they ever pile up.
 """
 
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -40,10 +49,14 @@ import numpy as np
 from numpy.typing import NDArray
 from usearch.index import Index
 
+from backend.infrastructure.storage.plain import is_plain_directory, is_plain_file
+
 INDEX_FORMAT_VERSION = 1
 MANIFEST_NAME = "manifest.json"
 QUARANTINE_DIRECTORY = "quarantine"
 _INDEX_FILE = re.compile(r"index\.[0-9a-f]{32}\.usearch")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+CHUNK_SIZE = 1024 * 1024
 
 Vector = NDArray[np.float32]
 
@@ -63,6 +76,7 @@ class IndexManifest:
     metric: str
     index_file: str
     size_bytes: int
+    sha256: str
     count: int
 
     def to_json(self) -> str:
@@ -76,6 +90,7 @@ class IndexManifest:
                 "metric": self.metric,
                 "index_file": self.index_file,
                 "size_bytes": self.size_bytes,
+                "sha256": self.sha256,
                 "count": self.count,
             },
             indent=2,
@@ -85,6 +100,9 @@ class IndexManifest:
     def from_json(cls, text: str) -> "IndexManifest":
         try:
             raw = json.loads(text)
+            sha256 = _string(raw["sha256"])
+            if _SHA256.fullmatch(sha256) is None:
+                raise ValueError(f"not a SHA-256 digest: {sha256!r}")
             return cls(
                 index_format_version=_integer(raw["index_format_version"]),
                 representation_space_id=uuid.UUID(_string(raw["representation_space_id"])),
@@ -94,6 +112,7 @@ class IndexManifest:
                 metric=_string(raw["metric"]),
                 index_file=_string(raw["index_file"]),
                 size_bytes=_integer(raw["size_bytes"]),
+                sha256=sha256,
                 count=_integer(raw["count"]),
             )
         except (ValueError, KeyError, TypeError) as error:
@@ -110,6 +129,14 @@ def _string(value: Any) -> str:
     if not isinstance(value, str):
         raise TypeError(f"expected a string, got {value!r}")
     return value
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(CHUNK_SIZE):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -181,11 +208,17 @@ class RepresentationIndex:
     ) -> "RepresentationIndex":
         """Load the live generation, or raise `IndexUnusableError` saying why it cannot be used.
 
-        Every way the persisted index can disagree with what the caller expects is checked: no
+        Read-only: nothing on disk is changed. Every way the persisted index can disagree with
+        what the caller expects is checked: a link where the directory or a file should be, no
         manifest, an unreadable or unsupported one, another space's, another dimension or metric,
-        a missing, resized or unreadable index file, or a different entry count than recorded.
+        an index file that is not this generation's, is missing, or differs in size, SHA-256,
+        loadability, dimension, metric or entry count from what the manifest recorded.
         """
+        if directory.exists() and not is_plain_directory(directory):
+            raise IndexUnusableError("the index directory is not a plain directory")
         manifest_path = directory / MANIFEST_NAME
+        if manifest_path.exists() and not is_plain_file(manifest_path):
+            raise IndexUnusableError("the manifest is not a plain file")
         try:
             text = manifest_path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -209,33 +242,51 @@ class RepresentationIndex:
                 f"index is {manifest.ndim}-dimensional {manifest.metric}, "
                 f"expected {ndim}-dimensional {metric}"
             )
-        if not _INDEX_FILE.fullmatch(manifest.index_file):
-            raise IndexUnusableError(f"manifest names an unexpected file {manifest.index_file!r}")
+        if manifest.index_file != f"index.{manifest.generation_id.hex}.usearch":
+            raise IndexUnusableError(
+                f"manifest names {manifest.index_file!r}, which is not its own generation's file"
+            )
 
         index_path = directory / manifest.index_file
-        try:
-            size = index_path.stat().st_size
-        except FileNotFoundError:
-            raise IndexUnusableError("the index file the manifest names is missing") from None
+        if not is_plain_file(index_path):
+            raise IndexUnusableError("the index file the manifest names is missing or not a file")
+        size = index_path.stat().st_size
         if size != manifest.size_bytes:
             raise IndexUnusableError(
                 f"index file is {size} bytes, the manifest recorded {manifest.size_bytes}"
             )
+        try:
+            digest = _sha256(index_path)
+        except OSError as error:
+            raise IndexUnusableError(f"index file cannot be read: {error!r}") from error
+        if digest != manifest.sha256:
+            raise IndexUnusableError("index file does not match the SHA-256 the manifest recorded")
 
         index = cls._new_index(ndim, metric)
+        # `Index.load` silently adopts the file's own dimension, and worse, keeps *computing* the
+        # file's own metric while `index.metric` goes on reporting the one it was constructed with
+        # (probed: an L2 file loaded into a cosine index answers with L2 distances). So the file's
+        # header is what must be checked, before loading.
         try:
+            header = Index.metadata(str(index_path))
             index.load(str(index_path))
-        except (RuntimeError, ValueError, OSError) as error:
+        except (RuntimeError, ValueError, OSError, KeyError) as error:
             raise IndexUnusableError(f"index file cannot be loaded: {error}") from error
-        # `load` adopts the file's own dimension and metric without complaint.
-        if index.ndim != ndim:
-            raise IndexUnusableError(f"index file is {index.ndim}-dimensional, expected {ndim}")
+        assert header is not None  # typed Optional, but a damaged file raises ValueError instead
+        if header["dimensions"] != ndim:
+            raise IndexUnusableError(
+                f"index file is {header['dimensions']}-dimensional, expected {ndim}"
+            )
+        if header["kind_metric"] != index.metric:
+            raise IndexUnusableError(
+                f"index file uses metric {header['kind_metric']}, expected {metric}"
+            )
         if len(index) != manifest.count:
             raise IndexUnusableError(
                 f"index file holds {len(index)} entries, the manifest recorded {manifest.count}"
             )
 
-        opened = cls(
+        return cls(
             directory,
             representation_space_id=representation_space_id,
             ndim=ndim,
@@ -243,8 +294,6 @@ class RepresentationIndex:
             index=index,
             manifest=manifest,
         )
-        opened._remove_leftovers()
-        return opened
 
     @classmethod
     def build(
@@ -305,17 +354,21 @@ class RepresentationIndex:
     def persist(
         self, *, clock: Callable[[], datetime], new_id: Callable[[], uuid.UUID]
     ) -> IndexManifest:
-        """Write a new generation and make it the live one, atomically.
+        """Write a new generation and make it the live one.
 
-        The index file is written under its own generation name, then the manifest is replaced
-        (write, fsync, rename) to name it. Until that rename, the previous generation is the live
-        one; after it, the previous index file is a leftover and is removed.
+        The generation's file is written, flushed to disk and hashed under its own name; then the
+        manifest is replaced (write, fsync, rename) to name it. Until that rename the previous
+        generation is the live one; after it, the previous file is a leftover and is removed.
         """
+        if self.directory.exists() and not is_plain_directory(self.directory):
+            raise ValueError(f"{self.directory} is not a plain directory")
         self.directory.mkdir(parents=True, exist_ok=True)
         generation_id = new_id()
         index_file = f"index.{generation_id.hex}.usearch"
         index_path = self.directory / index_file
         self._index.save(str(index_path))
+        with index_path.open("rb+") as written:
+            os.fsync(written.fileno())
         manifest = IndexManifest(
             index_format_version=INDEX_FORMAT_VERSION,
             representation_space_id=self.representation_space_id,
@@ -325,6 +378,7 @@ class RepresentationIndex:
             metric=self.metric,
             index_file=index_file,
             size_bytes=index_path.stat().st_size,
+            sha256=_sha256(index_path),
             count=len(self._index),
         )
         staged = self.directory / f"{MANIFEST_NAME}.tmp"
@@ -334,38 +388,53 @@ class RepresentationIndex:
             os.fsync(out.fileno())
         os.replace(staged, self.directory / MANIFEST_NAME)
         self.manifest = manifest
-        self._remove_leftovers()
+        self.remove_leftovers()
         return manifest
 
-    def _remove_leftovers(self) -> None:
-        """Delete index files and staged manifests that no manifest names (an interrupted persist,
-        or a superseded generation). Only files named in this module's exact patterns."""
+    def remove_leftovers(self) -> None:
+        """Delete index files and staged manifests that the live manifest does not name (an
+        interrupted persist, or a superseded generation). Only this module's own plain files, by
+        exact name; a locked one is skipped and retried on the next call. Writer only: it judges
+        "live" by this object's manifest, so it must not run concurrently with another writer."""
         live = self.manifest.index_file if self.manifest is not None else None
         for path in self.directory.iterdir():
             stale_index = _INDEX_FILE.fullmatch(path.name) and path.name != live
-            if stale_index or path.name == f"{MANIFEST_NAME}.tmp":
-                with contextlib.suppress(OSError):  # locked: the next open retries
+            if (stale_index or path.name == f"{MANIFEST_NAME}.tmp") and is_plain_file(path):
+                with contextlib.suppress(OSError):
                     path.unlink()
 
 
 def quarantine(directory: Path) -> Path | None:
     """Move an unusable index out of the way, keeping it for diagnosis. Returns where it went, or
-    None if there was nothing to move. Only this module's own files are moved."""
+    None if nothing could be moved. Best effort: a file that is locked (an antivirus scan) stays
+    where it is instead of stopping the rebuild, since the rebuilt generation's own manifest
+    replaces the old one and `remove_leftovers` retries the old index file later. Only this
+    module's own plain files are moved, and never through a link."""
+    if not is_plain_directory(directory):
+        return None
     own = [
         path
-        for path in (directory.iterdir() if directory.is_dir() else [])
-        if path.name == MANIFEST_NAME or _INDEX_FILE.fullmatch(path.name)
+        for path in directory.iterdir()
+        if (path.name == MANIFEST_NAME or _INDEX_FILE.fullmatch(path.name)) and is_plain_file(path)
     ]
     if not own:
         return None
     root = directory / QUARANTINE_DIRECTORY
+    if root.exists() and not is_plain_directory(root):
+        return None
     root.mkdir(exist_ok=True)
-    number = 1 + max((int(p.name) for p in root.iterdir() if p.name.isdigit()), default=0)
+    number = 1 + max(
+        (int(p.name) for p in root.iterdir() if p.name.isdigit() and is_plain_directory(p)),
+        default=0,
+    )
     target = root / str(number)
     target.mkdir()
+    moved = False
     for path in own:
-        os.replace(path, target / path.name)
-    return target
+        with contextlib.suppress(OSError):
+            os.replace(path, target / path.name)
+            moved = True
+    return target if moved else None
 
 
 @dataclass(frozen=True)
@@ -385,10 +454,10 @@ def open_or_rebuild(
     clock: Callable[[], datetime],
     new_id: Callable[[], uuid.UUID],
 ) -> OpenResult:
-    """The startup path (§23, §28): use the persisted index if it is sound, otherwise quarantine it
-    and rebuild from `entries()`, which streams the space's active representations from SQLite.
-    `entries` is only called when a rebuild is needed. A directory with nothing in it is a first
-    build, not a failure."""
+    """The startup path (§23, §28), for the writer: use the persisted index if it is sound (and
+    clear any leftovers of an interrupted persist), otherwise quarantine it and rebuild from
+    `entries()`, which streams the space's active representations from SQLite and is only called
+    when a rebuild is needed. An absent index is a first build, not a failure."""
     try:
         opened = RepresentationIndex.open(
             directory, representation_space_id=representation_space_id, ndim=ndim, metric=metric
@@ -404,5 +473,7 @@ def open_or_rebuild(
             clock=clock,
             new_id=new_id,
         )
+        # Nothing to quarantine means nothing was there: a first build, not a failure.
         return OpenResult(rebuilt, True, str(error) if moved is not None else None)
+    opened.remove_leftovers()
     return OpenResult(opened, False, None)
