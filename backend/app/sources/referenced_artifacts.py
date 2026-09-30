@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import cast
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.sources.artifact_storage import (
@@ -60,6 +61,61 @@ def add_referenced_artifact(
     session.add(artifact)
     session.flush()
     return artifact
+
+
+def mark_missing_referenced_originals(
+    session_factory: sessionmaker[Session], *, clock: Callable[[], datetime]
+) -> list[uuid.UUID]:
+    """Mark every AVAILABLE referenced original whose file is gone `MISSING`, by existence alone.
+
+    Cheap enough for startup (IMPLEMENTATION_ARCHITECTURE.md §23.5, §25.13): it reads no file, so a
+    library of large videos costs one `stat` each. It only ever moves AVAILABLE to MISSING. Whether
+    a file that came back is the same media needs its content hashed, which is
+    `reverify_referenced_artifact` or a relink, never a startup scan. A file that is present but
+    cannot be examined (denied, unreachable drive) is left alone: that is not evidence it is gone.
+    Returns the artifacts it marked; the Source rows are never touched.
+    """
+    with session_factory() as session:
+        candidates = session.execute(
+            select(Artifact.id, Artifact.external_path)
+            .where(
+                Artifact.storage_mode == StorageMode.REFERENCED,
+                Artifact.state == ArtifactState.AVAILABLE,
+            )
+            .order_by(Artifact.created_at, Artifact.id)
+        ).all()
+    gone: list[uuid.UUID] = []
+    for artifact_id, external_path in candidates:
+        try:
+            present = stat.S_ISREG(Path(cast("str", external_path)).stat().st_mode)
+        except FileNotFoundError:
+            present = False
+        except OSError:
+            continue
+        if not present:
+            gone.append(artifact_id)
+    if not gone:
+        return []
+    with session_factory() as session:
+        marked: list[uuid.UUID] = []
+        for artifact_id in gone:
+            try:
+                transition_artifact(
+                    session,
+                    artifact_id,
+                    {ArtifactState.AVAILABLE},
+                    {
+                        "state": ArtifactState.MISSING,
+                        "failure_code": REFERENCED_FILE_MISSING,
+                        "failure_detail": None,
+                    },
+                    storage_mode=StorageMode.REFERENCED,
+                )
+            except ArtifactStateError:
+                continue  # settled by something else meanwhile
+            marked.append(artifact_id)
+        session.commit()
+    return marked
 
 
 def _matches(path: Path, size: int, recorded: StoredBytes | None) -> bool:
