@@ -56,8 +56,10 @@ _Last updated: 2026-09-30 (USearch index)_
   build rows with the shared `build` factory and
   assert constraints with `tests/fixtures/constraints.py`. `backend/infrastructure/indexing/
   representation_index.py` is the per-space USearch index: idempotent add/remove, candidate search,
-  generations persisted behind an atomically replaced manifest, and quarantine plus rebuild of a
-  missing, corrupt, mismatched or unsupported index (`open_or_rebuild`); it takes keys and vectors
+  generations flushed and hashed behind an atomically replaced manifest, a read-only `open`, and
+  quarantine plus rebuild of a missing, corrupt, mismatched or unsupported index
+  (`open_or_rebuild`; one process, one writer; note `Index.load` adopts the file's dimension *and*
+  metric, so the file header is checked); it takes keys and vectors
   and knows nothing about SQLite or `ann_key` allocation (open questions 13, 21). The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
   source-import use case and no ML worker yet.
