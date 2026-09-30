@@ -8,7 +8,8 @@
   storage mode`, `feat(storage): inspect external files for referenced imports`,
   `feat(sources): record referenced artifacts and track their availability`,
   `test(sources): add referenced artifact tests`, `docs: record referenced artifacts`,
-  `fix(sources): treat only a vanished file as missing`, `docs: record the referenced artifact review`
+  `fix(sources): treat only a vanished file as missing`, `docs: record the referenced artifact review`,
+  `fix(sources): settle a file that turns into a directory mid-check`
 
 ## What changed
 
@@ -32,7 +33,7 @@
 - `backend/app/sources/artifact_storage.py`: `_transition` became `transition_artifact` with a
   `storage_mode` keyword (default `MANAGED`), so referenced transitions share the same guarded
   `UPDATE`. No behaviour change for managed artifacts.
-- Tests: `tests/integration/test_referenced_artifacts.py` (32). The directory-link helper moved from
+- Tests: `tests/integration/test_referenced_artifacts.py` (34). The directory-link helper moved from
   `test_storage_files.py` to `tests/fixtures/links.py` so both files share it.
 
 ## Why
@@ -68,7 +69,7 @@ Contracts §52, §57, §58).
 
 - `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform
   linux`: clean.
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 401 passed (32 new, 0 regressions in the 369
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 403 passed (34 new, 0 regressions in the 369
   before); `backend/` coverage 100%.
 - The new file was run 5 times in a row before review and 3 after the fix: 0 failures.
 - Mutation checks, each reverted and confirmed byte-identical with a diff: 16 mutations (dropping
@@ -94,6 +95,15 @@ Contracts §52, §57, §58).
 The reviewer also confirmed: the state-guarded update prevents stale overwrites, link and junction
 resolution and the in-root rejection are sound, and it found no spec deviation in API §§51-60,
 architecture §§16 and 23.5 or persistence §4.1. It did not run the tests.
+
+### Re-review of the fix (Codex CLI, scoped to the fix commit): two low findings, addressed
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | A path could stop being a regular file between the first `stat` and the fingerprint step, so `_matches` could record `REFERENCED_CONTENT_CHANGED` from a directory's size or raise `IsADirectoryError` | The size now comes from the single `stat` that proved the file regular, and `IsADirectoryError` is settled as missing; a test makes the hash step raise it |
+| 2 | `NotADirectoryError` had no test and its removal would survive | A test replaces the file's folder with a plain file. On Windows that is reported as `FileNotFoundError`, so `NotADirectoryError` cannot occur here and removing it from the handler still passed: the branch is genuinely unreachable, so it was deleted rather than tested (the test stays as a behaviour check) |
+
+Mutations on these changes: 3 caught after the deletion, 0 survivors.
 
 ## Open issues / follow-ups
 
