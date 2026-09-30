@@ -17,6 +17,9 @@ _Last updated: 2026-09-30 (source recycle and restore)_
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
   ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
+  Reviewers for agent-opened PRs (`rules/branches.md`): Codex CLI and a read-only subagent are
+  approved. Probed 2026-09-30 and **not** approved: `agy`, OpenCode (see the implementation entry
+  for why); the Cursor `agent` CLI is not installed.
 - **Backend:** the SQLite engine/session factory, models for all 33 `0001_initial_schema`
   tables (registry `backend/app/models.py`), the Identity Manager core use cases
   (`backend/app/identities/use_cases.py`: create/activate an identity, assign a representation
