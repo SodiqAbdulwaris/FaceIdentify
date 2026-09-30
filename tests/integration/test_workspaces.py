@@ -5,6 +5,8 @@ A workspace is disposable machine-local scratch space. The manager only ever del
 named itself, and never follows a link out of one.
 """
 
+import os
+import stat
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -12,7 +14,12 @@ from pathlib import Path
 import pytest
 
 from backend.infrastructure.storage.layout import StorageRoots
-from backend.infrastructure.storage.workspaces import WORKSPACE_SUBDIRECTORIES, WorkspaceManager
+from backend.infrastructure.storage.workspaces import (
+    OWNERSHIP_MARKER,
+    WORKSPACE_SUBDIRECTORIES,
+    WorkspaceError,
+    WorkspaceManager,
+)
 from tests.fixtures.links import link_directory
 
 
@@ -46,7 +53,9 @@ def test_a_workspace_is_machine_local_and_has_the_standard_subdirectories(
 
     assert path == storage_roots.local_state_root / "temp" / "jobs" / job.hex
     assert not path.is_relative_to(storage_roots.library_root)
-    assert sorted(child.name for child in path.iterdir()) == sorted(WORKSPACE_SUBDIRECTORIES)
+    assert sorted(child.name for child in path.iterdir()) == sorted(
+        [*WORKSPACE_SUBDIRECTORIES, OWNERSHIP_MARKER]
+    )
     assert workspaces.path_for(job) == path
 
 
@@ -112,10 +121,79 @@ def test_release_refuses_a_workspace_that_is_itself_a_link(
     workspaces.root.mkdir(parents=True)
     link_directory(workspaces.path_for(job), precious)
 
-    with pytest.raises(ValueError, match="is a link"):
+    with pytest.raises(WorkspaceError, match="not a workspace this manager made"):
         workspaces.release(job)
 
     assert (precious / "thesis.txt").read_text() == "years of work"
+
+
+def test_a_directory_the_manager_did_not_mark_is_not_released(
+    workspaces: WorkspaceManager,
+) -> None:
+    job = new_job()
+    foreign = workspaces.root / job.hex
+    foreign.mkdir(parents=True)
+    (foreign / "someone else's.txt").write_text("not ours")
+
+    with pytest.raises(WorkspaceError, match="not a workspace"):
+        workspaces.release(job)
+
+    assert (foreign / "someone else's.txt").read_text() == "not ours"
+
+
+def test_a_read_only_file_does_not_keep_a_workspace_alive(workspaces: WorkspaceManager) -> None:
+    """Copying a read-only original keeps the read-only flag; cleanup must still finish."""
+    job = new_job()
+    readonly = workspaces.allocate(job) / "decode" / "copy-of-original.jpg"
+    readonly.write_bytes(b"x")
+    os.chmod(readonly, stat.S_IREAD)
+
+    workspaces.release(job)
+
+    assert not workspaces.path_for(job).exists()
+
+
+# --- allocation refuses what is not its own ---------------------------------------------------
+
+
+def test_allocation_does_not_write_through_a_link(
+    workspaces: WorkspaceManager, precious: Path
+) -> None:
+    job = new_job()
+    workspaces.root.mkdir(parents=True)
+    link_directory(workspaces.path_for(job), precious)
+
+    with pytest.raises(WorkspaceError, match="not a directory this manager may use"):
+        workspaces.allocate(job)
+
+    assert sorted(child.name for child in precious.iterdir()) == ["thesis.txt"]
+
+
+def test_allocation_does_not_adopt_a_directory_with_someone_elses_files(
+    workspaces: WorkspaceManager,
+) -> None:
+    job = new_job()
+    foreign = workspaces.root / job.hex
+    foreign.mkdir(parents=True)
+    (foreign / "notes.txt").write_text("not ours")
+
+    with pytest.raises(WorkspaceError, match="was not made by this manager"):
+        workspaces.allocate(job)
+
+    assert [child.name for child in foreign.iterdir()] == ["notes.txt"]
+
+
+def test_allocation_adopts_an_empty_directory_left_by_a_crash(
+    workspaces: WorkspaceManager,
+) -> None:
+    """A crash between creating the directory and marking it leaves an empty one to adopt."""
+    job = new_job()
+    workspaces.path_for(job).mkdir(parents=True)
+
+    path = workspaces.allocate(job)
+
+    assert (path / OWNERSHIP_MARKER).is_file()
+    assert workspaces.existing() == [job]
 
 
 # --- listing ---------------------------------------------------------------------------------
@@ -136,6 +214,7 @@ def test_only_directories_the_manager_names_are_workspaces(
     (root / "notes.txt").write_text("not a workspace")  # a file
     (root / uuid.uuid4().hex.upper()).mkdir()  # not the exact form the manager generates
     (root / "scratch").mkdir()
+    (root / uuid.uuid4().hex).mkdir()  # the right name, but never marked as ours
     (root / uuid.uuid4().hex).write_text("a file with a workspace-like name")
     link_directory(root / uuid.uuid4().hex, precious)  # a link posing as a workspace
 
@@ -174,6 +253,7 @@ def test_cleanup_never_deletes_what_it_does_not_own(
     root_entries: dict[str, Callable[[Path], object]] = {
         "notes.txt": lambda p: p.write_text("mine"),
         "scratch": lambda p: p.mkdir(),
+        uuid.uuid4().hex: lambda p: p.mkdir(),  # right name, no ownership marker
         uuid.uuid4().hex.upper(): lambda p: p.mkdir(),
         uuid.uuid4().hex: lambda p: link_directory(p, precious),
     }
@@ -197,6 +277,55 @@ def test_cleanup_does_not_follow_links_inside_a_workspace(
 
     assert workspaces.remove_orphans(set()).removed == [job]
     assert (precious / "thesis.txt").read_text() == "years of work"
+
+
+def test_cleanup_removes_a_read_only_file_too(workspaces: WorkspaceManager) -> None:
+    job = new_job()
+    readonly = workspaces.allocate(job) / "intermediate" / "copy-of-original.jpg"
+    readonly.write_bytes(b"x")
+    os.chmod(readonly, stat.S_IREAD)
+
+    report = workspaces.remove_orphans(set())
+
+    assert (report.removed, report.failed) == ([job], [])
+    assert workspaces.existing() == []
+
+
+def test_an_entry_that_cannot_be_examined_is_left_alone(
+    workspaces: WorkspaceManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail closed: if the manager cannot tell what something is, it is not its to delete."""
+    job = new_job()
+    path = workspaces.allocate(job)
+    real_lstat = Path.lstat
+
+    def denied(self: Path) -> os.stat_result:
+        if self == path:
+            raise PermissionError("access is denied")
+        return real_lstat(self)
+
+    monkeypatch.setattr(Path, "lstat", denied)
+
+    assert workspaces.existing() == []
+    report = workspaces.remove_orphans(set())
+    assert (report.removed, report.unowned) == ([], [job.hex])
+    monkeypatch.undo()
+    assert workspaces.existing() == [job]
+
+
+def test_a_directory_in_use_is_reported_not_forced(
+    workspaces: WorkspaceManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A folder that is some process's working directory cannot be removed: report, retry later."""
+    job = new_job()
+    in_use = workspaces.allocate(job) / "decode"
+    monkeypatch.chdir(in_use)
+
+    report = workspaces.remove_orphans(set())
+
+    assert [failed for failed, _ in report.failed] == [job]
+    monkeypatch.undo()
+    assert workspaces.remove_orphans(set()).removed == [job]
 
 
 def test_one_workspace_that_cannot_be_removed_does_not_stop_the_rest(

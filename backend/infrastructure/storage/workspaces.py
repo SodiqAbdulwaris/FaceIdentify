@@ -5,23 +5,72 @@ within controlled allocated workspaces". A workspace holds disposable, reconstru
 (decoded frames, crops, intermediates), never authoritative bytes, so it lives in the
 machine-local root (tech-stack.md §15), not the library.
 
-The manager owns only directories it names itself: `<32 lower-case hex job id>`. Anything else
-under `temp/jobs/` is not its to delete. Deciding *which* jobs are live is the caller's (it needs
-the database); PERSISTENCE_IMPLEMENTATION.md §28: "remove only application-owned workspace after
-verifying no live run needs it". This module knows nothing about the database.
+The manager owns only directories it made itself: a real directory (never a link, junction, mount
+point or any other reparse point) named `<32 lower-case hex job id>` and carrying the ownership
+marker it writes on allocation. Anything else under `temp/jobs/` is not its to delete. Deciding
+*which* jobs are live is the caller's (it needs the database); PERSISTENCE_IMPLEMENTATION.md §28:
+"remove only application-owned workspace after verifying no live run needs it". This module knows
+nothing about the database.
+
+ponytail: a path is checked and then deleted, so a workspace swapped for a link in between would be
+followed. The directory is machine-local and writable only by the current user, who can already do
+anything this process can, so a handle-based deleter is not worth its complexity. Revisit if
+workspaces ever move somewhere other users can write.
 """
 
+import os
 import re
 import shutil
+import stat
 import uuid
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.infrastructure.storage.layout import StorageRoots
 
 WORKSPACE_SUBDIRECTORIES = ("decode", "frames", "crops", "intermediate")
+OWNERSHIP_MARKER = ".faceidentify-workspace"
 _NAME = re.compile(r"[0-9a-f]{32}")
+
+
+class WorkspaceError(Exception):
+    """The path is not a workspace this manager may use or delete."""
+
+
+def _is_plain_directory(path: Path) -> bool:
+    """A real directory: not a symlink, a junction, a mount point, a cloud placeholder or any other
+    reparse point. `lstat` is used because `is_dir` follows links."""
+    try:
+        status = path.lstat()
+    except OSError:
+        return False
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(status, "st_file_attributes", 0)
+    return (
+        stat.S_ISDIR(status.st_mode)
+        and not stat.S_ISLNK(status.st_mode)
+        and not (attributes & reparse)
+    )
+
+
+def _clear_read_only_and_retry(
+    function: Callable[[str], object], path: str, error: BaseException
+) -> None:
+    """`rmtree` hook: a read-only file (copied from a read-only source) is ours to remove, but a
+    file that is locked stays an error."""
+    if isinstance(error, PermissionError) and _is_plain_file(Path(path)):
+        os.chmod(path, stat.S_IWRITE)
+        function(path)
+    else:
+        raise error
+
+
+def _is_plain_file(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
 
 
 @dataclass
@@ -43,47 +92,73 @@ class WorkspaceManager:
 
     def allocate(self, job_id: uuid.UUID) -> Path:
         """Create the job's workspace with its standard subdirectories. Idempotent, so a retried or
-        resumed job gets its existing workspace back, files included."""
+        resumed job gets its existing workspace back, files included.
+
+        Refuses an existing entry of that name that is a link or some other reparse point, or a
+        directory with contents this manager did not mark as its own, instead of writing into it.
+        An existing *empty* directory is adopted (a crash between creating it and marking it).
+        """
         path = self.path_for(job_id)
+        self.root.mkdir(parents=True, exist_ok=True)
+        try:
+            path.mkdir()
+        except FileExistsError:
+            if not _is_plain_directory(path):
+                raise WorkspaceError(
+                    f"{path.name} is not a directory this manager may use"
+                ) from None
+            if not self._is_marked(path) and any(path.iterdir()):
+                raise WorkspaceError(
+                    f"{path.name} exists but was not made by this manager"
+                ) from None
+        (path / OWNERSHIP_MARKER).touch()
         for name in WORKSPACE_SUBDIRECTORIES:
             (path / name).mkdir(parents=True, exist_ok=True)
         return path
 
     def release(self, job_id: uuid.UUID) -> None:
         """Remove the job's workspace and everything in it. Idempotent. Never follows a link out of
-        the workspace, and refuses a workspace that is itself a link."""
+        the workspace, and refuses anything that is not a workspace this manager made."""
         path = self.path_for(job_id)
-        if path.is_symlink() or path.is_junction():
-            raise ValueError(f"workspace {path.name} is a link, not a directory this manager made")
-        if path.exists():
-            shutil.rmtree(path)
+        if not os.path.lexists(path):
+            return
+        if not self._is_workspace(path):
+            raise WorkspaceError(f"{path.name} is not a workspace this manager made")
+        shutil.rmtree(path, onexc=_clear_read_only_and_retry)
 
     def existing(self) -> list[uuid.UUID]:
         """The job ids that currently have a workspace directory."""
         if not self.root.is_dir():
             return []
         return sorted(
-            uuid.UUID(hex=entry.name)
-            for entry in self.root.iterdir()
-            if _NAME.fullmatch(entry.name) and self._is_workspace(entry)
+            uuid.UUID(hex=entry.name) for entry in self.root.iterdir() if self._is_workspace(entry)
         )
 
     @staticmethod
-    def _is_workspace(entry: Path) -> bool:
-        return entry.is_dir() and not (entry.is_symlink() or entry.is_junction())
+    def _is_marked(entry: Path) -> bool:
+        return _is_plain_file(entry / OWNERSHIP_MARKER)
+
+    def _is_workspace(self, entry: Path) -> bool:
+        return (
+            bool(_NAME.fullmatch(entry.name))
+            and _is_plain_directory(entry)
+            and self._is_marked(entry)
+        )
 
     def remove_orphans(self, live_jobs: Collection[uuid.UUID]) -> WorkspaceCleanup:
         """Remove every workspace whose job is not in `live_jobs`.
 
-        Tolerant, like startup recovery: one workspace that cannot be removed is reported in
-        `failed` and does not stop the rest.
+        Precondition, like `recover_artifacts`: `live_jobs` is read once, so this runs at startup,
+        before any worker allocates or uses a workspace (durable liveness is startup recovery's,
+        TST-030). Tolerant: one workspace that cannot be removed is reported in `failed` and does
+        not stop the rest.
         """
         report = WorkspaceCleanup()
         if not self.root.is_dir():
             return report
         live = set(live_jobs)
         for entry in sorted(self.root.iterdir()):
-            if not (_NAME.fullmatch(entry.name) and self._is_workspace(entry)):
+            if not self._is_workspace(entry):
                 report.unowned.append(entry.name)
                 continue
             job_id = uuid.UUID(hex=entry.name)
@@ -91,7 +166,7 @@ class WorkspaceManager:
                 report.kept.append(job_id)
                 continue
             try:
-                shutil.rmtree(entry)
+                shutil.rmtree(entry, onexc=_clear_read_only_and_retry)
             except OSError as error:
                 report.failed.append((job_id, f"{type(error).__name__}: {error}"))
                 continue
