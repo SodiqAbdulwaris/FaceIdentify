@@ -4,9 +4,11 @@
 - **Milestone / tracker IDs:** M2 (TST-025 in progress)
 - **Status:** partial (conservative cleanup of unreferenced managed artifacts; storage usage is its
   own PR)
-- **Commits:** PR (number added when opened): `feat(sources): discover what references an
-  artifact`, `feat(sources): clean up unreferenced managed artifacts`,
-  `test(sources): add conservative cleanup tests`, `docs: record conservative cleanup`
+- **Commits:** PR #20: `feat(sources): discover what references an artifact`,
+  `feat(sources): clean up unreferenced managed artifacts`,
+  `test(sources): add conservative cleanup tests`, `docs: record conservative cleanup`,
+  `fix(sources): make cleanup stricter about age, keys and references`,
+  `docs: record the conservative cleanup review`
 
 ## What changed
 
@@ -23,7 +25,7 @@
   and `cleanup_unreferenced_artifacts(session_factory, store, *, older_than, clock)`, returning a
   `CleanupReport` (`deleted`, `skipped`, `failed`). Each artifact goes through the existing crash-safe
   protocol (intent, bytes, finalize).
-- Tests: `tests/integration/test_storage_cleanup.py` (26).
+- Tests: `tests/integration/test_storage_cleanup.py` (33).
 
 ## Why
 
@@ -38,7 +40,7 @@ stored and its final commit then failed and startup recovery completed the artif
   caller-supplied cutoff.** Everything else is out of reach by construction: referenced originals
   (the user's files, §52), any other state, and anything a row points at, including a recycled
   Source's original and thumbnail (so a restore never needs reprocessing).
-- **References come from the schema, not from a list.** A hand-kept list goes stale the first time a
+- **References come from the schema, not from a list, and only foreign keys count.** A hand-kept list goes stale the first time a
   table gains an `artifacts.id` foreign key, and a stale list deletes bytes something still needs. A
   test pins the current six columns and requires a case for each, so a new reference fails the suite
   until it has been looked at.
@@ -48,8 +50,16 @@ stored and its final commit then failed and startup recovery completed the artif
   reported as `skipped`. A test makes the window real.
 - **The cutoff has no default.** It is the grace period that protects that window and the caller
   knows its own; choosing a number would be an unmeasured threshold. It is compared with when the
-  artifact *became available* (falling back to when it was created), so a long write cannot make a
-  finished artifact look old; the comparison is strict, so an artifact exactly at the cutoff stays.
+  artifact *became available*, so a long write cannot make a finished artifact look old; an artifact
+  with no availability time is never collected (its creation time is when it was reserved); the
+  comparison is strict, so an artifact exactly at the cutoff stays.
+- **A reference made after the intent is the creator's to prevent.** The intent's `UPDATE` refuses
+  an artifact that is referenced when it runs. A reference created to an artifact *already marked
+  `DELETING`* cannot be stopped from here without database triggers, and does not need them:
+  whatever creates a reference (the future import use case) must, in its own transaction, first check
+  that the artifact is still `AVAILABLE`. SQLite has one writer, so that check and the intent are
+  serialized and one of them loses cleanly. This contract is in the module docstring and in CONTEXT;
+  nothing creates such references yet.
 - **Stray files on disk are never deleted.** `scan_storage` reports them. A file no row owns may just
   be a file whose row was lost (a database restored from an older backup): then it is the only copy.
   Keeping a stray file costs disk space; deleting it can cost the data. They stay a report.
@@ -65,8 +75,9 @@ stored and its final commit then failed and startup recovery completed the artif
 
 - `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform
   linux`: clean.
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 492 passed (26 new, 0 regressions in the 466
-  before); `backend/` coverage 100%. The new file was run 5 times in a row: 26 passed each time.
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 499 passed (33 new, 0 regressions in the 466
+  before); `backend/` coverage 100%. The new file was run 5 times in a row before review and 5 after
+  the fixes: 0 failures.
 - Mutation checks, each reverted and confirmed byte-identical: 13 (dropping the managed-mode or the
   AVAILABLE filter, the strict comparison, each of the two fall-backs of the availability time, the
   ordering, the reference condition in the listing and in the deletion intent, the intent
@@ -76,6 +87,25 @@ stored and its final commit then failed and startup recovery completed the artif
   the ordering, since six artifacts were needed to make id order differ from age order); the
   assertions now require that a referenced artifact is never even chosen and use six artifacts. All
   13 are caught.
+
+After the review, 5 more mutations (the key check before the intent, catching the unusable-key
+error, the availability-time fallback, dropping the first or last referencing column), all caught.
+One clause added in the fix, an explicit `IS NOT NULL`, is redundant (a NULL comparison is already
+false in SQL), so no test can tell it from its absence; it was removed rather than kept untested.
+
+## Independent review (Codex CLI, read-only, disposable worktree): five findings, addressed
+
+| # | Finding | Resolution |
+|---|---|---|
+| P1 | A reference created after the `DELETING` intent commits can lose its bytes | **Not a trigger; a contract.** Whatever creates a reference must check in its own transaction that the artifact is still `AVAILABLE`; SQLite's single writer serializes that against the intent. Recorded in the module docstring, this entry and CONTEXT. Database triggers on six columns would be a schema change for a window that only a not-yet-written import use case can open |
+| P1 | A null `available_at` falls back to an old `created_at`, defeating the grace period | Fixed: only a non-null `available_at` counts; such a row is never collected. The test is reversed |
+| P2 | A malformed stored key raises after the intent is committed, stopping the batch and leaving the row `DELETING` | Fixed: `delete_managed_artifact` validates the key before committing the intent (a corrupt row is now refused without a state change, for every caller), and cleanup reports it as `skipped`. A test puts a corrupt key ahead of a good artifact |
+| P2 | The "all references" claim covers only declared foreign keys | Fixed in the wording: the module and this entry say *declared foreign keys*, and state the rule that a reference that keeps bytes alive must be one. No other kind exists today |
+| P2 | The race test exercises only `sources.original_artifact_id` | Fixed: it runs for every reference kind, committing the reference after the candidate was chosen |
+| Doc | The PR number was missing | Fixed |
+
+The reviewer found the intent, bytes, finalize structure conforms to API §§51-60 and persistence
+§4.1, and did not run the tests.
 
 ## Open issues / follow-ups
 
