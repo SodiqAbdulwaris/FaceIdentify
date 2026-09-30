@@ -3,15 +3,16 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-25 (PR #14)_
+_Last updated: 2026-09-30 (referenced artifacts)_
 
 ## Current state
 
 - **Milestone:** M0 and M1 (domain integrity) are complete and merged. M2 (persistence) has
   started: Alembic and the initial migration (TST-032, in progress), SQLite WAL behaviour
   (TST-021), use-case transaction rollback (TST-023), optimistic concurrency (TST-024), managed
-  artifact finalization (TST-026) and the Storage Manager's managed core (TST-025, in progress:
-  referenced imports, relinking and workspaces remain) are done; TST-022 and 027 to 031 are next.
+  artifact finalization (TST-026), the Storage Manager's managed core and referenced artifacts
+  (TST-025, in progress: relinking, workspaces, recycle/restore, usage and cleanup remain) are
+  done; TST-022 and 027 to 031 are next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
@@ -30,7 +31,11 @@ _Last updated: 2026-09-25 (PR #14)_
   and layout from tech-stack §15, safe key → path resolution, crash-safe staged writes, reads,
   hashing, deletion) and `backend/app/sources/artifact_storage.py` (the three-step
   PENDING → AVAILABLE protocol, symmetric deletion, startup recovery, a report-only consistency
-  scan). Tests build rows with the shared `build` factory and
+  scan), and `backend/app/sources/referenced_artifacts.py` with
+  `backend/infrastructure/storage/referenced.py` (external originals: inspect and fingerprint
+  before the transaction, record `REFERENCED`/`AVAILABLE`, and re-verify against the file so a
+  missing or changed original becomes `MISSING`, never touching the Source or the file). Tests
+  build rows with the shared `build` factory and
   assert constraints with `tests/fixtures/constraints.py`. The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
   source-import use case and no ML worker yet.
@@ -206,6 +211,14 @@ Unresolved items need the user's decision. Do not settle them silently.
     live writer's PENDING artifact MISSING. **Recommendation:** the backend takes an exclusive lock
     on a file in the library (e.g. `<Library>/database/.lock`) for its whole lifetime and refuses to
     start without it, before migrations and recovery. Decide with the startup/lifespan work.
+24. **Open: when does a `Source` become `UNAVAILABLE`?** Persistence §4.2 lists the state, but
+    no spec says what sets it. The likeliest trigger is a missing referenced original, but
+    IMPLEMENTATION_ARCHITECTURE §23.5 says to keep the Source and mark the *artifact's*
+    availability `MISSING`, and API §57 says this "is handled by availability state rather than
+    corrupting Source history". `reverify_referenced_artifact` therefore leaves the Source
+    `ACTIVE`. **Recommendation:** keep `UNAVAILABLE` unassigned until a use case needs it, and
+    derive "the original is missing" from the artifact, so there is one source of truth.
+    Decide with the Source use cases.
 
 ## M1 delivery (complete)
 
@@ -240,8 +253,9 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 3. ~~Use-case transaction rollback~~ Done (PR #13): TST-023
    (`tests/integration/test_transaction_rollback.py`).
 4. ~~Storage Manager, managed core~~ Done (PR #14): TST-026 passing, TST-025 in progress.
-5. Storage Manager follow-ups for TST-025: referenced imports, missing-file detection for
-   referenced originals, relinking, temporary workspaces, storage usage and conservative cleanup.
+5. Storage Manager follow-ups for TST-025: ~~referenced imports and missing-file detection for
+   referenced originals~~ (done, see above); relinking, temporary workspaces, recycle/restore,
+   storage usage and conservative cleanup.
 6. The rest of M2: TST-022 (repository contract), TST-027 (USearch integration), TST-028
    (IndexOperation replay), TST-029 (cross-storage failure), TST-030 (startup recovery beyond
    artifacts), TST-031 (deletion).
