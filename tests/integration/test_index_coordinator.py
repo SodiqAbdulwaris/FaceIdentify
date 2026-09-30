@@ -7,6 +7,7 @@ Each crash window between the two is reproduced.
 
 import uuid
 from datetime import timedelta
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -199,22 +200,97 @@ def test_an_add_for_a_representation_that_is_no_longer_active_is_applied_but_add
     assert not open_index(coordinator, space).contains(9)
 
 
-def test_an_erased_representation_has_no_key_to_remove_and_is_applied(
+def files_containing(directory: Path, needle: bytes) -> list[Path]:
+    return [p for p in directory.rglob("*") if p.is_file() and needle in p.read_bytes()]
+
+
+def test_an_erased_vector_is_gone_from_every_file_of_the_index(
     coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
     build: ModelFactory,
 ) -> None:  # fmt: skip
-    """CONTEXT open question 25: erasure clears `ann_key`, so a later REMOVE cannot name the key."""
-    rep = active(build, space, 4)
-    queue(build, rep, "ADD")
+    """Erasure clears `ann_key`, so a REMOVE cannot name a key: the space is rebuilt from SQLite
+    and the superseded generation's file, which still held the vector, must be gone (CONTEXT 25)."""
+    secret = [123.25, -7.5, 99.125, 0.03125]
+    erased = active(build, space, 4, secret)
+    survivor = active(build, space, 5, [1.0, 2.0, 3.0, 4.0])
+    queue(build, erased, "ADD")
+    queue(build, survivor, "ADD")
     run(coordinator, build)
+    directory = coordinator.index_directory(space.id)
     assert open_index(coordinator, space).contains(4)
-    rep.state, rep.vector, rep.ann_key = "ERASED", None, None  # erased: no key, no vector
-    operation = queue(build, rep, "REMOVE")
+    assert files_containing(directory, float32_vector(secret))  # it is in the index file now
+    erased.state, erased.vector, erased.ann_key = "ERASED", None, None
+    operation = queue(build, erased, "REMOVE")
 
     report = run(coordinator, build)
 
     assert report.applied == [operation.id]
-    assert open_index(coordinator, space).contains(4)  # still there until the next rebuild
+    assert report.purged_spaces == [space.id]
+    assert files_containing(directory, float32_vector(secret)) == []  # nowhere on disk
+    index = open_index(coordinator, space)
+    assert (index.contains(4), index.contains(5)) == (False, True)
+    assert not (directory / "quarantine").exists()  # quarantine would have kept the old file
+    assert load_op(factory, operation.id).state == "APPLIED"
+
+
+def test_a_purge_still_honours_a_remove_for_a_representation_that_is_active(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    """REMOVE means absent, even where SQLite still calls the representation active."""
+    erased, removed, kept = (active(build, space, key) for key in (1, 2, 3))
+    for rep in (erased, removed, kept):
+        queue(build, rep, "ADD")
+    run(coordinator, build)
+    erased.state, erased.vector, erased.ann_key = "ERASED", None, None
+    queue(build, erased, "REMOVE")
+    queue(build, removed, "REMOVE")
+
+    run(coordinator, build)
+
+    index = open_index(coordinator, space)
+    assert [index.contains(key) for key in (1, 2, 3)] == [False, False, True]
+
+
+def test_an_operation_that_failed_is_not_applied_again_by_a_purge(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory,
+) -> None:  # fmt: skip
+    erased = active(build, space, 1)
+    queue(build, erased, "ADD")
+    run(coordinator, build)
+    erased.state, erased.vector, erased.ann_key = "ERASED", None, None
+    purge = queue(build, erased, "REMOVE")
+    bad = queue(build, bad_vector(build, space, 2), "ADD")
+
+    report = run(coordinator, build)
+
+    assert report.applied == [purge.id]
+    assert [op for op, _ in report.retrying] == [bad.id]
+    assert report.purged_spaces == [space.id]
+
+
+def test_a_purge_that_cannot_delete_the_old_file_fails_instead_of_reporting_it_gone(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory,
+) -> None:  # fmt: skip
+    erased = active(build, space, 4, [123.25, -7.5, 99.125, 0.03125])
+    queue(build, erased, "ADD")
+    run(coordinator, build)
+    directory = coordinator.index_directory(space.id)
+    old_generation = next(directory.glob("index.*.usearch"))
+    erased.state, erased.vector, erased.ann_key = "ERASED", None, None
+    operation = queue(build, erased, "REMOVE")
+    build.clock.advance(minutes=1)
+
+    with old_generation.open("rb"):  # an open handle: Windows refuses to delete the file
+        report = run(coordinator, build)
+
+    assert report.applied == []
+    assert "could not be removed" in report.retrying[0][1]
+    assert load_op(factory, operation.id).state == "PENDING"  # not reported applied
+    build.clock.advance(minutes=5)
+    assert run(coordinator, build).applied == [operation.id]  # the lock is gone
+    assert files_containing(directory, float32_vector([123.25, -7.5, 99.125, 0.03125])) == []
 
 
 def test_operations_are_applied_in_the_order_they_were_queued(
@@ -382,7 +458,7 @@ def test_an_operation_settled_by_someone_else_meanwhile_is_not_counted(
     operation = queue(build, active(build, space, 1), "ADD")
     real = coordinator._apply_one
 
-    def apply_and_get_settled_elsewhere(*args: object, **kwargs: object) -> bool:
+    def apply_and_get_settled_elsewhere(*args: object, **kwargs: object) -> object:
         with factory() as other:
             other.execute(
                 update(IndexOperation).where(IndexOperation.id == operation.id)
@@ -397,6 +473,74 @@ def test_an_operation_settled_by_someone_else_meanwhile_is_not_counted(
 
     assert report.applied == []
     assert load_op(factory, operation.id).attempt_count == 0  # untouched by this pass
+
+
+def test_a_rebuild_leaves_out_a_vector_that_is_not_finite_and_says_so(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    nan = active(build, space, 1, [float("nan"), 0.0, 0.0, 0.0])
+    infinite = active(build, space, 2, [float("inf"), 0.0, 0.0, 0.0])
+    fine = active(build, space, 3)
+    queue(build, fine, "ADD")
+
+    report = run(coordinator, build)
+
+    assert sorted(report.unindexable) == sorted([nan.id, infinite.id])
+    assert report.applied != []
+    index = open_index(coordinator, space)
+    assert [index.contains(key) for key in (1, 2, 3)] == [False, False, True]
+
+
+def test_a_representation_whose_identity_is_not_active_is_not_indexed(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    """§6.2: an active representation needs an active identity, which no constraint can check."""
+    not_active = build.identity(state="PENDING")
+    orphan = active(build, space, 1)
+    orphan.identity_id = not_active.id
+    healthy = active(build, space, 2)
+    queue(build, orphan, "ADD")
+    queue(build, healthy, "ADD")
+
+    run(coordinator, build)
+
+    index = open_index(coordinator, space)
+    assert (index.contains(1), index.contains(2)) == (False, True)  # not by ADD, not by rebuild
+
+
+def test_a_remove_does_not_depend_on_the_identity(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    rep = active(build, space, 1)
+    queue(build, rep, "ADD")
+    run(coordinator, build)
+    rep.identity_id = build.identity(state="PENDING").id
+    queue(build, rep, "REMOVE")
+
+    run(coordinator, build)
+
+    assert not open_index(coordinator, space).contains(1)
+
+
+def test_passes_are_serialized(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """Two threads must not both load, change and persist one index: the last writer would win."""
+    queue(build, active(build, space, 1), "ADD")
+    real = coordinator._apply_space
+    held: list[bool] = []
+
+    def while_applying(*args: object, **kwargs: object) -> None:
+        held.append(coordinator._lock.locked())
+        real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(coordinator, "_apply_space", while_applying)
+
+    run(coordinator, build)
+
+    assert held == [True]
+    assert not coordinator._lock.locked()
 
 
 # --- spaces ----------------------------------------------------------------------------------

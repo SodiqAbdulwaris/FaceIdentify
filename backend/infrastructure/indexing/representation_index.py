@@ -391,17 +391,28 @@ class RepresentationIndex:
         self.remove_leftovers()
         return manifest
 
-    def remove_leftovers(self) -> None:
-        """Delete index files and staged manifests that the live manifest does not name (an
-        interrupted persist, or a superseded generation). Only this module's own plain files, by
-        exact name; a locked one is skipped and retried on the next call. Writer only: it judges
-        "live" by this object's manifest, so it must not run concurrently with another writer."""
+    def stale_files(self) -> list[Path]:
+        """Index files and staged manifests the live manifest does not name: what an interrupted
+        persist or a superseded generation leaves behind. Only this module's own plain files, by
+        exact name. A stale index file still holds every vector it was built with."""
         live = self.manifest.index_file if self.manifest is not None else None
-        for path in self.directory.iterdir():
-            stale_index = _INDEX_FILE.fullmatch(path.name) and path.name != live
-            if (stale_index or path.name == f"{MANIFEST_NAME}.tmp") and is_plain_file(path):
-                with contextlib.suppress(OSError):
-                    path.unlink()
+        return [
+            path
+            for path in self.directory.iterdir()
+            if (
+                (_INDEX_FILE.fullmatch(path.name) and path.name != live)
+                or path.name == f"{MANIFEST_NAME}.tmp"
+            )
+            and is_plain_file(path)
+        ]
+
+    def remove_leftovers(self) -> None:
+        """Delete `stale_files()`; a locked one is skipped and retried on the next call. Writer
+        only: it judges "live" by this object's manifest, so it must not run concurrently with
+        another writer."""
+        for path in self.stale_files():
+            with contextlib.suppress(OSError):
+                path.unlink()
 
 
 def quarantine(directory: Path) -> Path | None:
