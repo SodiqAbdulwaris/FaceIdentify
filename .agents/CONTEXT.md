@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-30 (USearch index)_
+_Last updated: 2026-09-30 (index coordinator)_
 
 ## Current state
 
@@ -12,8 +12,8 @@ _Last updated: 2026-09-30 (USearch index)_
   (TST-021), use-case transaction rollback (TST-023), optimistic concurrency (TST-024), managed
   artifact finalization (TST-026) and the Storage Manager (TST-025: managed core, referenced
   artifacts, relinking, temporary workspaces, Source recycle/restore, conservative cleanup and
-  storage usage) and the per-space USearch index (TST-027) are done; TST-022, 028 to 031 are
-  next.
+  storage usage) the per-space USearch index (TST-027) and the IndexCoordinator that replays
+  `IndexOperation`s into it (TST-028) are done; TST-022 and 029 to 031 are next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
@@ -59,7 +59,10 @@ _Last updated: 2026-09-30 (USearch index)_
   generations flushed and hashed behind an atomically replaced manifest, a read-only `open`, and
   quarantine plus rebuild of a missing, corrupt, mismatched or unsupported index
   (`open_or_rebuild`; one process, one writer; note `Index.load` adopts the file's dimension *and*
-  metric, so the file header is checked); it takes keys and vectors
+  metric, so the file header is checked), and `backend/app/memory/index_coordinator.py`
+  (`IndexCoordinator.apply_pending`: re-reads each representation, applies `ADD`/`REMOVE` as a desired
+  state, persists one index generation and only then marks the operations `APPLIED`; retry limit and
+  backoff are caller-supplied; a rebuild skips and reports a corrupt vector); it takes keys and vectors
   and knows nothing about SQLite or `ann_key` allocation (open questions 13, 21). The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
   source-import use case and no ML worker yet.
@@ -243,6 +246,19 @@ Unresolved items need the user's decision. Do not settle them silently.
     `ACTIVE`. **Recommendation:** keep `UNAVAILABLE` unassigned until a use case needs it, and
     derive "the original is missing" from the artifact, so there is one source of truth.
     Decide with the Source use cases.
+25. **Open: a `REMOVE` cannot name an erased representation's key.** Persistence's `erasure`
+    constraint makes an `ERASED` representation have no vector *and no `ann_key`*, and §17 says
+    `REMOVE` "ensure[s] absence regardless of stale index contents" after the coordinator "re-reads
+    authoritative representation state". After erasure the row no longer says which key to remove,
+    so the coordinator can only mark such a `REMOVE` applied, and the entry (with the erased vector's
+    bytes) stays in the USearch file until the space is next rebuilt. SQLite would reject the
+    candidate key on revalidation, but the biometric bytes remain on disk in the index. A test
+    pins the current behaviour. **Options:** (a) make erasure two-step: queue the `REMOVE`, and clear
+    `ann_key` and the vector only after that operation is `APPLIED` and persisted; (b) make erasure
+    force a rebuild of the space's index before it reports success; (c) accept it until rebuild.
+    **Recommendation:** (a), because it keeps the "SQLite precedes the index" ordering (INDEX-01) and
+    needs no full rebuild, with (b) as the fallback for bulk forget. It changes the erase/forget use
+    cases, so decide with TST-031 (deletion).
 
 ## M1 delivery (complete)
 
@@ -280,8 +296,8 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 5. ~~Storage Manager follow-ups for TST-025~~ Done: referenced imports, missing-file detection,
    relinking, temporary workspaces, recycle/restore, conservative cleanup and storage usage (see
    above).
-6. The rest of M2: TST-022 (repository contract), ~~TST-027 (USearch integration)~~ done, TST-028
-   (IndexOperation replay), TST-029 (cross-storage failure), TST-030 (startup recovery beyond
+6. The rest of M2: TST-022 (repository contract), ~~TST-027 (USearch integration)~~ done, ~~TST-028
+   (IndexOperation replay)~~ done, TST-029 (cross-storage failure), TST-030 (startup recovery beyond
    artifacts), TST-031 (deletion).
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
