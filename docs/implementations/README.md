@@ -63,3 +63,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-09-30 | [M2: Storage Manager, conservative cleanup](2026-09-30-m2-storage-conservative-cleanup.md) | partial; TST-025 in progress |
 | 2026-09-30 | [M2: Storage Manager, storage usage](2026-09-30-m2-storage-usage.md) | done; TST-025 complete |
 | 2026-09-30 | [M2: the per-space USearch index](2026-09-30-m2-usearch-representation-index.md) | done; TST-027 |
+| 2026-09-30 | [M2: the IndexCoordinator](2026-09-30-m2-index-coordinator.md) | done; TST-028 |
