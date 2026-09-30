@@ -4,8 +4,10 @@
 - **Milestone / tracker IDs:** M2 (TST-028)
 - **Status:** done for replay into the per-space index; the use cases that *create* operations and
   the startup wiring are later work
-- **Commits:** PR (number added when opened): `feat(memory): replay IndexOperations into the USearch
-  index`, `test(memory): add index coordinator tests`, `docs: record the index coordinator`
+- **Commits:** PR #23: `feat(memory): replay IndexOperations into the USearch index`,
+  `test(memory): add index coordinator tests`, `docs: record the index coordinator`,
+  `fix(memory): guarantee an erased vector leaves the index and tighten eligibility`,
+  `docs: record the index coordinator review`
 
 ## What changed
 
@@ -17,9 +19,12 @@
     each operation, **persists one new generation if anything changed, and only then marks the
     operations `APPLIED`**.
   - Each operation **re-reads its representation** and applies a desired state (§17). `ADD`: present
-    under its `ann_key` if the representation is still `ACTIVE`; otherwise left alone (the `REMOVE`
-    queued when it lost eligibility handles it). `REMOVE`: absent, even if the representation is
-    still active. Both are idempotent: replaying one changes nothing, and no new generation is
+    under its `ann_key` if the representation is still `ACTIVE` *and its identity is `ACTIVE`*;
+    otherwise left alone (the `REMOVE` queued when it lost eligibility handles it). `REMOVE`: absent,
+    even if the representation is still active. For an **erased** representation, which has no
+    `ann_key` left, the space's index is **rebuilt from SQLite and the superseded generation's file
+    must be gone** (not quarantined, which would keep the vector), else the pass fails and retries.
+    Both are idempotent: replaying one changes nothing, and no new generation is
     written for a replay that changed nothing.
   - `RetryPolicy(max_attempts, backoff)`, **required and with no defaults**. A failed operation
     records its attempt, failure code and detail and is retried after `backoff(attempts)`; out of
@@ -27,9 +32,14 @@
     failure to persist retries the whole space's batch and leaves the old generation live.
   - `CoordinatorReport`: `applied`, `retrying`, `failed`, `rebuilt_spaces`, and `unindexable`
     (ACTIVE representations a rebuild had to leave out because their stored vector is not a valid
-    vector for the space).
+    vector for the space: wrong length, NaN or infinity), and `purged_spaces`.
+  - `apply_pending` holds a lock, so two threads cannot load, change and persist one index.
+  - Settlement reads the attempt counts in its own transaction first, so no read precedes the
+    writes in the transaction that commits them (no `BUSY_SNAPSHOT` from this step).
   - `USEARCH_METRICS` maps the space's `COSINE` to USearch's `cos`.
-- Tests: `tests/integration/test_index_coordinator.py` (19), on real SQLite and real USearch files.
+- Tests: `tests/integration/test_index_coordinator.py` (27), on real SQLite and real USearch files.
+- `backend/infrastructure/indexing/representation_index.py`: `stale_files()` (what `remove_leftovers()`
+  deletes), so the coordinator can verify that no superseded generation file remains.
 
 ## Why
 
@@ -72,22 +82,26 @@ the operation applied." TESTING_STRATEGY INDEX-01: SQLite precedes index mutatio
 - **One process, one thread** runs the coordinator (§23), and it is the sole writer of the index
   directory; this is stated in the module and inherited from the index.
 
-## Open question found: `REMOVE` cannot name an erased representation's key (CONTEXT 25)
+## Open question found: erasure clears the key a `REMOVE` would need (CONTEXT 25)
 
-Persistence's `erasure` constraint makes an `ERASED` representation have no vector and **no `ann_key`**.
-A `REMOVE` queued for it therefore has nothing to remove by: the coordinator marks it applied
-(nothing it can do) and the entry stays in the index file until the space is next rebuilt. The
-candidate key would be revalidated against SQLite and rejected, but the *vector bytes remain on disk*
-inside the index file, which matters for an erased biometric. A test documents the current behaviour.
-Recommendation and options are in CONTEXT 25; it needs a decision with the deletion work (TST-031)
-and is not settled here.
+Persistence's `erasure` constraint makes an `ERASED` representation have no vector and **no `ann_key`**,
+so a `REMOVE` for it has nothing to remove by. The first version of this coordinator marked such an
+operation applied and left the vector inside the index file, which the review rightly called a
+violation of §17's "ensure absence regardless of stale index contents" for an erased biometric. The
+coordinator now guarantees absence itself (rebuild, verify the old file is gone, else retry), with a
+test that searches every file of the index directory for the erased vector's bytes. What stays open
+is whether the *erase use case* should order things so the rebuild is unnecessary (queue the
+`REMOVE`, clear the key and vector only after it is applied), which changes the erase/forget flow and
+is decided with TST-031 (CONTEXT 25). Older *quarantined* generations from earlier corruption may
+still hold a vector; quarantine retention is part of the same decision.
 
 ## Verification
 
 - `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform
   linux`: clean.
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 613 passed (19 new, 0 regressions in the 594
-  before); `backend/` coverage 100%. The new file was run 5 times in a row: 19 passed each time.
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 620 passed (26 new, 0 regressions in the 594
+  before); `backend/` coverage 100%. The new file was run 5 times in a row before review and 5 after
+  the fixes: 0 failures.
 - Mutation checks, each reverted and confirmed byte-identical: 25 on the claim query (state, due
   time, ordering, limit), the different-space check, `REMOVE` and `ADD` eligibility, persisting only
   when changed (both directions), the changed-flag accumulation, the attempt limit, the backoff, the
@@ -102,6 +116,29 @@ and is not settled here.
   concurrent use (the design forbids it), and behaviour with `SQLITE_BUSY` (CONTEXT open question 20):
   the settle step reads then writes in one transaction, so a second writer committing in between
   could raise the known `BUSY_SNAPSHOT`.
+
+After the review, 12 more mutations on the new behaviour (the purge trigger, the stale-file check,
+the re-application of the batch after a purge, persisting after it, the purge report, finiteness, each
+side of the identity rule, and the lock): 11 caught; one survivor, `join` against `outerjoin` under an
+`Identity.state == ACTIVE` filter, is equivalent (the filter removes the rows an outer join would
+keep). A guard the review did not ask for, on the attempt count in the settle `UPDATE`, was removed
+because nothing in a single-coordinator design can exercise it and the `PENDING` guard already stops
+a double settle.
+
+## Independent review (Codex CLI, read-only, disposable worktree): request-changes, addressed
+
+| # | Finding | Resolution |
+|---|---|---|
+| C1 (critical) | An erased representation's `REMOVE` is marked applied without removing anything, leaving its vector in the index file | Fixed in the coordinator: a keyless `REMOVE` rebuilds the space from SQLite (no quarantine), re-applies the batch, and requires the superseded generation's file to be gone or the pass fails and retries. Test: the erased vector's bytes are found in the index file before and in no file of the directory after; a second proves a locked old file keeps the operation `PENDING`. Whether erasure should also be ordered to avoid the rebuild remains CONTEXT 25 |
+| H1 | `_claim` does not lock; concurrent passes can lose an update | Fixed in-process: `apply_pending` holds a lock across claim, apply, persist and settle (tested). **Not** an inter-process lock: the coordinator is a single process by design and the index is machine-local state under the shell's single instance; a second process is the library-lock question (CONTEXT 23) |
+| H2 | Settlement reads then writes in a deferred transaction and can raise `BUSY_SNAPSHOT` | Fixed for this step: the attempt counts are read in their own transaction, so the writes' transaction starts with a write. A retrying wrapper for `SQLITE_BUSY` generally is open question 20 and is not built here. A real two-session `BUSY_SNAPSHOT` test was not written: with no read in the write transaction there is nothing for it to fail on, and the ordering is visible in the code |
+| M1 | A rebuild skips only a wrong-length vector; a NaN blocks the whole space | Fixed: finiteness is checked with the length; such rows are reported as `unindexable`. Test with NaN and infinity |
+| M2 | Eligibility is only `state == ACTIVE`; §6.2 needs an active identity | Fixed in `ADD` and in the rebuild; `REMOVE` stays unconditional. Tests for a non-active identity and for a `REMOVE` regardless of identity |
+| L | The test commit changes 465 lines with no body rationale | Not split and history not rewritten: it is one new test module (plus nothing else); explained on the PR |
+
+The reviewer found the normal replay, the persist-before-applied ordering and the persist-to-settle
+crash window correct, noted that coalescing opposite operations belongs to the producing use cases,
+and did not run the tests.
 
 ## Open issues / follow-ups
 

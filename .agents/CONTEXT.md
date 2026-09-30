@@ -59,11 +59,13 @@ _Last updated: 2026-09-30 (index coordinator)_
   generations flushed and hashed behind an atomically replaced manifest, a read-only `open`, and
   quarantine plus rebuild of a missing, corrupt, mismatched or unsupported index
   (`open_or_rebuild`; one process, one writer; note `Index.load` adopts the file's dimension *and*
-  metric, so the file header is checked), and `backend/app/memory/index_coordinator.py`
-  (`IndexCoordinator.apply_pending`: re-reads each representation, applies `ADD`/`REMOVE` as a desired
-  state, persists one index generation and only then marks the operations `APPLIED`; retry limit and
-  backoff are caller-supplied; a rebuild skips and reports a corrupt vector); it takes keys and vectors
-  and knows nothing about SQLite or `ann_key` allocation (open questions 13, 21). The remaining backend
+  metric, so the file header is checked; it takes keys and vectors and knows nothing about SQLite
+  or `ann_key` allocation, open questions 13 and 21). `backend/app/memory/index_coordinator.py` is
+  the IndexCoordinator: `apply_pending` re-reads each representation, applies `ADD`/`REMOVE` as a
+  desired state, persists one index generation and only then marks the operations `APPLIED`; the
+  retry limit and backoff are caller-supplied, a rebuild skips and reports a corrupt vector,
+  eligibility needs an ACTIVE identity, and an erased representation's vector is guaranteed gone
+  by a rebuild (open question 25). The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
   source-import use case and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
@@ -246,19 +248,18 @@ Unresolved items need the user's decision. Do not settle them silently.
     `ACTIVE`. **Recommendation:** keep `UNAVAILABLE` unassigned until a use case needs it, and
     derive "the original is missing" from the artifact, so there is one source of truth.
     Decide with the Source use cases.
-25. **Open: a `REMOVE` cannot name an erased representation's key.** Persistence's `erasure`
-    constraint makes an `ERASED` representation have no vector *and no `ann_key`*, and §17 says
-    `REMOVE` "ensure[s] absence regardless of stale index contents" after the coordinator "re-reads
-    authoritative representation state". After erasure the row no longer says which key to remove,
-    so the coordinator can only mark such a `REMOVE` applied, and the entry (with the erased vector's
-    bytes) stays in the USearch file until the space is next rebuilt. SQLite would reject the
-    candidate key on revalidation, but the biometric bytes remain on disk in the index. A test
-    pins the current behaviour. **Options:** (a) make erasure two-step: queue the `REMOVE`, and clear
-    `ann_key` and the vector only after that operation is `APPLIED` and persisted; (b) make erasure
-    force a rebuild of the space's index before it reports success; (c) accept it until rebuild.
-    **Recommendation:** (a), because it keeps the "SQLite precedes the index" ordering (INDEX-01) and
-    needs no full rebuild, with (b) as the fallback for bulk forget. It changes the erase/forget use
-    cases, so decide with TST-031 (deletion).
+25. **Open (mitigated): erasure clears the key a `REMOVE` would need.** Persistence's `erasure`
+    constraint makes an `ERASED` representation have no vector *and no `ann_key`*, so a `REMOVE` for
+    it cannot name a key. The IndexCoordinator now guarantees absence itself: a keyless `REMOVE`
+    rebuilds the space's index from SQLite (not quarantined) and requires the superseded generation's
+    file to be gone, else it retries (tested by searching every file of the index directory for the
+    erased bytes). What is still undecided is the erase/forget *flow*: **(a)** make erasure two-step,
+    queueing the `REMOVE` and clearing `ann_key` and the vector only after it is `APPLIED` and
+    persisted, which keeps "SQLite precedes the index" (INDEX-01) and needs no rebuild; **(b)** keep
+    today's behaviour and accept a full-space rebuild per erasure batch; or **(c)** make bulk forget
+    batch its erasures into one rebuild. **Recommendation:** (a) for single erasures with (c) for bulk
+    forget. Also undecided: how long *quarantined* index generations, which may hold a vector from
+    before an erasure, are kept. Decide with TST-031 (deletion).
 
 ## M1 delivery (complete)
 
