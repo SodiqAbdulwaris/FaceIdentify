@@ -46,6 +46,12 @@ def _digest_stream(stream: BinaryIO) -> StoredBytes:
     return StoredBytes(digest.digest(), size)
 
 
+def digest_path(path: Path) -> StoredBytes:
+    """Hash and size of a file, streamed. Reads only; the caller decides which files to read."""
+    with path.open("rb") as stream:
+        return _digest_stream(stream)
+
+
 class ManagedFileStore:
     def __init__(self, roots: StorageRoots) -> None:
         self.roots = roots
@@ -109,10 +115,7 @@ class ManagedFileStore:
     def digest(self, storage_key: str) -> StoredBytes | None:
         """Hash and size of the file at the key, or None if there is no file."""
         path = self.roots.path_for(storage_key)
-        if not path.is_file():
-            return None
-        with path.open("rb") as stream:
-            return _digest_stream(stream)
+        return digest_path(path) if path.is_file() else None
 
     def delete(self, storage_key: str) -> None:
         """Remove the file at the key. Idempotent: an already-absent file is success."""
