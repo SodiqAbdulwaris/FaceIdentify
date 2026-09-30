@@ -7,7 +7,8 @@ commits, for the same reason the managed primitives do.
 
 The external file may later go missing, and that "is handled by availability state rather than
 corrupting Source history" (§57). `reverify_referenced_artifact` moves an artifact between
-AVAILABLE and MISSING; it never touches the Source row or the file.
+AVAILABLE and MISSING; it never touches the Source row or the file. `relink_referenced_artifact`
+points a MISSING artifact at a moved file, once it is verified to be the same media.
 """
 
 import stat
@@ -19,10 +20,15 @@ from typing import cast
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.app.sources.artifact_storage import ArtifactStateError, transition_artifact
+from backend.app.sources.artifact_storage import (
+    ArtifactStateError,
+    ArtifactStorageError,
+    transition_artifact,
+)
 from backend.app.sources.models import Artifact, ArtifactKind, ArtifactState, StorageMode
 from backend.infrastructure.storage.files import StoredBytes, digest_path
-from backend.infrastructure.storage.referenced import ReferencedFile
+from backend.infrastructure.storage.layout import StorageRoots
+from backend.infrastructure.storage.referenced import ReferencedFile, inspect_referenced_file
 
 REFERENCED_FILE_MISSING = "REFERENCED_FILE_MISSING"
 REFERENCED_CONTENT_CHANGED = "REFERENCED_CONTENT_CHANGED"
@@ -130,3 +136,57 @@ def reverify_referenced_artifact(
         )
         session.commit()
     return str(new_state)
+
+
+class RelinkMismatchError(ArtifactStorageError):
+    """The candidate is not the recorded media: that is replacement, not relinking (§59)."""
+
+
+def relink_referenced_artifact(
+    session_factory: sessionmaker[Session],
+    roots: StorageRoots,
+    artifact_id: uuid.UUID,
+    candidate: Path,
+    *,
+    clock: Callable[[], datetime],
+) -> None:
+    """Point a MISSING referenced original at the file the user selected ("Locate File").
+
+    API and Contracts.md §59: relinking "must verify that the selected candidate represents the
+    expected underlying media"; different media is replacement. The candidate must match the
+    recorded size and SHA-256 exactly, so an artifact with no recorded fingerprint cannot be
+    relinked (nothing to verify against). Only a MISSING artifact is relinked; V1 never searches
+    a disk for it. The candidate is inspected outside any transaction and is never modified.
+    """
+    with session_factory() as session:
+        artifact = _referenced(session.get(Artifact, artifact_id), artifact_id)
+        if artifact.state != ArtifactState.MISSING:
+            raise ArtifactStateError(
+                f"artifact {artifact_id} is REFERENCED {artifact.state}; expected MISSING"
+            )
+        if artifact.sha256 is None or artifact.size_bytes is None:
+            raise ArtifactStorageError(
+                f"artifact {artifact_id} has no recorded fingerprint to verify a relink against"
+            )
+        recorded = StoredBytes(artifact.sha256, artifact.size_bytes)
+
+    inspected = inspect_referenced_file(candidate, roots)
+    if inspected.stored != recorded:
+        raise RelinkMismatchError(
+            f"{candidate.name!r} is not the media artifact {artifact_id} recorded"
+        )
+
+    with session_factory() as session:
+        transition_artifact(
+            session,
+            artifact_id,
+            {ArtifactState.MISSING},
+            {
+                "state": ArtifactState.AVAILABLE,
+                "external_path": str(inspected.path),
+                "failure_code": None,
+                "failure_detail": None,
+            },
+            storage_mode=StorageMode.REFERENCED,
+        )
+        session.commit()
