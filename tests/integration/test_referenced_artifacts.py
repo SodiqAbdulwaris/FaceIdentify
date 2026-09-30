@@ -399,6 +399,33 @@ def test_a_file_deleted_while_it_is_being_read_is_missing(
     assert load(artifact_id).failure_code == REFERENCED_FILE_MISSING
 
 
+def test_a_file_in_the_place_of_the_folder_is_missing(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    artifact_id = import_file(factory, storage_roots, build, photo)
+    photo.unlink()
+    photo.parent.rmdir()
+    photo.parent.write_bytes(b"now a plain file")
+
+    assert reverify(factory, build, artifact_id) == "MISSING"
+    assert load(artifact_id).failure_code == REFERENCED_FILE_MISSING
+
+
+def test_a_file_that_becomes_a_directory_while_being_read_is_missing(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, load: Callable[[uuid.UUID], Artifact], monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    artifact_id = import_file(factory, storage_roots, build, photo)
+
+    def swapped(_path: Path) -> object:
+        raise IsADirectoryError("is a directory")
+
+    monkeypatch.setattr(referenced_artifacts, "digest_path", swapped)
+    assert reverify(factory, build, artifact_id) == "MISSING"
+    assert load(artifact_id).failure_code == REFERENCED_FILE_MISSING
+
+
 def test_a_directory_in_the_place_of_the_file_is_missing(
     factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
     photo: Path, load: Callable[[uuid.UUID], Artifact],
@@ -437,7 +464,7 @@ def test_a_concurrent_state_change_is_not_overwritten(
     """The write is guarded by the state that was read, so it cannot resurrect a settled row."""
     artifact_id = import_file(factory, storage_roots, build, photo)
 
-    def row_settles_while_the_file_is_read(_path: Path, _recorded: object) -> bool:
+    def row_settles_while_the_file_is_read(_path: Path, _size: int, _recorded: object) -> bool:
         with factory() as other:
             other.execute(
                 update(Artifact).where(Artifact.id == artifact_id).values(state="DELETED")

@@ -56,12 +56,12 @@ def add_referenced_artifact(
     return artifact
 
 
-def _matches(path: Path, recorded: StoredBytes | None) -> bool:
+def _matches(path: Path, size: int, recorded: StoredBytes | None) -> bool:
     """Whether the file at `path` is still the recorded content. The size check comes first so a
     changed multi-gigabyte video is not hashed just to learn it differs."""
     if recorded is None:
         return True
-    return path.stat().st_size == recorded.size_bytes and digest_path(path) == recorded
+    return size == recorded.size_bytes and digest_path(path) == recorded
 
 
 def _judge(path: Path, recorded: StoredBytes | None) -> tuple[ArtifactState, str | None]:
@@ -72,11 +72,12 @@ def _judge(path: Path, recorded: StoredBytes | None) -> tuple[ArtifactState, str
     every other `OSError` propagates: it is not evidence that the media is gone.
     """
     try:
-        if not stat.S_ISREG(path.stat().st_mode):
+        examined = path.stat()
+        if not stat.S_ISREG(examined.st_mode):
             return ArtifactState.MISSING, REFERENCED_FILE_MISSING
-        if _matches(path, recorded):
+        if _matches(path, examined.st_size, recorded):
             return ArtifactState.AVAILABLE, None
-    except (FileNotFoundError, NotADirectoryError):
+    except (FileNotFoundError, IsADirectoryError):
         return ArtifactState.MISSING, REFERENCED_FILE_MISSING
     return ArtifactState.MISSING, REFERENCED_CONTENT_CHANGED
 
