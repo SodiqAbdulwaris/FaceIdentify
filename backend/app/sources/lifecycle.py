@@ -15,13 +15,16 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from backend.app.sources.models import Artifact, ArtifactState, Source, SourceState
 from backend.infrastructure.db.optimistic import optimistic_locked_update
 
-# An original in one of these states has no bytes left to show: restoring the Source would hand
-# back a Source that can never be displayed or processed ("Restores... where possible", §5.6).
+# An original in one of these states is in, or has been through, permanent deletion (a failed one
+# may still have bytes, and is retried). Restoring would hand back a Source that can never be
+# displayed or processed ("Restores... where possible", §5.6), and recycling one is pointless, so
+# neither moves it.
 BYTES_GONE = {ArtifactState.DELETING, ArtifactState.DELETE_FAILED, ArtifactState.DELETED}
 
 
@@ -31,6 +34,14 @@ class SourceLifecycleError(Exception):
 
 class StaleSourceRevisionError(SourceLifecycleError):
     """The Source's revision no longer matches what the caller last read."""
+
+
+def _original_is_going(original_artifact_id: Any) -> Any:
+    return exists(
+        select(Artifact.id).where(
+            Artifact.id == original_artifact_id, Artifact.state.in_(BYTES_GONE)
+        )
+    )
 
 
 def _move(
@@ -48,7 +59,9 @@ def _move(
         source_id,
         expected_revision=expected_revision,
         values={"state": to_state, **values},
-        extra_where=[Source.state == from_state],
+        # Evaluated by the database inside the same UPDATE, never against a cached object, so a
+        # deletion that begins in another session is seen, and no read precedes the write.
+        extra_where=[Source.state == from_state, ~_original_is_going(Source.original_artifact_id)],
     )
     if rowcount == 0:
         current = session.get(Source, source_id, populate_existing=True)
@@ -59,8 +72,14 @@ def _move(
                 f"source {source_id} is at revision {current.revision}, "
                 f"expected {expected_revision}"
             )
+        if current.state != from_state:
+            raise SourceLifecycleError(
+                f"source {source_id} is {current.state}; expected {from_state} to become {to_state}"
+            )
+        original = session.get(Artifact, current.original_artifact_id, populate_existing=True)
+        assert original is not None  # RESTRICT foreign key: a Source's original cannot vanish
         raise SourceLifecycleError(
-            f"source {source_id} is {current.state}; expected {from_state} to become {to_state}"
+            f"source {source_id} cannot become {to_state}: its original is {original.state}"
         )
     session.flush()
     # populate_existing: optimistic_locked_update disables session-sync (see its docstring).
@@ -76,7 +95,8 @@ def recycle_source(
     expected_revision: int,
     clock: Callable[[], datetime],
 ) -> Source:
-    """Move an ACTIVE Source to the Recycle Bin. Touches nothing but the Source row."""
+    """Move an ACTIVE Source to the Recycle Bin. Touches nothing but the Source row. Refused, like a
+    restore, for a Source whose original is being or has been permanently deleted."""
     now = clock()
     return _move(
         session, source_id,
@@ -93,17 +113,11 @@ def restore_source(
     expected_revision: int,
     clock: Callable[[], datetime],
 ) -> Source:
-    """Bring a RECYCLED Source back, unless its original's bytes are already gone."""
-    source = session.get(Source, source_id, populate_existing=True)
-    if source is not None and source.state == SourceState.RECYCLED:
-        original = session.get(Artifact, source.original_artifact_id)
-        if original is not None and original.state in BYTES_GONE:
-            raise SourceLifecycleError(
-                f"source {source_id} cannot be restored: its original is {original.state}"
-            )
+    """Bring a RECYCLED Source back, unless its original is being or has been deleted."""
+    now = clock()
     return _move(
         session, source_id,
         from_state=SourceState.RECYCLED, to_state=SourceState.ACTIVE,
         expected_revision=expected_revision,
-        values={"recycled_at": None, "updated_at": clock()},
+        values={"recycled_at": None, "updated_at": now},
     )  # fmt: skip

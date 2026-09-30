@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.sources.artifact_storage import create_managed_artifact
@@ -20,7 +20,7 @@ from backend.app.sources.lifecycle import (
     recycle_source,
     restore_source,
 )
-from backend.app.sources.models import Source
+from backend.app.sources.models import Artifact, Source
 from backend.infrastructure.db.engine import Base, create_session_factory
 from backend.infrastructure.storage.files import ManagedFileStore
 from tests.factories.models import ModelFactory
@@ -232,6 +232,48 @@ def test_the_state_is_reported_before_the_original(
 
     with pytest.raises(SourceLifecycleError, match="is ACTIVE; expected RECYCLED"):
         restore_source(db_session, source.id, expected_revision=1, clock=build.clock)
+
+
+def test_a_deletion_begun_in_another_session_is_seen_despite_a_cached_original(
+    factory: sessionmaker[Session], db_session: Session, build: ModelFactory
+) -> None:
+    """Sessions keep loaded objects after a commit, so the database must evaluate the guard."""
+    original = build.artifact(state="AVAILABLE")
+    source = build.source(state="RECYCLED", original_artifact_id=original.id)
+    db_session.commit()
+    source_id, original_id = source.id, original.id
+
+    with factory() as restoring:
+        cached = restoring.get(Artifact, original_id)
+        assert cached is not None
+        assert cached.state == "AVAILABLE"
+        restoring.commit()  # the cached object outlives the transaction
+
+        with factory() as deleting:
+            deleting.execute(
+                update(Artifact).where(Artifact.id == original_id).values(state="DELETING")
+            )
+            deleting.commit()
+
+        assert cached.state == "AVAILABLE"  # stale, exactly as the reviewer described
+        with pytest.raises(SourceLifecycleError, match="its original is DELETING"):
+            restore_source(restoring, source_id, expected_revision=1, clock=build.clock)
+        restoring.rollback()
+
+    assert reload(factory, source_id).state == "RECYCLED"
+
+
+@pytest.mark.parametrize("original_state", ["DELETING", "DELETE_FAILED", "DELETED"])
+def test_a_source_whose_original_is_being_deleted_is_not_recycled(
+    db_session: Session, build: ModelFactory, original_state: str
+) -> None:
+    source = build.source(original_artifact_id=build.artifact(state=original_state).id)
+    db_session.commit()
+
+    with pytest.raises(SourceLifecycleError, match=f"its original is {original_state}"):
+        recycle_source(db_session, source.id, expected_revision=1, clock=build.clock)
+    db_session.rollback()
+    assert reload_state(db_session, source.id) == "ACTIVE"
 
 
 @pytest.mark.parametrize("original_state", ["AVAILABLE", "MISSING"])
