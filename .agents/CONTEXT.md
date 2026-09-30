@@ -47,7 +47,9 @@ _Last updated: 2026-09-30 (conservative cleanup)_
   `backend/app/sources/storage_cleanup.py` (deletes only `AVAILABLE` managed artifacts that no row
   references, past a caller-supplied cutoff; the references are read from the schema in
   `artifact_references.py`, and the check is part of the deletion-intent `UPDATE`; stray files are
-  reported, never deleted). Tests
+  reported, never deleted; a reference that keeps bytes alive must be a foreign key, and whatever
+  creates one, such as the future import use case, must first check in its own transaction that the
+  artifact is still `AVAILABLE`). Tests
   build rows with the shared `build` factory and
   assert constraints with `tests/fixtures/constraints.py`. The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
