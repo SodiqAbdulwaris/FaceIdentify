@@ -7,10 +7,10 @@ commits, for the same reason the managed primitives do.
 
 The external file may later go missing, and that "is handled by availability state rather than
 corrupting Source history" (§57). `reverify_referenced_artifact` moves an artifact between
-AVAILABLE and MISSING; it never touches the Source row or the file. Relinking a moved file is
-`relink_referenced_artifact`.
+AVAILABLE and MISSING; it never touches the Source row or the file.
 """
 
+import stat
 import uuid
 from collections.abc import Callable
 from datetime import datetime
@@ -64,6 +64,23 @@ def _matches(path: Path, recorded: StoredBytes | None) -> bool:
     return path.stat().st_size == recorded.size_bytes and digest_path(path) == recorded
 
 
+def _judge(path: Path, recorded: StoredBytes | None) -> tuple[ArtifactState, str | None]:
+    """The state and failure code the file on disk implies.
+
+    Only "there is nothing there" means missing, including a file that vanishes while it is read.
+    `Path.is_file` would also report a denied or unreachable file as absent, so `stat` is used and
+    every other `OSError` propagates: it is not evidence that the media is gone.
+    """
+    try:
+        if not stat.S_ISREG(path.stat().st_mode):
+            return ArtifactState.MISSING, REFERENCED_FILE_MISSING
+        if _matches(path, recorded):
+            return ArtifactState.AVAILABLE, None
+    except (FileNotFoundError, NotADirectoryError):
+        return ArtifactState.MISSING, REFERENCED_FILE_MISSING
+    return ArtifactState.MISSING, REFERENCED_CONTENT_CHANGED
+
+
 def _referenced(artifact: Artifact | None, artifact_id: uuid.UUID) -> Artifact:
     if artifact is None or artifact.storage_mode != StorageMode.REFERENCED:
         where = "does not exist" if artifact is None else f"is {artifact.storage_mode}"
@@ -98,12 +115,7 @@ def reverify_referenced_artifact(
             else StoredBytes(artifact.sha256, artifact.size_bytes)
         )
 
-    if not path.is_file():
-        new_state, new_code = ArtifactState.MISSING, REFERENCED_FILE_MISSING
-    elif _matches(path, recorded):
-        new_state, new_code = ArtifactState.AVAILABLE, None
-    else:
-        new_state, new_code = ArtifactState.MISSING, REFERENCED_CONTENT_CHANGED
+    new_state, new_code = _judge(path, recorded)
     if (new_state, new_code) == (state, failure_code):
         return str(state)
 

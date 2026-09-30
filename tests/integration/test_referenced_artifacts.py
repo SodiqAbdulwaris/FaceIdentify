@@ -25,6 +25,7 @@ from backend.app.sources.referenced_artifacts import (
 )
 from backend.infrastructure.db.engine import create_session_factory
 from backend.infrastructure.storage import referenced as referenced_module
+from backend.infrastructure.storage.files import digest_path
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.referenced import ReferencedFileError, inspect_referenced_file
 from tests.factories.models import ModelFactory
@@ -352,6 +353,62 @@ def test_a_file_that_cannot_be_read_is_not_evidence_that_it_is_gone(
     with pytest.raises(PermissionError):
         reverify(factory, build, artifact_id)
     assert load(artifact_id).state == "AVAILABLE"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        PermissionError("access is denied"),
+        # winerror 21: an unplugged or unreachable drive. `Path.is_file` reports this one as False.
+        OSError(0, "the device is not ready", None, 21),
+    ],
+    ids=["access-denied", "device-not-ready"],
+)
+def test_a_file_that_cannot_be_examined_is_not_evidence_that_it_is_gone(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, load: Callable[[uuid.UUID], Artifact], monkeypatch: pytest.MonkeyPatch,
+    error: OSError,
+) -> None:  # fmt: skip
+    artifact_id = import_file(factory, storage_roots, build, photo)
+    real_stat = Path.stat
+    target = photo.resolve()  # computed first: resolving calls stat
+
+    def unreachable(self: Path, **kwargs: bool) -> object:
+        if self == target:
+            raise error
+        return real_stat(self, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", unreachable)
+    with pytest.raises(OSError, match=str(error)[-12:]):
+        reverify(factory, build, artifact_id)
+    assert load(artifact_id).state == "AVAILABLE"
+
+
+def test_a_file_deleted_while_it_is_being_read_is_missing(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, load: Callable[[uuid.UUID], Artifact], monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    artifact_id = import_file(factory, storage_roots, build, photo)
+
+    def vanishes(path: Path) -> object:
+        path.unlink()
+        return digest_path(path)  # now raises FileNotFoundError
+
+    monkeypatch.setattr(referenced_artifacts, "digest_path", vanishes)
+    assert reverify(factory, build, artifact_id) == "MISSING"
+    assert load(artifact_id).failure_code == REFERENCED_FILE_MISSING
+
+
+def test_a_directory_in_the_place_of_the_file_is_missing(
+    factory: sessionmaker[Session], storage_roots: StorageRoots, build: ModelFactory,
+    photo: Path, load: Callable[[uuid.UUID], Artifact],
+) -> None:  # fmt: skip
+    artifact_id = import_file(factory, storage_roots, build, photo)
+    photo.unlink()
+    photo.mkdir()
+
+    assert reverify(factory, build, artifact_id) == "MISSING"
+    assert load(artifact_id).failure_code == REFERENCED_FILE_MISSING
 
 
 def test_an_artifact_without_a_fingerprint_is_checked_for_existence_only(
