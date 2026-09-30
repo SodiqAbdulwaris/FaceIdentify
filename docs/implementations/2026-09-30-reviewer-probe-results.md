@@ -3,7 +3,7 @@
 - **Date:** 2026-09-30
 - **Milestone / tracker IDs:** none (process: `.agents/rules/branches.md`, Review)
 - **Status:** done (no reviewer newly approved)
-- **Commits:** PR (number added when opened): `docs: record the reviewer CLI probe results`
+- **Commits:** PR #19: `docs: record the reviewer CLI probe results`
 
 ## What changed
 
