@@ -58,20 +58,22 @@ def storage_key_for(kind: str, artifact_id: uuid.UUID) -> str:
     return f"{KIND_DIRECTORIES[ArtifactKind(kind)]}/{artifact_id.hex}"
 
 
-def _transition(
+def transition_artifact(
     session: Session,
     artifact_id: uuid.UUID,
     from_states: Collection[str],
     values: dict[str, Any],
+    *,
+    storage_mode: str = StorageMode.MANAGED,
 ) -> None:
-    """Move one managed artifact between states, guarded by its current state in the database."""
+    """Move one artifact between states, guarded by its current state in the database."""
     result = cast(
         "CursorResult[Any]",
         session.execute(
             update(Artifact)
             .where(
                 Artifact.id == artifact_id,
-                Artifact.storage_mode == StorageMode.MANAGED,
+                Artifact.storage_mode == storage_mode,
                 Artifact.state.in_(from_states),
             )
             .values(**values),
@@ -84,7 +86,7 @@ def _transition(
             "does not exist" if current is None else f"is {current.storage_mode} {current.state}"
         )
         raise ArtifactStateError(
-            f"artifact {artifact_id} {where}; expected MANAGED in {sorted(from_states)}"
+            f"artifact {artifact_id} {where}; expected {storage_mode} in {sorted(from_states)}"
         )
 
 
@@ -125,7 +127,7 @@ def mark_artifact_available(
     clock: Callable[[], datetime],
 ) -> None:
     """Step 3: record the verified hash and size and make the artifact AVAILABLE."""
-    _transition(
+    transition_artifact(
         session,
         artifact_id,
         {ArtifactState.PENDING},
@@ -141,7 +143,7 @@ def mark_artifact_available(
 
 
 def _mark_write_not_completed(session: Session, artifact_id: uuid.UUID, detail: str) -> None:
-    _transition(
+    transition_artifact(
         session,
         artifact_id,
         {ArtifactState.PENDING},
@@ -198,7 +200,7 @@ def request_artifact_deletion(
 ) -> None:
     """Step 1 of deletion: durable intent. Refuses REFERENCED artifacts: their bytes are the
     user's, and this application never deletes them (API and Contracts.md §52)."""
-    _transition(
+    transition_artifact(
         session,
         artifact_id,
         DELETABLE_STATES,
@@ -210,7 +212,7 @@ def finalize_artifact_deletion(
     session: Session, artifact_id: uuid.UUID, *, clock: Callable[[], datetime]
 ) -> None:
     """Step 3 of deletion, once the bytes are verified gone."""
-    _transition(
+    transition_artifact(
         session,
         artifact_id,
         {ArtifactState.DELETING, ArtifactState.DELETE_FAILED},
@@ -220,7 +222,7 @@ def finalize_artifact_deletion(
 
 
 def _record_delete_failure(session: Session, artifact_id: uuid.UUID, detail: str) -> None:
-    _transition(
+    transition_artifact(
         session,
         artifact_id,
         {ArtifactState.DELETING, ArtifactState.DELETE_FAILED},
