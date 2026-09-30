@@ -38,7 +38,7 @@ class WorkspaceError(Exception):
     """The path is not a workspace this manager may use or delete."""
 
 
-def _is_plain_directory(path: Path) -> bool:
+def is_plain_directory(path: Path) -> bool:
     """A real directory: not a symlink, a junction, a mount point, a cloud placeholder or any other
     reparse point. `lstat` is used because `is_dir` follows links."""
     try:
@@ -103,7 +103,7 @@ class WorkspaceManager:
         try:
             path.mkdir()
         except FileExistsError:
-            if not _is_plain_directory(path):
+            if not is_plain_directory(path):
                 raise WorkspaceError(
                     f"{path.name} is not a directory this manager may use"
                 ) from None
@@ -141,7 +141,7 @@ class WorkspaceManager:
     def _is_workspace(self, entry: Path) -> bool:
         return (
             bool(_NAME.fullmatch(entry.name))
-            and _is_plain_directory(entry)
+            and is_plain_directory(entry)
             and self._is_marked(entry)
         )
 
