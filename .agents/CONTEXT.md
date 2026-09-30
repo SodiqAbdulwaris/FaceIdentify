@@ -37,7 +37,7 @@ _Last updated: 2026-09-30 (temporary workspaces)_
   `relink_referenced_artifact` points a `MISSING` one at a user-selected file only if its size and
   SHA-256 equal the recorded ones), and `backend/infrastructure/storage/workspaces.py` (job
   workspaces under machine-local `temp/jobs/<job id>/`: allocate, release, and remove orphans given
-  the live job ids; deletes only directories it named, never follows a link). Tests
+  the live job ids; deletes only marked directories it made, never follows a link). Tests
   build rows with the shared `build` factory and
   assert constraints with `tests/fixtures/constraints.py`. The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
