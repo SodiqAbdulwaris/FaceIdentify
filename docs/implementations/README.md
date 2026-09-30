@@ -57,3 +57,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-09-25 | [M2: Storage Manager, managed core](2026-09-25-m2-storage-manager-managed-core.md) | done; TST-025 in progress |
 | 2026-09-30 | [M2: Storage Manager, referenced artifacts](2026-09-30-m2-storage-referenced-artifacts.md) | partial; TST-025 in progress |
 | 2026-09-30 | [M2: Storage Manager, relinking](2026-09-30-m2-storage-relinking.md) | partial; TST-025 in progress |
+| 2026-09-30 | [M2: Storage Manager, temporary workspaces](2026-09-30-m2-storage-temporary-workspaces.md) | partial; TST-025 in progress |
