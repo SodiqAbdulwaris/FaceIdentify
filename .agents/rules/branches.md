@@ -71,11 +71,11 @@ and `$dir`, save its report to `$result`, then continue from the two `git status
 
 | Reviewer | Status | Read-only invocation |
 |---|---|---|
-| Codex CLI | **Approved** (used on PR #2) | `codex exec -s read-only -C "$dir" -o "$result" - < "$prompt"` |
+| Codex CLI | **Approved** (used on PR #2 and PRs #15 to #18) | `codex exec -s read-only -C "$dir" -o "$result" - < "$prompt"`. Re-probed 2026-09-30: asked to create a file, append to `README.md` and run `git commit`, all three were refused (access denied, `index.lock` permission denied) and the worktree stayed clean |
 | Subagent | **Approved** (used on PR #2, final review) | A fresh-context subagent without edit tools, told to work only in `$dir`. It may still have a shell, so this is *detected*, not sandboxed: check `git -C "$dir" status --short` **and** the author's own `git status` afterwards |
-| Antigravity CLI (`agy`) | Not yet approved | Candidate: `agy --sandbox --mode plan -p …`, run in `$dir`. Test that it cannot write before approving |
-| OpenCode CLI | Not yet approved | `--agent plan` only selects an agent and is not a sandbox. Needs a tested read-only configuration |
-| Cursor CLI (`agent`) | Not yet approved | Not installed on the current machine. Identify and test its read-only flag first |
+| Antigravity CLI (`agy`) | **Not approved** (probed 2026-09-30) | `agy --sandbox --mode plan -p` does not make a usable read-only reviewer: headless, it auto-denies every shell command (so it cannot run `git diff`); its file-write tool created a file in its own scratch directory (`~/.gemini/antigravity-cli/scratch`), which is also its workspace rather than the current directory, so it could neither see the worktree nor be shown unable to write to it; and a read-only question hung. Retest if a release documents a workspace flag and a real read-only mode |
+| OpenCode CLI | **Not approved** (probed 2026-09-30) | `--agent plan` only selects an agent and is not a sandbox. With `OPENCODE_CONFIG_CONTENT='{"permission":{"edit":"deny","write":"deny","webfetch":"deny","bash":{"*":"deny","git log*":"allow","git diff*":"allow","git show*":"allow","git status*":"allow"}}}'` it refused a file write, an append and a commit and had no edit tool. Two gaps stop approval: a `git diff --output=<file>` would match the allowlist and writes a file (a `bash` of `deny` is the safer configuration, with the diff supplied in the prompt), and that stricter configuration could not be verified because its free tier began refusing non-interactive use ("can only be used from within OpenCode") |
+| Cursor CLI (`agent`) | Not yet approved | Not installed on the current machine (only the editor's `cursor` launcher is, and it is not the agent CLI). Identify and test its read-only flag first |
 
 **A failed run is not a review.** If the reviewer exits non-zero or `$result` is empty, read
 `$tmp/reviewer.log` *before* cleaning up, fix the cause or switch to another approved reviewer,

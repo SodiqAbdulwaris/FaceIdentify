@@ -59,3 +59,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-09-30 | [M2: Storage Manager, relinking](2026-09-30-m2-storage-relinking.md) | partial; TST-025 in progress |
 | 2026-09-30 | [M2: Storage Manager, temporary workspaces](2026-09-30-m2-storage-temporary-workspaces.md) | partial; TST-025 in progress |
 | 2026-09-30 | [M2: Source recycle and restore](2026-09-30-m2-source-recycle-restore.md) | partial; TST-025 in progress |
+| 2026-09-30 | [Reviewer CLI probe results](2026-09-30-reviewer-probe-results.md) | done; none newly approved |
