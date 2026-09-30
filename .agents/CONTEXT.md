@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-30 (storage usage)_
+_Last updated: 2026-09-30 (USearch index)_
 
 ## Current state
 
@@ -12,7 +12,8 @@ _Last updated: 2026-09-30 (storage usage)_
   (TST-021), use-case transaction rollback (TST-023), optimistic concurrency (TST-024), managed
   artifact finalization (TST-026) and the Storage Manager (TST-025: managed core, referenced
   artifacts, relinking, temporary workspaces, Source recycle/restore, conservative cleanup and
-  storage usage) are done; TST-022 and 027 to 031 are next.
+  storage usage) and the per-space USearch index (TST-027) are done; TST-022, 028 to 031 are
+  next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
@@ -53,7 +54,11 @@ _Last updated: 2026-09-30 (storage usage)_
   holds by kind, the Recycle Bin's share, referenced originals apart, workspace bytes and volume
   free space; it reports, the scheduler decides). Tests
   build rows with the shared `build` factory and
-  assert constraints with `tests/fixtures/constraints.py`. The remaining backend
+  assert constraints with `tests/fixtures/constraints.py`. `backend/infrastructure/indexing/
+  representation_index.py` is the per-space USearch index: idempotent add/remove, candidate search,
+  generations persisted behind an atomically replaced manifest, and quarantine plus rebuild of a
+  missing, corrupt, mismatched or unsupported index (`open_or_rebuild`); it takes keys and vectors
+  and knows nothing about SQLite or `ann_key` allocation (open questions 13, 21). The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
   source-import use case and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
@@ -273,7 +278,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 5. ~~Storage Manager follow-ups for TST-025~~ Done: referenced imports, missing-file detection,
    relinking, temporary workspaces, recycle/restore, conservative cleanup and storage usage (see
    above).
-6. The rest of M2: TST-022 (repository contract), TST-027 (USearch integration), TST-028
+6. The rest of M2: TST-022 (repository contract), ~~TST-027 (USearch integration)~~ done, TST-028
    (IndexOperation replay), TST-029 (cross-storage failure), TST-030 (startup recovery beyond
    artifacts), TST-031 (deletion).
 
