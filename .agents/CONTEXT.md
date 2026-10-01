@@ -68,9 +68,12 @@ _Last updated: 2026-09-30 (startup recovery)_
   eligibility needs an ACTIVE identity, and an erased representation's vector is guaranteed gone
   by a rebuild (open question 25). `backend/app/recovery/startup.py` is startup recovery:
   `recover_on_startup` settles artifacts and missing referenced originals (existence only), marks
-  `RUNNING` jobs, runs and segments `INTERRUPTED`, removes workspaces of finished jobs, validates
-  every active space's index and catches up pending `IndexOperation`s in bounded passes; idempotent,
-  and survives a crash after any step. Nothing calls it yet (no application lifespan). The remaining backend
+  `RUNNING` jobs, runs and segments `INTERRUPTED` and clears stale leases from any job, removes
+  workspaces of finished jobs whose run is over too, validates every active space's index, gives
+  `FAILED` `IndexOperation`s one fresh set of attempts and catches up pending ones in bounded
+  passes; idempotent, survives a crash after any step, and reports what is `unresolved`. It relies
+  on the single-process precondition (open questions 20 and 23) and nothing calls it yet (no
+  application lifespan). The remaining backend
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
   source-import use case and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
