@@ -517,3 +517,155 @@ def test_versions_of_a_component_are_read_oldest_first_not_in_version_string_ord
     with factory() as session:
         versions = RuntimeCatalogRepository(session).versions_of(newest.component_id)
         assert [v.id for v in versions] == [older[1].id, older[0].id, newest.id]
+
+
+# --- findings of the review ---------------------------------------------------------------------
+
+
+def test_a_catalog_row_that_is_already_persistent_is_refused_not_updated(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    version = build.component_version()
+    export = new_export(build, version.id)
+    build.session.add(export)
+    build.session.commit()
+
+    with factory() as session:
+        stored = session.get(ModelExport, export.id)
+        assert stored is not None
+        stored.precision = "INT8"  # a change a flush would turn into an UPDATE
+        with pytest.raises(ValueError, match="immutable"):
+            RuntimeCatalogRepository(session).add(stored)
+        session.rollback()
+    with factory() as session:
+        row = session.get(ModelExport, export.id)
+        assert row is not None
+        assert row.precision == "FP16"
+
+
+def test_ties_are_broken_by_id_in_every_ordered_read(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    first = build.component_version()
+    space = build.representation_space()
+    when = build.clock()
+    ids = [uuid.UUID(int=n) for n in (3, 1, 2)]  # added out of id order
+    versions = [
+        build.add(
+            ComponentVersion(
+                id=row_id, component_id=first.component_id, semantic_version=f"9.0.{n}",
+                contract_schema_version=1, contract_json={}, created_at=when,
+            )
+        )
+        for n, row_id in enumerate(ids)
+    ]  # fmt: skip
+    exports = [build.add(new_export(build, first.id, id=row_id, created_at=when)) for row_id in ids]
+    variants = [build.add(new_variant(build, exports[0].id, "same-key", id=i)) for i in ids]
+    for variant in variants:
+        build.add(
+            RuntimeVariantRepresentationSpace(
+                runtime_variant_id=variant.id, representation_space_id=space.id,
+                validation_json={}, state="VALIDATED",
+            )
+        )  # fmt: skip
+    profiles = [
+        build.add(
+            RecognitionCalibrationProfile(
+                id=row_id, representation_space_id=space.id, version=f"v{n}", state="ACTIVE",
+                parameters_json={}, schema_version=1, created_at=when,
+            )
+        )
+        for n, row_id in enumerate(ids)
+    ]  # fmt: skip
+    build.session.commit()
+    ascending = sorted(ids)
+
+    with factory() as session:
+        repo = RuntimeCatalogRepository(session)
+        same_time = [v.id for v in repo.versions_of(first.component_id) if v.id in ids]
+        assert same_time == ascending
+        assert [e.id for e in repo.exports_of(first.id)] == ascending
+        assert [v.id for v in repo.variants_for_space(space.id, states=["VALIDATED"])] == ascending
+        assert [p.id for p in repo.calibration_profiles(space.id)] == sorted(ids, reverse=True)
+    assert len(versions) == len(exports) == len(profiles) == 3
+
+
+def test_installations_of_one_export_or_package_are_listed_by_id(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    installed_export, installed_package = installation_fixture(build)
+    ids = [uuid.UUID(int=n) for n in (3, 1, 2)]
+    for row_id in ids:
+        build.add(
+            InstalledModelExport(
+                id=row_id, model_export_id=installed_export.model_export_id,
+                artifact_id=build.artifact().id, state="INSTALLING",
+            )
+        )  # fmt: skip
+        build.add(
+            RuntimePackageInstallation(
+                id=row_id, runtime_package_id=installed_package.runtime_package_id,
+                artifact_id=build.artifact().id, state="INSTALLING",
+            )
+        )  # fmt: skip
+    build.session.commit()
+
+    with factory() as session:
+        repo = RuntimeCatalogRepository(session)
+        exports = [i.id for i in repo.export_installations(installed_export.model_export_id)]
+        packages = [i.id for i in repo.package_installations(installed_package.runtime_package_id)]
+    assert exports == sorted([installed_export.id, *ids])
+    assert packages == sorted([installed_package.id, *ids])
+
+
+def test_a_transition_writes_what_it_is_given_so_an_omitted_time_is_lost_and_a_detail_clears(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    installed_export, _ = installation_fixture(build)
+    stamp = build.clock()
+
+    def row_state() -> tuple[object, ...]:
+        with factory() as session:
+            row = session.get(InstalledModelExport, installed_export.id)
+            assert row is not None
+            return (row.state, row.installed_at, row.failure_detail)
+
+    steps: list[tuple[str, str, dict[str, Any]]] = [
+        ("INSTALLING", "FAILED", {"failure_detail": "checksum mismatch"}),
+        ("FAILED", "INSTALLED", {"installed_at": stamp}),  # a success clears the old detail
+        ("INSTALLED", "VERIFYING", {}),  # installed_at was not passed again: it is cleared
+    ]
+    expected = [
+        ("FAILED", None, "checksum mismatch"),
+        ("INSTALLED", stamp, None),
+        ("VERIFYING", None, None),
+    ]
+    for (source, target, values), after in zip(steps, expected, strict=True):
+        with factory() as session:
+            assert RuntimeCatalogRepository(session).transition_export_installation(
+                installed_export.id, from_states=[source], to_state=target, **values
+            )
+            session.commit()
+        assert row_state() == after
+
+
+def test_only_one_of_two_concurrent_installation_transitions_wins(
+    factory: sessionmaker[Session], sqlite_engine: Engine, build: ModelFactory
+) -> None:
+    installed_export, _ = installation_fixture(build)
+
+    def attempt(to_state: str) -> bool:
+        with factory() as session:
+            done = RuntimeCatalogRepository(session).transition_export_installation(
+                installed_export.id, from_states=["INSTALLING"], to_state=to_state
+            )
+            session.commit()
+            return done
+
+    with (
+        rendezvous_before_write(sqlite_engine, "UPDATE installed_model_exports", parties=2),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        outcomes = list(pool.map(attempt, ["INSTALLED", "FAILED"]))
+
+    assert sorted(outcomes) == [False, True]

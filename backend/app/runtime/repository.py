@@ -8,9 +8,15 @@ The hierarchy is `Component -> ComponentVersion -> ModelExport -> RuntimeVariant
 `RecognitionCalibrationProfile` and `RuntimePackage`. Those rows are *metadata*: a version, an
 export and a calibration profile are immutable (a calibration change creates a new profile), and
 "metadata rows are retained after uninstall; only installation records change" (§18). So this
-repository can `add` any catalog row but has no update for one, and the only changes to an existing
-row are the installation records' states (`transition_export_installation`,
+repository can `add` a new catalog row (an already-persistent one is refused: flushing a modified
+one would be an update) but has no update for one, and the only changes to an existing row are the
+installation records' states (`transition_export_installation`,
 `transition_package_installation`).
+
+Not covered yet, by design: the `state` of a component, a runtime variant, a variant's compatibility
+mapping and a package is mutable by nature, but no spec says who changes it or between which values
+(open question 11), so there is no write path for those until the first use case that needs one.
+Their reads (`variants_for_space(states=...)`) work on whatever state the rows were added with.
 
 The value sets of `state`, `kind`, `format`, `provider` and the like are still undecided (CONTEXT
 open question 11), so every state is the caller's string and a transition only needs the caller to
@@ -24,6 +30,7 @@ from typing import Any, cast
 
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.base import instance_state
 
 from backend.app.runtime.models import (
     Component,
@@ -61,9 +68,12 @@ class RuntimeCatalogRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def add(self, row: CatalogRow) -> CatalogRow:
-        """Stage a catalog row and flush, so its constraints (a unique key, an unknown parent, a
-        wrong digest length) are checked now."""
+    def add[T: CatalogRow](self, row: T) -> T:
+        """Stage a new catalog row and flush, so its constraints (a unique key, an unknown parent,
+        a wrong digest length) are checked now. A row that is already persistent is a
+        `ValueError`: catalog rows are immutable, and flushing a changed one would update it."""
+        if not instance_state(row).transient:
+            raise ValueError("a catalog row is added once: it is immutable afterwards")
         self._session.add(row)
         self._session.flush()
         return row
@@ -179,8 +189,9 @@ class RuntimeCatalogRepository:
         failure_detail: str | None = None,
     ) -> bool:
         """Move a model export's installation record to `to_state` only if it is in one of
-        `from_states` now: one guarded `UPDATE`. The times and detail are written as given
-        (`None` clears them), so a failure can record its detail and a success can clear it.
+        `from_states` now: one guarded `UPDATE`. **Pass every value that should survive:** the times
+        and detail are written as given, so `None` (the default) clears them, which is how a failure
+        records its detail and a success clears it, and also how an omitted `installed_at` is lost.
         False if the record was not in an expected state."""
         return self._transition(
             InstalledModelExport, installation_id, from_states, to_state,
