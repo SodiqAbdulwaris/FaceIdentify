@@ -77,3 +77,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-01 | [M2: ANN candidate revalidation](2026-10-01-m2-ann-candidate-revalidation.md) | done; issue #44; found #48 |
 | 2026-10-01 | [M2: ProcessingRun and snapshot repositories](2026-10-01-m2-processing-run-repository.md) | partial; TST-022 in progress |
 | 2026-10-01 | [Decide revision 0003 and the SQLite erasure policy](2026-10-01-decide-0003-and-sqlite-erasure.md) | done (documents); issues #48, #51, #52 |
+| 2026-10-01 | [M2: revision 0003](2026-10-01-m2-revision-0003.md) | done; TST-032; issues #48, #51 |

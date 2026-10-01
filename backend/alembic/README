@@ -15,7 +15,11 @@ The library database's path comes from the FACEIDENTIFY_DATABASE_PATH environmen
 
 Migrations run with foreign key enforcement off (SQLite cannot recreate a referenced table
 otherwise) and check `PRAGMA foreign_key_check` before each revision commits; each revision is its
-own transaction, so one that fails leaves the database at the revision before it. The `--sql`
+own transaction, so one that fails leaves the database at the revision before it. Triggers belong
+to their table: recreating `processing_configuration_snapshots` would drop its two immutability
+triggers (revision 0003), so a revision that does must recreate them (the triggers' text is
+`SNAPSHOT_*_TRIGGER` in `backend/app/processing/models.py`). The triggers do not stop `INSERT OR
+REPLACE` on a snapshot no run references (SQLite does not fire delete triggers for it): issue 55. The `--sql`
 output is for review only: it has neither the foreign key pragma nor the check, so do not replay it.
 
 `downgrade base` destroys the library. Foreign keys sometimes stop it on a database that has rows
