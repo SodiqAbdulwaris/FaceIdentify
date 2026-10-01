@@ -52,14 +52,18 @@ is the one repository operation whose meaning depends on how SQLite works.
   path): non-string keys (`json.dumps` would turn `1` into `"1"`), `NaN` and infinities (not JSON), sets,
   tuples, bytes and any other object. Nine cases are tested, plus a valid document using every kind of value
   (a 70-bit integer included) that round-trips.
-- **One snapshot per run and immutable are conventions, not database guarantees, and the entry now says so.**
-  `create` is the only write and there is no update or delete, but SQLite allows an `UPDATE` of a snapshot,
-  and nothing stops two runs from sharing one (`configuration_snapshot_id` is not unique). Enforcing either
-  takes a trigger and a unique constraint: a schema change, so GitHub issue #51 asks the owner (recommended:
-  one revision `0003`, with the one issue #48 may need). The fingerprint is deliberately not unique, so runs
-  with identical settings each keep their own row (tested with real runs).
+- **One snapshot per run is a database guarantee; immutability is not yet.** `create` is the only write and
+  there is no update or delete. A second run cannot reference a snapshot a run already uses
+  (`uq_processing_runs_configuration_snapshot_id`, in `0001`; tested). SQLite does allow an `UPDATE` of a
+  snapshot; two triggers are decided for revision `0003` (issue #51). The fingerprint is deliberately not
+  unique, so runs with identical settings each keep their own row (tested with real runs).
+  **Correction (added 2026-10-01):** this entry first said the database enforced *neither*, and that nothing
+  stopped two runs from sharing a snapshot because `configuration_snapshot_id` "is not unique". That was
+  wrong: the unique constraint was in the model and in `0001` all along (a test now shows the second run is
+  refused), and the review comment I "corrected" in response was right to expect it. I had not looked at the
+  schema before asserting it.
 - **Not built:** run state transitions, the acceptance use case, and database-level snapshot immutability
-  and uniqueness (issue #51).
+  (revision `0003`, issue #51).
 
 ## Verification
 
@@ -85,9 +89,9 @@ findings.
 
 | Finding | Resolution |
 |---|---|
-| Snapshots are not immutable: SQLite allows an `UPDATE`, which would rewrite a run's intent; add a trigger | Right that the guarantee is only a convention, but a trigger (and a unique constraint for "one per run") is a schema change, so it is not slipped into a repository PR. The module and this entry now say plainly that neither is enforced, and issue #51 asks the owner, with a recommendation to bundle it with revision `0003` |
+| Snapshots are not immutable: SQLite allows an `UPDATE`, which would rewrite a run's intent; add a trigger | Right for immutability, but a trigger is a schema change, so it was not slipped into a repository PR: issue #51 asked the owner, who decided on 2026-10-01 to add two triggers in revision `0003`. (My statement here that "one per run" was also unenforced was wrong: see the correction in Decisions) |
 | `json.dumps` accepts `NaN`/`Infinity` and coerces non-string keys | Confirmed and fixed: `_require_json` refuses anything JSON cannot say exactly, before staging (see Decisions) |
-| The "one snapshot per run" test made two snapshots and no runs | Confirmed. It now creates real runs referencing each snapshot, and the claim that the database enforces one-per-run is corrected (it does not; issue #51) |
+| The "one snapshot per run" test made two snapshots and no runs | Confirmed. It now creates real runs referencing each snapshot. My "correction" that the database does not enforce one-per-run was itself wrong (it does: see Decisions), and a test now shows a second run on the same snapshot is refused |
 | The freshness tests commit before the concurrent update, so they do not prove freshness inside an open transaction (WAL read snapshot) | Right, and the code is qualified rather than the tests changed: `get` says a transaction that has already read sees its snapshot, the tests are renamed to say "in a new transaction", and the answer for a caller that needs the current row is `lock` first |
 | No test had a second writer wait for `lock` (the locking session committed before the reader started) | Replaced: a second `lock`, told not to wait, is refused while the first holds the lock and returns the committed row once it commits. The earlier test is renamed to what it shows (the read-first failure) |
 
