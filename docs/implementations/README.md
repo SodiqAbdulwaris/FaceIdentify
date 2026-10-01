@@ -81,3 +81,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-01 | [M2: SQLite erasure policy (pragma and checkpoint)](2026-10-01-m2-sqlite-erasure-policy.md) | partial; issue #52 |
 | 2026-10-01 | [M2: representation erasure, the owed-truncation marker and erasure recovery](2026-10-01-m2-representation-erasure.md) | done; TST-031 in progress |
 | 2026-10-01 | [M2: Observation and Representation repositories](2026-10-01-m2-observation-representation-repositories.md) | done; TST-022 in progress |
+| 2026-10-01 | [M2: Identity, Occurrence and Evidence repositories](2026-10-01-m2-identity-occurrence-evidence-repositories.md) | done; TST-022 in progress |
