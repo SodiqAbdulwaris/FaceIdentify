@@ -118,7 +118,7 @@ EXPECTED_INDEXES: dict[str, set[tuple[tuple[str, ...], bool]]] = {
         (("face_crop_artifact_id",), False),
     },
     "representations": {
-        (("ann_key",), True),
+        (("representation_space_id", "ann_key"), True),
         (("representation_space_id", "state", "ann_key"), False),
         (("identity_id", "state"), False),
         (("processing_run_id", "state"), False),

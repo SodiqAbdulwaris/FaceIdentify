@@ -190,6 +190,7 @@ class Representation(Base):
             name="active_eligible",
         ),
         UniqueConstraint("observation_id", "representation_space_id"),
+        UniqueConstraint("representation_space_id", "ann_key"),
         Index(None, "representation_space_id", "state", "ann_key"),
         Index(None, "identity_id", "state"),
         Index(None, "processing_run_id", "state"),
@@ -213,7 +214,8 @@ class Representation(Base):
         ForeignKey("representation_spaces.id", ondelete="RESTRICT")
     )
     state: Mapped[str] = mapped_column(String)
-    ann_key: Mapped[int | None] = mapped_column(BigInteger, unique=True)
+    # Unique within a representation space, not across the application (decision 2026-10-01).
+    ann_key: Mapped[int | None] = mapped_column(BigInteger)
     vector: Mapped[bytes | None] = mapped_column(LargeBinary)
     vector_dimension: Mapped[int] = mapped_column(Integer)
     quality_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
