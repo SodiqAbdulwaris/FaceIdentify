@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (decisions for revision 0003 and the SQLite erasure policy)_
+_Last updated: 2026-10-01 (revision 0003)_
 
 ## Current state
 
@@ -36,8 +36,8 @@ _Last updated: 2026-10-01 (decisions for revision 0003 and the SQLite erasure po
   (`backend/app/people/use_cases.py`: assign/reassign/remove an Identity's Person link, rename a
   Person). `backend/infrastructure/db/optimistic.py` holds the one shared optimistic-locked
   `UPDATE` helper both feature modules use. The schema is created only by Alembic
-  (`backend/alembic/`, revisions `0001_initial_schema` and `0002_representation_erasing_state`, the
-  latter adding the `ERASING` representation state); every persistence test runs on the migrated
+  (`backend/alembic/`, revisions `0001_initial_schema`, `0002_representation_erasing_state` (the `ERASING`
+  state) and `0003_ann_key_per_space_and_snapshot_triggers` (`ann_key` unique per space; immutable snapshots)); every persistence test runs on the migrated
   schema. The Storage Manager's managed core: `backend/infrastructure/storage/` (the two roots
   and layout from tech-stack §15, safe key → path resolution, crash-safe staged writes, reads,
   hashing, deletion) and `backend/app/sources/artifact_storage.py` (the three-step
@@ -173,8 +173,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     isn't identity/visual evidence, only an Identity's link to a Person is).
 13. ~~Open: `representations.ann_key` global uniqueness vs per-space sequences.~~ **Decided 2026-10-01 (owner,
     issue 48; the same conflict as question 28, which re-found it):** `UNIQUE(representation_space_id, ann_key)`,
-    revision `0003`, not yet built. Until it is, two simultaneously ACTIVE spaces still collide (no code path
-    creates them today).
+    revision `0003`, **built**: two spaces can now hold the same key.
 14. **Open (M6): job claim order.** `jobs.priority` is a string, so `ORDER BY priority` is
     alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
     claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
@@ -302,12 +301,16 @@ Unresolved items need the user's decision. Do not settle them silently.
     run with pending output and no final checkpoint, and interrupted runtime installations.
 28. ~~Open: `ann_key` is globally unique but allocated per space (the same conflict as question 13).~~ **Decided 2026-10-01 (owner, issue 48):**
     an `ann_key` is unique within its space, `UNIQUE(representation_space_id, ann_key)`, as revision `0003`
-    (specs: persistence 6.2, 6.3). Every index lookup and removal carries the space and the key; allocation
+    (specs: persistence 6.2, 6.3), **built** in revision `0003`. Every index lookup and removal carries the
+    space and the key (already true: an index belongs to one space, and `resolve_ann_candidates` looks keys
+    up by the pair); allocation
     stays at ANN-eligibility time (question 21, provisional) and run-local indexes keep ephemeral labels.
 29. **Decided 2026-10-01 (owner, issue 51): snapshots are immutable and one per run, in the database.** One
     snapshot per run is already enforced (`uq_processing_runs_configuration_snapshot_id`; I had wrongly said it
-    was not, in PR 50, and corrected it). Immutability is two triggers (revision `0003`): `UPDATE` always aborts,
-    `DELETE` aborts while a run references the snapshot. **Mine, to confirm with TST-031:** deleting a run
+    was not, in PR 50, and corrected it). Immutability is two triggers (revision `0003`, **built**): `UPDATE` always aborts,
+    `DELETE` aborts while a run references the snapshot. **Known limit:** `INSERT OR REPLACE` on a snapshot no run
+    references is not stopped (SQLite fires no delete trigger for it; issue 55, optional hardening). **Mine, to confirm
+    with TST-031:** deleting a run
     retains its snapshot as historical evidence; permanent deletion of a Source deletes its runs and then their
     now-unreferenced snapshots (the database allows any caller to delete an unreferenced snapshot, so "only
     the lifecycle does" is the application's rule, not a database guarantee). Snapshots carry every value needed to reproduce a

@@ -240,7 +240,7 @@ An `UPDATE` of a committed snapshot is refused, by the ORM and by raw SQL; a sna
 
 ### PER-10: ANN keys are unique per space
 
-Two representation spaces can each hold an `ACTIVE` representation with the same `ann_key`; within one space a key cannot repeat; erased representations (no key) can repeat the absence; every key of an existing database survives the migration, and a database that already violates the new constraint is refused.
+Two representation spaces can each hold an `ACTIVE` representation with the same `ann_key`; within one space a key cannot repeat; erased representations (no key) can repeat the absence; every key of an existing database survives the migration (the new constraint is weaker than the old, so no existing database can violate it), and a downgrade is refused atomically while two spaces hold the same key.
 
 ### JOB-01: Valid job transitions
 
