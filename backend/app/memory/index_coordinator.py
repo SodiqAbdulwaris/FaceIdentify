@@ -37,6 +37,7 @@ reads and writes only `index_operations`, and reads `representations`, `identiti
 import threading
 import uuid
 from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -135,6 +136,13 @@ class IndexCoordinator:
 
     def index_directory(self, space_id: uuid.UUID) -> Path:
         return self._root / space_id.hex
+
+    def exclusive(self) -> AbstractContextManager[object]:
+        """Hold the coordinator's lock: no pass loads, changes, quarantines or persists an index
+        while the caller holds it. Erasure finalizes under it, so no pass can create a quarantined
+        copy of an erased vector between the check that none remains and the commit. Not
+        reentrant: `apply_pending` and `validate_indexes` must not be called inside it."""
+        return self._lock
 
     # --- one pass -------------------------------------------------------------------------
 
