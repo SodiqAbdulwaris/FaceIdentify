@@ -322,7 +322,10 @@ Unresolved items need the user's decision. Do not settle them silently.
     publish a replacement generation; retire old and quarantined generations; clear the vector and key and
     commit; checkpoint; verify (persistence 6.2 item 9, 25). A durable "WAL truncation owed" marker is needed
     (set with the clearing transaction, cleared after a successful truncation) so a crash between them is
-    recoverable; its mechanism is for the owner to confirm (issue 52). Built: nothing yet.
+    recoverable; its mechanism is for the owner to confirm (issue 52). **Built (2026-10-01):** `secure_delete = ON` in
+    `SQLITE_PRAGMAS` and `truncate_wal(engine)` in `backend/infrastructure/db/engine.py` (False when a reader blocks it),
+    with the byte-search tests in `test_sqlite_erasure_policy.py`. **Not built:** the owed marker (needs the owner's
+    mechanism choice and a schema change) and the erasure use case that calls the checkpoint.
 27. **Agreed provisional direction (owner, 2026-10-01), to be validated when the erasure and import use
     cases that append operations begin: how an obsolete `IndexOperation` is superseded.** Persistence
     §17 says that creating an opposite operation "must supersede/coalesce the obsolete desired state
