@@ -4,9 +4,9 @@
 - **Milestone / tracker IDs:** M2 (TST-031, TST-032); decisions and one correction, no schema or behaviour
   change
 - **Status:** done (documents); the implementation is tracked in GitHub issues #48, #51, #52 and #29
-- **Commits:** PR (number added when opened): `docs(specs): decide ann_key scope, snapshot triggers, SQLite
-  erasure`, `fix(processing): correct the claim that snapshots may be shared`, `docs: record the revision 0003
-  and SQLite erasure decisions`
+- **Commits:** [PR 53](https://github.com/SodiqAbdulwaris/FaceIdentify/pull/53): `docs(specs): decide ann_key
+  scope, snapshot triggers, SQLite erasure`, `fix(processing): correct the claim that snapshots may be shared`,
+  `docs: record the revision 0003 and SQLite erasure decisions` (review fixes are folded in; see Review)
 
 ## What was decided (owner, 2026-10-01)
 
@@ -42,8 +42,9 @@ TST-032 in the tracker carry them. CONTEXT questions 28, 29 and 30 record the de
 - **Run deletion and snapshots (the owner asked me to decide).** Deleting a run **retains its snapshot** as
   historical evidence. The `DELETE` trigger aborts while a run references the snapshot (the foreign key says so
   too; the trigger gives a clear message) and allows deleting one no run references, so permanent deletion of a
-  Source, an explicit lifecycle operation, deletes its runs and then their now-unreferenced snapshots: the only
-  way a snapshot is ever removed. This is slightly narrower than "reject deletions of committed snapshots" and
+  Source, an explicit lifecycle operation, deletes its runs and then their now-unreferenced snapshots. The
+  database cannot tell that operation from any other caller (the trigger allows deleting any unreferenced
+  snapshot), so "only the lifecycle removes a snapshot" is the application's rule, not a database guarantee. This is slightly narrower than "reject deletions of committed snapshots" and
   is flagged for the owner to confirm with the deletion work (TST-031). Ordinary updates stay prohibited either
   way.
 - **The erasure sequence** merges the owner's with the design approved for Q25. The owner listed "delete the
@@ -54,9 +55,27 @@ TST-032 in the tracker carry them. CONTEXT questions 28, 29 and 30 record the de
   replacement generation; retire old and quarantined generations; clear the vector and key and commit;
   checkpoint; verify. The checkpoint is a privacy mechanism for erasure, which persistence 25 had called "an
   optimization, not a correctness mechanism"; the note says so.
-- **A checkpoint that cannot finish** needs no new durable marker: it is idempotent, so it is retried at the
-  next erasure batch, startup recovery or maintenance, and the erasure is reported with outstanding cleanup
-  meanwhile.
+- **A checkpoint that cannot finish needs a durable record** (the review's critical finding; my first draft
+  said it did not, and was wrong). The checkpoint is idempotent and the log database-wide, so it can be retried
+  at the next erasure batch, startup or maintenance; but `ERASED` is committed before the checkpoint, so after a
+  crash between them the database could not say the cleanup is owed, and "not complete until the checkpoint
+  succeeded" could not be kept. The specs now require a database-wide "WAL truncation owed" marker, set in the
+  transaction that clears the vector and cleared only after a successful truncation; startup runs the
+  checkpoint whenever it is set. **The mechanism (a one-row settings value or a column) is a schema/data choice
+  for the owner to confirm** when the policy is built (issue #52).
+
+## Review
+
+Independent review by Codex CLI (`codex exec -s read-only`, disposable worktree): request changes, five
+findings, all correct.
+
+| Finding | Resolution |
+|---|---|
+| Critical: erasure cannot durably report or recover a blocked checkpoint (`ERASED` commits first; the record said no marker is needed) | Confirmed; the claim was wrong. The specs now require a durable database-wide "WAL truncation owed" marker (mechanism to confirm with the owner, issue #52), and PER-08 adds the crash-between case |
+| The snapshot-deletion policy ("only way") contradicts a trigger that allows deleting any unreferenced snapshot | Confirmed: it is the application's rule, not a database guarantee, and the specs and this entry now say so |
+| The spec said revision `0003` was delivered when it is not | Fixed: future tense, and the §6.2 row says the table-wide constraint is still in force until it lands |
+| The ann-key decision was not propagated (§21 index list still said unique `ann_key`; CONTEXT still listed the conflict as open; the earlier entry said "not fixed") | Fixed in all three. CONTEXT already had this conflict as **question 13** ("decide before M3"), which I had re-found as question 28: 13 is now resolved and 28 links it |
+| Verification counts conflicted (tracker 906 vs 907; 36 vs 37 tests) | Fixed to the verified 907 and 37 |
 
 ## Implementation order (the owner's)
 
