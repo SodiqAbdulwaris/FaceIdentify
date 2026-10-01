@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-01
 - **Milestone / tracker IDs:** M2 (TST-031 precondition; PER-08); GitHub issues #31 (decided), #52
-- **Status:** partial: the pragma and the checkpoint helper are built; the owed marker and the erasure use case are not
+- **Status:** partial: the pragma and the checkpoint helper are built; the owed marker and the erasure use case are not (both were built afterwards: see [representation erasure](2026-10-01-m2-representation-erasure.md))
 - **Commits:** branch `feat/sqlite-erasure-policy`
 
 ## What changed

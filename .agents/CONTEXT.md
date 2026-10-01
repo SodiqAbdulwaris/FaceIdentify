@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (revision 0003)_
+_Last updated: 2026-10-01 (representation erasure, revision 0004)_
 
 ## Current state
 
@@ -15,7 +15,7 @@ _Last updated: 2026-10-01 (revision 0003)_
   storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
   `IndexOperation`s into it (TST-028) and the cross-storage failure matrix (TST-029) are done;
   startup recovery (TST-030) is partly done (see open question 26); TST-022 (repository contract) has its
-  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository` and `SnapshotRepository`; TST-031 is next.
+  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository` and `SnapshotRepository`; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
   #29 to #41, #48, #51 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
@@ -37,7 +37,8 @@ _Last updated: 2026-10-01 (revision 0003)_
   Person). `backend/infrastructure/db/optimistic.py` holds the one shared optimistic-locked
   `UPDATE` helper both feature modules use. The schema is created only by Alembic
   (`backend/alembic/`, revisions `0001_initial_schema`, `0002_representation_erasing_state` (the `ERASING`
-  state) and `0003_ann_key_per_space_and_snapshot_triggers` (`ann_key` unique per space; immutable snapshots)); every persistence test runs on the migrated
+  state), `0003_ann_key_per_space_and_snapshot_triggers` (`ann_key` unique per space; immutable snapshots) and
+  `0004_app_state` (a key/value table for the durable `wal_truncation_owed` marker)); every persistence test runs on the migrated
   schema. The Storage Manager's managed core: `backend/infrastructure/storage/` (the two roots
   and layout from tech-stack §15, safe key → path resolution, crash-safe staged writes, reads,
   hashing, deletion) and `backend/app/sources/artifact_storage.py` (the three-step
@@ -74,8 +75,13 @@ _Last updated: 2026-10-01 (revision 0003)_
   by `IndexOperationRepository.append_batch`) while it was in flight, a rebuild skips and reports a
   corrupt vector,
   eligibility needs an ACTIVE identity, and an erased representation's vector is guaranteed gone
-  by a rebuild (open question 25). `backend/app/recovery/startup.py` is startup recovery:
-  `recover_on_startup` settles artifacts and missing referenced originals (existence only), marks
+  by a rebuild (open question 25); the `REMOVE` of an `ERASING` representation is applied by rebuilding the space (a saved USearch
+  generation keeps a removed key's bytes), and no `REMOVE` is `APPLIED` while a superseded generation file remains.
+  `backend/app/memory/erasure.py` is the erasure use case (`RepresentationEraser.erase(ids)` / `resume()`: queue and
+  exclude, rebuild once per space, retire old and quarantined generations under the coordinator's lock, clear vector and
+  key with the `wal_truncation_owed` marker, `truncate_wal`, verify; a blocked step is reported, never complete).
+  `backend/app/recovery/startup.py` is startup recovery:
+  `recover_on_startup` (it takes the eraser and finishes interrupted erasures and an owed log truncation) settles artifacts and missing referenced originals (existence only), marks
   `RUNNING` jobs, runs and segments `INTERRUPTED`, moves a job or run found `PAUSING` to `PAUSED` and
   one found `CANCELLING` to `CANCELLED` (a cancelled job ends, its partial output stays private), clears
   stale leases from any job, removes
@@ -195,6 +201,15 @@ Unresolved items need the user's decision. Do not settle them silently.
     (first-run selection, persisted setting, default location), so `backend/alembic/env.py` still
     reads `FACEIDENTIFY_DATABASE_PATH` explicitly. Decide with the first-run/settings work.
     **2026-10-01 (owner):** deferred to the first-run/settings milestone.
+    **Decided 2026-10-01 (owner), to be built with the lifespan wiring (issue 33; not built yet):** the desktop shell owns
+    library selection and persists the selected absolute library root in application-level settings *outside* the library;
+    the backend receives exactly one resolved root at startup, immutable for the process lifetime, and every database,
+    artifact, index, runtime, quarantine and lock path derives from it (repositories and Alembic never read
+    `FACEIDENTIFY_DATABASE_PATH` themselves; it is deprecated in favour of a `FACEIDENTIFY_LIBRARY_ROOT` development/test
+    override, whose priority is: explicit override, then the persisted setting, then first-run selection). The library
+    lock (question 23) is taken right after the root is resolved and minimally validated, before migrations, recovery,
+    workers or any mutation; a held lock fails startup for that library and never falls back to another. Changing library
+    means restarting the backend lifecycle.
 18. **Open: batch-mode migrations and multi-revision failure atomicity are unproven.** `env.py`
     enables `render_as_batch` from the first revision because SQLite needs table recreation for
     most constraint changes, but revision `0001` only creates tables, so batch mode is exercised
@@ -215,6 +230,11 @@ Unresolved items need the user's decision. Do not settle them silently.
     the README marks it development-only. Decide whether to leave it, or refuse to downgrade a
     non-empty database unless explicitly forced.
     **2026-10-01 (owner):** deferred to the second Alembic revision (TST-032).
+    **Decided 2026-10-01 (owner), to be built with issue 35 (not built yet):** a downgrade that could destroy information
+    is refused on a *populated* library by default (populated = user/domain data, not merely a row in `app_state` or
+    migration bookkeeping), with an explicit development-only override (`FACEIDENTIFY_ALLOW_DESTRUCTIVE_DOWNGRADE=1`) that
+    the application never sets; an empty library downgrades normally; a refused downgrade leaves the database unchanged;
+    production recovery moves forward with corrective migrations, never by schema rollback.
 20. **Open: `SQLITE_BUSY` handling does not exist yet.** Persistence §25 requires the application
     to "retry a small bounded number of times for known transient write conflicts, and return a
     diagnostic/retryable error rather than spin forever". Nothing does. What
@@ -234,6 +254,10 @@ Unresolved items need the user's decision. Do not settle them silently.
     `OperationalError` whose message says the database is locked or busy as retryable (other
     `OperationalError`s, such as I/O errors, are not).
     **2026-10-01 (owner): agreed provisional direction** (the recommendation above), to be validated when the unit-of-work / API layer is designed.
+    **2026-10-01 (owner): pre-approved for finalisation with item 3 of the build order, without coming back:** write units of
+    work use `BEGIN IMMEDIATE`; retry is bounded and at the whole-transaction boundary, never per statement and never for
+    non-idempotent work outside the transaction; exhaustion becomes a retryable application/API error. If implementation
+    contradicts an existing spec, isolate that part and open an issue.
 21. **Open: when `ann_key` is allocated, and whether a rolled-back key may be reused.** Two spec
     passages pull apart. Persistence §6.3 allocates "in the same short transaction that creates
     representations... keys are never reused", and the run-local pending index (§23, "Recognition
@@ -250,6 +274,9 @@ Unresolved items need the user's decision. Do not settle them silently.
     (e.g. a per-run integer mapped to `representation_id`) so it never depends on `ann_key`.
     Decide before the processing pipeline (M3) builds the run-local index.
     **2026-10-01 (owner): agreed provisional direction** (the recommendation above), to be validated before M3 builds the run-local index.
+    **2026-10-01 (owner): pre-approved for finalisation with item 3:** `ann_key` is allocated when a representation becomes
+    ANN-eligible, unique within its space; run-local indexes use their own ephemeral labels and never depend on permanent
+    keys of transactions that might roll back.
 22. ~~Storage layout: three specs disagreed~~ **Resolved 2026-09-25 (owner):** tech-stack §15's
     two roots are authoritative (library root with `database/library.db` and managed bytes;
     `%LOCALAPPDATA%` for derived data). Managed writes stage in `<Library Root>/staging/` so the
@@ -263,6 +290,10 @@ Unresolved items need the user's decision. Do not settle them silently.
     on a file in the library (e.g. `<Library>/database/.lock`) for its whole lifetime and refuses to
     start without it, before migrations and recovery. Decide with the startup/lifespan work.
     **2026-10-01 (owner): agreed provisional direction** (the recommendation above), to be validated with the startup/lifespan work.
+    **2026-10-01 (owner): pre-approved for finalisation with item 3:** an exclusive library-lifetime lock at
+    `<LibraryRoot>/database/.lock`, taken after question 17's resolution and validation and before migrations, recovery,
+    workers or any mutation; another live owner fails startup for that library; released on orderly shutdown; an OS-level
+    lock so a crash never leaves the library locked.
 24. **Open: when does a `Source` become `UNAVAILABLE`?** Persistence §4.2 lists the state, but
     no spec says what sets it. The likeliest trigger is a missing referenced original, but
     IMPLEMENTATION_ARCHITECTURE §23.5 says to keep the Source and mark the *artifact's*
@@ -285,11 +316,14 @@ Unresolved items need the user's decision. Do not settle them silently.
     updated (persistence 6.2, 23, 28; architecture 23; testing strategy INDEX-03, INDEX-04, INDEX-05, PER-07). Candidate revalidation resolves each
     `ann_key` to its representation row (`resolve_ann_candidates`, built; returns plain values and reads 500 keys per query; issue 44 closed).
     **Built:** the `ERASING` state (revision `0002`, which is also the populated batch-mode migration
-    question 18 needed). **Still to build (TST-031):** the erasure use case, coordinator retirement of old
-    generations before a `REMOVE` is applied, recovery of `ERASING`, and the tests. The keyless-`REMOVE`
-    rebuild in the coordinator stays as a safety net. **Not decided here:** whether SQLite itself should
-    run with `secure_delete` / checkpoint after an erasure so the cleared vector does not linger in WAL or
-    free pages (see the tracking issue).
+    question 18 needed). **Built (2026-10-01, PR for issues 29 and 52):** the erasure use case
+    (`backend/app/memory/erasure.py`), coordinator retirement of old generations before a `REMOVE` is applied, recovery of
+    `ERASING` and the tests. Owner answers: `ACTIVE`, `PENDING` and `SUPERSEDED` may be erased (a keyless one skips the
+    index work); representation-level erasure writes no Evidence (section 7's Evidence is for the identity-level forget).
+    **Agent finding (issue opened, awaiting the owner):** persistence 6.2 item 2 says a single erasure "needs no rebuild",
+    but a USearch generation saved after `remove()` still holds the vector's bytes (probed), so the `REMOVE` of an `ERASING`
+    representation rebuilds the space (one rebuild per space for a bulk). The keyless-`REMOVE` rebuild stays as a safety net.
+    SQLite's own residue is question 30.
 26. **Decided 2026-10-01 (owner), built for `PAUSING`/`CANCELLING`:** startup recovery marks a job or run found `PAUSING`
     `PAUSED` (nothing runs; the worker is gone) and one found `CANCELLING` `CANCELLED` (the user's intent;
     partial output stays private and is never activated). A `RUNNING` job is `INTERRUPTED`, never
@@ -309,8 +343,8 @@ Unresolved items need the user's decision. Do not settle them silently.
     snapshot per run is already enforced (`uq_processing_runs_configuration_snapshot_id`; I had wrongly said it
     was not, in PR 50, and corrected it). Immutability is two triggers (revision `0003`, **built**): `UPDATE` always aborts,
     `DELETE` aborts while a run references the snapshot. **Known limit:** `INSERT OR REPLACE` on a snapshot no run
-    references is not stopped (SQLite fires no delete trigger for it; issue 55, optional hardening). **Mine, to confirm
-    with TST-031:** deleting a run
+    references is not stopped (SQLite fires no delete trigger for it; issue 55, optional hardening). **Decided (final) 2026-10-01 (owner), to be built with
+    the run and Source deletion use cases:** deleting a run
     retains its snapshot as historical evidence; permanent deletion of a Source deletes its runs and then their
     now-unreferenced snapshots (the database allows any caller to delete an unreferenced snapshot, so "only
     the lifecycle does" is the application's rule, not a database guarantee). Snapshots carry every value needed to reproduce a
@@ -324,10 +358,14 @@ Unresolved items need the user's decision. Do not settle them silently.
     (set with the clearing transaction, cleared after a successful truncation) so a crash between them is
     recoverable; its mechanism is for the owner to confirm (issue 52). **Built (2026-10-01):** `secure_delete = ON` in
     `SQLITE_PRAGMAS` and `truncate_wal(engine)` in `backend/infrastructure/db/engine.py` (False when a reader blocks it),
-    with the byte-search tests in `test_sqlite_erasure_policy.py`. **Not built:** the owed marker (needs the owner's
-    mechanism choice and a schema change) and the erasure use case that calls the checkpoint.
-27. **Agreed provisional direction (owner, 2026-10-01), to be validated when the erasure and import use
-    cases that append operations begin: how an obsolete `IndexOperation` is superseded.** Persistence
+    with the byte-search tests in `test_sqlite_erasure_policy.py`. **Decided and built (owner, 2026-10-01):** the owed
+    marker is a key/value table `app_state` (revision `0004`, only that), key `wal_truncation_owed`, set in the clearing
+    transaction and cleared (compare-and-delete) after a successful truncation; startup recovery runs the checkpoint while
+    it is set; the erasure use case calls the checkpoint and never reports complete without it.
+27. **Decided (final) 2026-10-01 (owner): how an obsolete `IndexOperation` is superseded. Keep deleting; no `SUPERSEDED`
+    state and no revision for an audit trail. Only a `PENDING` operation may be deleted this way: an `APPLIED` or
+    otherwise historical one is never rewritten or deleted because a later opposite operation exists.** (Was provisional;
+    the erasure use case, which appends operations, is built.) Persistence
     §17 says that creating an opposite operation "must supersede/coalesce the obsolete desired state
     in the use case", and names no mechanism. It matters: `REMOVE` means absent whatever SQLite
     says, so a `REMOVE` left pending would run after, and undo, a later `ADD` that was skipped as a
@@ -378,7 +416,13 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    above).
 6. The rest of M2: TST-022 (repository contract; `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository` done, others as use cases need them), ~~TST-027 (USearch integration)~~ done, ~~TST-028
    (IndexOperation replay)~~ done, ~~TST-029 (cross-storage failure)~~ done, ~~TST-030 (startup recovery beyond
-   artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion).
+   artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion: representation erasure
+   done; Source deletion, Recycle Bin cleanup and identity-level forget remain).
+7. Owner's build order (2026-10-01): the remaining repositories (issue 32: Observation/Representation, then
+   Identity/Occurrence/Evidence, then RuntimeCatalog/Settings), then lifespan wiring and process-kill tests (33),
+   the rest of Q26 (34), the downgrade policy (35, question 19), the library root (36, question 17), and the
+   provisional validations Q20, Q21, Q23, Q27 (37 to 41), deriving a missing original's availability from its artifact (Q24).
+   Issue 55 (block `INSERT OR REPLACE` on snapshots) stays optional and unbuilt unless the owner asks.
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
 plain string, listed as an open question. Every schema change is now a reviewed Alembic revision
