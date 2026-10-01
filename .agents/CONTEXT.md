@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (ProcessingRun repository)_
+_Last updated: 2026-10-01 (decisions for revision 0003 and the SQLite erasure policy)_
 
 ## Current state
 
@@ -18,7 +18,7 @@ _Last updated: 2026-10-01 (ProcessingRun repository)_
   `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository` and `SnapshotRepository`; TST-031 is next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
-  #29 to #41, #48 and #51 hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
+  #29 to #41, #48, #51 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
   `docs/implementations/2026-10-01-decide-q25-q26-erasure-and-recovery.md`). When something becomes pending,
   open an issue for it.
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
@@ -309,14 +309,23 @@ Unresolved items need the user's decision. Do not settle them silently.
     (issue 34):**
     `FINALIZING` runs (revalidate and accept without redoing ML, needing `AcceptProcessingRunUseCase`), a
     run with pending output and no final checkpoint, and interrupted runtime installations.
-28. **Open (found building issue 44): `ann_key` is globally unique but allocated per space.** Persistence
-    §6.2 says `ann_key` is unique and the schema makes it unique across the whole `representations` table,
-    but §6.3 keeps one `ann_key_sequences` row per space and `allocate_ann_key` starts each at 1: two spaces
-    both allocate `1`, and activating a representation with key `1` in the second raises `IntegrityError`
-    (shown by a throwaway test). Latent: it needs a second ACTIVE space, for example after a model upgrade.
-    **Recommendation:** make uniqueness per space, `UNIQUE(representation_space_id, ann_key)`, matching one
-    index per space (revision `0003`; the migration procedure for recreating the table exists). Alternative:
-    one global sequence, which contradicts §6.3. GitHub issue 48.
+28. ~~Open: `ann_key` is globally unique but allocated per space.~~ **Decided 2026-10-01 (owner, issue 48):**
+    an `ann_key` is unique within its space, `UNIQUE(representation_space_id, ann_key)`, as revision `0003`
+    (specs: persistence 6.2, 6.3). Every index lookup and removal carries the space and the key; allocation
+    stays at ANN-eligibility time (question 21, provisional) and run-local indexes keep ephemeral labels.
+29. **Decided 2026-10-01 (owner, issue 51): snapshots are immutable and one per run, in the database.** One
+    snapshot per run is already enforced (`uq_processing_runs_configuration_snapshot_id`; I had wrongly said it
+    was not, in PR 50, and corrected it). Immutability is two triggers (revision `0003`): `UPDATE` always aborts,
+    `DELETE` aborts while a run references the snapshot. **Mine, to confirm with TST-031:** deleting a run
+    retains its snapshot as historical evidence; permanent deletion of a Source deletes its runs and then their
+    now-unreferenced snapshots, the only way one is removed. Snapshots carry every value needed to reproduce a
+    run, never references to mutable rows (persistence 13).
+30. **Decided 2026-10-01 (owner, issue 31): `PRAGMA secure_delete = ON` on every connection, and a
+    `wal_checkpoint(TRUNCATE)` after each erasure batch commits**, retried later if readers prevent it, with the
+    erasure reported as having outstanding cleanup until it succeeds. Not a guarantee of physical erasure.
+    The owner's sequence is merged with question 25's: queue and exclude (`ERASING`); apply the index removal or
+    publish a replacement generation; retire old and quarantined generations; clear the vector and key and
+    commit; checkpoint; verify (persistence 6.2 item 9, 25). Built: nothing yet.
 27. **Agreed provisional direction (owner, 2026-10-01), to be validated when the erasure and import use
     cases that append operations begin: how an obsolete `IndexOperation` is superseded.** Persistence
     §17 says that creating an opposite operation "must supersede/coalesce the obsolete desired state

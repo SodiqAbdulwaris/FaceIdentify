@@ -230,6 +230,18 @@ Running recovery repeatedly must not duplicate state or compound damage. After o
 
 Stopping after any step of an erasure (queued; index changed; new generation persisted; old generation removed; `REMOVE` marked `APPLIED` but the representation still `ERASING`; vector cleared) and rerunning recovery completes the erasure exactly once. The erased vector never reappears in the index or in recognition, and the representation is never reactivated.
 
+### PER-08: Erasure leaves no residue in SQLite
+
+With `secure_delete` on and the truncating checkpoint done, the erased vector's bytes are absent from the main database file and from the write-ahead log (a byte search of both). An erasure whose checkpoint could not complete is reported with outstanding cleanup, never as complete, and a later retry completes it. This verifies the SQLite files only: it is not a claim of physical erasure from SSD storage, filesystem snapshots or backups.
+
+### PER-09: Snapshots are immutable and one per run
+
+An `UPDATE` of a committed snapshot is refused, by the ORM and by raw SQL; a snapshot a run references cannot be deleted, and one no run references can be; a second run cannot reference a snapshot a run already uses. Revision `0003` is tested on a populated database, including a failing upgrade and a downgrade.
+
+### PER-10: ANN keys are unique per space
+
+Two representation spaces can each hold an `ACTIVE` representation with the same `ann_key`; within one space a key cannot repeat; erased representations (no key) can repeat the absence; every key of an existing database survives the migration, and a database that already violates the new constraint is refused.
+
 ### JOB-01: Valid job transitions
 
 Jobs may transition only according to the documented state machine.

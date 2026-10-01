@@ -150,7 +150,7 @@ An equal dimension does not establish compatibility. A vector may only be compar
 | `processing_run_id`, `execution_segment_id` | non-null provenance FKs, `RESTRICT` |
 | `representation_space_id` | non-null FK, `RESTRICT` |
 | `state` | `PENDING`, `ACTIVE`, `SUPERSEDED`, `ERASING`, `ERASED`, `DELETED` |
-| `ann_key` | nullable unique positive signed 64-bit integer; required while ANN-eligible |
+| `ann_key` | nullable positive signed 64-bit integer, unique within its `representation_space_id` (`UNIQUE(representation_space_id, ann_key)`); required while ANN-eligible |
 | `vector` | non-null canonical float32 blob |
 | `vector_dimension` | non-null positive integer, checked against its space in application validation |
 | `quality_json` | nullable measured embedding/quality facts |
@@ -169,11 +169,14 @@ Use `UNIQUE(observation_id, representation_space_id)` for one persisted embeddin
 > 6. *Retrieval.* Candidate revalidation (section 23) resolves each `ann_key` to its `representations` row and accepts it only if the row is in the same space, `ACTIVE`, with an `ACTIVE` identity. That step is `resolve_ann_candidates` (built; `resolve_recognition_candidates` revalidates identity ids only and cannot see a representation's state): it reads the representation row, because an identity-only check would let a stale index return an `ERASING` vector.
 > 7. *Ordering with the coordinator.* Queueing the `REMOVE` deletes the representation's pending `ADD` in the same transaction (open question 27), so a due batch never holds both for one representation. The coordinator's lock serializes its own passes, not the erasure transaction, so an `ADD` it claimed before step one commits can go either way: it is applied (the vector is briefly in the raw index but never returned, by item 6) and the `REMOVE` queued by step one, claimed by a later pass, removes it; or it re-reads the representation as `ERASING` and does nothing (an ineligible representation is skipped). Either way the `REMOVE` still runs afterwards and the erasure is not finished until it is `APPLIED`. Settlement tolerates the `ADD`'s row having been deleted meanwhile.
 > 8. *The state machine is guarded.* `ACTIVE` -> `ERASING` and `ERASING` -> `ERASED` are guarded transitions (`UPDATE ... WHERE state = X`): a second erasure of a representation already `ERASING` or `ERASED` is a no-op, nothing moves a representation out of `ERASING` except to `ERASED`, and identity merge and split leave an `ERASING` representation's state alone.
-> 9. The existing coordinator behaviour for a *keyless* `REMOVE` (rebuild the space and require the old generation to be gone) stays as the safety net for a representation that reached `ERASED` any other way.
+> 9. *SQLite residue (decision 2026-10-01, issue 31).* After step two commits (the vector and key cleared), the batch ends with the truncating checkpoint of section 25. The erasure is complete only when the index generations are retired **and** that checkpoint has succeeded; until both, it is reported with its outstanding cleanup. The order is therefore: queue and exclude (`ERASING`); apply the index removal or publish a replacement generation; retire superseded and quarantined generations; clear the SQLite vector and key and commit; checkpoint; verify the representation cannot be retrieved.
+> 10. The existing coordinator behaviour for a *keyless* `REMOVE` (rebuild the space and require the old generation to be gone) stays as the safety net for a representation that reached `ERASED` any other way.
 
 ### 6.3 `ann_key_sequences`
 
 This table has one row per `representation_space_id`: the space UUID primary key/FK and `next_ann_key INTEGER NOT NULL CHECK(next_ann_key > 0)`. Allocation occurs in the same short transaction that creates representations, using a guarded update; keys are never reused. A gap is harmless and safer than reuse after a crash or erase.
+
+> **Decision 2026-10-01 (owner; GitHub issue 48): an `ann_key` identifies a representation within one space, not across the application.** §6.2 said `ann_key` is unique and the schema made it unique across the whole table, while this section allocates from a sequence per space that each starts at 1: two spaces both allocate `1`, and the second `ACTIVE` representation failed with `IntegrityError` (shown by a test). The constraint is now `UNIQUE(representation_space_id, ann_key)`, matching one USearch index per space. Every index lookup and removal therefore carries both the space and the key (an index belongs to one space, and a key is resolved to its representation through the pair). The allocation policy is unchanged: a permanent key is allocated only when a representation becomes ANN-eligible (CONTEXT open question 21, provisional), and run-local pending indexes keep their own ephemeral labels. A `NULL` key (an `ERASED` representation) is still allowed to repeat. Delivered as revision `0003`, which recreates `representations`, keeps every existing key and verifies the new uniqueness.
 
 ## 7. Identity persistence
 
@@ -244,6 +247,10 @@ There may be many historical runs per source but only one source pointer, `curre
 `processing_configuration_snapshots` records resolved semantic intent at command acceptance, never today's mutable settings. It contains `id`, `schema_version`, `canonical_json`, `fingerprint_sha256`, `created_at`, and nullable `created_by_user_action`. `canonical_json` includes source-processing choices, selected component/version/export contracts, intended representation spaces, calibration profile, allowed fallback policy, crop/quality policy, and all other semantic settings necessary to explain the run.
 
 Use `UNIQUE(fingerprint_sha256)` only if identical snapshots are safely shareable; otherwise retain an immutable row per run. This design chooses one snapshot per run for unambiguous provenance. It must never be updated. The fingerprint helps diagnostics and is not an authorization token.
+
+> **Decision 2026-10-01 (owner; GitHub issue 51): both invariants are enforced by the database.** *One snapshot per run* is `UNIQUE(processing_runs.configuration_snapshot_id)` (already in revision `0001`; the snapshot has no run column, the run holds the foreign key, so the constraint sits on the run). *Immutability* is two triggers on `processing_configuration_snapshots` (revision `0003`): `BEFORE UPDATE` always aborts, so a committed snapshot's captured configuration can never change; `BEFORE DELETE` aborts while a run references the snapshot (the foreign key says so too; the trigger gives a clear message) and allows deleting one no run references. Creation is an ordinary `INSERT` in the caller's transaction. A snapshot must carry every value needed to reproduce the run inside `canonical_json` (component versions, export contracts, spaces, calibration, policies), never a reference to a mutable row.
+>
+> **Deleting a run retains its snapshot as historical evidence** (my decision, for the owner to confirm with the deletion work, TST-031): deleting a run does not delete its snapshot, and the trigger would refuse to while the run exists. Permanent deletion of a Source is an explicit lifecycle operation that deletes its runs and then their now-unreferenced snapshots; that is the only way a snapshot is ever removed, and ordinary updates stay prohibited either way.
 
 ## 14. ExecutionSegment persistence
 
@@ -383,11 +390,14 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA busy_timeout = 5000;
 PRAGMA temp_store = MEMORY;
+PRAGMA secure_delete = ON;
 ```
 
 `foreign_keys=ON` is mandatory because constraints/cascades otherwise do not protect the model. WAL permits readers during normal writes; it does not permit multiple writers to hold long transactions. `synchronous=NORMAL` is an acceptable local-desktop durability/performance choice because all workflows are recoverable; use `FULL` only if evaluation or product policy requires the additional cost. The application must tolerate `SQLITE_BUSY`: keep writes short, retry a small bounded number of times for known transient write conflicts, and return a diagnostic/retryable error rather than spin forever.
 
 Do not run `VACUUM`, checkpoint pressure, index rebuilds, or storage scans inside a request transaction. Startup and maintenance can issue a bounded WAL checkpoint only when safe; it is an optimization, not a correctness mechanism. Backups copy the SQLite database using SQLite-aware backup/online methods, not an arbitrary file copy while it is active.
+
+> **Decision 2026-10-01 (owner; GitHub issue 31): secure deletion is on, and an erasure batch ends with a truncating checkpoint.** `PRAGMA secure_delete = ON` is set on every connection (the list above): SQLite overwrites deleted content in ordinary database pages with zeros instead of leaving it in free pages. It does not reach the write-ahead log, so after an erasure batch commits the application runs `PRAGMA wal_checkpoint(TRUNCATE)`, outside any request transaction. A checkpoint can only finish when no reader holds an older snapshot; if it cannot (the call reports busy, or the log is not truncated) it is retried at the next opportunity (the next erasure batch, startup recovery, maintenance), and the erasure is reported as having outstanding cleanup, never as complete, until it has succeeded. For erasure this makes the checkpoint a privacy mechanism, not only an optimization. **Neither is a guarantee of physical erasure:** SSD wear levelling, filesystem snapshots and backups can keep old bytes, and the application must not say otherwise (TESTING_STRATEGY section 11).
 
 ## 26. Repository and read-query patterns
 
