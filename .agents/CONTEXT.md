@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (settle fix)_
+_Last updated: 2026-10-01 (Source repository)_
 
 ## Current state
 
@@ -15,7 +15,7 @@ _Last updated: 2026-10-01 (settle fix)_
   storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
   `IndexOperation`s into it (TST-028) and the cross-storage failure matrix (TST-029) are done;
   startup recovery (TST-030) is partly done (see open question 26); TST-022 (repository contract) has its
-  `JobRepository`, `SegmentRepository`, `CheckpointRepository` and `IndexOperationRepository`; TST-031 is next.
+  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository` and `SourceRepository`; TST-031 is next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
   #29 to #41 and #44 hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
@@ -349,7 +349,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 5. ~~Storage Manager follow-ups for TST-025~~ Done: referenced imports, missing-file detection,
    relinking, temporary workspaces, recycle/restore, conservative cleanup and storage usage (see
    above).
-6. The rest of M2: TST-022 (repository contract; `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository` done, others as use cases need them), ~~TST-027 (USearch integration)~~ done, ~~TST-028
+6. The rest of M2: TST-022 (repository contract; `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository` done, others as use cases need them), ~~TST-027 (USearch integration)~~ done, ~~TST-028
    (IndexOperation replay)~~ done, ~~TST-029 (cross-storage failure)~~ done, ~~TST-030 (startup recovery beyond
    artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion).
 
