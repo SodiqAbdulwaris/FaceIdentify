@@ -10,7 +10,8 @@ ML worker and the scheduler. `recover_on_startup` is the recovery and index step
    no longer exists, so it becomes `INTERRUPTED` and the job's lease is cleared (§23.2: "Interrupted
    active runs/segments become `INTERRUPTED`"; resuming creates new work, it does not reopen this).
 3. Workspaces: remove the temp workspace of every job that is over; keep those a job may resume.
-4. Indexes: validate every active space's index and rebuild what is missing or unusable.
+4. Indexes: validate every active space's index and rebuild what is missing or unusable, and give
+   every `FAILED` `IndexOperation` one fresh set of attempts (persistence §28: "pending/failed").
 5. Pending `IndexOperation`s: catch the indexes up, in bounded passes.
 
 Recovery is idempotent and safe to repeat after another crash (§28, §23.8): each step only records a
@@ -31,12 +32,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.jobs.models import Job, JobState
 from backend.app.memory.index_coordinator import CoordinatorReport, IndexCoordinator
 from backend.app.processing.models import (
+    TRANSIENT_RUN_STATES,
     ExecutionSegment,
     ExecutionSegmentState,
     ProcessingRun,
@@ -56,6 +58,9 @@ class InterruptedWork:
     jobs: list[uuid.UUID] = field(default_factory=list)
     runs: list[uuid.UUID] = field(default_factory=list)
     segments: list[uuid.UUID] = field(default_factory=list)
+    # Jobs not `RUNNING` that still held a lease (and so are not in `jobs`): their state is
+    # untouched, only the lease nobody can hold any more is cleared.
+    leases_cleared: list[uuid.UUID] = field(default_factory=list)
 
 
 @dataclass
@@ -65,12 +70,32 @@ class StartupReport:
     interrupted: InterruptedWork
     workspaces: WorkspaceCleanup
     indexes_rebuilt: list[uuid.UUID]
+    requeued_operations: list[uuid.UUID]
     index_operations: CoordinatorReport
     index_passes: int
 
     @property
+    def unresolved(self) -> list[str]:
+        """What recovery tried and could not finish, or left for later, by name. A repair that
+        needs another start (a locked file) or a decision (a corrupt vector) is not a clean run.
+        Entries under `temp/jobs/` that are not workspaces are not listed: they are not
+        recovery's work."""
+        artifacts, operations = self.artifacts, self.index_operations
+        counts = {
+            "artifacts skipped": len(artifacts.skipped),
+            "staging files left": len(artifacts.staging_left),
+            "artifact deletions failed": len(artifacts.delete_failed),
+            "workspaces not removed": len(self.workspaces.failed),
+            "representations that cannot be indexed": len(operations.unindexable),
+            "index operations backing off": len(operations.retrying),
+            "index operations out of attempts": len(operations.failed),
+        }
+        return [f"{count} {what}" for what, count in counts.items() if count]
+
+    @property
     def repaired_nothing(self) -> bool:
-        """True when this run found nothing to repair (the state a second run should reach)."""
+        """True when this run made no repair (the state a second run should reach). It says
+        nothing about whether anything is still unresolved: see `unresolved` and `clean`."""
         artifacts = self.artifacts
         operations = self.index_operations
         return not (
@@ -83,14 +108,21 @@ class StartupReport:
             or self.interrupted.jobs
             or self.interrupted.runs
             or self.interrupted.segments
+            or self.interrupted.leases_cleared
             or self.workspaces.removed
             or self.indexes_rebuilt
+            or self.requeued_operations
             or operations.applied
             or operations.retrying
             or operations.failed
             or operations.rebuilt_spaces
             or operations.purged_spaces
         )
+
+    @property
+    def clean(self) -> bool:
+        """No repair was needed and nothing is left unresolved."""
+        return self.repaired_nothing and not self.unresolved
 
 
 def interrupt_in_flight_work(
@@ -99,7 +131,9 @@ def interrupt_in_flight_work(
     """Mark every `RUNNING` job, run and segment `INTERRUPTED`, in one transaction.
 
     Each is a guarded `UPDATE ... RETURNING`, so a repeated run matches nothing and the first
-    statement of the transaction is a write. A job's lease is cleared, since nobody holds it now.
+    statement of the transaction is a write. A job's lease is cleared, since nobody holds it now:
+    for a `RUNNING` job as it is interrupted, and for any *other* job still holding one (an expired
+    or stale lease, persistence §28) with its state left alone.
     A segment ends at recovery time with no `ended_reason`: nothing recorded why it stopped, and the
     closest reasons (`WORKER_CRASH`, `SHUTDOWN`) would claim a cause that is not known.
     """
@@ -147,14 +181,37 @@ def interrupt_in_flight_work(
             .scalars()
             .all()
         )
+        leased = (
+            session.execute(
+                update(Job)
+                .where(or_(Job.lease_owner.is_not(None), Job.lease_expires_at.is_not(None)))
+                .values(lease_owner=None, lease_expires_at=None, updated_at=now)
+                .returning(Job.id)
+                .execution_options(synchronize_session=False)
+            )
+            .scalars()
+            .all()
+        )
         session.commit()
-    return InterruptedWork(sorted(jobs), sorted(runs), sorted(segments))
+    return InterruptedWork(sorted(jobs), sorted(runs), sorted(segments), sorted(leased))
 
 
 def jobs_that_may_resume(session_factory: sessionmaker[Session]) -> set[uuid.UUID]:
-    """The jobs whose temp workspace must be kept: every job that is not over."""
+    """The jobs whose temp workspace must be kept: every job that is not over, and every job whose
+    linked processing run is not over either. A finished job with a live run is contradictory
+    state; it is recoverable inconsistency, not permission to delete scratch data a run may need
+    ("after verifying no live run needs it", persistence §28)."""
     with session_factory() as session:
-        return set(session.scalars(select(Job.id).where(Job.state.not_in(FINISHED_JOB_STATES))))
+        rows = session.execute(
+            select(Job.id, Job.state, ProcessingRun.state).outerjoin(
+                ProcessingRun, ProcessingRun.id == Job.processing_run_id
+            )
+        ).all()
+    return {
+        job_id
+        for job_id, job_state, run_state in rows
+        if job_state not in FINISHED_JOB_STATES or run_state in TRANSIENT_RUN_STATES
+    }
 
 
 def recover_on_startup(
@@ -176,6 +233,7 @@ def recover_on_startup(
     interrupted = interrupt_in_flight_work(session_factory, clock=clock)
     cleanup = workspaces.remove_orphans(jobs_that_may_resume(session_factory))
     rebuilt = coordinator.validate_indexes()
+    requeued = coordinator.requeue_failed_operations()
 
     merged = CoordinatorReport()
     passes = 0
@@ -190,4 +248,6 @@ def recover_on_startup(
         merged.purged_spaces += result.purged_spaces
         if not (result.applied or result.retrying or result.failed):
             break  # nothing was due: the queue is caught up (or every remaining one is backing off)
-    return StartupReport(artifacts, missing, interrupted, cleanup, rebuilt, merged, passes)
+    return StartupReport(
+        artifacts, missing, interrupted, cleanup, rebuilt, requeued, merged, passes
+    )

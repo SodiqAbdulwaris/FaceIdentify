@@ -6,6 +6,7 @@ safe to run again, including after *another* crash part-way through.
 """
 
 import io
+import shutil
 import sqlite3
 import uuid
 from collections.abc import Callable
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.jobs.models import Job
@@ -406,7 +407,7 @@ def test_a_workspace_is_kept_for_every_job_that_is_not_over(
 
 def clean_report() -> StartupReport:
     return StartupReport(
-        RecoveryReport(), [], InterruptedWork(), WorkspaceCleanup(), [], CoordinatorReport(), 1
+        RecoveryReport(), [], InterruptedWork(), WorkspaceCleanup(), [], [], CoordinatorReport(), 1
     )
 
 
@@ -424,6 +425,8 @@ def test_a_report_with_no_repairs_says_so() -> None:
         lambda r: r.artifacts.staging_removed.append("a.part"),
         lambda r: r.missing_references.append(uuid.uuid4()),
         lambda r: r.interrupted.jobs.append(uuid.uuid4()),
+        lambda r: r.interrupted.leases_cleared.append(uuid.uuid4()),
+        lambda r: r.requeued_operations.append(uuid.uuid4()),
         lambda r: r.interrupted.runs.append(uuid.uuid4()),
         lambda r: r.interrupted.segments.append(uuid.uuid4()),
         lambda r: r.workspaces.removed.append(uuid.uuid4()),
@@ -436,8 +439,8 @@ def test_a_report_with_no_repairs_says_so() -> None:
     ],
     ids=[
         "artifact-finalized", "artifact-not-completed", "artifact-deleted",
-        "artifact-delete-failed", "staging-removed", "missing-reference", "job", "run", "segment",
-        "workspace",
+        "artifact-delete-failed", "staging-removed", "missing-reference", "job", "lease-cleared",
+        "operation-requeued", "run", "segment", "workspace",
         "index-rebuilt", "operation-applied", "operation-retrying", "operation-failed",
         "coordinator-rebuilt", "coordinator-purged",
     ],
@@ -446,6 +449,271 @@ def test_any_repair_means_the_run_was_not_clean(repair: Callable[[StartupReport]
     report = clean_report()
     repair(report)
     assert not report.repaired_nothing
+
+
+# --- what is left unresolved ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("unresolved", "what"),
+    [
+        (lambda r: r.artifacts.skipped.append((uuid.uuid4(), "locked")), "artifacts skipped"),
+        (lambda r: r.artifacts.staging_left.append("a.part"), "staging files left"),
+        (lambda r: r.artifacts.delete_failed.append(uuid.uuid4()), "artifact deletions failed"),
+        (lambda r: r.workspaces.failed.append((uuid.uuid4(), "locked")), "workspaces not removed"),
+        (lambda r: r.index_operations.unindexable.append(uuid.uuid4()), "cannot be indexed"),
+        (lambda r: r.index_operations.retrying.append((uuid.uuid4(), "x")), "backing off"),
+        (lambda r: r.index_operations.failed.append((uuid.uuid4(), "x")), "out of attempts"),
+    ],
+    ids=["skipped", "staging", "delete-failed", "workspace", "unindexable", "retrying", "failed"],
+)  # fmt: skip
+def test_unresolved_work_means_the_run_is_not_clean(
+    unresolved: Callable[[StartupReport], object], what: str
+) -> None:
+    assert clean_report().clean
+    report = clean_report()
+    unresolved(report)
+
+    assert not report.clean
+    assert any(what in item for item in report.unresolved)
+
+
+def test_foreign_entries_under_the_workspace_folder_are_not_unresolved_work() -> None:
+    report = clean_report()
+    report.workspaces.unowned.append("notes.txt")
+
+    assert report.clean
+
+
+def test_a_repair_alone_is_not_unresolved() -> None:
+    report = clean_report()
+    report.interrupted.jobs.append(uuid.uuid4())
+
+    assert not report.repaired_nothing
+    assert report.unresolved == []
+    assert not report.clean
+
+
+# --- leases, linked state and failed operations ------------------------------------------------
+
+
+@pytest.mark.parametrize("state", ["QUEUED", "PAUSED", "PAUSING", "CANCELLING", "COMPLETED"])
+@pytest.mark.parametrize("held", ["both", "owner-only", "expiry-only"])
+def test_a_stale_lease_is_cleared_from_a_job_that_is_not_running_and_its_state_kept(
+    factory: sessionmaker[Session], build: ModelFactory, state: str, held: str
+) -> None:
+    job = build.job(
+        state=state,
+        lease_owner=None if held == "expiry-only" else "worker-1",
+        lease_expires_at=None if held == "owner-only" else build.clock(),
+    )
+    build.session.commit()
+
+    cleared = interrupt_in_flight_work(factory, clock=build.clock)
+
+    assert cleared.leases_cleared == [job.id]
+    assert cleared.jobs == []  # not interrupted: Q26 owns what these states should become
+    after = reload(factory, Job, job.id)
+    assert (after.state, after.lease_owner, after.lease_expires_at) == (state, None, None)
+    assert interrupt_in_flight_work(factory, clock=build.clock).leases_cleared == []
+
+
+def test_job_and_run_states_are_recovered_independently_of_each_other(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    """Each row is judged by its own state: contradictory combinations are all handled."""
+    consistent_run = build.run(state="RUNNING")
+    consistent_segment = build.segment(consistent_run, 0, "RUNNING")
+    consistent = build.job(state="RUNNING", processing_run_id=consistent_run.id)
+    finished_run = build.run(state="COMPLETED")
+    running_job_of_a_finished_run = build.job(state="RUNNING", processing_run_id=finished_run.id)
+    live_run = build.run(state="RUNNING")
+    finished_job_of_a_live_run = build.job(state="COMPLETED", processing_run_id=live_run.id)
+    build.session.commit()
+
+    interrupted = interrupt_in_flight_work(factory, clock=build.clock)
+
+    assert {consistent.id, running_job_of_a_finished_run.id} <= set(interrupted.jobs)
+    assert finished_job_of_a_live_run.id not in interrupted.jobs
+    assert {consistent_run.id, live_run.id} <= set(interrupted.runs)
+    assert finished_run.id not in interrupted.runs
+    assert consistent_segment.id in interrupted.segments
+    assert reload(factory, ProcessingRun, finished_run.id).state == "COMPLETED"
+    assert reload(factory, Job, finished_job_of_a_live_run.id).state == "COMPLETED"
+
+
+def test_a_workspace_is_kept_for_a_finished_job_whose_run_is_still_live(
+    factory: sessionmaker[Session], workspaces: WorkspaceManager, build: ModelFactory
+) -> None:
+    """Contradictory state is recoverable inconsistency, not permission to delete scratch data."""
+    live_run = build.run(state="PAUSED")
+    finished_run = build.run(state="COMPLETED")
+    kept = build.job(state="COMPLETED", processing_run_id=live_run.id)
+    removed = build.job(state="COMPLETED", processing_run_id=finished_run.id)
+    unlinked = build.job(state="FAILED")
+    for job in (kept, removed, unlinked):
+        workspaces.allocate(job.id)
+    build.session.commit()
+
+    assert jobs_that_may_resume(factory) == {kept.id}
+    cleanup = workspaces.remove_orphans(jobs_that_may_resume(factory))
+
+    assert sorted(cleanup.removed) == sorted([removed.id, unlinked.id])
+    assert workspaces.existing() == [kept.id]
+
+
+def test_a_failed_index_operation_gets_one_fresh_set_of_attempts(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, workspaces: WorkspaceManager,
+    coordinator: IndexCoordinator, build: ModelFactory,
+) -> None:  # fmt: skip
+    space = build.representation_space(dimension=NDIM)
+    rep = active(build, space, 1)
+    operation = build.index_operation(
+        rep, operation="ADD", state="FAILED", attempt_count=3, failure_code="APPLY_ERROR",
+        failure_detail="the disk was full",
+    )  # fmt: skip
+
+    report = recover(factory, file_store, workspaces, coordinator, build)
+
+    assert report.requeued_operations == [operation.id]
+    assert report.index_operations.applied == [operation.id]  # and it succeeded this time
+    done = reload(factory, IndexOperation, operation.id)
+    assert (done.state, done.attempt_count, done.failure_code) == ("APPLIED", 1, None)
+    assert open_index(coordinator, space).contains(1)
+
+
+def test_a_failed_operation_that_would_duplicate_a_pending_one_stays_failed(
+    factory: sessionmaker[Session], coordinator: IndexCoordinator, build: ModelFactory
+) -> None:
+    space = build.representation_space(dimension=NDIM)
+    rep = active(build, space, 1)
+    failed = build.index_operation(rep, operation="ADD", state="FAILED", attempt_count=3)
+    pending = build.index_operation(rep, operation="ADD", state="PENDING")
+    other_kind = build.index_operation(rep, operation="REMOVE", state="FAILED", attempt_count=3)
+    build.session.commit()
+
+    requeued = coordinator.requeue_failed_operations()
+
+    assert requeued == [other_kind.id]  # the REMOVE has no pending twin; the ADD does
+    assert reload(factory, IndexOperation, failed.id).state == "FAILED"
+    assert reload(factory, IndexOperation, pending.id).state == "PENDING"
+
+
+def test_of_several_failed_twins_only_the_newest_is_requeued(
+    factory: sessionmaker[Session], coordinator: IndexCoordinator, build: ModelFactory
+) -> None:
+    space = build.representation_space(dimension=NDIM)
+    rep = active(build, space, 1)
+    older = build.index_operation(rep, operation="ADD", state="FAILED")
+    build.clock.advance(hours=1)
+    newer = build.index_operation(rep, operation="ADD", state="FAILED")
+    build.session.commit()
+
+    assert coordinator.requeue_failed_operations() == [newer.id]
+    assert reload(factory, IndexOperation, older.id).state == "FAILED"
+    assert coordinator.requeue_failed_operations() == []  # the newer one is pending now
+
+
+def test_an_operation_settled_while_requeueing_is_not_resurrected(
+    factory: sessionmaker[Session], coordinator: IndexCoordinator, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    space = build.representation_space(dimension=NDIM)
+    operation = build.index_operation(active(build, space, 1), operation="ADD", state="FAILED")
+    build.session.commit()
+    real = coordinator._sessions
+    opened: list[int] = []
+
+    def sessions() -> Session:
+        opened.append(1)
+        if len(opened) == 2:  # between choosing the failed operations and writing: it is settled
+            with real() as other:
+                other.execute(
+                    update(IndexOperation).where(IndexOperation.id == operation.id)
+                    .values(state="APPLIED", applied_at=build.clock())
+                )  # fmt: skip
+                other.commit()
+        return real()
+
+    monkeypatch.setattr(coordinator, "_sessions", sessions)
+
+    assert coordinator.requeue_failed_operations() == []
+    assert reload(factory, IndexOperation, operation.id).state == "APPLIED"
+
+
+def test_requeueing_keeps_the_diagnostics_until_the_next_outcome(
+    factory: sessionmaker[Session], coordinator: IndexCoordinator, build: ModelFactory
+) -> None:
+    space = build.representation_space(dimension=NDIM)
+    operation = build.index_operation(
+        active(build, space, 1), operation="ADD", state="FAILED", attempt_count=3,
+        failure_code="APPLY_ERROR", failure_detail="OSError: locked",
+    )  # fmt: skip
+    build.session.commit()
+    build.clock.advance(hours=1)
+
+    coordinator.requeue_failed_operations()
+
+    again = reload(factory, IndexOperation, operation.id)
+    assert (again.state, again.attempt_count, again.not_before_at) == (
+        "PENDING", 0, build.clock(),
+    )  # fmt: skip
+    assert (again.failure_code, again.failure_detail) == ("APPLY_ERROR", "OSError: locked")
+
+
+# --- failures inside a step ----------------------------------------------------------------------
+
+
+class InjectedFault(Exception):
+    """Raised in place of a real SQL statement; never raised by production code."""
+
+
+def test_a_failure_part_way_through_interrupting_work_rolls_all_of_it_back(
+    world: World, factory: sessionmaker[Session], build: ModelFactory, sqlite_engine: Engine,
+) -> None:  # fmt: skip
+    build.session.commit()
+    before = database_state(sqlite_engine)
+
+    def fail_on_runs(_c: object, _cur: object, statement: str, *_r: object) -> None:
+        if statement.lstrip().upper().startswith("UPDATE PROCESSING_RUNS"):
+            raise InjectedFault
+
+    event.listen(sqlite_engine, "before_cursor_execute", fail_on_runs)
+    try:
+        with pytest.raises(InjectedFault):
+            interrupt_in_flight_work(factory, clock=build.clock)
+    finally:
+        event.remove(sqlite_engine, "before_cursor_execute", fail_on_runs)
+
+    assert database_state(sqlite_engine) == before  # the jobs updated first were rolled back too
+    assert reload(factory, Job, world.running_job.id).state == "RUNNING"
+    assert interrupt_in_flight_work(factory, clock=build.clock).jobs == [world.running_job.id]
+
+
+def test_a_crash_inside_the_workspace_removal_is_repaired_by_running_recovery_again(
+    world: World, factory: sessionmaker[Session], file_store: ManagedFileStore,
+    workspaces: WorkspaceManager, coordinator: IndexCoordinator, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    real = shutil.rmtree
+    calls: list[object] = []
+
+    def dies_on_the_second_removal(path: Any, *args: Any, **kwargs: Any) -> None:
+        calls.append(path)
+        if len(calls) == 2:
+            raise SimulatedCrash
+        real(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", dies_on_the_second_removal)
+    with pytest.raises(SimulatedCrash):
+        recover(factory, file_store, workspaces, coordinator, build)
+    monkeypatch.undo()
+    assert len(workspaces.existing()) > 2  # some finished workspaces are still there
+
+    recover(factory, file_store, workspaces, coordinator, build)
+
+    assert workspaces.existing() == sorted([world.running_job.id, world.paused_job.id])
+    assert recover(factory, file_store, workspaces, coordinator, build).repaired_nothing
 
 
 # --- referenced originals ----------------------------------------------------------------------
