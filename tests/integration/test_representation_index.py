@@ -26,6 +26,8 @@ from backend.infrastructure.indexing.representation_index import (
     RepresentationIndex,
     open_or_rebuild,
     quarantine,
+    retire_quarantine,
+    superseded_files,
 )
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 from tests.fixtures.links import link_directory
@@ -871,3 +873,161 @@ def test_rebuilding_from_no_entries_gives_a_usable_empty_index(
     )  # fmt: skip
 
     assert (result.rebuilt, len(result.index)) == (True, 0)
+
+
+# --- retiring superseded and quarantined generations (erasure, persistence section 23) ---------
+
+
+def test_superseded_files_lists_what_the_manifest_on_disk_does_not_name(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    index = build(directory, space, vectors, clock, new_id)
+    assert index.manifest is not None
+    assert superseded_files(directory) == []  # only the live generation and the manifest
+    old = directory / f"index.{uuid.UUID(int=7).hex}.usearch"
+    staged = directory / f"{MANIFEST_NAME}.tmp"
+    old.write_bytes(b"old generation")
+    staged.write_bytes(b"{}")
+    (directory / "notes.txt").write_text("not ours")
+    (directory / "index.nothex.usearch").write_bytes(b"lookalike")
+
+    assert superseded_files(directory) == sorted([old, staged])
+
+
+def test_superseded_files_reads_the_manifest_afresh_not_from_an_object_in_memory(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    first = build(directory, space, vectors, clock, new_id)
+    assert first.manifest is not None
+    first_file = directory / first.manifest.index_file
+    kept = first_file.read_bytes()
+    build(directory, space, vectors, clock, new_id)  # a second generation replaces it
+    first_file.write_bytes(kept)  # the first file is back on disk
+
+    assert superseded_files(directory) == [first_file]  # `first` still thinks it is live
+
+
+def test_with_no_usable_manifest_every_index_file_is_superseded(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    index = build(directory, space, vectors, clock, new_id)
+    assert index.manifest is not None
+    (directory / MANIFEST_NAME).write_text("{broken")
+    assert superseded_files(directory) == [directory / index.manifest.index_file]
+    (directory / MANIFEST_NAME).unlink()
+    assert superseded_files(directory) == [directory / index.manifest.index_file]
+
+
+def test_a_manifest_that_cannot_be_read_names_nothing_so_every_index_file_is_superseded(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    index = build(directory, space, vectors, clock, new_id)
+    assert index.manifest is not None
+    live_file = directory / index.manifest.index_file
+    (directory / MANIFEST_NAME).write_bytes(bytes([0xFF, 0xFE, 0x80]))
+    assert superseded_files(directory) == [live_file]  # undecodable
+
+    (directory / MANIFEST_NAME).write_text(index.manifest.to_json())
+    assert superseded_files(directory) == []  # readable again
+    real_read_text = Path.read_text
+
+    def unreadable(self: Path, *args: object, **kwargs: object) -> str:
+        if self.name == MANIFEST_NAME:
+            raise PermissionError("locked")
+        return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    assert superseded_files(directory) == [live_file]  # unreadable
+
+
+def test_superseded_files_of_a_missing_or_linked_directory_is_empty(
+    directory: Path, tmp_path: Path
+) -> None:
+    assert superseded_files(directory) == []  # no directory
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / f"index.{uuid.UUID(int=7).hex}.usearch").write_bytes(b"x")
+    link_directory(directory, real)
+    assert superseded_files(directory) == []  # never looked at through a link
+
+
+def quarantined_index(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> Path:  # fmt: skip
+    build(directory, space, vectors, clock, new_id)
+    moved = quarantine(directory)
+    assert moved is not None
+    return moved
+
+
+def test_retiring_the_quarantine_deletes_every_quarantined_generation_and_its_folders(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    quarantined_index(directory, space, vectors, clock, new_id)
+    quarantined_index(directory, space, vectors, clock, new_id)  # a second numbered folder
+    live = build(directory, space, vectors, clock, new_id)
+
+    assert retire_quarantine(directory) == []
+
+    assert not (directory / "quarantine").exists()
+    assert len(reopen(directory, space)) == len(live)  # the live generation is untouched
+
+
+def test_retiring_a_quarantine_that_does_not_exist_is_a_no_op(directory: Path) -> None:
+    directory.mkdir(parents=True)
+    assert retire_quarantine(directory) == []
+    assert retire_quarantine(directory / "absent") == []
+
+
+def test_a_locked_quarantined_file_is_reported_as_remaining_and_deleted_later(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    moved = quarantined_index(directory, space, vectors, clock, new_id)
+    locked = next(moved.glob("index.*.usearch"))
+
+    with locked.open("rb"):  # an open handle: Windows refuses to delete the file
+        assert retire_quarantine(directory) == [locked]
+        assert not (moved / MANIFEST_NAME).exists()  # what could be deleted was
+
+    assert retire_quarantine(directory) == []
+    assert not (directory / "quarantine").exists()
+
+
+def test_retiring_leaves_files_that_are_not_the_indexs_own(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs,
+) -> None:  # fmt: skip
+    moved = quarantined_index(directory, space, vectors, clock, new_id)
+    (moved / "notes.txt").write_text("not ours")
+
+    assert retire_quarantine(directory) == []  # nothing of the index's remains
+
+    assert (moved / "notes.txt").read_text() == "not ours"  # and the folder stays for it
+    assert not list(moved.glob("index.*.usearch"))
+
+
+def test_retiring_never_follows_a_link(
+    directory: Path, space: uuid.UUID, vectors: dict[int, NDArray[np.float32]],
+    clock: FrozenClock, new_id: SeededUUIDs, tmp_path: Path,
+) -> None:  # fmt: skip
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    bait = elsewhere / MANIFEST_NAME
+    bait.write_text("must survive")
+    directory.mkdir(parents=True)
+    link_directory(directory / "quarantine", elsewhere)
+    assert retire_quarantine(directory) == [directory / "quarantine"]  # cannot be judged
+    assert bait.read_text() == "must survive"
+
+    (directory / "quarantine").rmdir()  # removes the junction only
+    (directory / "quarantine").mkdir()
+    link_directory(directory / "quarantine" / "1", elsewhere)  # a numbered folder that is a link
+    assert retire_quarantine(directory) == [directory / "quarantine" / "1"]
+    assert bait.read_text() == "must survive"
