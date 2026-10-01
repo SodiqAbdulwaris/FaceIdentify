@@ -57,9 +57,9 @@ tests INDEX-03/04/05 and PER-07/08 of TESTING_STRATEGY.
 ## Verification
 
 - `uv run ruff format --check .` (120 files formatted), `uv run ruff check .` (clean), `uv run mypy` and
-  `uv run mypy --platform linux` (no issues in 120 files), `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 987 passed,
+  `uv run mypy --platform linux` (no issues in 120 files), `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 990 passed,
   backend coverage 100% (statements and branches).
-- New tests: `test_representation_erasure.py` (34; INDEX-03/04/05, PER-07 at five crash points, PER-08 by byte search of the
+- New tests: `test_representation_erasure.py` (37; INDEX-03/04/05, PER-07 at five crash points, PER-08 by byte search of the
   database file, its log and every file under the index directory, run five times without a failure), `test_migration_0004.py`
   (7), 10 index-helper tests, 5 coordinator tests, 3 startup-recovery tests plus the report-property cases.
 - Mutations, each broken, shown to fail a test and restored byte-identical: coordinator (3), index helpers (9, one equivalent
@@ -82,6 +82,11 @@ Independent read-only review by an Explore subagent in a disposable worktree (Co
 - **M2 (fixed):** a `FAILED` `REMOVE` of an `ERASING` representation is requeued by `queue`.
 - **m1 (fixed):** `resume` reports an unexpected exception instead of aborting startup. **m2 (fixed):** only the
   erasing representations' operations count as errors. **m4 (fixed):** the marker token is `uuid.uuid4()`.
+- **Re-review of the fix commit (same kind of reviewer):** the earlier findings are fixed; it raised three more, all fixed:
+  **N1** the marker value was shared by every space finalized in one call, so a checkpoint run between two
+  commits could clear the marker the second set (each clearing commit now sets a value of its own); **N2** the pending-`REMOVE`
+  delete bound every id of the bulk so far (now only the chunk's); **N3** a `FAILED` `REMOVE` from before the erasure kept
+  the first call from finishing (now deleted with the pending one).
 - **m3 (answered):** a cleared row has no key, so candidate revalidation cannot return it; the bytes in the index
   files are covered by the rebuild and the byte-search tests, not by `_verify`.
 - **n1 (answered):** the erasure code and its tests are one logical unit in one commit; it is above the guide's ~400 lines

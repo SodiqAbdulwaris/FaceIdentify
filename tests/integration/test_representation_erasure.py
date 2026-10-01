@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.identities.models import EvidenceKind
@@ -778,9 +778,9 @@ def test_verification_reports_a_cleared_representation_that_still_holds_a_vector
     real = RepresentationEraser._finalize_space
 
     def claims_to_have_cleared_it(
-        self: RepresentationEraser, space_id: uuid.UUID, token: str
+        self: RepresentationEraser, space_id: uuid.UUID
     ) -> tuple[list[uuid.UUID], str | None]:
-        cleared, reason = real(self, space_id, token)
+        cleared, reason = real(self, space_id)
         return [*cleared, liar.id], reason  # still ACTIVE, still holding its vector
 
     monkeypatch.setattr(RepresentationEraser, "_finalize_space", claims_to_have_cleared_it)
@@ -990,3 +990,68 @@ def test_an_unrelated_operation_backing_off_does_not_make_an_erasure_incomplete(
     assert report.errors == []
     assert report.complete, report.outstanding_cleanup
     assert_gone(factory, sqlite_engine, coordinator, space, victim)
+
+
+# --- findings of the re-review ------------------------------------------------------------------
+
+
+def test_every_clearing_commit_sets_a_marker_value_of_its_own(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, space: RepresentationSpace,
+    build: ModelFactory, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """Two spaces finalized by one call: a checkpoint that ran between the two commits must not be
+    able to clear the marker the second sets, which a shared value would allow."""
+    other = build.representation_space(dimension=NDIM)
+    db_session.commit()
+    (first,) = indexed(build, coordinator, space, 1)
+    (second,) = indexed(build, coordinator, other, 11)
+    values: list[str] = []
+    real = AppStateRepository.set
+
+    def spy(self: AppStateRepository, key: str, value: str, **kwargs: Any) -> None:
+        values.append(value)
+        real(self, key, value, **kwargs)
+
+    monkeypatch.setattr(AppStateRepository, "set", spy)
+
+    assert eraser.erase([first.id, second.id]).complete
+
+    assert len(values) == 2
+    assert len(set(values)) == 2
+
+
+def test_a_failed_remove_from_before_the_erasure_does_not_hold_it_up(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, factory: sessionmaker[Session],
+    sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
+) -> None:  # fmt: skip
+    (victim,) = indexed(build, coordinator, space, 1)
+    build.index_operation(victim, operation="REMOVE", state="FAILED", attempt_count=3)
+    build.session.commit()
+
+    report = eraser.erase([victim.id])  # one call is enough
+
+    assert report.complete, report.outstanding_cleanup
+    assert_gone(factory, sqlite_engine, coordinator, space, victim)
+
+
+def test_queueing_a_bulk_binds_only_one_chunk_of_ids_per_statement(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, factory: sessionmaker[Session],
+    sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    monkeypatch.setattr(erasure, "CHUNK", 2)
+    victims = indexed(build, coordinator, space, 1, 2, 3, 4, 5)
+    bound: list[int] = []
+
+    @event.listens_for(sqlite_engine, "before_cursor_execute")
+    def record(conn: Any, cursor: Any, statement: str, parameters: Any, *rest: Any) -> None:
+        if statement.startswith("DELETE FROM index_operations"):
+            bound.append(len(parameters))
+
+    try:
+        eraser.queue([v.id for v in victims])
+    finally:
+        event.remove(sqlite_engine, "before_cursor_execute", record)
+
+    assert bound
+    assert max(bound) <= 2 + 3  # a chunk of ids, the operation and the two states
