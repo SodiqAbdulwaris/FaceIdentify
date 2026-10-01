@@ -3,7 +3,7 @@
 - **Date:** 2026-10-01
 - **Milestone / tracker IDs:** M2 · TST-022; GitHub issue #32 (the third item)
 - **Status:** done for Identity/Occurrence/Evidence; RuntimeCatalog/Settings remains in #32
-- **Commits:** PR (branch `feat/identity-evidence-repositories`): `feat(identities): identity, occurrence and evidence repositories`
+- **Commits:** PR #60: `feat(identities): identity, occurrence and evidence repositories`, `docs: record the identity, occurrence and evidence repositories`, `fix(identities): address the review of the identity repositories`
 
 ## What changed
 
@@ -16,7 +16,7 @@
   - `EvidenceRepository`: `append` (the evidence, the representations it cites with their roles, and its ranked candidates, one
     flush), `get`, `candidates` (rank order), `links`, a keyset `page_for_identity`, and `mark_superseded` (the explanatory
     marker, set once). There is no update that touches a payload.
-- `tests/integration/test_identity_repositories.py` (19): nothing is committed on the caller's behalf; `lock` really holds
+- `tests/integration/test_identity_repositories.py` (20): nothing is committed on the caller's behalf; `lock` really holds
   SQLite's write lock and changes nothing; a transition needs the revision and state (stale and wrong-state callers change
   nothing; one winner under contention); a `MERGED` identity must name its target (the schema insists); a bare string is not a
   state list; observations keep their order; pages are newest first and neither skip nor repeat when a row disappears or
@@ -37,12 +37,23 @@ the existing repositories.
 
 ## Verification
 
-- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1033 passed, backend coverage 100%.
+- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1034 passed, backend coverage 100%.
   Every guard was broken, shown to fail a test and restored byte-identical (19 mutations). Two did not fail a test, both
   equivalent: an `UPDATE` matching no row still takes SQLite's write lock (so the `lock` test was re-aimed at removing the
   statement, which it catches), and the explicit `ORDER BY rank` of the candidates equals the primary key's order `(evidence_id,
   rank)`; it is kept because the contract should not rest on an index choice.
 - **Not verified:** the repositories under real use cases (not wired in yet).
+
+## Review
+
+Independent read-only review (Explore subagent; Codex was over its usage limit until 2026-10-03), posted on PR 60. No
+blocker or major. Fixed: a test mixing tied and distinct timestamps with ids chosen so that only (time, then id) gives the
+right walk; the contention test now lets only the revision decide the winner; the identity `add` test fails inside `add`
+(proving the flush), and the stored `ordinal` values are asserted; the PR number above; a stale "remaining" statement in the
+tracker; docstrings (the `lock` caveat, the caller's candidates being mutated, the use case owning "not empty"). Answered: the
+first commit is above the ~400-line guide because the repositories and their contract tests are one unit; three identical
+keyset cursors (`Cursor`, `LibraryCursor`, `RepresentationCursor`) can be one shared type later; `activated_at` is rewritten
+only if a caller chooses to move `ACTIVE` to `ACTIVE`, which no use case does.
 
 ## Open issues / follow-ups
 

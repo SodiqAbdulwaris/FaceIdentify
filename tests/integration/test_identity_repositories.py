@@ -77,6 +77,8 @@ def test_adding_an_identity_flushes_but_does_not_commit(
         with factory() as other:  # not visible to another connection until the caller commits
             assert other.get(Identity, identity.id) is None
         session.rollback()
+    with factory() as session, pytest.raises(IntegrityError, match="state"):
+        IdentityRepository(session).add(new_identity(build, state="NOT_A_STATE"))  # at the add
 
 
 def test_get_returns_the_row_as_the_database_has_it_now_not_a_cached_copy(
@@ -224,8 +226,9 @@ def test_only_one_of_two_concurrent_identity_transitions_wins(
     def attempt(to_state: str) -> bool:
         with factory() as session:
             done = IdentityRepository(session).transition(
-                identity.id, expected_revision=1, from_states=["ACTIVE"], to_state=to_state, now=now
-            )
+                identity.id, expected_revision=1, to_state=to_state, now=now,
+                from_states=["ACTIVE", "FORGOTTEN", "DELETED"],  # any: the revision decides
+            )  # fmt: skip
             session.commit()
             return done
 
@@ -291,6 +294,12 @@ def test_an_occurrence_keeps_its_observations_in_the_order_given(
     with factory() as session:
         assert OccurrenceRepository(session).observation_ids(occurrence.id) == order
         assert OccurrenceRepository(session).observation_ids(uuid.UUID(int=9)) == []
+        ordinals = session.scalars(
+            select(OccurrenceObservation.ordinal)
+            .where(OccurrenceObservation.occurrence_id == occurrence.id)
+            .order_by(OccurrenceObservation.ordinal)
+        )
+        assert list(ordinals) == [0, 1, 2]
 
 
 def test_an_observation_listed_twice_is_the_databases_integrity_error(
@@ -559,3 +568,41 @@ def test_evidence_is_marked_superseded_once_and_its_payload_is_never_rewritten(
         row = EvidenceRepository(session).get(evidence.id)
         assert row is not None
         assert (row.superseded_at, row.payload_json) == (first, {"why": "similar"})
+
+
+def test_ties_and_distinct_times_are_ordered_together_whatever_the_ids_are(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    """Rows at three times, two of them tied, with ids chosen so that the older row has the
+    largest id: only (time, then id), newest first, gives the right walk."""
+    identity = build.identity()
+    build.session.commit()
+    start = build.clock()
+    layout = [  # (id, seconds after start)
+        (uuid.UUID(int=9), 0),  # oldest, largest id
+        (uuid.UUID(int=1), 1),  # tied with the next, smallest id
+        (uuid.UUID(int=5), 1),
+        (uuid.UUID(int=2), 2),  # newest
+    ]
+    with factory() as session:
+        for row_id, seconds in layout:
+            EvidenceRepository(session).append(
+                new_evidence(
+                    build, identity.id, id=row_id, created_at=start + timedelta(seconds=seconds)
+                )
+            )
+        session.commit()
+    expected = [uuid.UUID(int=2), uuid.UUID(int=5), uuid.UUID(int=1), uuid.UUID(int=9)]
+
+    for limit in (1, 2, 3):
+        seen: list[uuid.UUID] = []
+        cursor: Cursor | None = None
+        while True:
+            with factory() as session:
+                page, cursor = EvidenceRepository(session).page_for_identity(
+                    identity.id, limit=limit, after=cursor
+                )
+            seen += [e.id for e in page]
+            if cursor is None:
+                break
+        assert seen == expected, limit

@@ -88,7 +88,9 @@ class IdentityRepository:
 
     def lock(self, identity_id: uuid.UUID) -> Identity | None:
         """Take the write lock, then return the identity fresh (None if there is none). Held until
-        the caller commits or rolls back; call it as the first statement of the transaction."""
+        the caller commits or rolls back; call it as the first statement of the transaction: one
+        that has already read keeps its snapshot and can fail with `SQLITE_BUSY_SNAPSHOT` when
+        another writer commits in between (CONTEXT open question 20)."""
         self._session.execute(
             update(Identity)
             .where(Identity.id == identity_id)
@@ -144,7 +146,8 @@ class OccurrenceRepository:
 
     def add(self, occurrence: Occurrence, observation_ids: Sequence[uuid.UUID]) -> Occurrence:
         """Stage the occurrence with its observations, in the order given (`ordinal` 0, 1, ...),
-        and flush. An observation listed twice is the database's `IntegrityError`."""
+        and flush. An observation listed twice is the database's `IntegrityError`. That the list is
+        not empty, or contains the representative observation, is the use case's rule (§11)."""
         self._session.add(occurrence)
         self._session.flush()  # the membership rows reference the occurrence
         self._session.add_all(
@@ -241,7 +244,8 @@ class EvidenceRepository:
         candidates: Sequence[EvidenceCandidate] = (),
     ) -> Evidence:
         """Append the evidence with the representations it cites and its ranked candidates, then
-        flush. Candidates keep the `rank` they carry (their original order)."""
+        flush. Candidates keep the `rank` they carry (their original order); their `evidence_id`
+        is set here, on the caller's objects."""
         self._session.add(evidence)
         self._session.flush()  # the links and candidates reference the evidence
         self._session.add_all(
