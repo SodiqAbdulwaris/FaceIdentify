@@ -25,7 +25,12 @@ from backend.app.memory.index_coordinator import (
     IndexCoordinator,
     RetryPolicy,
 )
-from backend.app.memory.models import IndexOperation, Representation, RepresentationSpace
+from backend.app.memory.models import (
+    IndexOperation,
+    Observation,
+    Representation,
+    RepresentationSpace,
+)
 from backend.app.processing.models import ExecutionSegment, ProcessingRun
 from backend.app.recovery import startup
 from backend.app.recovery.startup import (
@@ -173,10 +178,22 @@ class World:
             heartbeat_at=build.clock(),
         )  # fmt: skip
         self.paused_job = build.job(state="PAUSED")
+        # Work that was being paused or cancelled when the process died, each still holding a lease.
+        self.pausing_job = build.job(
+            state="PAUSING", lease_owner="worker-1", lease_expires_at=build.clock(),
+            heartbeat_at=build.clock(),
+        )  # fmt: skip
+        self.cancelling_job = build.job(
+            state="CANCELLING", lease_owner="worker-1", lease_expires_at=build.clock(),
+            heartbeat_at=build.clock(),
+        )  # fmt: skip
         self.queued_job = build.job(state="QUEUED")
         self.done_job = build.job(state="COMPLETED")
         self.failed_job = build.job(state="FAILED")
-        for job in (self.running_job, self.paused_job, self.done_job, self.failed_job):
+        for job in (
+            self.running_job, self.paused_job, self.pausing_job, self.cancelling_job,
+            self.done_job, self.failed_job,
+        ):  # fmt: skip
             workspaces.allocate(job.id)
         self.unknown_workspace = uuid.uuid4()
         workspaces.allocate(self.unknown_workspace)
@@ -185,6 +202,15 @@ class World:
         self.running_segment = build.segment(self.running_run, 0, "RUNNING")
         self.finalizing_run = build.run(state="FINALIZING")
         self.pausing_run = build.run(state="PAUSING")
+        self.cancelling_run = build.run(state="CANCELLING")
+        self.cancelling_segment = build.segment(self.cancelling_run, 0, "RUNNING")
+        # Output the cancelled run produced so far: private, and recovery must not activate it.
+        self.partial_observation = build.observation(
+            self.cancelling_run, execution_segment_id=self.cancelling_segment.id
+        )
+        self.partial_representation = build.representation(
+            self.partial_observation, representation_space_id=self.space.id
+        )
         self.done_run = build.run(state="COMPLETED")
         self.done_segment = build.segment(self.done_run, 0, "COMPLETED")
         # PENDING artifact whose final file was renamed into place but never committed AVAILABLE.
@@ -253,6 +279,28 @@ def test_every_interrupted_state_is_reconciled(
     assert report.interrupted.segments == running["segments"]
     assert ids_in_state(factory, ProcessingRun, "RUNNING") == []
     assert ids_in_state(factory, ExecutionSegment, "RUNNING") == []
+    # Work being paused or cancelled: PAUSED or CANCELLED, no lease; a cancelled job ends now.
+    pausing = reload(factory, Job, world.pausing_job.id)
+    assert (pausing.state, pausing.lease_owner, pausing.lease_expires_at) == ("PAUSED", None, None)
+    assert pausing.ended_at is None  # paused work is not over
+    cancelling = reload(factory, Job, world.cancelling_job.id)
+    assert (cancelling.state, cancelling.lease_owner, cancelling.lease_expires_at) == (
+        "CANCELLED", None, None,
+    )  # fmt: skip
+    assert cancelling.ended_at == build.clock()
+    paused_run = reload(factory, ProcessingRun, world.pausing_run.id)
+    assert (paused_run.state, paused_run.revision) == ("PAUSED", 2)
+    cancelled_run = reload(factory, ProcessingRun, world.cancelling_run.id)
+    assert (cancelled_run.state, cancelled_run.revision) == ("CANCELLED", 2)
+    assert report.interrupted.jobs_paused == [world.pausing_job.id]
+    assert report.interrupted.jobs_cancelled == [world.cancelling_job.id]
+    assert report.interrupted.runs_paused == [world.pausing_run.id]
+    assert report.interrupted.runs_cancelled == [world.cancelling_run.id]
+    assert report.interrupted.leases_cleared == []  # they moved on, they were not bare lease clears
+    # The cancelled run's segment was RUNNING, so it is closed; its output stays private.
+    assert reload(factory, ExecutionSegment, world.cancelling_segment.id).state == "INTERRUPTED"
+    assert reload(factory, Observation, world.partial_observation.id).state == "PENDING"
+    assert reload(factory, Representation, world.partial_representation.id).state == "PENDING"
     # The PENDING artifact whose file reached its final key is finalized.
     artifact = reload(factory, Artifact, world.artifact_id)
     assert (artifact.state, artifact.size_bytes) == ("AVAILABLE", len(DATA))
@@ -264,9 +312,12 @@ def test_every_interrupted_state_is_reconciled(
     assert reload(factory, Source, world.vanished_source.id).state == "ACTIVE"
     assert report.missing_references == [world.vanished_reference.id]
     # Workspaces: kept for jobs that may resume, removed for finished ones and for unknown ids.
-    assert workspaces.existing() == sorted([world.running_job.id, world.paused_job.id])
+    # (a job that was being paused is PAUSED and may resume; one that was cancelled is over)
+    assert workspaces.existing() == sorted(
+        [world.running_job.id, world.paused_job.id, world.pausing_job.id]
+    )
     assert sorted(report.workspaces.removed) == sorted(
-        [world.done_job.id, world.failed_job.id, world.unknown_workspace]
+        [world.done_job.id, world.failed_job.id, world.cancelling_job.id, world.unknown_workspace]
     )
     # A corrupt index is rebuilt from SQLite, and the pending operation is applied to the right one.
     assert report.indexes_rebuilt == [world.other_space.id]
@@ -281,14 +332,15 @@ def test_other_states_are_left_exactly_as_they_were(
     world: World, factory: sessionmaker[Session], file_store: ManagedFileStore,
     workspaces: WorkspaceManager, coordinator: IndexCoordinator, build: ModelFactory,
 ) -> None:  # fmt: skip
-    """Only RUNNING work is interrupted: a pause, a finalization and finished work are not ours."""
+    """Only RUNNING, PAUSING and CANCELLING work is moved: a finalization, a pause that finished,
+    queued work and finished work are not ours."""
     before = {
         job.id: reload(factory, Job, job.id).state
         for job in (world.paused_job, world.queued_job, world.done_job, world.failed_job)
     }
     runs = {
         run.id: reload(factory, ProcessingRun, run.id)
-        for run in (world.finalizing_run, world.pausing_run, world.done_run)
+        for run in (world.finalizing_run, world.done_run)
     }
     states = {run_id: (run.state, run.revision) for run_id, run in runs.items()}
 
@@ -360,9 +412,15 @@ def test_a_crash_after_any_step_is_repaired_by_running_recovery_again(
     assert reload(factory, Job, world.running_job.id).state == "INTERRUPTED"
     assert reload(factory, ProcessingRun, world.running_run.id).state == "INTERRUPTED"
     assert reload(factory, ExecutionSegment, world.running_segment.id).state == "INTERRUPTED"
+    assert reload(factory, Job, world.pausing_job.id).state == "PAUSED"
+    assert reload(factory, Job, world.cancelling_job.id).state == "CANCELLED"
+    assert reload(factory, ProcessingRun, world.pausing_run.id).state == "PAUSED"
+    assert reload(factory, ProcessingRun, world.cancelling_run.id).state == "CANCELLED"
     assert reload(factory, Artifact, world.artifact_id).state == "AVAILABLE"
     assert reload(factory, IndexOperation, world.op.id).state == "APPLIED"
-    assert workspaces.existing() == sorted([world.running_job.id, world.paused_job.id])
+    assert workspaces.existing() == sorted(
+        [world.running_job.id, world.paused_job.id, world.pausing_job.id]
+    )
     assert open_index(coordinator, world.space).contains(1)
     assert open_index(coordinator, world.other_space).contains(2)
     rows = database_state(sqlite_engine)
@@ -383,8 +441,14 @@ def test_in_flight_work_is_interrupted_in_one_transaction_and_only_once(
     assert first.jobs == [world.running_job.id]
     assert world.running_run.id in first.runs
     assert world.running_segment.id in first.segments
-    assert (second.jobs, second.runs, second.segments) == ([], [], [])
+    assert first.jobs_paused == [world.pausing_job.id]
+    assert first.jobs_cancelled == [world.cancelling_job.id]
+    assert first.runs_paused == [world.pausing_run.id]
+    assert first.runs_cancelled == [world.cancelling_run.id]
+    assert second == InterruptedWork()  # nothing left to move, nothing moved twice
     assert reload(factory, ProcessingRun, world.running_run.id).revision == 2  # bumped once
+    assert reload(factory, ProcessingRun, world.pausing_run.id).revision == 2
+    assert reload(factory, ProcessingRun, world.cancelling_run.id).revision == 2
 
 
 def test_a_workspace_is_kept_for_every_job_that_is_not_over(
@@ -438,6 +502,10 @@ def test_a_report_with_no_repairs_says_so() -> None:
         lambda r: r.requeued_operations.append(uuid.uuid4()),
         lambda r: r.interrupted.runs.append(uuid.uuid4()),
         lambda r: r.interrupted.segments.append(uuid.uuid4()),
+        lambda r: r.interrupted.jobs_paused.append(uuid.uuid4()),
+        lambda r: r.interrupted.jobs_cancelled.append(uuid.uuid4()),
+        lambda r: r.interrupted.runs_paused.append(uuid.uuid4()),
+        lambda r: r.interrupted.runs_cancelled.append(uuid.uuid4()),
         lambda r: r.workspaces.removed.append(uuid.uuid4()),
         lambda r: r.indexes_rebuilt.append(uuid.uuid4()),
         lambda r: r.index_operations.applied.append(uuid.uuid4()),
@@ -449,7 +517,8 @@ def test_a_report_with_no_repairs_says_so() -> None:
     ids=[
         "artifact-finalized", "artifact-not-completed", "artifact-deleted",
         "artifact-delete-failed", "staging-removed", "missing-reference", "missing-managed",
-        "job", "lease-cleared", "operation-requeued", "run", "segment", "workspace",
+        "job", "lease-cleared", "operation-requeued", "run", "segment", "job-paused",
+        "job-cancelled", "run-paused", "run-cancelled", "workspace",
         "index-rebuilt", "operation-applied", "operation-retrying", "operation-failed",
         "coordinator-rebuilt", "coordinator-purged",
     ],
@@ -506,7 +575,7 @@ def test_a_repair_alone_is_not_unresolved() -> None:
 # --- leases, linked state and failed operations ------------------------------------------------
 
 
-@pytest.mark.parametrize("state", ["QUEUED", "PAUSED", "PAUSING", "CANCELLING", "COMPLETED"])
+@pytest.mark.parametrize("state", ["QUEUED", "PAUSED", "COMPLETED"])
 @pytest.mark.parametrize("held", ["both", "owner-only", "expiry-only"])
 def test_a_stale_lease_is_cleared_from_a_job_that_is_not_running_and_its_state_kept(
     factory: sessionmaker[Session], build: ModelFactory, state: str, held: str
@@ -521,10 +590,81 @@ def test_a_stale_lease_is_cleared_from_a_job_that_is_not_running_and_its_state_k
     cleared = interrupt_in_flight_work(factory, clock=build.clock)
 
     assert cleared.leases_cleared == [job.id]
-    assert cleared.jobs == []  # not interrupted: Q26 owns what these states should become
+    assert cleared.jobs == []  # not interrupted: only RUNNING work is
     after = reload(factory, Job, job.id)
     assert (after.state, after.lease_owner, after.lease_expires_at) == (state, None, None)
     assert interrupt_in_flight_work(factory, clock=build.clock).leases_cleared == []
+
+
+@pytest.mark.parametrize(
+    ("state", "becomes", "ends"), [("PAUSING", "PAUSED", False), ("CANCELLING", "CANCELLED", True)]
+)
+@pytest.mark.parametrize("held", ["both", "owner-only", "expiry-only"])
+def test_a_job_being_paused_or_cancelled_moves_on_and_its_lease_is_cleared(
+    factory: sessionmaker[Session], build: ModelFactory, state: str, becomes: str, ends: bool,
+    held: str,
+) -> None:  # fmt: skip
+    job = build.job(
+        state=state,
+        lease_owner=None if held == "expiry-only" else "worker-1",
+        lease_expires_at=None if held == "owner-only" else build.clock(),
+    )
+    build.session.commit()
+
+    moved = interrupt_in_flight_work(factory, clock=build.clock)
+
+    after = reload(factory, Job, job.id)
+    assert (after.state, after.lease_owner, after.lease_expires_at) == (becomes, None, None)
+    assert after.ended_at == (build.clock() if ends else None)
+    assert moved.leases_cleared == []  # reported as moved, not as a bare lease clear
+    assert (moved.jobs_paused, moved.jobs_cancelled) == (
+        ([job.id], []) if becomes == "PAUSED" else ([], [job.id])
+    )
+    assert moved.jobs == []  # not interrupted
+    assert interrupt_in_flight_work(factory, clock=build.clock) == InterruptedWork()
+
+
+def test_what_was_moved_is_reported_in_id_order_whatever_order_it_was_stored_in(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    """Rows are inserted in descending id order, so insertion order cannot be what sorts them."""
+    ids = sorted((build.new_id() for _ in range(3)), reverse=True)
+    paused_jobs = [build.job(id=i, state="PAUSING") for i in ids]
+    cancelled_jobs = [build.job(id=build.new_id(), state="CANCELLING") for _ in range(3)]
+    cancelled_jobs.sort(key=lambda j: j.id, reverse=True)
+    paused_runs = [
+        build.run(id=i, state="PAUSING")
+        for i in sorted((build.new_id() for _ in range(3)), reverse=True)
+    ]
+    cancelled_runs = [
+        build.run(id=i, state="CANCELLING")
+        for i in sorted((build.new_id() for _ in range(3)), reverse=True)
+    ]
+    build.session.commit()
+
+    moved = interrupt_in_flight_work(factory, clock=build.clock)
+
+    assert moved.jobs_paused == sorted(job.id for job in paused_jobs)
+    assert moved.jobs_cancelled == sorted(job.id for job in cancelled_jobs)
+    assert moved.runs_paused == sorted(run.id for run in paused_runs)
+    assert moved.runs_cancelled == sorted(run.id for run in cancelled_runs)
+
+
+def test_a_run_being_paused_or_cancelled_is_moved_by_its_own_state_whatever_its_job_says(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    pausing = build.run(state="PAUSING")
+    cancelling = build.run(state="CANCELLING")
+    queued_job_of_a_pausing_run = build.job(state="QUEUED", processing_run_id=pausing.id)
+    done_job_of_a_cancelling_run = build.job(state="COMPLETED", processing_run_id=cancelling.id)
+    build.session.commit()
+
+    moved = interrupt_in_flight_work(factory, clock=build.clock)
+
+    assert moved.runs_paused == [pausing.id]
+    assert moved.runs_cancelled == [cancelling.id]
+    assert reload(factory, Job, queued_job_of_a_pausing_run.id).state == "QUEUED"
+    assert reload(factory, Job, done_job_of_a_cancelling_run.id).state == "COMPLETED"
 
 
 def test_job_and_run_states_are_recovered_independently_of_each_other(
@@ -677,15 +817,23 @@ class InjectedFault(Exception):
     """Raised in place of a real SQL statement; never raised by production code."""
 
 
+@pytest.mark.parametrize("which", [1, 2, 3], ids=["running", "pausing", "cancelling"])
 def test_a_failure_part_way_through_interrupting_work_rolls_all_of_it_back(
     world: World, factory: sessionmaker[Session], build: ModelFactory, sqlite_engine: Engine,
+    which: int,
 ) -> None:  # fmt: skip
+    """The run updates come in three steps (RUNNING, PAUSING, CANCELLING); a failure at any of them
+    leaves the database exactly as it was, jobs updated before it included."""
     build.session.commit()
     before = database_state(sqlite_engine)
+    seen = 0
 
     def fail_on_runs(_c: object, _cur: object, statement: str, *_r: object) -> None:
+        nonlocal seen
         if statement.lstrip().upper().startswith("UPDATE PROCESSING_RUNS"):
-            raise InjectedFault
+            seen += 1
+            if seen == which:
+                raise InjectedFault
 
     event.listen(sqlite_engine, "before_cursor_execute", fail_on_runs)
     try:
@@ -717,11 +865,13 @@ def test_a_crash_inside_the_workspace_removal_is_repaired_by_running_recovery_ag
     with pytest.raises(SimulatedCrash):
         recover(factory, file_store, workspaces, coordinator, build)
     monkeypatch.undo()
-    assert len(workspaces.existing()) > 2  # some finished workspaces are still there
+    assert len(workspaces.existing()) > 3  # some finished workspaces are still there
 
     recover(factory, file_store, workspaces, coordinator, build)
 
-    assert workspaces.existing() == sorted([world.running_job.id, world.paused_job.id])
+    assert workspaces.existing() == sorted(
+        [world.running_job.id, world.paused_job.id, world.pausing_job.id]
+    )
     assert recover(factory, file_store, workspaces, coordinator, build).repaired_nothing
 
 
