@@ -42,8 +42,8 @@ from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from sqlalchemy import CursorResult, select, update
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import CursorResult, exists, select, update
+from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from backend.app.identities.models import Identity, IdentityState
 from backend.app.memory.models import (
@@ -184,6 +184,61 @@ class IndexCoordinator:
                 if opened.rebuilt:
                     rebuilt.append(space_id)
         return rebuilt
+
+    def requeue_failed_operations(self) -> list[uuid.UUID]:
+        """Give every `FAILED` operation a fresh set of attempts, once.
+
+        Persistence §28: "pending/failed IndexOperation: wake coordinator with bounded
+        retry/backoff". `FAILED` means this process ran out of attempts, which may have had a
+        transient cause (a locked file, a full disk) that a restart has cleared. Each is put back to
+        `PENDING`, due now, with its attempt count reset so the caller's `RetryPolicy` applies
+        afresh; its failure code and detail are kept until the next outcome replaces them. That is
+        the bound: one new set of attempts per call, and startup makes one call. One that would
+        duplicate a `PENDING` operation for the same representation and kind (the schema allows
+        only one) stays `FAILED`, since the pending one already says the same thing. Returns the
+        operations requeued.
+        """
+        now = self._clock()
+        requeued: list[uuid.UUID] = []
+        with self._lock:
+            with self._sessions() as session:
+                failed = (
+                    session.execute(
+                        select(IndexOperation.id)
+                        .where(IndexOperation.state == IndexOperationState.FAILED)
+                        .order_by(IndexOperation.created_at.desc(), IndexOperation.id)
+                    )
+                    .scalars()
+                    .all()
+                )
+            with self._sessions() as session:
+                other = aliased(IndexOperation)
+                for operation_id in failed:
+                    result = cast(
+                        "CursorResult[Any]",
+                        session.execute(
+                            update(IndexOperation)
+                            .where(
+                                IndexOperation.id == operation_id,
+                                IndexOperation.state == IndexOperationState.FAILED,
+                                ~exists().where(
+                                    other.state == IndexOperationState.PENDING,
+                                    other.representation_id == IndexOperation.representation_id,
+                                    other.operation == IndexOperation.operation,
+                                ),
+                            )
+                            .values(
+                                state=IndexOperationState.PENDING,
+                                attempt_count=0,
+                                not_before_at=now,
+                                updated_at=now,
+                            )
+                        ),
+                    )
+                    if result.rowcount:
+                        requeued.append(operation_id)
+                session.commit()
+        return requeued
 
     def _claim(self, limit: int) -> list[_Claimed]:
         with self._sessions() as session:
