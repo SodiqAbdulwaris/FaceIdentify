@@ -116,7 +116,7 @@ def test_a_populated_database_upgrades_with_every_row_and_key_kept(
     before = dump(path)
     assert {row[7] for row in before["representations"] if row[7] is not None} == {1, 2, 3}
 
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
 
     assert version(path) == "0003"
     assert dump(path) == before  # nothing lost, changed or reordered, in any table; keys included
@@ -131,7 +131,7 @@ def test_the_same_key_may_be_used_in_two_spaces_but_not_twice_in_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
     first, second = spaces(path)[:2]
     engine = create_sqlite_engine(path)
     try:
@@ -168,7 +168,7 @@ def test_a_committed_snapshot_cannot_be_updated_by_sql_or_by_the_orm_even_to_the
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
     used, free = snapshot_ids(path)
     before = dump(path)
 
@@ -205,7 +205,7 @@ def test_a_snapshot_a_run_uses_cannot_be_deleted_and_one_no_run_uses_can(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
     used, free = snapshot_ids(path)
 
     with pytest.raises(sqlite3.IntegrityError, match="a run uses"):
@@ -228,7 +228,7 @@ def test_known_limit_insert_or_replace_rewrites_a_snapshot_no_run_uses(
     stop it on a snapshot no run references; one a run uses is still protected by the foreign
     key (GitHub issue 55). Pinned so that closing the gap shows up as a deliberate change."""
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
     used, free = snapshot_ids(path)
     replace = (
         "INSERT OR REPLACE INTO processing_configuration_snapshots"
@@ -254,7 +254,7 @@ def test_a_new_snapshot_can_still_be_created_and_a_second_run_cannot_reuse_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
     used, _ = snapshot_ids(path)
     engine = create_sqlite_engine(path)
     try:
@@ -292,7 +292,7 @@ def test_a_python_error_after_the_recreation_and_the_triggers_rolls_everything_b
     patch_revision(monkeypatch, "0003", after_upgrade=fail("0003 failed at the very end"))
 
     with pytest.raises(RuntimeError, match="at the very end"):
-        migrate(monkeypatch, path, "head")
+        migrate(monkeypatch, path, "0003")
 
     assert_untouched_at_0002(path, before)  # the recreated table and both triggers are gone
 
@@ -305,7 +305,7 @@ def test_a_dangling_reference_left_by_the_revision_is_caught_before_commit(
     patch_revision(monkeypatch, "0003", after_upgrade=dangle(DANGLING_UPDATE))
 
     with pytest.raises(RuntimeError, match="index_operations with rowid 1 points at a missing row"):
-        migrate(monkeypatch, path, "head")
+        migrate(monkeypatch, path, "0003")
 
     assert_untouched_at_0002(path, before)
 
@@ -317,7 +317,7 @@ def test_foreign_key_enforcement_is_off_while_the_revision_runs(
     seen: list[int] = []
     patch_revision(monkeypatch, "0003", after_upgrade=record_enforcement(seen))
 
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
 
     assert seen == [0]  # recreating a referenced table needs it, with child rows present
 
@@ -329,7 +329,7 @@ def test_in_one_upgrade_a_failing_third_revision_leaves_the_first_two_applied(
     patch_revision(monkeypatch, "0003", after_upgrade=fail("0003 failed"))
 
     with pytest.raises(RuntimeError, match="0003 failed"):
-        migrate(monkeypatch, path, "head")
+        migrate(monkeypatch, path, "0003")
 
     assert version(path) == "0002"  # each revision commits on its own
     assert trigger_names(path) == set()
@@ -343,7 +343,7 @@ def test_downgrade_restores_the_table_wide_constraint_and_drops_the_triggers(
 ) -> None:
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
     before = dump(path)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
 
     downgrade(monkeypatch, path, "0002")
 
@@ -364,7 +364,7 @@ def test_downgrade_is_refused_atomically_while_two_spaces_hold_the_same_key(
     older schema cannot hold the same key in two spaces, so the database refuses and nothing
     changes."""
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0003")
     first, second = spaces(path)[:2]
     engine = create_sqlite_engine(path)
     try:

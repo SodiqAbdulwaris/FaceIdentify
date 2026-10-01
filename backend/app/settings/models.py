@@ -7,7 +7,7 @@ columns exist; typed columns are added with the features that own them.
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Integer, text
+from sqlalchemy import CheckConstraint, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.infrastructure.db.engine import Base
@@ -45,4 +45,20 @@ class RuntimeSettings(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class AppState(Base):
+    """Small durable facts the application must remember across a crash, one row per key.
+
+    Not a user setting: `wal_truncation_owed` records that an erasure committed and the write-ahead
+    log has not yet been truncated (PERSISTENCE_IMPLEMENTATION.md §25, decision 2026-10-01, issue
+    52).
+    """
+
+    __tablename__ = "app_state"
+    __table_args__ = (CheckConstraint("key != ''", name="key_not_empty"),)
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
