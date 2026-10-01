@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-09-30 (startup recovery)_
+_Last updated: 2026-10-01 (cross-storage failures)_
 
 ## Current state
 
@@ -13,8 +13,8 @@ _Last updated: 2026-09-30 (startup recovery)_
   artifact finalization (TST-026) and the Storage Manager (TST-025: managed core, referenced
   artifacts, relinking, temporary workspaces, Source recycle/restore, conservative cleanup and
   storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
-  `IndexOperation`s into it (TST-028) are done; startup recovery (TST-030) is partly done (see
-  open question 26); TST-022, 029 and 031 are next.
+  `IndexOperation`s into it (TST-028) and the cross-storage failure matrix (TST-029) are done;
+  startup recovery (TST-030) is partly done (see open question 26); TST-022 and 031 are next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
@@ -69,7 +69,9 @@ _Last updated: 2026-09-30 (startup recovery)_
   by a rebuild (open question 25). `backend/app/recovery/startup.py` is startup recovery:
   `recover_on_startup` settles artifacts and missing referenced originals (existence only), marks
   `RUNNING` jobs, runs and segments `INTERRUPTED` and clears stale leases from any job, removes
-  workspaces of finished jobs whose run is over too, validates every active space's index, gives
+  workspaces of finished jobs whose run is over too, marks a managed artifact whose file is gone
+  `MISSING`, validates every active space's index (a stale one is rebuilt from SQLite, not just a
+  missing or corrupt one), gives
   `FAILED` `IndexOperation`s one fresh set of attempts and catches up pending ones in bounded
   passes; idempotent, survives a crash after any step, and reports what is `unresolved`. It relies
   on the single-process precondition (open questions 20 and 23) and nothing calls it yet (no
@@ -319,7 +321,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    relinking, temporary workspaces, recycle/restore, conservative cleanup and storage usage (see
    above).
 6. The rest of M2: TST-022 (repository contract), ~~TST-027 (USearch integration)~~ done, ~~TST-028
-   (IndexOperation replay)~~ done, TST-029 (cross-storage failure), ~~TST-030 (startup recovery beyond
+   (IndexOperation replay)~~ done, ~~TST-029 (cross-storage failure)~~ done, ~~TST-030 (startup recovery beyond
    artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion).
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
