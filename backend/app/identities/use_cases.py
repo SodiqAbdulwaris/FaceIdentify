@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import exists, insert, select, update
+from sqlalchemy import exists, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import (
@@ -32,11 +32,11 @@ from backend.app.identities.models import (
     IdentityState,
 )
 from backend.app.memory.models import (
-    AnnKeySequence,
     IndexOperation,
     Representation,
     RepresentationState,
 )
+from backend.app.memory.repository import RepresentationRepository
 from backend.app.people.models import AssociationState, IdentityPersonAssociation
 from backend.infrastructure.db.optimistic import optimistic_locked_update
 
@@ -128,29 +128,11 @@ def _raise_activation_conflict(
 
 
 def allocate_ann_key(session: Session, representation_space_id: uuid.UUID) -> int:
-    """Allocate the next positive ANN key for a space (§6.3). Guarded and race-safe.
+    """Allocate the next positive ANN key for a space (§6.3): `RepresentationRepository` owns it.
 
     Allocation happens inside the caller's transaction, so a committed key is never handed out
-    again, but a rolled-back allocation is (see `.agents/CONTEXT.md` open question 21).
-
-    The sequence row is created lazily on first allocation: no spec text assigns that
-    responsibility elsewhere, and RepresentationSpace creation (PR #4) does not create it.
-    """
-    session.execute(
-        insert(AnnKeySequence)
-        .prefix_with("OR IGNORE")
-        .values(representation_space_id=representation_space_id, next_ann_key=1)
-    )
-    # scalar_one() is intentional, not scalar_one_or_none(): nothing deletes ann_key_sequences
-    # rows and its FK to representation_spaces is RESTRICT, so the row this UPDATE targets
-    # (just INSERT-OR-IGNORE'd above) cannot be missing. If that ever stops being true, this
-    # fails loudly with NoResultFound rather than silently returning a wrong key.
-    return session.execute(
-        update(AnnKeySequence)
-        .where(AnnKeySequence.representation_space_id == representation_space_id)
-        .values(next_ann_key=AnnKeySequence.next_ann_key + 1)
-        .returning(AnnKeySequence.next_ann_key - 1)
-    ).scalar_one()
+    again, but a rolled-back allocation is (see `.agents/CONTEXT.md` open question 21)."""
+    return RepresentationRepository(session).allocate_ann_key(representation_space_id)
 
 
 def _has_creation_evidence(session: Session, identity_id: uuid.UUID) -> bool:
