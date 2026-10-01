@@ -20,8 +20,8 @@ Found by the independent review of the Q25/Q26 decision record (PR 42). `IndexOp
 `_settle` indexed `seen[operation_id]` directly, so an operation deleted between claiming it and
 settling it raised `KeyError`. That aborted the whole pass: the other operations of the batch were left
 unsettled until the next pass. It is transient (the deleted row is not claimed again), but it is a crash
-in the very path the supersede decision created. Until now only the coordinator ever removed rows, so
-nothing exercised it.
+in the very path the supersede decision created. No test had deleted a claimed operation while the
+coordinator was running, so nothing exercised it.
 
 ## Decisions
 

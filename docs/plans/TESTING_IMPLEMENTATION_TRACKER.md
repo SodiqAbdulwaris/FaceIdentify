@@ -136,7 +136,7 @@ complete: TST-011 through TST-020 all `PASSING`.
 
 **Milestone gate:** Representative identity and observation records can be committed, retrieved and recovered without violating authoritative-state invariants.
 
-### M2 status (2026-09-30)
+### M2 status (2026-10-01)
 
 Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 800 passed, 0 skipped, 0
 warnings, `backend/` coverage 100%. Remote CI observed green on PR #11. Only part of M2 has been
