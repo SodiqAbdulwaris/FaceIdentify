@@ -70,7 +70,8 @@ class SettingsRepository:
         """Apply `values` to the group if its revision is `expected_revision`, bump the revision and
         stamp `updated_at`: one guarded `UPDATE`. False if the revision was stale (or the group was
         never bootstrapped). A name that is not a setting of the group is a `ValueError`. Re-read
-        the row with `get`: no in-memory copy is updated."""
+        the row with `get`: no in-memory copy is updated. With no `values` it still bumps the
+        revision and stamps `updated_at` (a touch)."""
         model = _MODELS[group]
         known = {column.key for column in inspect(model).mapper.column_attrs} - _MANAGED_COLUMNS
         unknown = sorted(set(values) - known)

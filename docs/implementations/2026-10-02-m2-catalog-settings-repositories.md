@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-02
 - **Milestone / tracker IDs:** M2 · TST-022; GitHub issue #32 (the last item)
-- **Status:** done; with this, every repository of persistence §26 exists
+- **Status:** done; with this, every repository listed in persistence §26 has its persistence mechanics, except that the Artifact mechanics live in `backend/app/sources/artifact_storage.py` (not an `ArtifactRepository` class) and Person/association changes are made by the Person use cases directly
 - **Commits:** PR #61: `feat(runtime): runtime catalog and settings repositories`
 
 ## What changed
@@ -18,7 +18,7 @@
   validated mapping in a stable order, `calibration_profiles` newest first, `package_by_key`, the installation lists) and
   the only changes to existing rows: `transition_export_installation` / `transition_package_installation`, guarded by the
   state the caller expects. Versions, exports and calibration profiles are immutable (§18), so there is no update for them.
-- `tests/integration/test_catalog_settings_repositories.py` (18).
+- `tests/integration/test_catalog_settings_repositories.py` (23).
 
 ## Why
 
@@ -35,12 +35,25 @@ PERSISTENCE_IMPLEMENTATION §26 ("cohesive catalog reads/writes; singleton group
 
 ## Verification
 
-- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1052 passed, backend coverage 100%.
-  Every guard was broken, shown to fail a test and restored byte-identical (17 mutations; one survivor, the versions'
+- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1057 passed, backend coverage 100%.
+  Every guard was broken, shown to fail a test and restored byte-identical (27 mutations in all, every one caught after two test fixes; the first survivor, the versions'
   `ORDER BY`, exposed that the unique index's natural order hid it, and the test now runs the dates against the version
   strings). The racy tests ran 3 times.
 - **Not verified:** the repositories under real use cases (not wired in yet).
 
+## Review
+
+Independent read-only review (Explore subagent; Codex was over its usage limit until 2026-10-03), posted on PR 61. No
+blocker. Fixed: **major**, `add` of an already-persistent catalog row would have flushed an `UPDATE`, against the
+immutability claim: it is now a `ValueError` (test). Tie-breaks by id of every ordered read, two or more installations per
+export and package, a success clearing an earlier failure's detail and an omitted `installed_at` being cleared (pinned and
+warned in the docstring), and two competing installation transitions are now tested; the mutation counts agree; the
+"complete" claim is softened as in Status above; `add` keeps its concrete type. Answered: the `state` of a component, a
+variant, a compatibility mapping and a package has no write path on purpose (no spec says who changes it or to what,
+open question 11; stated in the module docstring); the first commit is above the ~400-line guide because the repositories
+and their contract tests are one unit.
+
 ## Open issues / follow-ups
 
 - Typed settings (and their `update` tests) arrive with the features that own them.
+- A write path for the mutable `state` of components, variants, compatibility mappings and packages, with the first use case that needs one (and the value sets of open question 11).
