@@ -12,12 +12,11 @@ exactly as it was.
 
 import io
 import sqlite3
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
-from alembic import command, util
+from alembic import command
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
@@ -25,19 +24,20 @@ from backend.app.memory.models import Representation
 from backend.infrastructure.db.engine import create_sqlite_engine
 from tests.factories.models import ModelFactory, float32_vector
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+from tests.fixtures.migrations import (
+    DANGLING_UPDATE,
+    dangle,
+    downgrade,
+    dump,
+    fail,
+    foreign_key_violations,
+    migrate,
+    patch_revision,
+    record_enforcement,
+    table_sql,
+    version,
+)
 from tests.fixtures.persistence import alembic_config
-
-DATABASE_PATH_ENV = "FACEIDENTIFY_DATABASE_PATH"
-
-
-def migrate(monkeypatch: pytest.MonkeyPatch, path: Path, revision: str) -> None:
-    monkeypatch.setenv(DATABASE_PATH_ENV, str(path))
-    command.upgrade(alembic_config(), revision)
-
-
-def downgrade(monkeypatch: pytest.MonkeyPatch, path: Path, revision: str) -> None:
-    monkeypatch.setenv(DATABASE_PATH_ENV, str(path))
-    command.downgrade(alembic_config(), revision)
 
 
 def populated_0001(
@@ -72,99 +72,8 @@ def refuse(session: Session, representation_id: Any, state: str) -> None:
     session.commit()
 
 
-def dump(path: Path) -> dict[str, list[tuple[Any, ...]]]:
-    """Every row of every table except the version stamp, by rowid."""
-    with sqlite3.connect(path) as connection:
-        tables = [
-            name
-            for (name,) in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-                " AND name != 'alembic_version' ORDER BY name"
-            )
-        ]
-        return {
-            table: connection.execute(f'SELECT * FROM "{table}" ORDER BY rowid').fetchall()  # noqa: S608
-            for table in tables
-        }
-
-
-def version(path: Path) -> str:
-    with sqlite3.connect(path) as connection:
-        return str(connection.execute("SELECT version_num FROM alembic_version").fetchone()[0])
-
-
 def representations_sql(path: Path) -> str:
-    with sqlite3.connect(path) as connection:
-        return str(
-            connection.execute(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'representations'"
-            ).fetchone()[0]
-        )
-
-
-def foreign_key_violations(path: Path) -> list[Any]:
-    with sqlite3.connect(path) as connection:
-        return connection.execute("PRAGMA foreign_key_check").fetchall()
-
-
-def patch_revision(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    after_upgrade: Callable[[], None] | None = None,
-    after_downgrade: Callable[[], None] | None = None,
-) -> None:
-    """Make revision 0002 run its real upgrade and downgrade and then the given hook. Alembic loads
-    a fresh module for every command, so the wrappers are applied at load time."""
-    real_load = util.load_python_file
-
-    def wrap(real: Callable[[], None], after: Callable[[], None]) -> Callable[[], None]:
-        def run() -> None:
-            real()
-            after()
-
-        return run
-
-    def load(directory: str, filename: str) -> Any:
-        module = real_load(directory, filename)
-        if getattr(module, "revision", None) == "0002":
-            if after_upgrade is not None:
-                vars(module)["upgrade"] = wrap(module.upgrade, after_upgrade)
-            if after_downgrade is not None:
-                vars(module)["downgrade"] = wrap(module.downgrade, after_downgrade)
-        return module
-
-    monkeypatch.setattr(util, "load_python_file", load)
-
-
-def record_enforcement(seen: list[int]) -> Callable[[], None]:
-    def record() -> None:
-        from alembic import op
-
-        seen.append(op.get_bind().exec_driver_sql("PRAGMA foreign_keys").scalar_one())
-
-    return record
-
-
-def fail(message: str) -> Callable[[], None]:
-    def raise_it() -> None:
-        raise RuntimeError(message)
-
-    return raise_it
-
-
-def dangle(table_update: str) -> Callable[[], None]:
-    def run() -> None:
-        from alembic import op
-
-        op.execute(table_update)
-
-    return run
-
-
-DANGLING_UPDATE = (
-    "UPDATE index_operations SET representation_id = X'00000000000000000000000000000001'"
-    " WHERE rowid = (SELECT min(rowid) FROM index_operations)"
-)
+    return table_sql(path, "representations")
 
 
 # --- upgrading a populated database -----------------------------------------------------------
@@ -178,7 +87,7 @@ def test_a_populated_database_upgrades_with_every_row_kept_and_no_dangling_refer
     assert before["representations"]  # the rows that matter exist
     assert before["index_operations"]
 
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0002")
 
     assert version(path) == "0002"
     assert dump(path) == before  # nothing lost, changed or reordered, in any table
@@ -190,7 +99,7 @@ def test_the_recreated_table_accepts_erasing_and_still_enforces_the_other_rules(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0001(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0002")
 
     engine = create_sqlite_engine(path)
     try:
@@ -220,9 +129,9 @@ def test_foreign_key_enforcement_is_off_while_the_revision_runs_and_the_data_is_
 ) -> None:
     path = populated_0001(tmp_path, monkeypatch, clock, new_id)
     seen: list[int] = []
-    patch_revision(monkeypatch, after_upgrade=record_enforcement(seen))
+    patch_revision(monkeypatch, "0002", after_upgrade=record_enforcement(seen))
 
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0002")
 
     assert seen == [0]  # a plain recreation would fail with enforcement on and child rows present
     engine = create_sqlite_engine(path)
@@ -250,10 +159,10 @@ def test_a_python_error_after_the_recreation_rolls_the_whole_upgrade_back(
     before = dump(path)
 
     patch_revision(
-        monkeypatch, after_upgrade=fail("the revision failed after recreating the table")
+        monkeypatch, "0002", after_upgrade=fail("the revision failed after recreating the table")
     )
     with pytest.raises(RuntimeError, match="after recreating"):
-        migrate(monkeypatch, path, "head")
+        migrate(monkeypatch, path, "0002")
 
     assert_untouched_at_0001(path, before)  # 0001 stays applied, as it was
 
@@ -265,12 +174,12 @@ def test_a_reference_the_revision_leaves_dangling_is_caught_before_commit(
     path = populated_0001(tmp_path, monkeypatch, clock, new_id)
     before = dump(path)
 
-    patch_revision(monkeypatch, after_upgrade=dangle(DANGLING_UPDATE))
+    patch_revision(monkeypatch, "0002", after_upgrade=dangle(DANGLING_UPDATE))
     with pytest.raises(
         RuntimeError,
         match=r"index_operations with rowid 1 points at a missing row of representations",
     ):
-        migrate(monkeypatch, path, "head")
+        migrate(monkeypatch, path, "0002")
 
     assert_untouched_at_0001(path, before)
 
@@ -287,7 +196,7 @@ def test_a_database_that_was_already_inconsistent_is_not_upgraded(
     before = dump(path)
 
     with pytest.raises(RuntimeError, match="may have been inconsistent before this migration"):
-        migrate(monkeypatch, path, "head")
+        migrate(monkeypatch, path, "0002")
 
     assert version(path) == "0001"
     assert dump(path) == before
@@ -301,10 +210,10 @@ def test_in_one_upgrade_a_failing_second_revision_leaves_the_first_applied(
     run were one transaction, 0001 would be gone too; every other test here starts at 0001 and
     cannot tell the two apart.)"""
     path = tmp_path / "library.db"
-    patch_revision(monkeypatch, after_upgrade=fail("0002 failed"))
+    patch_revision(monkeypatch, "0002", after_upgrade=fail("0002 failed"))
 
     with pytest.raises(RuntimeError, match="0002 failed"):
-        migrate(monkeypatch, path, "head")
+        migrate(monkeypatch, path, "0002")
 
     assert version(path) == "0001"
     assert "'ERASING'" not in representations_sql(path)
@@ -319,9 +228,9 @@ def test_downgrade_restores_the_old_check_and_keeps_the_rows_when_nothing_is_era
 ) -> None:
     path = populated_0001(tmp_path, monkeypatch, clock, new_id)
     before = dump(path)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0002")
     seen: list[int] = []
-    patch_revision(monkeypatch, after_downgrade=record_enforcement(seen))
+    patch_revision(monkeypatch, "0002", after_downgrade=record_enforcement(seen))
 
     downgrade(monkeypatch, path, "0001")
 
@@ -335,9 +244,9 @@ def test_a_downgrade_that_leaves_a_dangling_reference_is_rolled_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0001(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0002")
     before = dump(path)
-    patch_revision(monkeypatch, after_downgrade=dangle(DANGLING_UPDATE))
+    patch_revision(monkeypatch, "0002", after_downgrade=dangle(DANGLING_UPDATE))
 
     with pytest.raises(RuntimeError, match="foreign key violation"):
         downgrade(monkeypatch, path, "0001")
@@ -353,7 +262,7 @@ def test_downgrade_is_refused_atomically_while_a_representation_is_erasing(
     """Q19 (what downgrade should do to a populated library) stays open; this pins what happens: the
     older schema cannot hold `ERASING`, so the database refuses and nothing changes."""
     path = populated_0001(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "head")
+    migrate(monkeypatch, path, "0002")
     with sqlite3.connect(path) as connection:
         connection.execute(
             "UPDATE representations SET state = 'ERASING' WHERE state = 'ACTIVE' AND ann_key = 1"
