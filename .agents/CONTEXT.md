@@ -15,7 +15,7 @@ _Last updated: 2026-10-01 (representation erasure, revision 0004)_
   storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
   `IndexOperation`s into it (TST-028) and the cross-storage failure matrix (TST-029) are done;
   startup recovery (TST-030) is partly done (see open question 26); TST-022 (repository contract) has its
-  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository` and `SnapshotRepository`; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
+  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `ObservationRepository` and `RepresentationRepository`; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
   #29 to #41, #48, #51 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
