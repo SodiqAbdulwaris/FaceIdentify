@@ -18,7 +18,7 @@ _Last updated: 2026-10-01 (Q25/Q26 decided)_
   `JobRepository`, `SegmentRepository`, `CheckpointRepository` and `IndexOperationRepository`; TST-031 is next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
-  #29 to #41 hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
+  #29 to #41 and #44 hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
   `docs/implementations/2026-10-01-decide-q25-q26-erasure-and-recovery.md`). When something becomes pending,
   open an issue for it.
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the

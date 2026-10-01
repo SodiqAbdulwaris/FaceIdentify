@@ -3,8 +3,9 @@
 - **Date:** 2026-10-01
 - **Milestone / tracker IDs:** M2 (TST-030, TST-031); decisions only, no code
 - **Status:** done (documents); the implementation is tracked in GitHub issues
-- **Commits:** PR (number added when opened): `docs(specs): decide erasure and recovery of paused and
-  cancelling work`, `docs: record the Q25 and Q26 decisions`
+- **Commits:** [PR 42](https://github.com/SodiqAbdulwaris/FaceIdentify/pull/42): `docs(specs): decide erasure and
+  recovery of paused and cancelling work`, `docs: record the Q25 and Q26 decisions`, `docs: address the
+  erasure and recovery review`
 
 ## What changed
 
@@ -71,7 +72,7 @@ four findings, all checked against the code and all correct.
 | Finding | Resolution |
 |---|---|
 | `ERASING` is not excluded by the existing candidate revalidation: `resolve_recognition_candidates` takes identity ids and checks only `Identity.state`, so a stale index could return an `ERASING` vector for an active identity | Confirmed. My claim that every existing eligibility check already excludes `ERASING` was true only of the coordinator's rebuild source. The spec now requires revalidation to resolve each `ann_key` to its representation row (same space, `ACTIVE`, active identity), says plainly that this step is not built yet, and INDEX-03 must exercise a stale index holding the vector |
-| No fence between the coordinator and the erasure transition; `append_batch` deletes a pending `ADD` the coordinator may be settling | Partly a real bug, partly a wrong remedy. The ordering the reviewer wants already exists and is now stated: the coordinator is the sole writer and serializes passes, so an in-flight `ADD` finishes before the `REMOVE` queued by step one is claimed, and retrieval is excluded by revalidation meanwhile. **The bug is real:** `_settle` indexes `seen[operation_id]` and raises `KeyError` for an operation deleted meanwhile. Fixed in a separate PR (#43); INDEX-05 now tests the race, a second erasure, bulk forget, reactivation and merge/split |
+| No fence between the coordinator and the erasure transition; `append_batch` deletes a pending `ADD` the coordinator may be settling | Partly a real bug, partly a wrong remedy. The ordering the reviewer wants already exists and is now stated: the coordinator is the sole writer and serializes passes, so an in-flight `ADD` finishes before the `REMOVE` queued by step one is claimed, and retrieval is excluded by revalidation meanwhile. **The bug is real:** `_settle` indexes `seen[operation_id]` and raises `KeyError` for an operation deleted meanwhile. Fixed in a separate PR ([#43](https://github.com/SodiqAbdulwaris/FaceIdentify/pull/43)); INDEX-05 now tests the race, a second erasure, bulk forget, reactivation and merge/split |
 | "Every recovery step" and "a repeat is a no-op" overstate recovery: startup requeues every `FAILED` index operation, so a persistently failing one changes on every start | Confirmed (the requeue docstring says one fresh set of attempts per call). The claim is narrowed in the persistence, architecture and strategy text: after one completed run a second is a no-op; a condition that keeps failing externally is retried once per start, bounded, and reported as unresolved, not claimed absent |
 | The requirements omit decisive windows: a crash after the `REMOVE` is `APPLIED` but before `ERASING` -> `ERASED`; a locked superseded or quarantined file; recursive quarantine; the coordinator race | Added to PER-07 and INDEX-04, with INDEX-05 for the race. The quarantine search is recursive because quarantined generations live in a subdirectory |
 
@@ -94,6 +95,7 @@ Every pending item is a GitHub issue so none is forgotten:
 | [#39](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/39) | Q23: exclusive library lock (provisional) |
 | [#40](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/40) | Q24: derive original availability from the artifact |
 | [#41](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/41) | Q27: validate superseding by deleting (provisional) |
+| [#44](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/44) | Recognition: revalidate candidates at representation level (found in review) |
 
 ## Verification
 
