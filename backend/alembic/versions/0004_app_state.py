@@ -19,6 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 import backend.infrastructure.db.types
+from backend.infrastructure.db.downgrade_guard import require_destructive_downgrade_allowed
 
 # revision identifiers, used by Alembic.
 revision: str = "0004"
@@ -42,4 +43,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema. Drops the markers with the table: a pending truncation is then forgotten,
     which is why a downgrade is a development operation only."""
+    require_destructive_downgrade_allowed(op.get_bind())
     op.drop_table("app_state")

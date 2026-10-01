@@ -22,9 +22,12 @@ triggers (revision 0003), so a revision that does must recreate them (the trigge
 REPLACE` on a snapshot no run references (SQLite does not fire delete triggers for it): issue 55. The `--sql`
 output is for review only: it has neither the foreign key pragma nor the check, so do not replay it.
 
-`downgrade base` destroys the library. Foreign keys sometimes stop it on a database that has rows
-(atomically), but whether they do is data-dependent, so never rely on that. Production only
-upgrades.
+`downgrade base` destroys the library, so a downgrade of a *populated* library (a row in any table
+other than the internal bookkeeping and re-creatable metadata listed in
+`backend/infrastructure/db/downgrade_guard.py`) is refused before it changes anything. For development
+only, set `FACEIDENTIFY_ALLOW_DESTRUCTIVE_DOWNGRADE=1` to allow it; the application never sets it.
+Production only upgrades and recovers with a corrective revision. Every revision's `downgrade()` must
+start with `require_destructive_downgrade_allowed(op.get_bind())` (a test enforces it).
 
 Changing a model means adding a reviewed revision:
 

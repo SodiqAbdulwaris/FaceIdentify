@@ -27,6 +27,7 @@ import sqlalchemy as sa
 from alembic import op
 
 import backend.infrastructure.db.types
+from backend.infrastructure.db.downgrade_guard import require_destructive_downgrade_allowed
 
 # revision identifiers, used by Alembic.
 revision: str = "0002"
@@ -154,4 +155,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema. Refused by the database (atomically) while any representation is still
     ERASING: that state cannot be expressed in the older schema."""
+    require_destructive_downgrade_allowed(op.get_bind())
     _replace_state_check(old=STATES_AFTER, new=STATES_BEFORE)
