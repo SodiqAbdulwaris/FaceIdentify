@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (IndexOperation repository)_
+_Last updated: 2026-10-01 (Q25/Q26 decided)_
 
 ## Current state
 
@@ -17,6 +17,10 @@ _Last updated: 2026-10-01 (IndexOperation repository)_
   startup recovery (TST-030) is partly done (see open question 26); TST-022 (repository contract) has its
   `JobRepository`, `SegmentRepository`, `CheckpointRepository` and `IndexOperationRepository`; TST-031 is next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
+- **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
+  #29 to #41 hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
+  `docs/implementations/2026-10-01-decide-q25-q26-erasure-and-recovery.md`). When something becomes pending,
+  open an issue for it.
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
   ruleset `23894323` (PR required, rebase merge only, five required CI checks, no bypass).
@@ -195,6 +199,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     (PR #14). What is still undecided is how the application learns the library root itself
     (first-run selection, persisted setting, default location), so `backend/alembic/env.py` still
     reads `FACEIDENTIFY_DATABASE_PATH` explicitly. Decide with the first-run/settings work.
+    **2026-10-01 (owner):** deferred to the first-run/settings milestone.
 18. **Open: batch-mode migrations and multi-revision failure atomicity are unproven.** `env.py`
     enables `render_as_batch` from the first revision because SQLite needs table recreation for
     most constraint changes, but revision `0001` only creates tables, so batch mode is exercised
@@ -202,11 +207,13 @@ Unresolved items need the user's decision. Do not settle them silently.
     that recreating a table with `PRAGMA foreign_keys = ON` behaves), a test that a failing
     *second* revision leaves `0001` applied as intended, and one for a Python error raised
     inside `upgrade()`; today only one failure shape is tested.
+    **2026-10-01 (owner):** deferred to the second Alembic revision (TST-032), which the `ERASING` state of question 25 will provide.
 19. **Open: what `alembic downgrade` should do to a populated library.** It destroys data, and
     whether foreign keys stop it is data-dependent (a richly populated database fails
     atomically; a simple one is dropped without complaint). Production never downgrades, and
     the README marks it development-only. Decide whether to leave it, or refuse to downgrade a
     non-empty database unless explicitly forced.
+    **2026-10-01 (owner):** deferred to the second Alembic revision (TST-032).
 20. **Open: `SQLITE_BUSY` handling does not exist yet.** Persistence §25 requires the application
     to "retry a small bounded number of times for known transient write conflicts, and return a
     diagnostic/retryable error rather than spin forever". Nothing does. What
@@ -225,6 +232,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     unit-of-work / API layer is designed; until then callers of use cases must treat an
     `OperationalError` whose message says the database is locked or busy as retryable (other
     `OperationalError`s, such as I/O errors, are not).
+    **2026-10-01 (owner): agreed provisional direction** (the recommendation above), to be validated when the unit-of-work / API layer is designed.
 21. **Open: when `ann_key` is allocated, and whether a rolled-back key may be reused.** Two spec
     passages pull apart. Persistence §6.3 allocates "in the same short transaction that creates
     representations... keys are never reused", and the run-local pending index (§23, "Recognition
@@ -240,6 +248,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     now, change §6.3 to say so, and give the run-local pending index its own ephemeral labels
     (e.g. a per-run integer mapped to `representation_id`) so it never depends on `ann_key`.
     Decide before the processing pipeline (M3) builds the run-local index.
+    **2026-10-01 (owner): agreed provisional direction** (the recommendation above), to be validated before M3 builds the run-local index.
 22. ~~Storage layout: three specs disagreed~~ **Resolved 2026-09-25 (owner):** tech-stack §15's
     two roots are authoritative (library root with `database/library.db` and managed bytes;
     `%LOCALAPPDATA%` for derived data). Managed writes stage in `<Library Root>/staging/` so the
@@ -252,6 +261,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     live writer's PENDING artifact MISSING. **Recommendation:** the backend takes an exclusive lock
     on a file in the library (e.g. `<Library>/database/.lock`) for its whole lifetime and refuses to
     start without it, before migrations and recovery. Decide with the startup/lifespan work.
+    **2026-10-01 (owner): agreed provisional direction** (the recommendation above), to be validated with the startup/lifespan work.
 24. **Open: when does a `Source` become `UNAVAILABLE`?** Persistence §4.2 lists the state, but
     no spec says what sets it. The likeliest trigger is a missing referenced original, but
     IMPLEMENTATION_ARCHITECTURE §23.5 says to keep the Source and mark the *artifact's*
@@ -260,32 +270,34 @@ Unresolved items need the user's decision. Do not settle them silently.
     `ACTIVE`. **Recommendation:** keep `UNAVAILABLE` unassigned until a use case needs it, and
     derive "the original is missing" from the artifact, so there is one source of truth.
     Decide with the Source use cases.
-25. **Open (mitigated): erasure clears the key a `REMOVE` would need.** Persistence's `erasure`
-    constraint makes an `ERASED` representation have no vector *and no `ann_key`*, so a `REMOVE` for
-    it cannot name a key. The IndexCoordinator now guarantees absence itself: a keyless `REMOVE`
-    rebuilds the space's index from SQLite (not quarantined) and requires the superseded generation's
-    file to be gone, else it retries (tested by searching every file of the index directory for the
-    erased bytes). What is still undecided is the erase/forget *flow*: **(a)** make erasure two-step,
-    queueing the `REMOVE` and clearing `ann_key` and the vector only after it is `APPLIED` and
-    persisted, which keeps "SQLite precedes the index" (INDEX-01) and needs no rebuild; **(b)** keep
-    today's behaviour and accept a full-space rebuild per erasure batch; or **(c)** make bulk forget
-    batch its erasures into one rebuild. **Recommendation:** (a) for single erasures with (c) for bulk
-    forget. Also undecided: how long *quarantined* index generations, which may hold a vector from
-    before an erasure, are kept. Decide with TST-031 (deletion).
-26. **Open: startup recovery of a run or job that was not plainly `RUNNING`.** Recovery marks
-    `RUNNING` work `INTERRUPTED` (architecture §23.2) and leaves everything else exactly as found.
-    Undecided, and needing the run lifecycle of M3: **`PAUSING`** (a pause was requested and the
-    worker died: `PAUSED`, since nothing runs, or `INTERRUPTED`, as for `RUNNING`), **`CANCELLING`**
-    (`CANCELLED`, since cancelling was the user's intent and its partial output stays private, or
-    `INTERRUPTED`), **`FINALIZING`** (a run with a final checkpoint that was not accepted: §28 says
-    revalidate and accept without redoing ML, which needs `AcceptProcessingRunUseCase`; meanwhile
-    it is left alone), a run with pending output and no final checkpoint ("resume from a supported
-    checkpoint or safely fail/not-resumable"), and an interrupted runtime installation ("verify
-    bytes/hash then finalize, remove partial managed bytes, or mark failed"). **Recommendation:**
-    `PAUSING` -> `PAUSED` and `CANCELLING` -> `CANCELLED` (finish the user's intent; nothing is
-    running), everything else decided with the M3 run lifecycle and the runtime installer. Jobs are
-    always `INTERRUPTED`, never requeued, because no spec defines when a requeue is safe.
-27. **Decision taken, open to your veto: how an obsolete `IndexOperation` is superseded.** Persistence
+    **Decided 2026-10-01 (owner):** keep `Source.UNAVAILABLE` unassigned until a use case needs it, and
+    derive "the original is missing" from the associated artifact's state.
+25. ~~Open (mitigated): erasure clears the key a `REMOVE` would need.~~ **Decided 2026-10-01 (owner):**
+    erasure is two-step. Step one, one transaction: the representation moves `ACTIVE` -> `ERASING` and a
+    `REMOVE` is queued; `ERASING` keeps its vector and key but is excluded from recognition, candidate
+    revalidation and every rebuild at once. Step two, only after the `REMOVE` is `APPLIED`, the new
+    generation is persisted and every superseded and quarantined generation file is verifiably gone:
+    `ERASING` -> `ERASED`, clearing vector and key. Bulk forget does step one for all, **one** rebuild,
+    then step two for all. A `REMOVE` is never applied while an old generation remains; quarantined
+    generations have no time-based retention and are deleted when an erasure in their space finishes.
+    "Securely retired" means verified file deletion, not physical erasure from SSD storage. Specs
+    updated (persistence 6.2, 23, 28; architecture 23; testing strategy INDEX-03, INDEX-04, PER-07).
+    **Still to build (TST-031):** the `ERASING` state (an Alembic revision, which is also the populated
+    batch-mode migration question 18 needs), the erasure use case, coordinator retirement of old
+    generations before a `REMOVE` is applied, recovery of `ERASING`, and the tests. The keyless-`REMOVE`
+    rebuild in the coordinator stays as a safety net. **Not decided here:** whether SQLite itself should
+    run with `secure_delete` / checkpoint after an erasure so the cleared vector does not linger in WAL or
+    free pages (see the tracking issue).
+26. **Decided 2026-10-01 (owner), partly built:** startup recovery marks a job or run found `PAUSING`
+    `PAUSED` (nothing runs; the worker is gone) and one found `CANCELLING` `CANCELLED` (the user's intent;
+    partial output stays private and is never activated). A `RUNNING` job is `INTERRUPTED`, never
+    requeued. Recovery is idempotent by construction (guarded transitions), tested by a stop after each
+    step and a rerun. **Not built yet:** the `PAUSING`/`CANCELLING` transitions in
+    `backend/app/recovery/startup.py`. **Still open, for the M3 run lifecycle and the runtime installer:**
+    `FINALIZING` runs (revalidate and accept without redoing ML, needing `AcceptProcessingRunUseCase`), a
+    run with pending output and no final checkpoint, and interrupted runtime installations.
+27. **Agreed provisional direction (owner, 2026-10-01), to be validated when the erasure and import use
+    cases that append operations begin: how an obsolete `IndexOperation` is superseded.** Persistence
     §17 says that creating an opposite operation "must supersede/coalesce the obsolete desired state
     in the use case", and names no mechanism. It matters: `REMOVE` means absent whatever SQLite
     says, so a `REMOVE` left pending would run after, and undo, a later `ADD` that was skipped as a
