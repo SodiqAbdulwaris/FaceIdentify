@@ -15,7 +15,7 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, event, select
+from sqlalchemy import Engine, delete, event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -131,7 +131,10 @@ def test_a_run_is_paged_in_the_order_it_was_recorded_and_new_rows_do_not_shift_a
             return [o.sequence_in_run for o in rows]
 
     assert page(None) == [0, 1]
-    with factory() as other:  # a row recorded between two page requests
+    with factory() as other:  # a row already paged past disappears: an offset would skip one
+        other.execute(delete(Observation).where(Observation.id == observations[0].id))
+        other.commit()
+    with factory() as other:  # and a row is recorded, both between two page requests
         late = Observation(
             id=build.new_id(), source_id=observations[0].source_id, processing_run_id=run_id,
             execution_segment_id=observations[0].execution_segment_id, state="PENDING",
@@ -141,7 +144,7 @@ def test_a_run_is_paged_in_the_order_it_was_recorded_and_new_rows_do_not_shift_a
         )  # fmt: skip
         ObservationRepository(other).add_batch([late])
         other.commit()
-    assert page(1) == [2, 3]  # nothing shifted or repeated
+    assert page(1) == [2, 3]  # nothing shifted or skipped
     assert page(3) == [4, 5]  # and the late row is seen where it belongs
     assert page(5) == []
     with factory() as session:
@@ -319,9 +322,12 @@ def test_ann_keys_are_looked_up_per_space_in_any_state_and_unknown_keys_are_abse
         if statement.lstrip().startswith("SELECT") and "FROM representations" in statement:
             bound.append(len(parameters))
 
-    with factory() as session:
-        found = RepresentationRepository(session).by_ann_keys(space_id, [5, 1, 99, 3, 1, 2, 4])
+    try:
+        with factory() as session:
+            found = RepresentationRepository(session).by_ann_keys(space_id, [5, 1, 99, 3, 1, 2, 4])
+    finally:
         event.remove(sqlite_engine, "before_cursor_execute", record)
+    with factory() as session:
         assert bound == [3, 3, 3]  # 6 distinct keys in chunks of 2, each with the space
         assert sorted(found) == [1, 2, 3, 4, 5]  # 99 is unknown; the repeated 1 counts once
         assert found[1].id == reps[0].id
@@ -477,3 +483,69 @@ def test_concurrent_allocations_never_hand_out_the_same_key(
         keys = list(pool.map(allocate, range(4)))
 
     assert sorted(keys) == [1, 2, 3, 4]
+
+
+# --- paging and states, in the cases the first tests did not reach --------------------------------
+
+
+def test_rows_sharing_one_timestamp_are_walked_by_cursor_exactly_once_between_changes(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    _, run_id, reps = committed_representations(
+        factory, build, 5, each=lambda i: {"created_at": build.clock()}
+    )
+    expected = sorted(r.id for r in reps)  # same time: the id decides the order
+
+    with factory() as session:
+        first, cursor = RepresentationRepository(session).page_for_run(run_id, limit=2)
+    assert [r.id for r in first] == expected[:2]
+    with factory() as session:  # a row already paged past disappears between the two requests
+        session.execute(delete(Representation).where(Representation.id == first[0].id))
+        session.commit()
+    seen = [r.id for r in first]
+    while cursor is not None:
+        with factory() as session:
+            page, cursor = RepresentationRepository(session).page_for_run(
+                run_id, limit=2, after=cursor
+            )
+        seen += [r.id for r in page]
+    assert seen == expected  # none skipped (an offset would skip one) and none repeated
+
+
+def test_a_state_filter_and_a_cursor_work_together(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    _, run_id, reps = committed_representations(
+        factory, build, 6, each=lambda i: {"state": "SUPERSEDED" if i % 2 else "PENDING"}
+    )
+    wanted = [reps[i].id for i in (1, 3, 5)]
+
+    with factory() as session:
+        repo = RepresentationRepository(session)
+        first, cursor = repo.page_for_run(run_id, limit=2, states=["SUPERSEDED"])
+        assert [r.id for r in first] == wanted[:2]
+        assert cursor is not None
+        rest, end = repo.page_for_run(run_id, limit=2, after=cursor, states=["SUPERSEDED"])
+        assert [r.id for r in rest] == wanted[2:]
+        assert end is None
+
+
+def test_a_single_string_is_not_a_collection_of_states(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    _, run_id, (rep, *_) = committed_representations(factory, build, 2)
+    run_for_observation, observations = new_observations(build, 1)
+
+    with factory() as session:
+        representations = RepresentationRepository(session)
+        with pytest.raises(TypeError, match="not a single string"):
+            representations.transition(
+                rep.id, from_states="PENDING", to_state="SUPERSEDED", now=build.clock()
+            )
+        with pytest.raises(TypeError, match="not a single string"):
+            representations.page_for_run(run_id, limit=1, states="PENDING")
+        with pytest.raises(TypeError, match="not a single string"):
+            ObservationRepository(session).transition(
+                observations[0].id, from_states="PENDING", to_state="ACTIVE"
+            )
+    assert run_for_observation != run_id

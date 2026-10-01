@@ -16,8 +16,8 @@ Two rules live in the repository because the schema cannot say them:
 * `allocate_ann_key` is the one place a key is allocated. A permanent key is handed out when a
   representation becomes ANN-eligible, unique within its space; a key allocated in a transaction
   that rolls back is handed out again, which is harmless because only committed keys are indexed
-  (CONTEXT open question 21, finalised 2026-10-01: run-local indexes use their own labels, never
-  these keys).
+  (CONTEXT open question 21, the owner's provisional direction, pre-approved for finalisation:
+  run-local indexes use their own labels, never these keys).
 """
 
 import uuid
@@ -38,6 +38,13 @@ from backend.app.memory.models import (
 
 _KEYS_PER_QUERY = 500  # bound parameters per statement
 _ERASURE_STATES = (RepresentationState.ERASING, RepresentationState.ERASED)
+
+
+def _states(states: Collection[str]) -> list[str]:
+    """A bare string is a `Collection[str]` too, and would silently become a list of letters."""
+    if isinstance(states, str):
+        raise TypeError("states must be a collection of state names, not a single string")
+    return list(states)
 
 
 def _execute(session: Session, statement: Any) -> "CursorResult[Any]":
@@ -95,7 +102,7 @@ class ObservationRepository:
         result = _execute(
             self._session,
             update(Observation)
-            .where(Observation.id == observation_id, Observation.state.in_(list(from_states)))
+            .where(Observation.id == observation_id, Observation.state.in_(_states(from_states)))
             .values(**values)
             .execution_options(synchronize_session=False),
         )
@@ -163,7 +170,7 @@ class RepresentationRepository:
             raise ValueError("a page holds at least one representation")
         query = select(*_SUMMARY_COLUMNS).where(Representation.processing_run_id == run_id)
         if states is not None:
-            query = query.where(Representation.state.in_(list(states)))
+            query = query.where(Representation.state.in_(_states(states)))
         if after is not None:
             query = query.where(
                 or_(
@@ -198,8 +205,7 @@ class RepresentationRepository:
             ).all()
             for row in rows:
                 summary = RepresentationSummary(*row)
-                assert summary.ann_key is not None  # selected by key
-                found[summary.ann_key] = summary
+                found[cast(int, summary.ann_key)] = summary  # selected by key: never None
         return found
 
     def transition(
@@ -216,7 +222,8 @@ class RepresentationRepository:
         `ERASING` and `ERASED` are refused on either side (`ValueError`): erasure is
         `RepresentationEraser`, not a state change. Moving to `ACTIVE` still needs an identity and
         a key, which the schema enforces (`active_eligible`)."""
-        if to_state in _ERASURE_STATES or any(state in _ERASURE_STATES for state in from_states):
+        expected = _states(from_states)
+        if to_state in _ERASURE_STATES or any(state in _ERASURE_STATES for state in expected):
             raise ValueError("erasure is not a plain state change: use RepresentationEraser")
         values: dict[str, Any] = {"state": to_state}
         if to_state == RepresentationState.ACTIVE:
@@ -226,7 +233,7 @@ class RepresentationRepository:
             update(Representation)
             .where(
                 Representation.id == representation_id,
-                Representation.state.in_(list(from_states)),
+                Representation.state.in_(expected),
             )
             .values(**values)
             .execution_options(synchronize_session=False),
@@ -238,7 +245,8 @@ class RepresentationRepository:
 
         Allocation happens inside the caller's transaction, so a committed key is never handed out
         again, but a rolled-back allocation is. The sequence row is created lazily on first
-        allocation (nothing else creates it)."""
+        allocation (nothing else creates it). It is two writes, so a caller that read earlier in
+        the same transaction can meet `SQLITE_BUSY_SNAPSHOT` (CONTEXT open question 20)."""
         self._session.execute(
             insert(AnnKeySequence)
             .prefix_with("OR IGNORE")

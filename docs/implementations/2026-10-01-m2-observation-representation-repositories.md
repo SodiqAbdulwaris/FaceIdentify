@@ -16,7 +16,7 @@
     either side**, because erasure is `RepresentationEraser`), `allocate_ann_key`.
 - `allocate_ann_key` moved into the repository (§26 lists it there); `identities/use_cases.allocate_ann_key` is now a
   one-line delegate, so its callers and tests are unchanged.
-- `tests/integration/test_memory_repositories.py` (21): nothing is committed on the caller's behalf; pages do not shift
+- `tests/integration/test_memory_repositories.py` (24): nothing is committed on the caller's behalf; pages do not shift
   or repeat when a row is added between two page requests; a page is a projection; ties are broken by id; a key lookup is
   per space and sees every state; guarded transitions and one winner under contention (`rendezvous_before_write`);
   erasure refused as a plain state change; `active_eligible` still enforced by the schema; keys are allocated one at a time
@@ -29,8 +29,8 @@ lifecycle transition") and the pattern of the existing repositories.
 
 ## Decisions
 
-- Allocation stays at ANN-eligibility time and run-local indexes keep their own labels (open question 21, finalised by the
-  owner on 2026-10-01).
+- Allocation stays at ANN-eligibility time and run-local indexes keep their own labels (open question 21: the owner's
+  provisional direction, pre-approved for finalisation with item 3; the question stays open in CONTEXT until then).
 - `candidates by ann keys` is `by_ann_keys`, a plain lookup of facts. `resolve_ann_candidates`
   (`identities/use_cases.py`, which also checks the identity) is left where it is: moving it is a refactor outside this task.
 - A `page_for_run` read inside one transaction sees one snapshot (SQLite WAL), so the no-shift guarantee holds between page
@@ -40,9 +40,19 @@ lifecycle transition") and the pattern of the existing repositories.
 
 ## Verification
 
-- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux`, `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1011 tests passed, backend coverage 100%. Every new guard was broken, shown to fail a test and restored byte-identical (14 mutations; one survivor,
+- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux`, `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1014 tests passed, backend coverage 100%. Every new guard was broken, shown to fail a test and restored byte-identical (14 mutations; one survivor,
   the key chunking, was made observable by counting bound parameters). The racy tests ran 5 times.
 - **Not verified:** the repositories under the real use cases (they are not wired in yet).
+
+## Review
+
+Independent read-only review (Explore subagent; Codex was over its usage limit until 2026-10-03), posted on PR 59. No
+blocker. Fixed: the paging tests could not tell keyset from offset paging (a row now disappears from before the cursor
+between pages, and four rows sharing one `created_at` are walked with a cursor, with and without a state filter);
+CONTEXT's duplicate repository names and header; the question 21 wording above; the allocation docstring now points to
+question 20; a bare string for `from_states` is refused; a listener removed in `finally`. Answered: the first commit is
+above the ~400-line guide because the repositories and their contract tests are one unit; the `allocate_ann_key` move is
+a delegate of a few lines.
 
 ## Open issues / follow-ups
 
