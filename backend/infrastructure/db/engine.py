@@ -88,14 +88,27 @@ def truncate_wal(engine: Engine, *, busy_timeout_ms: int = 5000) -> bool:
     """Checkpoint the write-ahead log and truncate it to zero bytes (persistence spec §24).
 
     `secure_delete` zeroes deleted content in the database file but not in the log, so an erasure
-    batch ends with this. It must run outside a transaction. Returns False when a reader still
-    holds an older snapshot (the checkpoint is blocked, nothing is lost); the caller must treat the
-    erasure as having outstanding cleanup and retry, never report it complete.
+    batch ends with this. It must run outside a transaction. Returns False when the checkpoint
+    could not complete (a reader holds an older snapshot, or the database is not in WAL mode);
+    the caller must treat the erasure as having outstanding cleanup and retry, never report it
+    complete. A database error propagates and means the same.
     """
-    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-        connection.exec_driver_sql(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
-        busy, _log_frames, _checkpointed = connection.exec_driver_sql(
-            "PRAGMA wal_checkpoint(TRUNCATE)"
-        ).one()
-        connection.exec_driver_sql("PRAGMA busy_timeout = 5000")
-    return bool(busy == 0)
+    # A raw pooled connection is already in driver autocommit mode (_disable_driver_transactions),
+    # so this runs outside a transaction and leaves the connection's isolation level alone.
+    connection = engine.raw_connection()
+    try:
+        cursor = connection.cursor()
+        try:
+            previous = cursor.execute("PRAGMA busy_timeout").fetchone()[0]
+            cursor.execute(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+            try:
+                busy, log_frames, checkpointed = cursor.execute(
+                    "PRAGMA wal_checkpoint(TRUNCATE)"
+                ).fetchone()
+            finally:
+                cursor.execute(f"PRAGMA busy_timeout = {int(previous)}")
+        finally:
+            cursor.close()
+    finally:
+        connection.close()
+    return bool(busy == 0 and log_frames == checkpointed == 0)
