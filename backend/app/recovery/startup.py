@@ -37,6 +37,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.jobs.models import Job, JobState
+from backend.app.jobs.repository import FINISHED_JOB_STATES
 from backend.app.memory.index_coordinator import CoordinatorReport, IndexCoordinator
 from backend.app.processing.models import (
     TRANSIENT_RUN_STATES,
@@ -54,9 +55,6 @@ from backend.app.sources.artifact_storage import (
 from backend.app.sources.referenced_artifacts import mark_missing_referenced_originals
 from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.workspaces import WorkspaceCleanup, WorkspaceManager
-
-# A job in one of these states is over: nothing will resume it, so its workspace is scratch.
-FINISHED_JOB_STATES = (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED)
 
 
 @dataclass
