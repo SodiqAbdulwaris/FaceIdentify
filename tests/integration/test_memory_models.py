@@ -152,15 +152,22 @@ def test_vector_bytes_match_the_declared_dimension(build: ModelFactory) -> None:
     )
 
 
-def test_ann_keys_are_positive_and_unique(build: ModelFactory) -> None:
+def test_ann_keys_are_positive_and_unique_within_a_space(build: ModelFactory) -> None:
+    """Decision 2026-10-01 (issue 48): a key identifies a representation within one space, so the
+    same key may be used in another space but not twice in one."""
     rejected(
         build.session,
         lambda: build.representation(ann_key=0),
         check("ck_representations_ann_key_positive"),
     )
-    build.representation(ann_key=7)
+    space = build.representation_space()
+    other_space = build.representation_space()
+    build.representation(representation_space_id=space.id, ann_key=7)
+    build.representation(representation_space_id=other_space.id, ann_key=7)  # another space: fine
     rejected(
-        build.session, lambda: build.representation(ann_key=7), unique("representations.ann_key")
+        build.session,
+        lambda: build.representation(representation_space_id=space.id, ann_key=7),
+        unique("representations.representation_space_id", "representations.ann_key"),
     )
 
 

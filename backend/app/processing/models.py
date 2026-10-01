@@ -5,7 +5,18 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, Integer, LargeBinary, String, text
+from sqlalchemy import (
+    DDL,
+    JSON,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    event,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.infrastructure.db.engine import Base
@@ -31,6 +42,30 @@ class ProcessingConfigurationSnapshot(Base):
     fingerprint_sha256: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     created_by_user_action: Mapped[str | None] = mapped_column(String)
+
+
+# A committed snapshot is never changed, and cannot be deleted while a run uses it (persistence §13,
+# decision 2026-10-01, issue 51). Written once here and copied, frozen, into revision 0003: the two
+# must stay byte-identical, because the migration tests compare the migrated schema with
+# `create_all`.
+SNAPSHOT_NO_UPDATE_TRIGGER = (
+    "CREATE TRIGGER trg_processing_configuration_snapshots_no_update "
+    "BEFORE UPDATE ON processing_configuration_snapshots "
+    "BEGIN SELECT RAISE(ABORT, 'a processing configuration snapshot is immutable'); END"
+)
+SNAPSHOT_NO_DELETE_WHILE_USED_TRIGGER = (
+    "CREATE TRIGGER trg_processing_configuration_snapshots_no_delete_while_used "
+    "BEFORE DELETE ON processing_configuration_snapshots "
+    "WHEN EXISTS (SELECT 1 FROM processing_runs WHERE configuration_snapshot_id = OLD.id) "
+    "BEGIN SELECT RAISE(ABORT, 'a processing configuration snapshot that a run uses cannot be "
+    "deleted'); END"
+)
+for _trigger in (SNAPSHOT_NO_UPDATE_TRIGGER, SNAPSHOT_NO_DELETE_WHILE_USED_TRIGGER):
+    event.listen(
+        ProcessingConfigurationSnapshot.__table__,
+        "after_create",
+        DDL(_trigger),  # type: ignore[no-untyped-call]  # SQLAlchemy ships DDL untyped
+    )
 
 
 class ProcessingRunState(StrEnum):
