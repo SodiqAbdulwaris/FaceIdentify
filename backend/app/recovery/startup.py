@@ -4,8 +4,9 @@ IMPLEMENTATION_ARCHITECTURE.md §22-§23).
 Startup order is database and migrations, storage, **recovery**, **indexes**, then the runtime, the
 ML worker and the scheduler. `recover_on_startup` is the recovery and index steps, in that order:
 
-1. Artifacts: settle every interrupted managed write and deletion (`recover_artifacts`), and mark a
-   referenced original whose file is gone `MISSING` (existence only: nothing is hashed at startup).
+1. Artifacts: settle every interrupted managed write and deletion (`recover_artifacts`), and mark
+   an available managed artifact or a referenced original whose file is gone `MISSING` (existence
+   only: nothing is hashed at startup).
 2. In-flight work: a `RUNNING` job, processing run or execution segment belongs to a process that
    no longer exists, so it becomes `INTERRUPTED` and the job's lease is cleared (§23.2: "Interrupted
    active runs/segments become `INTERRUPTED`"; resuming creates new work, it does not reopen this).
@@ -44,7 +45,11 @@ from backend.app.processing.models import (
     ProcessingRun,
     ProcessingRunState,
 )
-from backend.app.sources.artifact_storage import RecoveryReport, recover_artifacts
+from backend.app.sources.artifact_storage import (
+    RecoveryReport,
+    mark_missing_managed_files,
+    recover_artifacts,
+)
 from backend.app.sources.referenced_artifacts import mark_missing_referenced_originals
 from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.workspaces import WorkspaceCleanup, WorkspaceManager
@@ -67,6 +72,7 @@ class InterruptedWork:
 class StartupReport:
     artifacts: RecoveryReport
     missing_references: list[uuid.UUID]
+    missing_managed: list[uuid.UUID]
     interrupted: InterruptedWork
     workspaces: WorkspaceCleanup
     indexes_rebuilt: list[uuid.UUID]
@@ -105,6 +111,7 @@ class StartupReport:
             or artifacts.delete_failed
             or artifacts.staging_removed
             or self.missing_references
+            or self.missing_managed
             or self.interrupted.jobs
             or self.interrupted.runs
             or self.interrupted.segments
@@ -230,6 +237,7 @@ def recover_on_startup(
     scheduler."""
     artifacts = recover_artifacts(session_factory, store, clock=clock)
     missing = mark_missing_referenced_originals(session_factory, clock=clock)
+    missing_managed = mark_missing_managed_files(session_factory, store)
     interrupted = interrupt_in_flight_work(session_factory, clock=clock)
     cleanup = workspaces.remove_orphans(jobs_that_may_resume(session_factory))
     rebuilt = coordinator.validate_indexes()
@@ -249,5 +257,5 @@ def recover_on_startup(
         if not (result.applied or result.retrying or result.failed):
             break  # nothing was due: the queue is caught up (or every remaining one is backing off)
     return StartupReport(
-        artifacts, missing, interrupted, cleanup, rebuilt, requeued, merged, passes
+        artifacts, missing, missing_managed, interrupted, cleanup, rebuilt, requeued, merged, passes
     )
