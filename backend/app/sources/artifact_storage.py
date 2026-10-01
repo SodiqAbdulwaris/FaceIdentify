@@ -49,6 +49,11 @@ class ArtifactStorageError(Exception):
     """A managed-artifact operation that is not valid for the artifact's current state."""
 
 
+class LibraryRootUnavailableError(ArtifactStorageError):
+    """The library root is not there (an unmounted drive, a moved folder). Nothing can be concluded
+    about any managed file, so nothing may be marked missing or recovered from its absence."""
+
+
 class ArtifactStateError(ArtifactStorageError):
     """The artifact is missing, not managed, or not in a state this transition starts from."""
 
@@ -446,6 +451,46 @@ class StorageScan:
         return not (self.missing or self.orphans or self.stray_staging or self.unsafe_keys)
 
 
+def require_library_root(store: ManagedFileStore) -> None:
+    """Raise `LibraryRootUnavailableError` unless the library root is a directory, before any
+    recovery step reads "the file is not there" as "the file is gone"."""
+    if not store.roots.library_root.is_dir():
+        raise LibraryRootUnavailableError(f"{store.roots.library_root} is not a directory")
+
+
+def reverify_managed_artifact(
+    session_factory: sessionmaker[Session], store: ManagedFileStore, artifact_id: uuid.UUID
+) -> str:
+    """Bring a `MISSING` managed artifact back to AVAILABLE if its file is there again and matches
+    the recorded size and SHA-256 exactly; a file that differs is not the original and leaves it
+    `MISSING`. Returns the resulting state. A file that cannot be read raises `OSError` and changes
+    nothing. The file is read outside any transaction.
+    """
+    with session_factory() as session:
+        artifact = session.get(Artifact, artifact_id)
+        if (
+            artifact is None
+            or artifact.storage_mode != StorageMode.MANAGED
+            or artifact.state != ArtifactState.MISSING
+            or artifact.storage_key is None
+        ):
+            raise ArtifactStateError(f"artifact {artifact_id} is not a MISSING managed artifact")
+        key = artifact.storage_key
+        recorded = StoredBytes(cast("bytes", artifact.sha256), cast("int", artifact.size_bytes))
+    if store.digest(key) != recorded:
+        return str(ArtifactState.MISSING)
+    with session_factory() as session:
+        transition_artifact(
+            session,
+            artifact_id,
+            {ArtifactState.MISSING},
+            {"state": ArtifactState.AVAILABLE, "failure_code": None, "failure_detail": None},
+            storage_mode=StorageMode.MANAGED,
+        )
+        session.commit()
+    return str(ArtifactState.AVAILABLE)
+
+
 def mark_missing_managed_files(
     session_factory: sessionmaker[Session], store: ManagedFileStore
 ) -> list[uuid.UUID]:
@@ -457,7 +502,11 @@ def mark_missing_managed_files(
     stay, so a file that is restored can be verified and brought back. Reads no file, only its
     status. A file that is present but cannot be examined, or a key that is not a valid managed key,
     is left as it is (the consistency scan reports the latter). Returns the artifacts marked.
+    `reverify_managed_artifact` brings one back. Raises `LibraryRootUnavailableError`, before
+    marking anything, if the library root itself is not there: an unmounted drive says nothing about
+    any single file.
     """
+    require_library_root(store)
     with session_factory() as session:
         candidates = _managed_in(session, {ArtifactState.AVAILABLE})
     gone: list[uuid.UUID] = []

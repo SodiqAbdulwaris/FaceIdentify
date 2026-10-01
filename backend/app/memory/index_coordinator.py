@@ -89,6 +89,9 @@ class CoordinatorReport:
     unindexable: list[uuid.UUID] = field(default_factory=list)
     # Spaces whose index was rebuilt to guarantee an erased representation's vector is gone.
     purged_spaces: list[uuid.UUID] = field(default_factory=list)
+    # Superseded index files that `validate_indexes` could not remove (locked). Each still holds
+    # every vector its generation was built with, so a rebuild that left one is not finished.
+    leftover_files: list[str] = field(default_factory=list)
 
 
 class _Effect(StrEnum):
@@ -149,7 +152,7 @@ class IndexCoordinator:
                 self._apply_space(space_id, operations, report)
             return report
 
-    def validate_indexes(self) -> list[uuid.UUID]:
+    def validate_indexes(self, report: CoordinatorReport | None = None) -> list[uuid.UUID]:
         """Check the index of every ACTIVE space and rebuild any that is missing, unusable or stale.
 
         *Stale* means a sound file whose entries differ from what SQLite says belongs in it: a key
@@ -166,7 +169,12 @@ class IndexCoordinator:
         found it empty. Startup runs this after recovery (§28: "index validation/rebuild
         scheduling"). Returns the spaces whose index was built or rebuilt from SQLite; a sound
         index is left exactly as it is. Deprecated spaces are historical and are not indexed (§29).
+
+        With a `report`, a representation a rebuild had to leave out (`unindexable`) and a
+        superseded index file that could not be removed (`leftover_files`) are recorded in it: a
+        rebuild that left the old generation on disk is not finished, however it is reported.
         """
+        report = report if report is not None else CoordinatorReport()
         rebuilt: list[uuid.UUID] = []
         with self._lock:
             with self._sessions() as session:
@@ -186,33 +194,53 @@ class IndexCoordinator:
                     representation_space_id=space_id,
                     ndim=ndim,
                     metric=metric,
-                    entries=partial(self._active_entries, space_id, ndim, []),
+                    entries=partial(self._active_entries, space_id, ndim, report.unindexable),
                     clock=self._clock,
                     new_id=self._new_id,
                 )
+                index = opened.index
                 if opened.rebuilt:
                     rebuilt.append(space_id)
-                elif self._is_stale(opened.index, space_id, ndim):
-                    RepresentationIndex.build(
+                elif self._is_stale(index, space_id):
+                    index = RepresentationIndex.build(
                         self.index_directory(space_id),
                         representation_space_id=space_id,
                         ndim=ndim,
                         metric=metric,
-                        entries=self._active_entries(space_id, ndim, []),
+                        entries=self._active_entries(space_id, ndim, report.unindexable),
                         clock=self._clock,
                         new_id=self._new_id,
                     )
                     rebuilt.append(space_id)
+                report.leftover_files += [str(path) for path in index.stale_files()]
         return rebuilt
 
-    def _is_stale(self, index: RepresentationIndex, space_id: uuid.UUID, ndim: int) -> bool:
+    def _is_stale(self, index: RepresentationIndex, space_id: uuid.UUID) -> bool:
         """Whether the index holds exactly the keys SQLite says belong in it."""
         expected = 0
-        for key, _vector in self._active_entries(space_id, ndim, []):
+        for key in self._active_keys(space_id):
             if not index.contains(key):
                 return True
             expected += 1
         return expected != len(index)
+
+    def _active_keys(self, space_id: uuid.UUID) -> Iterator[int]:
+        """The keys `_active_entries` would yield, without reading any vector. The schema fixes a
+        vector's length, so only a non-finite one is left out there and not here: it is caught by a
+        rebuild, which reports it, so such a space is rebuilt at every start until its
+        representation is dealt with."""
+        with self._sessions() as session:
+            rows = session.execute(
+                select(Representation.ann_key)
+                .join(Identity, Identity.id == Representation.identity_id)
+                .where(
+                    Representation.representation_space_id == space_id,
+                    Representation.state == RepresentationState.ACTIVE,
+                    Identity.state == IdentityState.ACTIVE,
+                )
+                .execution_options(yield_per=1000)
+            )
+            yield from (key for key in rows.scalars() if key is not None)
 
     def requeue_failed_operations(self) -> list[uuid.UUID]:
         """Give every `FAILED` operation a fresh set of attempts, once.

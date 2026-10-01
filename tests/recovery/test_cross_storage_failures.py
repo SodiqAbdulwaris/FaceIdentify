@@ -8,6 +8,7 @@ library is then consistent and that a second run changes nothing.
 """
 
 import io
+import shutil
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from backend.app.recovery.startup import StartupReport, recover_on_startup
 from backend.app.sources.artifact_storage import (
     MANAGED_FILE_MISSING,
     WRITE_NOT_COMPLETED,
+    LibraryRootUnavailableError,
     mark_artifact_available,
     request_artifact_deletion,
     reserve_managed_artifact,
@@ -160,10 +162,11 @@ def open_index(library: Library) -> RepresentationIndex:
 
 @dataclass
 class Case:
-    """A named failure. `broken` is False only for states that are consistent by definition."""
+    """A named failure. `shows` is the phrase the consistency check must report before recovery
+    (what is actually wrong); None only for states that are consistent by definition."""
 
     build: Callable[[Library], object]
-    broken: bool = True
+    shows: str | None
     keeps_orphans: bool = False
 
 
@@ -248,6 +251,19 @@ def case_index_holds_a_different_key_with_the_same_count(library: Library) -> In
     return operation
 
 
+def case_superseded_index_file_left_behind(library: Library) -> Path:
+    """A generation the live manifest no longer names, still holding every vector it was built
+    with: what an interrupted persist or a rebuild whose cleanup failed leaves."""
+    accept(library, 1)
+    library.coordinator.apply_pending(limit=10)
+    directory = library.coordinator.index_directory(library.space.id)
+    live = open_index(library).manifest
+    assert live is not None
+    stale = directory / f"index.{uuid.uuid4().hex}.usearch"
+    shutil.copyfile(directory / live.index_file, stale)
+    return stale
+
+
 def case_managed_file_deleted_behind_our_back(library: Library) -> uuid.UUID:
     artifact_id = import_original(library, bytes_written=True, available=True)
     key = library.artifact(artifact_id).storage_key
@@ -292,23 +308,38 @@ def case_disk_full_while_persisting_the_index(library: Library) -> IndexOperatio
 
 
 CASES: dict[str, Case] = {
-    "reserved only": Case(case_reserved_only),
-    "bytes written, never made available": Case(case_bytes_written_not_available),
-    "available but unreferenced": Case(case_available_but_unreferenced, broken=False),
-    "accepted, index untouched": Case(case_accepted_index_untouched),
-    "index persisted, operation not settled": Case(case_index_persisted_but_not_settled),
-    "index deleted": Case(case_index_deleted),
-    "index manifest corrupt": Case(case_index_manifest_corrupt),
-    "index holds a key sqlite dropped": Case(case_index_has_a_key_sqlite_no_longer_stands_behind),
-    "index lacks a key sqlite has": Case(case_index_lacks_a_key_sqlite_has),
-    "index holds a different key, same count": Case(
-        case_index_holds_a_different_key_with_the_same_count
+    "reserved only": Case(case_reserved_only, "is still PENDING"),
+    "bytes written, never made available": Case(
+        case_bytes_written_not_available, "is still PENDING"
     ),
-    "managed file deleted": Case(case_managed_file_deleted_behind_our_back),
-    "staging file left behind": Case(case_staging_file_of_a_settled_artifact),
-    "orphan file": Case(case_orphan_file_no_row_owns, keeps_orphans=True),
-    "deletion intent, bytes still there": Case(case_deletion_intent_committed_bytes_still_there),
-    "disk full while persisting the index": Case(case_disk_full_while_persisting_the_index),
+    "available but unreferenced": Case(case_available_but_unreferenced, None),
+    "accepted, index untouched": Case(case_accepted_index_untouched, "pending and due"),
+    "index persisted, operation not settled": Case(
+        case_index_persisted_but_not_settled, "pending and due"
+    ),
+    "index deleted": Case(case_index_deleted, "no usable index"),
+    "index manifest corrupt": Case(case_index_manifest_corrupt, "no usable index"),
+    "index holds a key sqlite dropped": Case(
+        case_index_has_a_key_sqlite_no_longer_stands_behind, "index holds"
+    ),
+    "index lacks a key sqlite has": Case(case_index_lacks_a_key_sqlite_has, "index lacks keys"),
+    "index holds a different key, same count": Case(
+        case_index_holds_a_different_key_with_the_same_count, "index lacks keys"
+    ),
+    "superseded index file left behind": Case(
+        case_superseded_index_file_left_behind, "superseded index files"
+    ),
+    "managed file deleted": Case(case_managed_file_deleted_behind_our_back, "bytes are not"),
+    "staging file left behind": Case(
+        case_staging_file_of_a_settled_artifact, "staging files remain"
+    ),
+    "orphan file": Case(case_orphan_file_no_row_owns, "files no row owns", keeps_orphans=True),
+    "deletion intent, bytes still there": Case(
+        case_deletion_intent_committed_bytes_still_there, "is still DELETING"
+    ),
+    "disk full while persisting the index": Case(
+        case_disk_full_while_persisting_the_index, "no usable index"
+    ),
 }
 
 
@@ -323,7 +354,10 @@ def test_a_partial_failure_is_recoverable_and_recovery_is_idempotent(
     case.build(library)
 
     before = library.problems()
-    assert bool(before) == case.broken, f"{name}: expected broken={case.broken}, found {before}"
+    if case.shows is None:
+        assert before == []
+    else:
+        assert any(case.shows in problem for problem in before), f"{name}: found {before}"
 
     library.recover()
 
@@ -429,3 +463,66 @@ def test_a_failed_persist_leaves_the_operation_pending_and_nothing_half_written(
     # No index existed yet, and the failed build left nothing half-written for a reader to find.
     with pytest.raises(IndexUnusableError, match="no manifest"):
         open_index(library)
+
+
+def lock_index_files(library: Library) -> None:
+    """Make every index file refuse deletion, as an open handle does on Windows."""
+    real_unlink = Path.unlink
+
+    def locked(self: Path, *args: bool, **kwargs: bool) -> None:
+        if self.suffix == ".usearch":
+            raise PermissionError("the file is in use")
+        real_unlink(self, *args, **kwargs)
+
+    library.patch.setattr(Path, "unlink", locked)
+
+
+def test_a_drift_rebuild_that_cannot_remove_the_old_generation_is_not_reported_clean(
+    library: Library,
+) -> None:
+    """The old file still holds every vector it was built with, SQLite's say-so notwithstanding."""
+    case_index_has_a_key_sqlite_no_longer_stands_behind(library)
+    lock_index_files(library)
+
+    report = library.recover()
+
+    assert library.space.id in report.indexes_rebuilt
+    assert len(report.index_operations.leftover_files) == 1
+    assert "1 superseded index files not removed" in report.unresolved
+    assert not report.clean
+    assert any("superseded index files" in problem for problem in library.problems())
+
+    library.patch.undo()  # the lock is released: the next start finishes the cleanup
+    again = library.recover()
+
+    assert again.clean
+    assert library.problems() == []
+
+
+def test_a_non_finite_vector_is_reported_every_start_not_silently_skipped(
+    library: Library,
+) -> None:
+    accept(library, 1)
+    accept(library, 2, [float("nan"), 1.0, 0.0, 0.0])
+
+    first = library.recover()
+    second = library.recover()
+
+    for report in (first, second):
+        assert "1 representations that cannot be indexed" in report.unresolved
+    assert not second.clean  # a key SQLite has can never be in the index, so it stays unresolved
+
+
+def test_a_library_root_that_is_not_there_recovers_nothing(library: Library) -> None:
+    artifact_id = case_reserved_only(library)
+    library.commit()
+    root = library.roots.library_root
+    real_is_dir = Path.is_dir
+    library.patch.setattr(Path, "is_dir", lambda self: False if self == root else real_is_dir(self))
+
+    with pytest.raises(LibraryRootUnavailableError):
+        library.recover()
+
+    assert (
+        library.artifact(artifact_id).state == "PENDING"
+    )  # not read as "the write never finished"

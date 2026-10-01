@@ -109,6 +109,8 @@ def _index_problems(
                 continue  # nothing is eligible, so there is nothing an index would hold
             problems.append(f"space {space.id} has no usable index: {error}")
             continue
+        if leftovers := [path.name for path in index.stale_files()]:
+            problems.append(f"space {space.id} has superseded index files {leftovers}")
         missing = sorted(key for key in expected if key is not None and not index.contains(key))
         if missing:
             problems.append(f"space {space.id} index lacks keys {missing}")

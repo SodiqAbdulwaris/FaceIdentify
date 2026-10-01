@@ -17,8 +17,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.sources import artifact_storage
 from backend.app.sources.artifact_storage import (
     MANAGED_FILE_MISSING,
+    ArtifactStateError,
+    LibraryRootUnavailableError,
     create_managed_artifact,
     mark_missing_managed_files,
+    reverify_managed_artifact,
 )
 from backend.app.sources.models import Artifact
 from backend.infrastructure.db.engine import create_session_factory
@@ -155,3 +158,71 @@ def test_an_artifact_settled_while_the_scan_ran_is_not_overwritten(
 
     assert mark_missing_managed_files(factory, file_store) == []
     assert state_of(factory, artifact_id) == "DELETING"
+
+
+def test_an_unavailable_library_root_marks_nothing_missing(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    artifact_id, _ = stored(factory, file_store, build)
+    root = file_store.roots.library_root
+    real_is_dir = Path.is_dir
+    monkeypatch.setattr(Path, "is_dir", lambda self: False if self == root else real_is_dir(self))
+
+    with pytest.raises(LibraryRootUnavailableError):
+        mark_missing_managed_files(factory, file_store)
+
+    assert state_of(factory, artifact_id) == "AVAILABLE"
+
+
+def lose(
+    factory: sessionmaker[Session], store: ManagedFileStore, build: ModelFactory
+) -> tuple[uuid.UUID, Path]:
+    artifact_id, path = stored(factory, store, build)
+    path.unlink()
+    assert mark_missing_managed_files(factory, store) == [artifact_id]
+    return artifact_id, path
+
+
+def test_a_restored_file_that_matches_brings_the_artifact_back(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, build: ModelFactory
+) -> None:
+    artifact_id, path = lose(factory, file_store, build)
+    assert reverify_managed_artifact(factory, file_store, artifact_id) == "MISSING"  # still gone
+
+    path.write_bytes(b"bytes")
+
+    assert reverify_managed_artifact(factory, file_store, artifact_id) == "AVAILABLE"
+    with factory() as session:
+        row = session.get(Artifact, artifact_id)
+        assert row is not None
+        assert (row.state, row.failure_code) == ("AVAILABLE", None)
+
+
+def test_a_file_that_is_not_the_original_does_not_bring_the_artifact_back(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, build: ModelFactory
+) -> None:
+    artifact_id, path = lose(factory, file_store, build)
+    path.write_bytes(b"other")  # same size, different content
+
+    assert reverify_managed_artifact(factory, file_store, artifact_id) == "MISSING"
+    assert state_of(factory, artifact_id) == "MISSING"
+
+
+def test_only_a_missing_managed_artifact_is_reverified(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, build: ModelFactory,
+    tmp_path: Path,
+) -> None:  # fmt: skip
+    available, available_path = stored(factory, file_store, build)
+    available_path.unlink()  # absent, but still AVAILABLE: no basis to call it anything else
+    referenced = build.artifact(
+        storage_mode="REFERENCED",
+        storage_key=None,
+        external_path=str(tmp_path / "x.jpg"),
+        state="MISSING",
+    )
+    build.session.commit()
+
+    for target in (available, referenced.id, uuid.uuid4()):
+        with pytest.raises(ArtifactStateError):
+            reverify_managed_artifact(factory, file_store, target)
