@@ -1,9 +1,8 @@
 """Alembic migration tests (M2: TST-032; PERSISTENCE_IMPLEMENTATION.md §27).
 
-Revision `0001_initial_schema` is the only revision so far, so there is no earlier populated
-schema to migrate *from*: these tests pin what a fresh database gets (it must be exactly what the
-models describe), that an empty database round-trips through downgrade, and that a failed
-migration never damages an existing database ("Existing databases are never automatically
+These tests pin what a fresh database gets (it must be exactly what the models describe),
+that an empty database round-trips through downgrade, and that a failed migration never damages
+an existing database ("Existing databases are never automatically
 deleted because migration failed", Roadmap-Plan §37). Every other persistence test also runs on
 the migrated schema, via the `sqlite_engine` fixture.
 """
@@ -143,7 +142,8 @@ def test_models_and_migration_have_no_drift(
 
 def test_the_revision_history_is_one_linear_chain_starting_at_0001() -> None:
     script = ScriptDirectory.from_config(alembic_config())
-    assert script.get_heads() == ["0001"]
+    assert script.get_heads() == ["0002"]
+    assert script.get_revision("0002").down_revision == "0001"
     assert script.get_revision("0001").down_revision is None
 
 
@@ -156,7 +156,7 @@ def test_upgrade_stamps_the_head_revision_and_is_idempotent(
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [
-            ("0001",)
+            ("0002",)
         ]
     assert len(schema_objects(path)) == len(schema_objects(create_all_database(tmp_path / "c.db")))
 
