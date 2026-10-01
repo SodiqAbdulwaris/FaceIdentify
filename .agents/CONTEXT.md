@@ -70,7 +70,8 @@ _Last updated: 2026-10-01 (cross-storage failures)_
   `recover_on_startup` settles artifacts and missing referenced originals (existence only), marks
   `RUNNING` jobs, runs and segments `INTERRUPTED` and clears stale leases from any job, removes
   workspaces of finished jobs whose run is over too, marks a managed artifact whose file is gone
-  `MISSING`, validates every active space's index (a stale one is rebuilt from SQLite, not just a
+  `MISSING` (and refuses to run at all if the library root is not there; `reverify_managed_artifact`
+  brings one back, but nothing calls it yet), validates every active space's index (a stale one is rebuilt from SQLite, not just a
   missing or corrupt one), gives
   `FAILED` `IndexOperation`s one fresh set of attempts and catches up pending ones in bounded
   passes; idempotent, survives a crash after any step, and reports what is `unresolved`. It relies
