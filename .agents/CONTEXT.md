@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (Q25/Q26 decided)_
+_Last updated: 2026-10-01 (settle fix)_
 
 ## Current state
 
@@ -69,7 +69,9 @@ _Last updated: 2026-10-01 (Q25/Q26 decided)_
   or `ann_key` allocation, open questions 13 and 21). `backend/app/memory/index_coordinator.py` is
   the IndexCoordinator: `apply_pending` re-reads each representation, applies `ADD`/`REMOVE` as a
   desired state, persists one index generation and only then marks the operations `APPLIED`; the
-  retry limit and backoff are caller-supplied, a rebuild skips and reports a corrupt vector,
+  retry limit and backoff are caller-supplied, settling skips an operation that was deleted (superseded
+  by `IndexOperationRepository.append_batch`) while it was in flight, a rebuild skips and reports a
+  corrupt vector,
   eligibility needs an ACTIVE identity, and an erased representation's vector is guaranteed gone
   by a rebuild (open question 25). `backend/app/recovery/startup.py` is startup recovery:
   `recover_on_startup` settles artifacts and missing referenced originals (existence only), marks
