@@ -30,6 +30,7 @@ import sqlalchemy as sa
 from alembic import op
 
 import backend.infrastructure.db.types
+from backend.infrastructure.db.downgrade_guard import require_destructive_downgrade_allowed
 
 # revision identifiers, used by Alembic.
 revision: str = "0003"
@@ -179,6 +180,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema. Refused by the database (atomically) while two spaces hold the same
     ann_key: the older schema cannot."""
+    require_destructive_downgrade_allowed(op.get_bind())
     op.execute("DROP TRIGGER trg_processing_configuration_snapshots_no_delete_while_used")
     op.execute("DROP TRIGGER trg_processing_configuration_snapshots_no_update")
     with op.batch_alter_table(

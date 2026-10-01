@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from alembic import command, util
 
+from backend.infrastructure.db.downgrade_guard import ALLOW_DESTRUCTIVE_DOWNGRADE_ENV
 from tests.fixtures.persistence import alembic_config
 
 DATABASE_PATH_ENV = "FACEIDENTIFY_DATABASE_PATH"
@@ -28,8 +29,17 @@ def migrate(monkeypatch: pytest.MonkeyPatch, path: Path, revision: str) -> None:
     command.upgrade(alembic_config(), revision)
 
 
-def downgrade(monkeypatch: pytest.MonkeyPatch, path: Path, revision: str) -> None:
+def downgrade(
+    monkeypatch: pytest.MonkeyPatch, path: Path, revision: str, *, allow_destructive: bool = True
+) -> None:
+    """Downgrade `path`. A downgrade of a populated library is refused unless the development
+    override is set, so the tests of a revision's downgrade opt in; the tests of the guard itself
+    pass `allow_destructive=False`."""
     monkeypatch.setenv(DATABASE_PATH_ENV, str(path))
+    if allow_destructive:
+        monkeypatch.setenv(ALLOW_DESTRUCTIVE_DOWNGRADE_ENV, "1")
+    else:
+        monkeypatch.delenv(ALLOW_DESTRUCTIVE_DOWNGRADE_ENV, raising=False)
     command.downgrade(alembic_config(), revision)
 
 

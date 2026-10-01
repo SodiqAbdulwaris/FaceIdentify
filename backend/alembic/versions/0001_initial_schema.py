@@ -18,6 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 import backend.infrastructure.db.types
+from backend.infrastructure.db.downgrade_guard import require_destructive_downgrade_allowed
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
@@ -1320,6 +1321,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    require_destructive_downgrade_allowed(op.get_bind())
     op.drop_table("occurrence_observations")
     with op.batch_alter_table("index_operations", schema=None) as batch_op:
         batch_op.drop_index(
