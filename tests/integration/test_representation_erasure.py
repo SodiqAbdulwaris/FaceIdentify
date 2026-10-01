@@ -837,3 +837,156 @@ def test_finalization_holds_the_coordinators_lock(
 
     assert eraser.erase([victim.id]).complete
     assert held == [True]
+
+
+# --- findings of the independent review of PR 58 -------------------------------------------------
+
+
+def test_an_ordinary_remove_in_flight_when_the_erasure_is_queued_does_not_leave_the_vector(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, factory: sessionmaker[Session],
+    sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """The in-place removal of an ordinary REMOVE leaves the vector's bytes in the live file; the
+    erasure committing before that REMOVE settles must not take it for its own."""
+    victim, _ = indexed(build, coordinator, space, 1, 2)
+    build.index_operation(victim, operation="REMOVE")
+    build.session.commit()
+    real = IndexCoordinator._apply_one
+    fired: list[int] = []
+
+    def erasure_commits_after_the_removal(self: IndexCoordinator, *args: Any) -> Any:
+        result = real(self, *args)
+        if not fired:
+            fired.append(1)
+            eraser.queue([victim.id])  # after the in-place removal, before it is settled
+        return result
+
+    monkeypatch.setattr(IndexCoordinator, "_apply_one", erasure_commits_after_the_removal)
+    coordinator.apply_pending(limit=10)
+    monkeypatch.undo()
+    assert index_files_with(coordinator, space, 1)  # the live file still holds the bytes
+
+    report = eraser.resume()
+
+    assert report.complete, report.outstanding_cleanup
+    assert_gone(factory, sqlite_engine, coordinator, space, victim)
+
+
+def test_a_keyed_superseded_representation_whose_earlier_remove_was_applied_is_still_purged(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, factory: sessionmaker[Session],
+    sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
+) -> None:  # fmt: skip
+    victim, _ = indexed(build, coordinator, space, 1, 2)
+    victim.state = "SUPERSEDED"
+    build.index_operation(victim, operation="REMOVE")
+    build.session.commit()
+    coordinator.apply_pending(limit=10)  # applied in place: the bytes stay in the live file
+    assert index_files_with(coordinator, space, 1)
+
+    report = eraser.erase([victim.id])
+
+    assert report.complete, report.outstanding_cleanup
+    assert_gone(factory, sqlite_engine, coordinator, space, victim)
+
+
+def test_a_failed_remove_is_given_a_fresh_set_of_attempts_by_the_next_erase(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, factory: sessionmaker[Session],
+    sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
+) -> None:  # fmt: skip
+    (victim,) = indexed(build, coordinator, space, 1)
+    eraser.queue([victim.id])
+    with factory() as session:
+        session.execute(
+            IndexOperation.__table__.update()  # type: ignore[attr-defined]
+            .where(IndexOperation.representation_id == victim.id)
+            .values(state="FAILED", attempt_count=3)
+        )
+        session.commit()
+
+    report = eraser.erase([victim.id])
+
+    assert report.complete, report.outstanding_cleanup
+    assert_gone(factory, sqlite_engine, coordinator, space, victim)
+
+
+def test_another_erasers_owed_truncation_is_not_hidden_by_a_complete_report(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, factory: sessionmaker[Session],
+    sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """A's erasure of X waits (its REMOVE is not due: no error, nothing blocked). B then finishes X
+    after A looked at the marker, and B's checkpoint is blocked by a reader. A must not report X
+    erased and the erasure complete while B's truncation is owed."""
+    (victim,) = indexed(build, coordinator, space, 1)
+    eraser.queue([victim.id])
+    later = build.clock() + timedelta(hours=1)
+    with factory() as session:
+        session.execute(
+            IndexOperation.__table__.update()  # type: ignore[attr-defined]
+            .where(IndexOperation.representation_id == victim.id)
+            .values(not_before_at=later)
+        )
+        session.commit()
+    other = make_eraser(factory, sqlite_engine, coordinator, build)
+    real = RepresentationEraser._verify
+    finished: list[ErasureReport] = []
+    started: list[int] = []
+
+    def second_eraser_finishes_meanwhile(
+        self: RepresentationEraser, *args: Any, **kwargs: Any
+    ) -> Any:
+        if not started:
+            started.append(1)  # (`other.resume()` calls this too)
+            build.clock.advance(hours=2)  # the REMOVE is due now
+            finished.append(other.resume())
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(RepresentationEraser, "_verify", second_eraser_finishes_meanwhile)
+
+    with sqlite_engine.connect() as reader:
+        reader.exec_driver_sql("SELECT count(*) FROM representations").all()
+        report = eraser.erase([victim.id])
+        monkeypatch.undo()
+
+        assert finished[0].erased == [victim.id]  # B finished X ...
+        assert not finished[0].wal_truncated  # ... but its truncation is owed
+        assert report.complete is False  # so A cannot call the erasure complete
+        assert marker(factory) is not None
+        reader.rollback()
+
+    assert eraser.resume().complete
+    assert marker(factory) is None
+
+
+def test_startup_recovery_reports_an_unexpected_failure_instead_of_aborting(
+    eraser: RepresentationEraser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(self: RepresentationEraser, ids: Any) -> None:
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(RepresentationEraser, "queue", broken)
+
+    report = eraser.resume()
+
+    assert report.errors == ["RuntimeError: database is locked"]
+    assert not report.complete
+
+
+def test_an_unrelated_operation_backing_off_does_not_make_an_erasure_incomplete(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, factory: sessionmaker[Session],
+    sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
+) -> None:  # fmt: skip
+    (victim,) = indexed(build, coordinator, space, 1)
+    corrupt = build.representation(
+        representation_space_id=space.id, state="ACTIVE", identity_id=build.identity().id,
+        ann_key=9, vector=float32_vector([1.0, 2.0, 3.0]), vector_dimension=3,
+    )  # fmt: skip
+    build.index_operation(corrupt, operation="ADD")  # fails every attempt, unrelated to the erasure
+    build.session.commit()
+
+    report = eraser.erase([victim.id])
+
+    assert report.errors == []
+    assert report.complete, report.outstanding_cleanup
+    assert_gone(factory, sqlite_engine, coordinator, space, victim)

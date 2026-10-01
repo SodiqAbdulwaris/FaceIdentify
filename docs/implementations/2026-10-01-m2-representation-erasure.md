@@ -57,9 +57,9 @@ tests INDEX-03/04/05 and PER-07/08 of TESTING_STRATEGY.
 ## Verification
 
 - `uv run ruff format --check .` (120 files formatted), `uv run ruff check .` (clean), `uv run mypy` and
-  `uv run mypy --platform linux` (no issues in 120 files), `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 981 passed,
+  `uv run mypy --platform linux` (no issues in 120 files), `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 987 passed,
   backend coverage 100% (statements and branches).
-- New tests: `test_representation_erasure.py` (28; INDEX-03/04/05, PER-07 at five crash points, PER-08 by byte search of the
+- New tests: `test_representation_erasure.py` (34; INDEX-03/04/05, PER-07 at five crash points, PER-08 by byte search of the
   database file, its log and every file under the index directory, run five times without a failure), `test_migration_0004.py`
   (7), 10 index-helper tests, 5 coordinator tests, 3 startup-recovery tests plus the report-property cases.
 - Mutations, each broken, shown to fail a test and restored byte-identical: coordinator (3), index helpers (9, one equivalent
@@ -67,6 +67,25 @@ tests INDEX-03/04/05 and PER-07/08 of TESTING_STRATEGY.
   did not parse or the mutant raised `NameError`, and redone.
 - **Not verified:** a real SSD/snapshot; two processes erasing at once (the library lock is open question 23); a concurrent
   reader holding the log across a real application session.
+
+## Review
+
+Independent read-only review by an Explore subagent in a disposable worktree (Codex was over its usage limit until
+2026-10-03); posted on PR 58. Findings and what was done:
+
+- **B1 (blocker, fixed):** an ordinary `REMOVE` in flight when the erasure was queued made the erasure skip its own
+  (the unique pending `REMOVE`), leaving the vector in the live index file. `queue` now deletes a pending `REMOVE` of
+  each representation it moves and appends a fresh one (applied by a rebuild); the late settlement of the deleted one is
+  skipped. Test reproduces it from inside a coordinator pass.
+- **M1 (fixed):** `erase()` could report complete while another eraser's truncation was owed. The states are now read
+  before the marker.
+- **M2 (fixed):** a `FAILED` `REMOVE` of an `ERASING` representation is requeued by `queue`.
+- **m1 (fixed):** `resume` reports an unexpected exception instead of aborting startup. **m2 (fixed):** only the
+  erasing representations' operations count as errors. **m4 (fixed):** the marker token is `uuid.uuid4()`.
+- **m3 (answered):** a cleared row has no key, so candidate revalidation cannot return it; the bytes in the index
+  files are covered by the rebuild and the byte-search tests, not by `_verify`.
+- **n1 (answered):** the erasure code and its tests are one logical unit in one commit; it is above the guide's ~400 lines
+  for that reason. **n2 (done):** comment added. **n3 (answered):** the unapproved finding is labelled as such in the note.
 
 ## Open issues / follow-ups
 
