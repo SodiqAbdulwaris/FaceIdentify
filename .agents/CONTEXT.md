@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (PAUSING/CANCELLING recovery)_
+_Last updated: 2026-10-01 (ERASING migration)_
 
 ## Current state
 
@@ -36,7 +36,8 @@ _Last updated: 2026-10-01 (PAUSING/CANCELLING recovery)_
   (`backend/app/people/use_cases.py`: assign/reassign/remove an Identity's Person link, rename a
   Person). `backend/infrastructure/db/optimistic.py` holds the one shared optimistic-locked
   `UPDATE` helper both feature modules use. The schema is created only by Alembic
-  (`backend/alembic/`, revision `0001_initial_schema`); every persistence test runs on the migrated
+  (`backend/alembic/`, revisions `0001_initial_schema` and `0002_representation_erasing_state`, the
+  latter adding the `ERASING` representation state); every persistence test runs on the migrated
   schema. The Storage Manager's managed core: `backend/infrastructure/storage/` (the two roots
   and layout from tech-stack §15, safe key → path resolution, crash-safe staged writes, reads,
   hashing, deletion) and `backend/app/sources/artifact_storage.py` (the three-step
@@ -212,6 +213,12 @@ Unresolved items need the user's decision. Do not settle them silently.
     *second* revision leaves `0001` applied as intended, and one for a Python error raised
     inside `upgrade()`; today only one failure shape is tested.
     **2026-10-01 (owner):** deferred to the second Alembic revision (TST-032), which the `ERASING` state of question 25 will provide.
+    **Resolved with revision `0002` (same day):** a plain recreation of `representations` *failed* on a
+    populated database (foreign keys on); `env.py` now follows SQLite's procedure (enforcement off
+    outside the transaction, `foreign_key_check` before each revision commits). Tested: a populated
+    upgrade, a Python error after the recreation, a dangling reference, an already inconsistent
+    database, and downgrade; each revision is its own transaction, so a failing second revision leaves
+    `0001` applied. Persistence section 27 has the decision note.
 19. **Open: what `alembic downgrade` should do to a populated library.** It destroys data, and
     whether foreign keys stop it is data-dependent (a richly populated database fails
     atomically; a simple one is dropped without complaint). Production never downgrades, and
@@ -287,8 +294,8 @@ Unresolved items need the user's decision. Do not settle them silently.
     "Securely retired" means verified file deletion, not physical erasure from SSD storage. Specs
     updated (persistence 6.2, 23, 28; architecture 23; testing strategy INDEX-03, INDEX-04, INDEX-05, PER-07). Candidate revalidation must resolve each
     `ann_key` to its representation row; today it revalidates identities only.
-    **Still to build (TST-031):** the `ERASING` state (an Alembic revision, which is also the populated
-    batch-mode migration question 18 needs), the erasure use case, coordinator retirement of old
+    **Built:** the `ERASING` state (revision `0002`, which is also the populated batch-mode migration
+    question 18 needed). **Still to build (TST-031):** the erasure use case, coordinator retirement of old
     generations before a `REMOVE` is applied, recovery of `ERASING`, and the tests. The keyless-`REMOVE`
     rebuild in the coordinator stays as a safety net. **Not decided here:** whether SQLite itself should
     run with `secure_delete` / checkpoint after an erasure so the cleared vector does not linger in WAL or
