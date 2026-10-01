@@ -636,3 +636,134 @@ def test_nothing_due_does_nothing(
 
     assert report == CoordinatorReport()
     assert not coordinator.index_directory(space.id).exists()
+
+
+# --- erasure: the vector must leave every file, and old generations are retired first ------------
+
+SECRET = [123.25, -7.5, 99.125, 0.03125]
+
+
+def queued_add(
+    build: ModelFactory, space: RepresentationSpace, key: int, values: list[float]
+) -> Representation:
+    """An ACTIVE representation with its ADD queued; a test moves it to ERASING afterwards."""
+    rep = active(build, space, key, values)
+    queue(build, rep, "ADD")
+    return rep
+
+
+def test_an_ordinary_remove_is_applied_in_place_and_leaves_the_bytes_in_the_saved_file(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    """Pins why erasure cannot use it: USearch keeps a removed key's vector in the saved file
+    (probed 2026-10-01), so removing the key proves nothing about the bytes."""
+    rep = active(build, space, 4, SECRET)
+    queue(build, rep, "ADD")
+    run(coordinator, build)
+    queue(build, rep, "REMOVE")
+
+    report = run(coordinator, build)
+
+    assert report.purged_spaces == []  # applied in place, no rebuild
+    assert not open_index(coordinator, space).contains(4)
+    assert files_containing(coordinator.index_directory(space.id), float32_vector(SECRET))
+
+
+def test_the_remove_of_an_erasing_representation_rebuilds_the_index_without_its_vector(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory,
+) -> None:  # fmt: skip
+    rep = queued_add(build, space, 4, SECRET)
+    survivor = active(build, space, 5, [1.0, 2.0, 3.0, 4.0])
+    queue(build, survivor, "ADD")
+    run(coordinator, build)
+    directory = coordinator.index_directory(space.id)
+    assert files_containing(directory, float32_vector(SECRET))
+    rep.state = "ERASING"  # step one of an erasure: still holds its vector and key
+    operation = queue(build, rep, "REMOVE")
+
+    report = run(coordinator, build)
+
+    assert report.applied == [operation.id]
+    assert report.purged_spaces == [space.id]
+    assert files_containing(directory, float32_vector(SECRET)) == []
+    index = open_index(coordinator, space)
+    assert (index.contains(4), index.contains(5)) == (False, True)
+    assert load_op(factory, operation.id).state == "APPLIED"
+    with factory() as session:  # SQLite still holds the vector: only step two clears it
+        assert session.get(Representation, rep.id).vector is not None  # type: ignore[union-attr]
+
+
+def test_every_remove_of_a_space_in_one_pass_shares_one_rebuild(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """Bulk forget never rebuilds once per representation (persistence §6.2 item 3)."""
+    reps = [queued_add(build, space, key, [float(key), 1.0, 2.0, 3.0]) for key in (1, 2, 3)]
+    run(coordinator, build)
+    for rep in reps:
+        rep.state = "ERASING"
+        queue(build, rep, "REMOVE")
+    calls: list[int] = []
+    real_build = RepresentationIndex.build.__func__  # type: ignore[attr-defined]
+
+    def counting(cls: type[RepresentationIndex], /, *args: object, **kwargs: object) -> object:
+        calls.append(1)
+        return real_build(cls, *args, **kwargs)
+
+    monkeypatch.setattr(RepresentationIndex, "build", classmethod(counting))
+
+    report = run(coordinator, build)
+
+    assert len(report.applied) == 3
+    assert len(calls) == 1
+    assert len(open_index(coordinator, space)) == 0
+
+
+def test_a_remove_is_not_applied_while_a_superseded_generation_remains(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory,
+) -> None:  # fmt: skip
+    """Persistence §23: the old generation still holds every vector it was built with."""
+    first, second = (active(build, space, key) for key in (1, 2))
+    queue(build, first, "ADD")
+    run(coordinator, build)
+    directory = coordinator.index_directory(space.id)
+    old_generation = next(directory.glob("index.*.usearch"))
+    remove = queue(build, first, "REMOVE")
+    add = queue(build, second, "ADD")
+    build.clock.advance(minutes=1)
+
+    with old_generation.open("rb"):  # an open handle: Windows refuses to delete the file
+        report = run(coordinator, build)
+
+    assert report.applied == [add.id]  # an ADD is unaffected
+    assert [op for op, _ in report.retrying] == [remove.id]
+    assert "could not be removed" in report.retrying[0][1]
+    assert report.leftover_files == [str(old_generation)]
+    assert load_op(factory, remove.id).state == "PENDING"
+    build.clock.advance(minutes=5)
+    assert run(coordinator, build).applied == [remove.id]  # the handle is gone
+    assert not old_generation.exists()
+
+
+def test_a_remove_for_a_key_already_absent_still_waits_for_the_old_generation_to_go(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory,
+) -> None:  # fmt: skip
+    queue(build, active(build, space, 1), "ADD")
+    run(coordinator, build)
+    directory = coordinator.index_directory(space.id)
+    old_generation = next(directory.glob("index.*.usearch"))
+    with old_generation.open("rb"):  # a second generation is published while this one is held
+        queue(build, active(build, space, 2), "ADD")
+        run(coordinator, build)
+        absent = queue(build, active(build, space, 3), "REMOVE")  # never in the index
+        build.clock.advance(minutes=1)
+
+        report = run(coordinator, build)
+
+        assert [op for op, _ in report.retrying] == [absent.id]
+        assert load_op(factory, absent.id).state == "PENDING"
+    build.clock.advance(minutes=5)
+    assert run(coordinator, build).applied == [absent.id]

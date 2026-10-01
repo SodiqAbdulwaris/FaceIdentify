@@ -10,11 +10,15 @@ applies it as a *desired state*, so replaying one is harmless:
 * `ADD`: ensure the representation's vector is present under its `ann_key`, if it is still `ACTIVE`
   and eligible (its identity is `ACTIVE` too, persistence §6.2). A representation that is no longer
   eligible is left alone; the `REMOVE` that its loss of eligibility queued deals with it.
-* `REMOVE`: ensure its key is absent, whatever the index currently holds. An *erased*
-  representation has no key left (`ann_key` is cleared by erasure), so the only way to guarantee its
-  vector is gone from the index is to rebuild the space's index from SQLite and confirm no older
-  generation file, which would still hold the vector, remains (CONTEXT open question 25 is about
-  ordering erasure so that this is not needed).
+* `REMOVE`: ensure its key is absent, whatever the index currently holds. Removing a key from a
+  USearch index and saving it does *not* remove the vector's bytes from the saved file (probed: they
+  are still in it), so the `REMOVE` of a representation being *erased* (`ERASING`), or one that has
+  no key left, is applied by rebuilding the space's index from SQLite, which excludes it, and
+  confirming no older generation file, which would still hold the vector, remains (CONTEXT open
+  question 25). All the `REMOVE`s of one space in a pass share that one rebuild. An ordinary
+  `REMOVE` (a representation that merely stops being eligible) is applied in place.
+* No `REMOVE` is marked `APPLIED` while a superseded generation file of its space remains on disk
+  (persistence §23): it is retried with backoff instead.
 
 The index generation is persisted *before* any operation is marked `APPLIED`. A crash between the
 two leaves the operations `PENDING`; replaying them finds the index already right and only marks
@@ -291,13 +295,34 @@ class IndexCoordinator:
                     outcomes[operation.id] = f"{type(error).__name__}: {error}"
             if _Effect.PURGE in effects.values():
                 self._purge(space_id, ndim, metric, operations, outcomes, report)
-            elif _Effect.CHANGED in effects.values():
-                # Persisted before anything is marked APPLIED (§17).
-                index.persist(clock=self._clock, new_id=self._new_id)
+            else:
+                if _Effect.CHANGED in effects.values():
+                    # Persisted before anything is marked APPLIED (§17).
+                    index.persist(clock=self._clock, new_id=self._new_id)
+                self._require_retired(index, operations, outcomes, report)
         except Exception as error:  # noqa: BLE001 - the whole space's batch is retried
             message = f"{type(error).__name__}: {error}"
             outcomes = {operation.id: message for operation in operations}
         self._settle(outcomes, report)
+
+    @staticmethod
+    def _require_retired(
+        index: RepresentationIndex,
+        operations: list[DueOperation],
+        outcomes: dict[uuid.UUID, str | None],
+        report: CoordinatorReport,
+    ) -> None:
+        """A `REMOVE` is not applied while a superseded generation file of its space is still on
+        disk: that file still holds every vector its generation was built with (persistence §23).
+        The `REMOVE`s of this pass fail (and are retried with backoff); an `ADD` is unaffected."""
+        stale = index.stale_files()
+        if not stale:
+            return
+        report.leftover_files += [str(path) for path in stale]
+        message = f"the superseded index file {stale[0].name} could not be removed"
+        for operation in operations:
+            if operation.kind == IndexOperationKind.REMOVE and outcomes[operation.id] is None:
+                outcomes[operation.id] = message
 
     def _purge(
         self,
@@ -388,8 +413,10 @@ class IndexCoordinator:
         if space_id != operation.space_id:
             raise ValueError("the operation and its representation name different spaces")
         if operation.kind == IndexOperationKind.REMOVE:
-            if ann_key is None:
-                return _Effect.PURGE  # erased: no key left to remove by
+            if ann_key is None or state == RepresentationState.ERASING:
+                # No key left to remove by (erased), or an erasure in progress: removing the key
+                # in place would leave the vector's bytes in the saved file.
+                return _Effect.PURGE
             return _Effect.CHANGED if index.remove(ann_key) else _Effect.NONE
         if state != RepresentationState.ACTIVE or identity_state != IdentityState.ACTIVE:
             return _Effect.NONE  # no longer eligible; its REMOVE deals with it
