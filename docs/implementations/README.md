@@ -83,3 +83,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-01 | [M2: Observation and Representation repositories](2026-10-01-m2-observation-representation-repositories.md) | done; TST-022 in progress |
 | 2026-10-01 | [M2: Identity, Occurrence and Evidence repositories](2026-10-01-m2-identity-occurrence-evidence-repositories.md) | done; TST-022 in progress |
 | 2026-10-02 | [M2: RuntimeCatalog and Settings repositories](2026-10-02-m2-catalog-settings-repositories.md) | done; TST-022 passing |
+| 2026-10-02 | [M2: refuse a destructive downgrade of a populated library](2026-10-02-m2-downgrade-guard.md) | done; issue #35 |
