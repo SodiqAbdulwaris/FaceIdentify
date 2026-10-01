@@ -14,7 +14,9 @@ Functions flush but do not commit: the caller owns the transaction boundary
 
 import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
 from sqlalchemy import exists, insert, select, update
 from sqlalchemy.orm import Session
@@ -547,6 +549,63 @@ def split_identity(
 
 
 # --- query-only recognition --------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RecognitionCandidate:
+    """An ANN candidate that SQLite still stands behind, as plain values."""
+
+    ann_key: int
+    representation_id: uuid.UUID
+    identity_id: uuid.UUID
+
+
+# Keys per SELECT: well under SQLite's bound-variable limit (999 before 3.32), so a long candidate
+# list is read in a few statements instead of failing.
+_KEYS_PER_QUERY = 500
+
+
+def resolve_ann_candidates(
+    session: Session, representation_space_id: uuid.UUID, ann_keys: Sequence[int]
+) -> list[RecognitionCandidate]:
+    """Revalidate the `ann_key`s an index returned against SQLite (persistence §23: "ANN output is
+    only candidate `ann_key` values; SQLite revalidates space, state, identity, and current
+    eligibility"). Each key is resolved to its `representations` row and kept only if that row is
+    in `representation_space_id`, is `ACTIVE`, and belongs to an `ACTIVE` identity; every other key
+    is dropped: unknown, another space's, `PENDING`, `SUPERSEDED`, `ERASING`, `ERASED` or `DELETED`,
+    or held by an identity that was merged away, split, forgotten or deleted.
+
+    That is what keeps a representation being erased out of retrieval from the moment its erasure is
+    queued, whatever the index file still holds (§6.2, decision 2026-10-01): a stale index may
+    return its key, and this refuses it. The state to check is the representation's own, not only
+    its identity's, which `resolve_recognition_candidates` (identity ids) cannot see.
+
+    Reads only, so a query cannot become ingest, and it touches no ORM object: it selects plain
+    columns and returns values, so it neither answers from a row this session cached nor overwrites
+    a change the caller has made but not flushed (with `autoflush` off, a caller that has just set a
+    representation `ERASING` must flush first for this to see it). The answer is the database's.
+    Input order is kept and a repeated key appears once. Keys are read `_KEYS_PER_QUERY` at a time,
+    so one SELECT serves any top-k a search is likely to ask for (no lookup per key, API and
+    Contracts §101).
+    """
+    unique = list(dict.fromkeys(ann_keys))  # first occurrence wins; the IN list never repeats a key
+    found: dict[int, RecognitionCandidate] = {}
+    for start in range(0, len(unique), _KEYS_PER_QUERY):
+        rows = session.execute(
+            select(Representation.ann_key, Representation.id, Identity.id)
+            .join(Identity, Identity.id == Representation.identity_id)
+            .where(
+                Representation.representation_space_id == representation_space_id,
+                Representation.ann_key.in_(unique[start : start + _KEYS_PER_QUERY]),
+                Representation.state == RepresentationState.ACTIVE,
+                Identity.state == IdentityState.ACTIVE,
+            )
+        ).all()
+        for ann_key, representation_id, identity_id in rows:
+            found[cast(int, ann_key)] = RecognitionCandidate(
+                cast(int, ann_key), representation_id, identity_id
+            )
+    return [found[key] for key in unique if key in found]
 
 
 def resolve_recognition_candidates(
