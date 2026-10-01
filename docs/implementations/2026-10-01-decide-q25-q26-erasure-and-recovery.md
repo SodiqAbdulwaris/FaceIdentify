@@ -19,7 +19,8 @@ Specs and test requirements now say so, each spec edit marked "Decision 2026-10-
   - 28: recovery rows for `PAUSING`, `CANCELLING` and `ERASING`; idempotence stated as a property.
 - `docs/specs/IMPLEMENTATION_ARCHITECTURE.md` 23.2, 23.6, 23.8: matching notes.
 - `docs/strategy/TESTING_STRATEGY.md`: new INDEX-03 (queued erasure excluded from retrieval at once),
-  INDEX-04 (superseded generations retired), PER-07 (erasure is crash-safe); PER-06, the recovery
+  INDEX-04 (superseded generations retired), INDEX-05 (erasure and the coordinator do not race), PER-07
+  (erasure is crash-safe); PER-06, the recovery
   test section and the deletion note extended.
 - `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`: TST-030 and TST-031 carry the decided requirements.
 - `.agents/CONTEXT.md`: Q25 and Q26 recorded as decided; Q24 decided; Q17-Q19 deferred to their
@@ -46,8 +47,9 @@ of Q26 (`FINALIZING`, pending output without a final checkpoint, runtime install
   retrieval immediately and that recovery be idempotent. With no durable marker between "queued" and
   "cleared", startup recovery cannot tell an erasure from an ordinary `REMOVE` (a deactivation), and
   eligibility would have to be checked against the operation queue everywhere. A representation state
-  gives both at once: `ERASING` is not `ACTIVE`, so every existing eligibility check (recognition
-  revalidation, the coordinator's rebuild source) already excludes it, and recovery finds work by state.
+  gives both at once: `ERASING` is not `ACTIVE`, so the coordinator's rebuild source (which selects `ACTIVE`
+  only) already excludes it, recognition revalidation will once it resolves candidates at representation
+  level (it does not yet; see Review), and recovery finds work by state.
   It is a CHECK change on `representations`, so it needs an Alembic revision, which is also the
   populated-database, batch-mode migration that Q18 asks for. The owner approved the two-step flow; this
   marker is how I made it durable and is flagged for validation when TST-031 starts (issue below).
@@ -60,6 +62,18 @@ of Q26 (`FINALIZING`, pending output without a final checkpoint, runtime install
 - **The coordinator rule changes when TST-031 is built:** a `REMOVE` will not be `APPLIED` while a
   superseded generation of the space remains. Today only the keyless-`REMOVE` rebuild requires that. The
   keyless rebuild stays as a safety net.
+
+## Review
+
+Independent review by Codex CLI (`codex exec -s read-only`, disposable worktree): request changes,
+four findings, all checked against the code and all correct.
+
+| Finding | Resolution |
+|---|---|
+| `ERASING` is not excluded by the existing candidate revalidation: `resolve_recognition_candidates` takes identity ids and checks only `Identity.state`, so a stale index could return an `ERASING` vector for an active identity | Confirmed. My claim that every existing eligibility check already excludes `ERASING` was true only of the coordinator's rebuild source. The spec now requires revalidation to resolve each `ann_key` to its representation row (same space, `ACTIVE`, active identity), says plainly that this step is not built yet, and INDEX-03 must exercise a stale index holding the vector |
+| No fence between the coordinator and the erasure transition; `append_batch` deletes a pending `ADD` the coordinator may be settling | Partly a real bug, partly a wrong remedy. The ordering the reviewer wants already exists and is now stated: the coordinator is the sole writer and serializes passes, so an in-flight `ADD` finishes before the `REMOVE` queued by step one is claimed, and retrieval is excluded by revalidation meanwhile. **The bug is real:** `_settle` indexes `seen[operation_id]` and raises `KeyError` for an operation deleted meanwhile. Fixed in a separate PR (#43); INDEX-05 now tests the race, a second erasure, bulk forget, reactivation and merge/split |
+| "Every recovery step" and "a repeat is a no-op" overstate recovery: startup requeues every `FAILED` index operation, so a persistently failing one changes on every start | Confirmed (the requeue docstring says one fresh set of attempts per call). The claim is narrowed in the persistence, architecture and strategy text: after one completed run a second is a no-op; a condition that keeps failing externally is retried once per start, bounded, and reported as unresolved, not claimed absent |
+| The requirements omit decisive windows: a crash after the `REMOVE` is `APPLIED` but before `ERASING` -> `ERASED`; a locked superseded or quarantined file; recursive quarantine; the coordinator race | Added to PER-07 and INDEX-04, with INDEX-05 for the race. The quarantine search is recursive because quarantined generations live in a subdirectory |
 
 ## Tracking
 

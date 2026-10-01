@@ -281,7 +281,8 @@ Unresolved items need the user's decision. Do not settle them silently.
     then step two for all. A `REMOVE` is never applied while an old generation remains; quarantined
     generations have no time-based retention and are deleted when an erasure in their space finishes.
     "Securely retired" means verified file deletion, not physical erasure from SSD storage. Specs
-    updated (persistence 6.2, 23, 28; architecture 23; testing strategy INDEX-03, INDEX-04, PER-07).
+    updated (persistence 6.2, 23, 28; architecture 23; testing strategy INDEX-03, INDEX-04, INDEX-05, PER-07). Candidate revalidation must resolve each
+    `ann_key` to its representation row; today it revalidates identities only.
     **Still to build (TST-031):** the `ERASING` state (an Alembic revision, which is also the populated
     batch-mode migration question 18 needs), the erasure use case, coordinator retirement of old
     generations before a `REMOVE` is applied, recovery of `ERASING`, and the tests. The keyless-`REMOVE`
