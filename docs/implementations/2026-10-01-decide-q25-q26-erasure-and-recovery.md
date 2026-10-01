@@ -76,6 +76,8 @@ four findings, all checked against the code and all correct.
 | "Every recovery step" and "a repeat is a no-op" overstate recovery: startup requeues every `FAILED` index operation, so a persistently failing one changes on every start | Confirmed (the requeue docstring says one fresh set of attempts per call). The claim is narrowed in the persistence, architecture and strategy text: after one completed run a second is a no-op; a condition that keeps failing externally is retried once per start, bounded, and reported as unresolved, not claimed absent |
 | The requirements omit decisive windows: a crash after the `REMOVE` is `APPLIED` but before `ERASING` -> `ERASED`; a locked superseded or quarantined file; recursive quarantine; the coordinator race | Added to PER-07 and INDEX-04, with INDEX-05 for the race. The quarantine search is recursive because quarantined generations live in a subdirectory |
 
+**Re-review** (Codex again, on the updated head): two points, both valid. (1) The ordering claim in erasure item 7 was imprecise: the coordinator's lock serializes its own passes, not the erasure transaction, so an `ADD` claimed before step one can either be applied or re-read the representation as `ERASING` and do nothing. The text now says that, notes that a due batch never holds both an `ADD` and the `REMOVE` (queueing the `REMOVE` deletes the `ADD`), and INDEX-05 requires both interleavings. (2) Two docstrings in `backend/app/recovery/startup.py` still promised an unconditional no-op second run; they are qualified, and its "not handled" paragraph now says `PAUSING`/`CANCELLING` are decided and not built (issue 30).
+
 ## Tracking
 
 Every pending item is a GitHub issue so none is forgotten:
@@ -99,5 +101,5 @@ Every pending item is a GitHub issue so none is forgotten:
 
 ## Verification
 
-Documents only; no code or schema changed. `uv run ruff format --check .` and `uv run ruff check .`
-are unaffected. Every anchor of the spec edits was matched exactly once before writing.
+Documents only: the one code file touched, `backend/app/recovery/startup.py`, changed three docstrings and
+no behaviour; no schema changed. Every anchor of the spec edits was matched exactly once before writing.

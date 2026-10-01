@@ -272,7 +272,7 @@ A `REMOVE` is not applied while a superseded generation of that space remains on
 
 ### INDEX-05: Erasure and the coordinator do not race
 
-An `ADD` in flight when an erasure is queued, a second erasure of the same representation, a bulk forget that overlaps a coordinator pass, an attempted reactivation, and an identity merge or split touching an `ERASING` representation each leave the representation never retrievable, never reactivated, and the erasure convergent; settlement tolerates the superseded `ADD` having been deleted.
+An `ADD` claimed before an erasure is queued, in both interleavings (it is applied before the erasure commits, and it re-reads the representation as `ERASING` and does nothing), a second erasure of the same representation, a bulk forget that overlaps a coordinator pass, an attempted reactivation, and an identity merge or split touching an `ERASING` representation each leave the representation never retrievable, never reactivated, and the erasure convergent; settlement tolerates the superseded `ADD` having been deleted.
 
 ---
 

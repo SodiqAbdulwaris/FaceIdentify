@@ -15,14 +15,18 @@ ML worker and the scheduler. `recover_on_startup` is the recovery and index step
    every `FAILED` `IndexOperation` one fresh set of attempts (persistence §28: "pending/failed").
 5. Pending `IndexOperation`s: catch the indexes up, in bounded passes.
 
-Recovery is idempotent and safe to repeat after another crash (§28, §23.8): each step only records a
-durable repair, and a second run finds nothing left to repair. It never turns a pending run's
-partial output into library memory, and it never assumes anything in memory survived.
+Recovery is idempotent and safe to repeat after another crash (§28, §23.8): each step only records
+a durable repair, and after one completed run a second finds nothing left to repair. The exception
+is a condition that keeps failing for an external reason (a locked file, an index operation that
+keeps failing): it is retried once per start, bounded, and reported as *unresolved*, not as a
+repair. It never turns a pending run's partial output into library memory, and it never assumes
+anything in memory survived.
 
-Not handled here, and left exactly as found: a run that was `PAUSING`, `CANCELLING` or `FINALIZING`
-when the process died (what should finish or roll back needs the run lifecycle of M3: CONTEXT open
-question 26), the acceptance of a run with a final checkpoint, and the recovery of an interrupted
-runtime installation.
+Not handled here, and left exactly as found: a run or job that was `PAUSING` or `CANCELLING` when
+the process died (decided 2026-10-01, CONTEXT open question 26: `PAUSED` and `CANCELLED`; not built
+yet, GitHub issue 30), a run that was `FINALIZING` or the acceptance of a run with a final
+checkpoint (needs the run lifecycle of M3), and the recovery of an interrupted runtime
+installation.
 
 Precondition, like `recover_artifacts`: one process, no other user of the library, before workers
 start. Single-instance is the desktop shell's job (tech-stack §2).
@@ -100,8 +104,9 @@ class StartupReport:
 
     @property
     def repaired_nothing(self) -> bool:
-        """True when this run made no repair (the state a second run should reach). It says
-        nothing about whether anything is still unresolved: see `unresolved` and `clean`."""
+        """True when this run made no repair (the state a second run reaches once the first has
+        converged). It says nothing about whether anything is still unresolved, and a condition that
+        keeps failing is retried on every start: see `unresolved` and `clean`."""
         artifacts = self.artifacts
         operations = self.index_operations
         return not (
