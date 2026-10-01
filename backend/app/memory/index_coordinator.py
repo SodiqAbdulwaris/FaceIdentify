@@ -150,7 +150,16 @@ class IndexCoordinator:
             return report
 
     def validate_indexes(self) -> list[uuid.UUID]:
-        """Check the index of every ACTIVE space and rebuild any that is missing or unusable.
+        """Check the index of every ACTIVE space and rebuild any that is missing, unusable or stale.
+
+        *Stale* means a sound file whose entries differ from what SQLite says belongs in it: a key
+        missing or an extra one (a database restored from another moment, an operation that was
+        never recorded). Pending operations let the index lag SQLite legitimately, but a rebuild
+        from SQLite is then simply correct sooner, so startup does not tell the two apart. The
+        index is derived and rebuildable (INDEX-02), and an unrebuilt stale index would answer
+        recognition with entries SQLite no longer stands behind. A stale index is replaced, not
+        quarantined: it is not damaged, and its old file, which still holds every vector it was
+        built with, must not outlive the rebuild.
 
         `apply_pending` only opens the index of a space that has pending operations, so an index
         that went missing or corrupt while nothing was pending would go unnoticed until recognition
@@ -183,7 +192,27 @@ class IndexCoordinator:
                 )
                 if opened.rebuilt:
                     rebuilt.append(space_id)
+                elif self._is_stale(opened.index, space_id, ndim):
+                    RepresentationIndex.build(
+                        self.index_directory(space_id),
+                        representation_space_id=space_id,
+                        ndim=ndim,
+                        metric=metric,
+                        entries=self._active_entries(space_id, ndim, []),
+                        clock=self._clock,
+                        new_id=self._new_id,
+                    )
+                    rebuilt.append(space_id)
         return rebuilt
+
+    def _is_stale(self, index: RepresentationIndex, space_id: uuid.UUID, ndim: int) -> bool:
+        """Whether the index holds exactly the keys SQLite says belong in it."""
+        expected = 0
+        for key, _vector in self._active_entries(space_id, ndim, []):
+            if not index.contains(key):
+                return True
+            expected += 1
+        return expected != len(index)
 
     def requeue_failed_operations(self) -> list[uuid.UUID]:
         """Give every `FAILED` operation a fresh set of attempts, once.
