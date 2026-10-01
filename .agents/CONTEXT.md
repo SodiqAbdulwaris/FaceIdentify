@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (ERASING migration)_
+_Last updated: 2026-10-01 (ANN candidate revalidation)_
 
 ## Current state
 
@@ -18,7 +18,7 @@ _Last updated: 2026-10-01 (ERASING migration)_
   `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository` and `SourceRepository`; TST-031 is next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
-  #29 to #41 and #44 hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
+  #29 to #41 and #48 hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
   `docs/implementations/2026-10-01-decide-q25-q26-erasure-and-recovery.md`). When something becomes pending,
   open an issue for it.
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
@@ -292,8 +292,8 @@ Unresolved items need the user's decision. Do not settle them silently.
     then step two for all. A `REMOVE` is never applied while an old generation remains; quarantined
     generations have no time-based retention and are deleted when an erasure in their space finishes.
     "Securely retired" means verified file deletion, not physical erasure from SSD storage. Specs
-    updated (persistence 6.2, 23, 28; architecture 23; testing strategy INDEX-03, INDEX-04, INDEX-05, PER-07). Candidate revalidation must resolve each
-    `ann_key` to its representation row; today it revalidates identities only.
+    updated (persistence 6.2, 23, 28; architecture 23; testing strategy INDEX-03, INDEX-04, INDEX-05, PER-07). Candidate revalidation resolves each
+    `ann_key` to its representation row (`resolve_ann_candidates`, built; returns plain values and reads 500 keys per query; issue 44 closed).
     **Built:** the `ERASING` state (revision `0002`, which is also the populated batch-mode migration
     question 18 needed). **Still to build (TST-031):** the erasure use case, coordinator retirement of old
     generations before a `REMOVE` is applied, recovery of `ERASING`, and the tests. The keyless-`REMOVE`
@@ -309,6 +309,14 @@ Unresolved items need the user's decision. Do not settle them silently.
     (issue 34):**
     `FINALIZING` runs (revalidate and accept without redoing ML, needing `AcceptProcessingRunUseCase`), a
     run with pending output and no final checkpoint, and interrupted runtime installations.
+28. **Open (found building issue 44): `ann_key` is globally unique but allocated per space.** Persistence
+    §6.2 says `ann_key` is unique and the schema makes it unique across the whole `representations` table,
+    but §6.3 keeps one `ann_key_sequences` row per space and `allocate_ann_key` starts each at 1: two spaces
+    both allocate `1`, and activating a representation with key `1` in the second raises `IntegrityError`
+    (shown by a throwaway test). Latent: it needs a second ACTIVE space, for example after a model upgrade.
+    **Recommendation:** make uniqueness per space, `UNIQUE(representation_space_id, ann_key)`, matching one
+    index per space (revision `0003`; the migration procedure for recreating the table exists). Alternative:
+    one global sequence, which contradicts §6.3. GitHub issue 48.
 27. **Agreed provisional direction (owner, 2026-10-01), to be validated when the erasure and import use
     cases that append operations begin: how an obsolete `IndexOperation` is superseded.** Persistence
     §17 says that creating an opposite operation "must supersede/coalesce the obsolete desired state
