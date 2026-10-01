@@ -49,6 +49,7 @@ from backend.app.sources.artifact_storage import (
     RecoveryReport,
     mark_missing_managed_files,
     recover_artifacts,
+    require_library_root,
 )
 from backend.app.sources.referenced_artifacts import mark_missing_referenced_originals
 from backend.infrastructure.storage.files import ManagedFileStore
@@ -93,6 +94,7 @@ class StartupReport:
             "artifact deletions failed": len(artifacts.delete_failed),
             "workspaces not removed": len(self.workspaces.failed),
             "representations that cannot be indexed": len(operations.unindexable),
+            "superseded index files not removed": len(operations.leftover_files),
             "index operations backing off": len(operations.retrying),
             "index operations out of attempts": len(operations.failed),
         }
@@ -235,15 +237,16 @@ def recover_on_startup(
     they bound how much index catch-up startup does before it gives way to readiness, and choosing
     them would be an unmeasured threshold. Operations not reached stay `PENDING` for the
     scheduler."""
+    require_library_root(store)  # before any step reads an absent file as a lost one
     artifacts = recover_artifacts(session_factory, store, clock=clock)
     missing = mark_missing_referenced_originals(session_factory, clock=clock)
     missing_managed = mark_missing_managed_files(session_factory, store)
     interrupted = interrupt_in_flight_work(session_factory, clock=clock)
     cleanup = workspaces.remove_orphans(jobs_that_may_resume(session_factory))
-    rebuilt = coordinator.validate_indexes()
+    merged = CoordinatorReport()
+    rebuilt = coordinator.validate_indexes(merged)
     requeued = coordinator.requeue_failed_operations()
 
-    merged = CoordinatorReport()
     passes = 0
     for _ in range(max_index_passes):
         result = coordinator.apply_pending(limit=index_batch)
