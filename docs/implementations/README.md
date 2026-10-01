@@ -66,3 +66,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-09-30 | [M2: the IndexCoordinator](2026-09-30-m2-index-coordinator.md) | done; TST-028 |
 | 2026-09-30 | [M2: startup recovery](2026-09-30-m2-startup-recovery.md) | partial; TST-030 in progress |
 | 2026-10-01 | [M2: cross-storage failures](2026-10-01-m2-cross-storage-failures.md) | done; TST-029 |
+| 2026-10-01 | [M2: Job repository](2026-10-01-m2-job-repository.md) | partial; TST-022 in progress |
