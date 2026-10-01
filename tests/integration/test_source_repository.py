@@ -8,17 +8,20 @@ by the database.
 """
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from backend.app.processing.models import ProcessingRun, ProcessingRunState
 from backend.app.sources.models import Source
 from backend.app.sources.repository import LibraryCursor, SourceRepository
 from backend.infrastructure.db.engine import create_session_factory
 from tests.factories.models import ModelFactory
+from tests.fixtures.concurrency import rendezvous_before_write
 
 
 @pytest.fixture
@@ -235,3 +238,210 @@ def test_the_library_page_shows_rows_as_the_database_has_them_now(
         page = SourceRepository(session).library_page(state="ACTIVE", limit=5)
 
     assert [entry.source.display_name for entry in page.entries] == ["renamed.jpg"]
+
+
+# --- set_current_run --------------------------------------------------------------------------
+
+
+def revision_and_pointer(
+    factory: sessionmaker[Session], source_id: uuid.UUID
+) -> tuple[int, uuid.UUID | None]:
+    with factory() as session:
+        row = session.execute(
+            select(Source.revision, Source.current_processing_run_id).where(Source.id == source_id)
+        ).one()
+        return row[0], row[1]
+
+
+def test_the_current_run_is_set_to_a_completed_run_of_the_same_source(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    source = build.source()
+    run = build.run(source_id=source.id, state="COMPLETED")
+    build.session.commit()
+    later = build.clock() + timedelta(minutes=1)
+
+    with factory() as session:
+        done = SourceRepository(session).set_current_run(
+            source.id, run.id, expected_revision=1, now=later
+        )
+        session.commit()
+
+    assert done is True
+    assert revision_and_pointer(factory, source.id) == (2, run.id)
+    with factory() as session:
+        row = SourceRepository(session).get(source.id)
+        assert row is not None
+        assert row.updated_at == later
+
+
+ACCEPTABLE = {ProcessingRunState.FINALIZING, ProcessingRunState.COMPLETED}
+
+
+@pytest.mark.parametrize("state", [s.value for s in ProcessingRunState if s not in ACCEPTABLE])
+def test_a_run_that_is_neither_being_accepted_nor_accepted_cannot_be_the_current_one(
+    factory: sessionmaker[Session], build: ModelFactory, state: str
+) -> None:
+    source = build.source()
+    run = build.run(source_id=source.id, state=state)
+    build.session.commit()
+
+    with factory() as session:
+        done = SourceRepository(session).set_current_run(
+            source.id, run.id, expected_revision=1, now=build.clock()
+        )
+
+    assert done is False
+    assert revision_and_pointer(factory, source.id) == (1, None)
+
+
+def test_a_run_being_accepted_may_be_pointed_at_and_the_acceptance_order_ends_consistent(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    """Persistence §30: "set `Source.current_processing_run_id`; then mark Run ... `COMPLETED`", in
+    one transaction. The pointer is set while the run is still `FINALIZING`; at commit it names a
+    `COMPLETED` run (the caller's half of the rule)."""
+    source = build.source()
+    run = build.run(source_id=source.id, state="FINALIZING")
+    build.session.commit()
+
+    with factory() as session:
+        assert SourceRepository(session).set_current_run(
+            source.id, run.id, expected_revision=1, now=build.clock()
+        )
+        session.execute(
+            update(ProcessingRun)
+            .where(ProcessingRun.id == run.id)
+            .values(state=ProcessingRunState.COMPLETED)
+        )
+        session.commit()
+
+    with factory() as session:
+        state = session.execute(
+            select(ProcessingRun.state)
+            .join(Source, Source.current_processing_run_id == ProcessingRun.id)
+            .where(Source.id == source.id)
+        ).scalar_one()
+    assert state == "COMPLETED"
+
+
+def test_another_sources_run_cannot_be_the_current_one(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    source = build.source()
+    other = build.source()
+    foreign = build.run(source_id=other.id, state="COMPLETED")
+    build.session.commit()
+
+    with factory() as session:
+        done = SourceRepository(session).set_current_run(
+            source.id, foreign.id, expected_revision=1, now=build.clock()
+        )
+
+    assert done is False
+    assert revision_and_pointer(factory, source.id) == (1, None)
+
+
+def test_a_stale_revision_is_refused(factory: sessionmaker[Session], build: ModelFactory) -> None:
+    source = build.source()
+    run = build.run(source_id=source.id, state="COMPLETED")
+    build.session.commit()
+
+    with factory() as session:
+        done = SourceRepository(session).set_current_run(
+            source.id, run.id, expected_revision=7, now=build.clock()
+        )
+
+    assert done is False
+    assert revision_and_pointer(factory, source.id) == (1, None)
+
+
+def test_an_unknown_source_or_run_is_refused(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    source = build.source()
+    run = build.run(source_id=source.id, state="COMPLETED")
+    build.session.commit()
+
+    with factory() as session:
+        repository = SourceRepository(session)
+        no_source = repository.set_current_run(
+            build.new_id(), run.id, expected_revision=1, now=build.clock()
+        )
+        no_run = repository.set_current_run(
+            source.id, build.new_id(), expected_revision=1, now=build.clock()
+        )
+
+    assert (no_source, no_run) == (False, False)
+    assert revision_and_pointer(factory, source.id) == (1, None)
+
+
+def test_set_current_run_does_not_commit(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    source = build.source()
+    run = build.run(source_id=source.id, state="COMPLETED")
+    build.session.commit()
+
+    with factory() as session:
+        assert SourceRepository(session).set_current_run(
+            source.id, run.id, expected_revision=1, now=build.clock()
+        )
+        assert revision_and_pointer(factory, source.id) == (1, None)  # not visible elsewhere yet
+        session.rollback()
+
+    assert revision_and_pointer(factory, source.id) == (1, None)
+
+
+def test_a_run_that_stops_being_completed_meanwhile_is_not_accepted(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    """The rule is evaluated by the update itself, so a run another session changed after this one
+    last looked is refused rather than trusted from a cached read."""
+    source = build.source()
+    run = build.run(source_id=source.id, state="COMPLETED")
+    build.session.commit()
+    with factory() as session:
+        cached = session.get(type(run), run.id)  # this session believes the run is COMPLETED
+        assert cached is not None
+        assert cached.state == "COMPLETED"
+        session.commit()
+        with factory() as other:
+            row = other.get(type(run), run.id)
+            assert row is not None
+            row.state = "FAILED"
+            other.commit()
+
+        done = SourceRepository(session).set_current_run(
+            source.id, run.id, expected_revision=1, now=build.clock()
+        )
+
+    assert done is False
+
+
+def test_two_writers_with_the_same_expected_revision_one_wins(
+    sqlite_engine: Engine, factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    source = build.source()
+    runs = [build.run(source_id=source.id, state="COMPLETED") for _ in range(2)]
+    build.session.commit()
+    now = build.clock()
+
+    def attempt(run_id: uuid.UUID) -> bool:
+        with factory() as session:
+            done = SourceRepository(session).set_current_run(
+                source.id, run_id, expected_revision=1, now=now
+            )
+            session.commit()
+            return done
+
+    with (
+        rendezvous_before_write(sqlite_engine, "UPDATE sources", parties=2),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        outcomes = list(pool.map(attempt, [runs[0].id, runs[1].id]))
+
+    assert sorted(outcomes) == [False, True]
+    revision, pointer = revision_and_pointer(factory, source.id)
+    assert revision == 2  # bumped once, not twice
+    assert pointer in {runs[0].id, runs[1].id}
