@@ -4,7 +4,8 @@
 - **Milestone / tracker IDs:** M2 (TST-028, TST-022); bug fix
 - **Status:** done
 - **Commits:** [PR 43](https://github.com/SodiqAbdulwaris/FaceIdentify/pull/43): `fix(memory): settle
-  around an operation deleted while in flight`, `docs: record the settle fix`
+  around an operation deleted while in flight`, `docs: record the settle fix`, `docs: correct the settle
+  fix entry and the status date`, `docs: note the settle fix in CONTEXT`
 
 ## What changed
 
