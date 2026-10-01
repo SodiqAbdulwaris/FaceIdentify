@@ -31,6 +31,7 @@ def test_production_pragmas_are_applied(sqlite_engine: Engine) -> None:
         assert pragma("synchronous") == 1  # NORMAL
         assert pragma("busy_timeout") == 5000
         assert pragma("temp_store") == 2  # MEMORY
+        assert pragma("secure_delete") == 1
 
 
 def test_foreign_keys_are_enforced(db_session: Session) -> None:
