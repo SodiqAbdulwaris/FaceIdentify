@@ -138,7 +138,7 @@ complete: TST-011 through TST-020 all `PASSING`.
 
 ### M2 status (2026-09-30)
 
-Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 799 passed, 0 skipped, 0
+Verified locally on Windows 11 (Python 3.12.14): `uv run pytest` gives 800 passed, 0 skipped, 0
 warnings, `backend/` coverage 100%. Remote CI observed green on PR #11. Only part of M2 has been
 started.
 
