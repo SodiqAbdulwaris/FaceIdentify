@@ -161,22 +161,28 @@ class RepresentationEraser:
                     )
                     .execution_options(synchronize_session=False)
                 ).all()
-                operations += [
+                keyed = [
                     NewOperation(rep_id, space_id, IndexOperationKind.REMOVE)
                     for rep_id, space_id, ann_key in moved
                     if ann_key is not None
                 ]
+                operations += keyed
                 # An ordinary REMOVE may be in flight (claimed, applied in place, not yet settled):
                 # its in-place removal leaves the vector's bytes in the live file, and the unique
                 # pending REMOVE would make this erasure skip its own. Delete it so a fresh REMOVE
-                # (applied by a rebuild) takes its place; its late settlement is then skipped.
+                # (applied by a rebuild) takes its place; its late settlement is then skipped. A
+                # `FAILED` one goes too: it would keep this erasure from finishing until the next
+                # call requeued it. Only this chunk's ids are bound, so a huge bulk stays under
+                # SQLite's parameter limit.
                 session.execute(
                     delete(IndexOperation).where(
                         IndexOperation.representation_id.in_(
-                            [op.representation_id for op in operations]
+                            [op.representation_id for op in keyed]
                         ),
                         IndexOperation.operation == IndexOperationKind.REMOVE,
-                        IndexOperation.state == IndexOperationState.PENDING,
+                        IndexOperation.state.in_(
+                            (IndexOperationState.PENDING, IndexOperationState.FAILED)
+                        ),
                     )
                 )
             repository = IndexOperationRepository(session)
@@ -244,11 +250,10 @@ class RepresentationEraser:
             report.errors += [
                 f"{op}: {error}" for op, error in applied.retrying + applied.failed if op in ours
             ]
-        token = uuid.uuid4().hex  # unique per call, whatever `new_id` is: it is compared
         cleared: list[uuid.UUID] = []
         for space_id in spaces:
             try:
-                done, reason = self._finalize_space(space_id, token)
+                done, reason = self._finalize_space(space_id)
             except Exception as error:  # noqa: BLE001 - one space must not stop the others
                 report.blocked[space_id] = f"{type(error).__name__}: {error}"
                 continue
@@ -273,9 +278,7 @@ class RepresentationEraser:
                 )
             )
 
-    def _finalize_space(
-        self, space_id: uuid.UUID, token: str
-    ) -> tuple[list[uuid.UUID], str | None]:
+    def _finalize_space(self, space_id: uuid.UUID) -> tuple[list[uuid.UUID], str | None]:
         """Clear every `ERASING` representation of the space whose removal is done. Returns them,
         and why the others (if any) must wait for a retry."""
         directory = self._coordinator.index_directory(space_id)
@@ -302,7 +305,9 @@ class RepresentationEraser:
             now = self._clock()
             cleared: list[uuid.UUID] = []
             with self._sessions() as session:
-                AppStateRepository(session).set(WAL_TRUNCATION_OWED, token, now=now)
+                # A value of its own for every clearing commit, whatever `new_id` is: a checkpoint
+                # that ran before this commit must not clear the marker this commit sets.
+                AppStateRepository(session).set(WAL_TRUNCATION_OWED, uuid.uuid4().hex, now=now)
                 for chunk in _chunks(ready):
                     cleared += session.scalars(
                         update(Representation)
