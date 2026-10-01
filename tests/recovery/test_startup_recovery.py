@@ -283,11 +283,13 @@ def test_every_interrupted_state_is_reconciled(
     pausing = reload(factory, Job, world.pausing_job.id)
     assert (pausing.state, pausing.lease_owner, pausing.lease_expires_at) == ("PAUSED", None, None)
     assert pausing.ended_at is None  # paused work is not over
+    assert pausing.heartbeat_at is not None  # the dead worker's last sign of life is kept
     cancelling = reload(factory, Job, world.cancelling_job.id)
     assert (cancelling.state, cancelling.lease_owner, cancelling.lease_expires_at) == (
         "CANCELLED", None, None,
     )  # fmt: skip
     assert cancelling.ended_at == build.clock()
+    assert cancelling.heartbeat_at is not None
     paused_run = reload(factory, ProcessingRun, world.pausing_run.id)
     assert (paused_run.state, paused_run.revision) == ("PAUSED", 2)
     cancelled_run = reload(factory, ProcessingRun, world.cancelling_run.id)
@@ -648,6 +650,26 @@ def test_what_was_moved_is_reported_in_id_order_whatever_order_it_was_stored_in(
     assert moved.jobs_cancelled == sorted(job.id for job in cancelled_jobs)
     assert moved.runs_paused == sorted(run.id for run in paused_runs)
     assert moved.runs_cancelled == sorted(run.id for run in cancelled_runs)
+
+
+def test_a_cancelled_job_keeps_its_workspace_while_a_linked_run_is_still_live(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, workspaces: WorkspaceManager,
+    coordinator: IndexCoordinator, build: ModelFactory,
+) -> None:  # fmt: skip
+    """The job is over, but its run was RUNNING and is only INTERRUPTED now: it may be resumed in a
+    new segment and may need the scratch data ("after verifying no live run needs it", §28)."""
+    run = build.run(state="RUNNING")
+    job = build.job(state="CANCELLING", processing_run_id=run.id)
+    alone = build.job(state="CANCELLING")
+    workspaces.allocate(job.id)
+    workspaces.allocate(alone.id)
+
+    report = recover(factory, file_store, workspaces, coordinator, build)
+
+    assert reload(factory, Job, job.id).state == "CANCELLED"
+    assert reload(factory, ProcessingRun, run.id).state == "INTERRUPTED"
+    assert workspaces.existing() == [job.id]  # kept for the live run; the other one is removed
+    assert report.workspaces.removed == [alone.id]
 
 
 def test_a_run_being_paused_or_cancelled_is_moved_by_its_own_state_whatever_its_job_says(

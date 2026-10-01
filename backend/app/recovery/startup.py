@@ -239,7 +239,10 @@ def _move_jobs(
     session: Session, from_state: JobState, to_state: JobState, now: datetime
 ) -> list[uuid.UUID]:
     """Move every job in `from_state` to `to_state`, clear its lease, and end it if `to_state` is
-    a finished state."""
+    a finished state. `heartbeat_at` is kept: the worker died, so unlike `JobRepository.transition`
+    (a cooperating worker leaving a leased state) this leaves its last sign of life as evidence, as
+    for a `RUNNING` job.
+    """
     values: dict[str, Any] = {
         "state": to_state, "lease_owner": None, "lease_expires_at": None, "updated_at": now,
     }  # fmt: skip
