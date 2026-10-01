@@ -79,3 +79,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-01 | [Decide revision 0003 and the SQLite erasure policy](2026-10-01-decide-0003-and-sqlite-erasure.md) | done (documents); issues #48, #51, #52 |
 | 2026-10-01 | [M2: revision 0003](2026-10-01-m2-revision-0003.md) | done; TST-032; issues #48, #51 |
 | 2026-10-01 | [M2: SQLite erasure policy (pragma and checkpoint)](2026-10-01-m2-sqlite-erasure-policy.md) | partial; issue #52 |
+| 2026-10-01 | [M2: representation erasure, the owed-truncation marker and erasure recovery](2026-10-01-m2-representation-erasure.md) | done; TST-031 in progress |
