@@ -72,3 +72,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-01 | [Decide Q25 and Q26: erasure and recovery](2026-10-01-decide-q25-q26-erasure-and-recovery.md) | done (documents); issues #29-#41, #44 |
 | 2026-10-01 | [Fix: settling a superseded operation](2026-10-01-fix-settle-superseded-operation.md) | done; bug fix |
 | 2026-10-01 | [M2: Source repository](2026-10-01-m2-source-repository.md) | partial; TST-022 in progress |
+| 2026-10-01 | [M2: recover PAUSING and CANCELLING](2026-10-01-m2-recover-pausing-cancelling.md) | done; TST-030 in progress; issue #30 |

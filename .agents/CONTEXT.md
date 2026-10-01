@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (Source repository)_
+_Last updated: 2026-10-01 (PAUSING/CANCELLING recovery)_
 
 ## Current state
 
@@ -75,7 +75,9 @@ _Last updated: 2026-10-01 (Source repository)_
   eligibility needs an ACTIVE identity, and an erased representation's vector is guaranteed gone
   by a rebuild (open question 25). `backend/app/recovery/startup.py` is startup recovery:
   `recover_on_startup` settles artifacts and missing referenced originals (existence only), marks
-  `RUNNING` jobs, runs and segments `INTERRUPTED` and clears stale leases from any job, removes
+  `RUNNING` jobs, runs and segments `INTERRUPTED`, moves a job or run found `PAUSING` to `PAUSED` and
+  one found `CANCELLING` to `CANCELLED` (a cancelled job ends, its partial output stays private), clears
+  stale leases from any job, removes
   workspaces of finished jobs whose run is over too, marks a managed artifact whose file is gone
   `MISSING` (and refuses to run at all if the library root is not there; `reverify_managed_artifact`
   brings one back, but nothing calls it yet), validates every active space's index (a stale one is rebuilt from SQLite, not just a
@@ -291,12 +293,13 @@ Unresolved items need the user's decision. Do not settle them silently.
     rebuild in the coordinator stays as a safety net. **Not decided here:** whether SQLite itself should
     run with `secure_delete` / checkpoint after an erasure so the cleared vector does not linger in WAL or
     free pages (see the tracking issue).
-26. **Decided 2026-10-01 (owner), partly built:** startup recovery marks a job or run found `PAUSING`
+26. **Decided 2026-10-01 (owner), built for `PAUSING`/`CANCELLING`:** startup recovery marks a job or run found `PAUSING`
     `PAUSED` (nothing runs; the worker is gone) and one found `CANCELLING` `CANCELLED` (the user's intent;
     partial output stays private and is never activated). A `RUNNING` job is `INTERRUPTED`, never
     requeued. Recovery is idempotent by construction (guarded transitions), tested by a stop after each
-    step and a rerun. **Not built yet:** the `PAUSING`/`CANCELLING` transitions in
-    `backend/app/recovery/startup.py`. **Still open, for the M3 run lifecycle and the runtime installer:**
+    step and a rerun. **Built** (PR for issue 30): the `PAUSING`/`CANCELLING` transitions in
+    `backend/app/recovery/startup.py`. **Still open, for the M3 run lifecycle and the runtime installer
+    (issue 34):**
     `FINALIZING` runs (revalidate and accept without redoing ML, needing `AcceptProcessingRunUseCase`), a
     run with pending output and no final checkpoint, and interrupted runtime installations.
 27. **Agreed provisional direction (owner, 2026-10-01), to be validated when the erasure and import use
