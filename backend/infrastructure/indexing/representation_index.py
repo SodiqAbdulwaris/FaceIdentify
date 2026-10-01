@@ -395,16 +395,9 @@ class RepresentationIndex:
         """Index files and staged manifests the live manifest does not name: what an interrupted
         persist or a superseded generation leaves behind. Only this module's own plain files, by
         exact name. A stale index file still holds every vector it was built with."""
-        live = self.manifest.index_file if self.manifest is not None else None
-        return [
-            path
-            for path in self.directory.iterdir()
-            if (
-                (_INDEX_FILE.fullmatch(path.name) and path.name != live)
-                or path.name == f"{MANIFEST_NAME}.tmp"
-            )
-            and is_plain_file(path)
-        ]
+        return _unnamed_files(
+            self.directory, self.manifest.index_file if self.manifest is not None else None
+        )
 
     def remove_leftovers(self) -> None:
         """Delete `stale_files()`; a locked one is skipped and retried on the next call. Writer
@@ -415,6 +408,78 @@ class RepresentationIndex:
                 path.unlink()
 
 
+def _unnamed_files(directory: Path, live: str | None) -> list[Path]:
+    return [
+        path
+        for path in directory.iterdir()
+        if (
+            (_INDEX_FILE.fullmatch(path.name) and path.name != live)
+            or path.name == f"{MANIFEST_NAME}.tmp"
+        )
+        and is_plain_file(path)
+    ]
+
+
+def superseded_files(directory: Path) -> list[Path]:
+    """The index files and staged manifests in a space's directory that its manifest, *as it is on
+    disk now*, does not name: a fresh listing, for the check that an erasure's old generations are
+    really gone (persistence section 23). A manifest that is missing or unreadable names nothing, so
+    every index file is reported (the index is unusable and will be rebuilt)."""
+    if not is_plain_directory(directory):
+        return []
+    live: str | None = None
+    manifest = directory / MANIFEST_NAME
+    if is_plain_file(manifest):
+        with contextlib.suppress(IndexUnusableError, OSError, UnicodeDecodeError):
+            live = IndexManifest.from_json(manifest.read_text(encoding="utf-8")).index_file
+    return sorted(_unnamed_files(directory, live))
+
+
+def retire_quarantine(directory: Path) -> list[Path]:
+    """Delete the quarantined generations of a space and return what is *still there* afterwards,
+    listed again from disk (persistence section 23: a copy of an erased vector is not diagnostic
+    data, so erasure deletes them; no time-based retention).
+
+    Only this module's own files are deleted, by exact name and never through a link; a quarantine
+    folder or numbered folder that is a link, or an own-named entry that is not a plain file, cannot
+    be judged and is reported as remaining. Other files stay where they are and are not reported.
+    Emptied folders are removed. An empty result means nothing of the quarantine remains."""
+    root = directory / QUARANTINE_DIRECTORY
+    if not root.exists() and not root.is_symlink():
+        return []
+    if not is_plain_directory(root):
+        return [root]
+    for batch in sorted(root.iterdir()):
+        if not is_plain_directory(batch):
+            continue
+        for path in batch.iterdir():
+            if _is_own_name(path) and is_plain_file(path):
+                with contextlib.suppress(OSError):
+                    path.unlink()
+        with contextlib.suppress(OSError):
+            batch.rmdir()  # only when nothing is left in it
+    with contextlib.suppress(OSError):
+        root.rmdir()
+    return _quarantined(root)
+
+
+def _is_own_name(path: Path) -> bool:
+    return path.name == MANIFEST_NAME or _INDEX_FILE.fullmatch(path.name) is not None
+
+
+def _quarantined(root: Path) -> list[Path]:
+    """Own-named entries under the quarantine folder, and numbered folders that are links."""
+    if not root.exists() and not root.is_symlink():
+        return []
+    remaining: list[Path] = []
+    for batch in sorted(root.iterdir()):
+        if not is_plain_directory(batch):
+            remaining.append(batch)
+            continue
+        remaining += [path for path in sorted(batch.iterdir()) if _is_own_name(path)]
+    return remaining
+
+
 def quarantine(directory: Path) -> Path | None:
     """Move an unusable index out of the way, keeping it for diagnosis. Returns where it went, or
     None if nothing could be moved. Best effort: a file that is locked (an antivirus scan) stays
@@ -423,11 +488,7 @@ def quarantine(directory: Path) -> Path | None:
     module's own plain files are moved, and never through a link."""
     if not is_plain_directory(directory):
         return None
-    own = [
-        path
-        for path in directory.iterdir()
-        if (path.name == MANIFEST_NAME or _INDEX_FILE.fullmatch(path.name)) and is_plain_file(path)
-    ]
+    own = [path for path in directory.iterdir() if _is_own_name(path) and is_plain_file(path)]
     if not own:
         return None
     root = directory / QUARANTINE_DIRECTORY
