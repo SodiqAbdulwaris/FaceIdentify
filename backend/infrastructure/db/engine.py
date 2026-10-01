@@ -15,6 +15,7 @@ SQLITE_PRAGMAS = (
     "PRAGMA synchronous = NORMAL",
     "PRAGMA busy_timeout = 5000",
     "PRAGMA temp_store = MEMORY",
+    "PRAGMA secure_delete = ON",
 )
 
 
@@ -81,3 +82,20 @@ def create_sqlite_engine(database_path: Path) -> Engine:
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(engine, autoflush=False, expire_on_commit=False)
+
+
+def truncate_wal(engine: Engine, *, busy_timeout_ms: int = 5000) -> bool:
+    """Checkpoint the write-ahead log and truncate it to zero bytes (persistence spec §24).
+
+    `secure_delete` zeroes deleted content in the database file but not in the log, so an erasure
+    batch ends with this. It must run outside a transaction. Returns False when a reader still
+    holds an older snapshot (the checkpoint is blocked, nothing is lost); the caller must treat the
+    erasure as having outstanding cleanup and retry, never report it complete.
+    """
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.exec_driver_sql(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+        busy, _log_frames, _checkpointed = connection.exec_driver_sql(
+            "PRAGMA wal_checkpoint(TRUNCATE)"
+        ).one()
+        connection.exec_driver_sql("PRAGMA busy_timeout = 5000")
+    return bool(busy == 0)
