@@ -155,6 +155,10 @@ class RepresentationState(StrEnum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     SUPERSEDED = "SUPERSEDED"
+    # Erasure is queued: still holds its vector and key but is no longer eligible for retrieval or
+    # any index build; becomes ERASED once its REMOVE is applied and old index generations are
+    # retired (decision 2026-10-01, CONTEXT open question 25).
+    ERASING = "ERASING"
     ERASED = "ERASED"
     DELETED = "DELETED"
 

@@ -393,7 +393,7 @@ def test_spec_defined_value_sets_reject_unknown_literals(
 # The complete value sets PERSISTENCE_IMPLEMENTATION.md defines (§5-§11, §17).
 SPEC_VALUE_SETS: dict[type[StrEnum], set[str]] = {
     ObservationState: {"PENDING", "ACTIVE", "SUPERSEDED", "REJECTED", "DELETED"},
-    RepresentationState: {"PENDING", "ACTIVE", "SUPERSEDED", "ERASED", "DELETED"},
+    RepresentationState: {"PENDING", "ACTIVE", "SUPERSEDED", "ERASING", "ERASED", "DELETED"},
     IdentityState: {"PENDING", "ACTIVE", "MERGED", "SPLIT", "FORGOTTEN", "DELETED"},
     IdentityLineageKind: {"MERGED_INTO", "SPLIT_FROM"},
     PersonState: {"ACTIVE", "RECYCLED", "DELETED"},

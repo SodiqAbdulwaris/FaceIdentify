@@ -8,10 +8,14 @@ comparisons only need `target_metadata`, so they work without it.
 """
 
 import os
+from collections.abc import Collection, Mapping
 from logging.config import fileConfig
 from pathlib import Path
+from typing import Any
 
 from alembic import context
+from alembic.runtime.migration import MigrationContext, MigrationInfo
+from sqlalchemy import Connection
 
 from backend.app.models import Base
 from backend.infrastructure.db.engine import create_sqlite_engine
@@ -27,7 +31,12 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """Emit SQL to stdout without a live database connection (`alembic upgrade head --sql`)."""
+    """Emit SQL to stdout without a live database connection (`alembic upgrade head --sql`).
+
+    The script is for review: it does not contain the online procedure's `PRAGMA foreign_keys = OFF`
+    or `foreign_key_check`, so replaying it by hand against a populated database with enforcement on
+    fails where a table is recreated. Use `alembic upgrade`.
+    """
     context.configure(
         url="sqlite:///offline",
         target_metadata=target_metadata,
@@ -37,6 +46,35 @@ def run_migrations_offline() -> None:
     )
     with context.begin_transaction():
         context.run_migrations()
+
+
+def _disable_foreign_keys(connection: Connection) -> None:
+    """`PRAGMA foreign_keys` is a no-op inside a transaction, so it is issued on the driver's own
+    connection (the sqlite3 module is in autocommit mode, see `create_sqlite_engine`) while no
+    transaction is open."""
+    connection.connection.driver_connection.execute(  # type: ignore[union-attr]
+        "PRAGMA foreign_keys = OFF"
+    )
+
+
+def _require_no_foreign_key_violations(
+    ctx: MigrationContext, step: MigrationInfo, heads: Collection[Any], run_args: Mapping[str, Any]
+) -> None:
+    """The last step of SQLite's table-recreation procedure: with enforcement off, a revision
+    could leave a row pointing at nothing. Alembic calls this (`on_version_apply`) inside the
+    revision's own transaction, after its statements and the version stamp and before the commit
+    (SQLite has no transactional DDL for Alembic, so each revision is its own transaction), so a
+    violation rolls that revision back."""
+    assert ctx.connection is not None
+    violations = ctx.connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        table, rowid, parent, _ = violations[0]
+        tables = sorted({row[0] for row in violations})
+        raise RuntimeError(
+            f"{len(violations)} foreign key violation(s) in {tables}"
+            f" (first: a row of {table} with rowid {rowid} points at a missing row of {parent}); "
+            "the database may have been inconsistent before this migration"
+        )
 
 
 def run_migrations_online() -> None:
@@ -57,8 +95,19 @@ def run_migrations_online() -> None:
             # not open a transaction for DDL on its own; Alembic's `transactional_ddl` flag does
             # not change that), and test_migrations.py pins it.
             context.configure(
-                connection=connection, target_metadata=target_metadata, render_as_batch=True
+                connection=connection,
+                target_metadata=target_metadata,
+                render_as_batch=True,
+                on_version_apply=_require_no_foreign_key_violations,
             )
+            # Recreating a table that other tables reference (every batch revision does it) drops
+            # it, and with enforcement on that fails as soon as a child row exists. SQLite's own
+            # procedure: enforcement off outside the transaction, the revision, then a foreign key
+            # check before that revision commits (`on_version_apply`). A failure at any point, the
+            # check included, rolls back the revision that was running; earlier ones stay applied.
+            # This connection is private to the migration and is closed afterwards, so enforcement
+            # needs no turning back on.
+            _disable_foreign_keys(connection)
             with context.begin_transaction():
                 context.run_migrations()
     finally:

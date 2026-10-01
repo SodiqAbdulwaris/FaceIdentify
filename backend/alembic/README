@@ -13,6 +13,11 @@ The library database's path comes from the FACEIDENTIFY_DATABASE_PATH environmen
     uv run alembic downgrade base               # drop every table: DEVELOPMENT ONLY
     uv run alembic check                        # fail if the models drifted from the migrations
 
+Migrations run with foreign key enforcement off (SQLite cannot recreate a referenced table
+otherwise) and check `PRAGMA foreign_key_check` before each revision commits; each revision is its
+own transaction, so one that fails leaves the database at the revision before it. The `--sql`
+output is for review only: it has neither the foreign key pragma nor the check, so do not replay it.
+
 `downgrade base` destroys the library. Foreign keys sometimes stop it on a database that has rows
 (atomically), but whether they do is data-dependent, so never rely on that. Production only
 upgrades.
@@ -23,5 +28,6 @@ Changing a model means adding a reviewed revision:
 
 Then read the generated file: autogenerate does not detect CHECK-constraint changes, and it does
 not know about data. SQLite can only change most constraints by recreating the table, so use
-`op.batch_alter_table` (batch mode is already on in env.py). tests/integration/test_migrations.py
+`op.batch_alter_table` (batch mode is already on in env.py), passing the table as a frozen
+definition (`copy_from`, see revision 0002) so `upgrade --sql` keeps working. tests/integration/test_migrations.py
 fails if the models and the migrations disagree.
