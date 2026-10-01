@@ -17,7 +17,8 @@ order is the owner's:
    sets the durable `wal_truncation_owed` marker.
 4. *Truncate*: `truncate_wal`, outside any transaction. Only if it succeeds is the marker cleared. A
    `False` or an exception means cleanup is outstanding, and the erasure is never reported complete.
-5. *Verify*: the cleared rows are read back.
+5. *Verify*: the cleared rows are read back (a cleared row has no key left, so it cannot be
+   returned by candidate revalidation).
 
 Every step is a guarded transition, so each can be repeated: `resume` (startup recovery) queues a
 missing `REMOVE`, runs the same steps for everything still `ERASING`, and truncates the log if the
@@ -34,7 +35,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import Engine, exists, func, select, update
+from sqlalchemy import Engine, delete, exists, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -132,8 +133,13 @@ class RepresentationEraser:
     def resume(self) -> ErasureReport:
         """Startup recovery (§28): queue a missing `REMOVE` for every `ERASING` representation and
         run the remaining steps for all of them, then truncate the log if that is owed."""
-        self.queue([])
-        return self._drive(None)
+        try:
+            self.queue([])
+            return self._drive(None)
+        except Exception as error:  # noqa: BLE001 - recovery reports it; startup must go on
+            report = ErasureReport()
+            report.errors.append(f"{type(error).__name__}: {error}")
+            return report
 
     # --- step one -------------------------------------------------------------------------
 
@@ -160,9 +166,24 @@ class RepresentationEraser:
                     for rep_id, space_id, ann_key in moved
                     if ann_key is not None
                 ]
+                # An ordinary REMOVE may be in flight (claimed, applied in place, not yet settled):
+                # its in-place removal leaves the vector's bytes in the live file, and the unique
+                # pending REMOVE would make this erasure skip its own. Delete it so a fresh REMOVE
+                # (applied by a rebuild) takes its place; its late settlement is then skipped.
+                session.execute(
+                    delete(IndexOperation).where(
+                        IndexOperation.representation_id.in_(
+                            [op.representation_id for op in operations]
+                        ),
+                        IndexOperation.operation == IndexOperationKind.REMOVE,
+                        IndexOperation.state == IndexOperationState.PENDING,
+                    )
+                )
             repository = IndexOperationRepository(session)
             repository.append_batch(operations, now=now, new_id=self._new_id)
             repository.append_batch(self._missing_removes(session), now=now, new_id=self._new_id)
+            for failed in self._failed_removes(session):
+                repository.requeue(failed, now=now)  # out of attempts earlier: a fresh set
             session.commit()
 
     @staticmethod
@@ -184,6 +205,22 @@ class RepresentationEraser:
             NewOperation(rep_id, space_id, IndexOperationKind.REMOVE) for rep_id, space_id in rows
         ]
 
+    @staticmethod
+    def _failed_removes(session: Session) -> list[uuid.UUID]:
+        """`FAILED` `REMOVE`s of `ERASING` representations: the erasure is not finished, so they
+        get another set of attempts instead of waiting for the next start."""
+        return list(
+            session.scalars(
+                select(IndexOperation.id)
+                .join(Representation, Representation.id == IndexOperation.representation_id)
+                .where(
+                    IndexOperation.operation == IndexOperationKind.REMOVE,
+                    IndexOperation.state == IndexOperationState.FAILED,
+                    Representation.state == RepresentationState.ERASING,
+                )
+            )
+        )
+
     # --- steps two to five ----------------------------------------------------------------
 
     def _drive(self, scope: Sequence[uuid.UUID] | None) -> ErasureReport:
@@ -203,8 +240,11 @@ class RepresentationEraser:
             )
         if spaces and due:
             applied = self._coordinator.apply_pending(limit=due)
-            report.errors += [f"{op}: {error}" for op, error in applied.retrying + applied.failed]
-        token = self._new_id().hex
+            ours = self._erasing_operations()
+            report.errors += [
+                f"{op}: {error}" for op, error in applied.retrying + applied.failed if op in ours
+            ]
+        token = uuid.uuid4().hex  # unique per call, whatever `new_id` is: it is compared
         cleared: list[uuid.UUID] = []
         for space_id in spaces:
             try:
@@ -215,10 +255,23 @@ class RepresentationEraser:
             cleared += done
             if reason is not None:
                 report.blocked[space_id] = reason
+        # The states are read before the marker: an erasure another caller finished meanwhile
+        # sets its marker in the same transaction that makes it `ERASED`, so a representation seen
+        # `ERASED` here has its marker visible to the truncation below.
+        self._summarize(scope, cleared, report)
         self._truncate(report)
         self._verify(cleared, report)
-        self._summarize(scope, cleared, report)
         return report
+
+    def _erasing_operations(self) -> set[uuid.UUID]:
+        with self._sessions() as session:
+            return set(
+                session.scalars(
+                    select(IndexOperation.id)
+                    .join(Representation, Representation.id == IndexOperation.representation_id)
+                    .where(Representation.state == RepresentationState.ERASING)
+                )
+            )
 
     def _finalize_space(
         self, space_id: uuid.UUID, token: str
@@ -238,6 +291,7 @@ class RepresentationEraser:
             ready = [rep for rep, key in rows if key is None or rep in removed]
             reason = None
             if any(key is not None for rep, key in rows if rep in removed):
+                # (Keyed ones only: a keyless representation was never in an index.)
                 # A fresh listing, not the in-memory index: the old generations must be gone.
                 left = superseded_files(directory) + retire_quarantine(directory)
                 if left:
