@@ -73,3 +73,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-01 | [Fix: settling a superseded operation](2026-10-01-fix-settle-superseded-operation.md) | done; bug fix |
 | 2026-10-01 | [M2: Source repository](2026-10-01-m2-source-repository.md) | partial; TST-022 in progress |
 | 2026-10-01 | [M2: recover PAUSING and CANCELLING](2026-10-01-m2-recover-pausing-cancelling.md) | done; TST-030 in progress; issue #30 |
+| 2026-10-01 | [M2: the ERASING state and revision 0002](2026-10-01-m2-erasing-state-migration.md) | done; TST-032 in progress; issues #29, #35 |
