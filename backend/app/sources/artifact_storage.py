@@ -12,6 +12,7 @@ The primitives (`reserve_managed_artifact`, `mark_artifact_available`, `request_
 because filesystem work must happen *between* transactions, never inside one (§1 rule 3).
 """
 
+import stat
 import uuid
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
@@ -39,6 +40,9 @@ KIND_DIRECTORIES = {
 # "a verified failure to resolve bytes" (§4.1), and nothing references such a row.
 WRITE_NOT_COMPLETED = "WRITE_NOT_COMPLETED"
 DELETE_ERROR = "DELETE_ERROR"
+# An AVAILABLE managed artifact whose file is no longer where its key says (removed behind the
+# application's back, or a database restored from a newer state than the files).
+MANAGED_FILE_MISSING = "MANAGED_FILE_MISSING"
 
 
 class ArtifactStorageError(Exception):
@@ -440,6 +444,57 @@ class StorageScan:
     @property
     def clean(self) -> bool:
         return not (self.missing or self.orphans or self.stray_staging or self.unsafe_keys)
+
+
+def mark_missing_managed_files(
+    session_factory: sessionmaker[Session], store: ManagedFileStore
+) -> list[uuid.UUID]:
+    """Mark every AVAILABLE managed artifact whose file is gone `MISSING`, by existence alone.
+
+    IMPLEMENTATION_ARCHITECTURE.md §16.4: startup recovery "reconciles pending records, staging/temp
+    files, missing available files, and managed orphans". `MISSING` is "a verified failure to
+    resolve bytes" (persistence §4.1) and nothing else changes: the row, its hash and its references
+    stay, so a file that is restored can be verified and brought back. Reads no file, only its
+    status. A file that is present but cannot be examined, or a key that is not a valid managed key,
+    is left as it is (the consistency scan reports the latter). Returns the artifacts marked.
+    """
+    with session_factory() as session:
+        candidates = _managed_in(session, {ArtifactState.AVAILABLE})
+    gone: list[uuid.UUID] = []
+    for artifact_id, storage_key in candidates:
+        try:
+            path = store.roots.path_for(storage_key)
+        except UnsafeStorageKeyError:
+            continue
+        try:
+            present = stat.S_ISREG(path.stat().st_mode)
+        except FileNotFoundError:
+            present = False
+        except OSError:
+            continue
+        if not present:
+            gone.append(artifact_id)
+    if not gone:
+        return []
+    marked: list[uuid.UUID] = []
+    with session_factory() as session:
+        for artifact_id in gone:
+            try:
+                transition_artifact(
+                    session,
+                    artifact_id,
+                    {ArtifactState.AVAILABLE},
+                    {
+                        "state": ArtifactState.MISSING,
+                        "failure_code": MANAGED_FILE_MISSING,
+                        "failure_detail": None,
+                    },
+                )
+            except ArtifactStateError:
+                continue  # settled by something else meanwhile
+            marked.append(artifact_id)
+        session.commit()
+    return marked
 
 
 def scan_storage(session: Session, store: ManagedFileStore) -> StorageScan:
