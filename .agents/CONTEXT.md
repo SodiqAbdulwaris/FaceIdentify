@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (Identity, Occurrence and Evidence repositories)_
+_Last updated: 2026-10-02 (RuntimeCatalog and Settings repositories)_
 
 ## Current state
 
@@ -15,7 +15,7 @@ _Last updated: 2026-10-01 (Identity, Occurrence and Evidence repositories)_
   storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
   `IndexOperation`s into it (TST-028) and the cross-storage failure matrix (TST-029) are done;
   startup recovery (TST-030) is partly done (see open question 26); TST-022 (repository contract) has its
-  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository` and `EvidenceRepository`; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
+  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository`, `SettingsRepository` and `RuntimeCatalogRepository` (TST-022 is complete); TST-031's representation erasure is built (Source deletion and identity-level forget are not).
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
   #29 to #41, #48, #51 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
@@ -414,12 +414,11 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 5. ~~Storage Manager follow-ups for TST-025~~ Done: referenced imports, missing-file detection,
    relinking, temporary workspaces, recycle/restore, conservative cleanup and storage usage (see
    above).
-6. The rest of M2: TST-022 (repository contract; `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository` done, RuntimeCatalog/Settings as use cases need them), ~~TST-027 (USearch integration)~~ done, ~~TST-028
+6. The rest of M2: TST-022 (repository contract; `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository`, `SettingsRepository`, `RuntimeCatalogRepository` done; TST-022 complete), ~~TST-027 (USearch integration)~~ done, ~~TST-028
    (IndexOperation replay)~~ done, ~~TST-029 (cross-storage failure)~~ done, ~~TST-030 (startup recovery beyond
    artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion: representation erasure
    done; Source deletion, Recycle Bin cleanup and identity-level forget remain).
-7. Owner's build order (2026-10-01): the remaining repositories (issue 32: Observation/Representation, then
-   Identity/Occurrence/Evidence, then RuntimeCatalog/Settings), then lifespan wiring and process-kill tests (33),
+7. Owner's build order (2026-10-01): ~~the remaining repositories (issue 32)~~ done, then lifespan wiring and process-kill tests (33),
    the rest of Q26 (34), the downgrade policy (35, question 19), the library root (36, question 17), and the
    provisional validations Q20, Q21, Q23, Q27 (37 to 41), deriving a missing original's availability from its artifact (Q24).
    Issue 55 (block `INSERT OR REPLACE` on snapshots) stays optional and unbuilt unless the owner asks.
