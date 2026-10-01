@@ -75,3 +75,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-01 | [M2: recover PAUSING and CANCELLING](2026-10-01-m2-recover-pausing-cancelling.md) | done; TST-030 in progress; issue #30 |
 | 2026-10-01 | [M2: the ERASING state and revision 0002](2026-10-01-m2-erasing-state-migration.md) | done; TST-032 in progress; issues #29, #35 |
 | 2026-10-01 | [M2: ANN candidate revalidation](2026-10-01-m2-ann-candidate-revalidation.md) | done; issue #44; found #48 |
+| 2026-10-01 | [M2: ProcessingRun and snapshot repositories](2026-10-01-m2-processing-run-repository.md) | partial; TST-022 in progress |
