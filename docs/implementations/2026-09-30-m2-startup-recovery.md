@@ -3,10 +3,11 @@
 - **Date:** 2026-09-30
 - **Milestone / tracker IDs:** M2 (TST-030, in progress)
 - **Status:** partial (the specified recovery actions; what is left is listed below and in CONTEXT 26)
-- **Commits:** PR (number added when opened): `feat(sources): mark missing referenced originals
-  without hashing`, `feat(memory): validate every space's index`, `feat(recovery): reconcile
-  interrupted state at startup`, `test(recovery): add startup recovery tests`, `docs: record startup
-  recovery`
+- **Commits:** PR #24: `feat(sources): mark missing referenced originals without hashing`,
+  `feat(memory): validate every space's index`, `feat(recovery): reconcile interrupted state at
+  startup`, `test(recovery): add startup recovery tests`, `docs: record startup recovery`,
+  `fix(recovery): clear stale leases, requeue failures, keep live work`,
+  `docs: record the startup recovery review`
 
 ## What changed
 
@@ -24,15 +25,17 @@
      not `COMPLETED`, `FAILED` or `CANCELLED`).
   4. **Indexes**: `IndexCoordinator.validate_indexes` (new) opens every `ACTIVE` space's index and
      rebuilds one that is missing or unusable; a sound one is untouched; a deprecated space is not
-     indexed.
+     indexed. `IndexCoordinator.requeue_failed_operations` (new) gives every `FAILED`
+     `IndexOperation` one fresh set of attempts (persistence §28: "pending/failed").
   5. **Pending `IndexOperation`s**: up to `max_index_passes` passes of `apply_pending(index_batch)`,
      stopping early when a pass did nothing.
 - `backend/app/sources/referenced_artifacts.py`: `mark_missing_referenced_originals` marks an
   `AVAILABLE` referenced original whose file is gone `MISSING` by existence alone (one `stat`, no
   hashing), leaving the Source alone.
-- `StartupReport.repaired_nothing`: true when a run found nothing to repair, which is the state a
-  second run must reach.
-- Tests: `tests/recovery/test_startup_recovery.py` (37). The `recovery` marker comes from the
+- `StartupReport.repaired_nothing` (no repair was made: the state a second run must reach),
+  `unresolved` (what was tried and could not be finished, or is left for later, by name) and `clean`
+  (neither).
+- Tests: `tests/recovery/test_startup_recovery.py` (72). The `recovery` marker comes from the
   directory, as the suite's convention says.
 
 ## Why
@@ -75,8 +78,9 @@ repeat after another crash" (§28, §23.8).
 
 - `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform
   linux`: clean.
-- `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 657 passed (37 new, 0 regressions in the 620
-  before); `backend/` coverage 100%. The new file was run 5 times in a row: 37 passed each time.
+- `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q`: 692 passed (72 new, 0 regressions in the 620
+  before); `backend/` coverage 100%. The new file was run 5 times in a row before review and 5 after
+  the fixes: 0 failures.
 - Mutation checks, each reverted and confirmed byte-identical: 27 valid ones (each state filter and
   each value the interrupt writes, the lease fields, the revision bump, the finished-job states, the
   workspace live set, index validation and its active-space filter, each clause of the pass loop and
@@ -87,6 +91,28 @@ repeat after another crash" (§28, §23.8).
 - Writing the tests found that the representation factories create their own `RUNNING` runs and
   segments, which recovery correctly interrupts too; the expectations now compare with whatever is
   `RUNNING` in the database beforehand, not just the rows the test named.
+
+After the review, 18 more mutations on the new behaviour (each half of the lease predicate and of
+the lease values, both clauses of the workspace live set, the requeue's wiring, state guard,
+duplicate guard, attempt reset, due time and ordering, and the unresolved/clean terms). 13 were caught
+at once; the survivors were real gaps (a lease held with only an owner or only an expiry, an operation
+settled between choosing and writing the requeue) and are now covered. All caught.
+
+## Independent review (Codex CLI, read-only, disposable worktree): request-changes, addressed
+
+| # | Finding | Resolution |
+|---|---|---|
+| H1 | Recovery's "one process, before workers" is only documented; a second process could interrupt live work | **Not built; it is CONTEXT open question 23** (an exclusive library lock for the backend's lifetime) with its recommendation already recorded, and "invoke only through the startup coordinator before workers start" is the lifespan work, which does not exist yet. Answered on the PR, not decided here |
+| H2 | An expired lease on a job that is not `RUNNING` is never touched (§28: "expired/running Job... clear lease") | Fixed: any job still holding a lease has it cleared in the same transaction, its state left alone (what `PAUSING`/`CANCELLING` become is CONTEXT 26). Tests for each state and for an owner-only and an expiry-only lease |
+| H3 | `FAILED` index operations have no recovery path (§28: "pending/failed IndexOperation") | Fixed: `requeue_failed_operations` gives each one fresh attempts once per startup (bounded), keeps the diagnostics until the next outcome, skips one that would duplicate a pending twin, and requeues only the newest of failed twins. Tests for each |
+| H4 | A workspace of a finished job is deleted even if its linked run is live | Fixed: a job's workspace is also kept while its linked run is in a non-terminal state (contradictory state is recoverable inconsistency, not permission to delete). Test |
+| M1 | `SQLITE_BUSY` is not retried around the interrupt transaction | **Not built; CONTEXT open question 20** (`BEGIN IMMEDIATE` plus a whole-transaction retry). The transaction's first statement is already a write, so it queues for the busy timeout instead of failing at once on a stale snapshot. A test injects a fault at the second statement and proves the first is rolled back too |
+| M2 | `repaired_nothing` can be true while work is unresolved | Fixed: the predicate keeps its meaning (documented), and `unresolved` and `clean` are added, naming skipped artifacts, left staging files, failed deletions, workspaces that could not be removed, unindexable representations, and operations backing off or out of attempts (foreign entries under `temp/jobs/` are not recovery's work and are not listed). Tests for each field |
+| M3 | Tests do not cover linked Job/Run/Segment combinations, failures inside a step, expired leases or failed operations | Added: a test of contradictory combinations (each row judged by its own state), the rollback test above, a crash inside the workspace removal, expired leases and failed operations. The process-level kill-and-restart tests need a backend process and remain open |
+| Rule | The 644-line test commit has no rationale | Not split, history not rewritten: one new test module; explained on the PR |
+
+The reviewer confirmed the step order, the single guarded transaction and the existence-only
+handling of referenced originals, and did not run the tests.
 
 ## Open issues / follow-ups
 
