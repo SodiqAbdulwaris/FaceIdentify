@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-02 (RuntimeCatalog and Settings repositories)_
+_Last updated: 2026-10-02 (the downgrade guard)_
 
 ## Current state
 
@@ -230,11 +230,11 @@ Unresolved items need the user's decision. Do not settle them silently.
     the README marks it development-only. Decide whether to leave it, or refuse to downgrade a
     non-empty database unless explicitly forced.
     **2026-10-01 (owner):** deferred to the second Alembic revision (TST-032).
-    **Decided 2026-10-01 (owner), to be built with issue 35 (not built yet):** a downgrade that could destroy information
+    **Decided 2026-10-01 (owner) and built (issue 35):** a downgrade that could destroy information
     is refused on a *populated* library by default (populated = user/domain data, not merely a row in `app_state` or
     migration bookkeeping), with an explicit development-only override (`FACEIDENTIFY_ALLOW_DESTRUCTIVE_DOWNGRADE=1`) that
     the application never sets; an empty library downgrades normally; a refused downgrade leaves the database unchanged;
-    production recovery moves forward with corrective migrations, never by schema rollback.
+    production recovery moves forward with corrective migrations, never by schema rollback. Built as `backend/infrastructure/db/downgrade_guard.py`: every revision's `downgrade()` starts with the guard (a test enforces it), 'populated' excludes the internal and re-creatable metadata tables listed there (the agent's reading of the owner's definition; a table not listed counts as data), and the override is exactly `=1`.
 20. **Open: `SQLITE_BUSY` handling does not exist yet.** Persistence §25 requires the application
     to "retry a small bounded number of times for known transient write conflicts, and return a
     diagnostic/retryable error rather than spin forever". Nothing does. What
