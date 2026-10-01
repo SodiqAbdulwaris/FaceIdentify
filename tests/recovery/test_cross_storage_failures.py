@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from backend.app.memory.erasure import RepresentationEraser
 from backend.app.memory.index_coordinator import IndexCoordinator, RetryPolicy
 from backend.app.memory.models import IndexOperation, Representation, RepresentationSpace
 from backend.app.recovery.startup import StartupReport, recover_on_startup
@@ -77,9 +78,13 @@ class Library:
 
     def recover(self) -> StartupReport:
         self.commit()
+        eraser = RepresentationEraser(
+            self.factory, self.engine, self.coordinator, clock=self.build.clock,
+            new_id=self.build.new_id, checkpoint_timeout_ms=0,
+        )  # fmt: skip
         return recover_on_startup(
-            self.factory, self.store, self.workspaces, self.coordinator, clock=self.build.clock,
-            index_batch=50, max_index_passes=5,
+            self.factory, self.store, self.workspaces, self.coordinator, eraser,
+            clock=self.build.clock, index_batch=50, max_index_passes=5,
         )  # fmt: skip
 
     def artifact(self, artifact_id: uuid.UUID) -> Artifact:

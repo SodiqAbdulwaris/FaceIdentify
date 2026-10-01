@@ -16,7 +16,10 @@ ML worker and the scheduler. `recover_on_startup` is the recovery and index step
 3. Workspaces: remove the temp workspace of every job that is over; keep those a job may resume.
 4. Indexes: validate every active space's index and rebuild what is missing or unusable, and give
    every `FAILED` `IndexOperation` one fresh set of attempts (persistence §28: "pending/failed").
-5. Pending `IndexOperation`s: catch the indexes up, in bounded passes.
+5. Erasures: every `ERASING` representation gets its missing `REMOVE`, is finished when its
+   conditions hold (`RepresentationEraser.resume`), and an owed truncation of the write-ahead log is
+   done; whatever cannot finish is reported as unresolved (persistence §6.2, §28).
+6. Pending `IndexOperation`s: catch the indexes up, in bounded passes.
 
 Recovery is idempotent and safe to repeat after another crash (§28, §23.8): each step only records
 a durable repair, and after one completed run a second finds nothing left to repair. The exception
@@ -44,6 +47,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.jobs.models import Job, JobState
 from backend.app.jobs.repository import FINISHED_JOB_STATES
+from backend.app.memory.erasure import ErasureReport, RepresentationEraser
 from backend.app.memory.index_coordinator import CoordinatorReport, IndexCoordinator
 from backend.app.processing.models import (
     TRANSIENT_RUN_STATES,
@@ -90,6 +94,7 @@ class StartupReport:
     requeued_operations: list[uuid.UUID]
     index_operations: CoordinatorReport
     index_passes: int
+    erasure: ErasureReport
 
     @property
     def unresolved(self) -> list[str]:
@@ -107,6 +112,7 @@ class StartupReport:
             "superseded index files not removed": len(operations.leftover_files),
             "index operations backing off": len(operations.retrying),
             "index operations out of attempts": len(operations.failed),
+            "erasure steps outstanding": len(self.erasure.outstanding_cleanup),
         }
         return [f"{count} {what}" for what, count in counts.items() if count]
 
@@ -141,6 +147,8 @@ class StartupReport:
             or operations.failed
             or operations.rebuilt_spaces
             or operations.purged_spaces
+            or self.erasure.erased
+            or self.erasure.truncated
         )
 
     @property
@@ -296,6 +304,7 @@ def recover_on_startup(
     store: ManagedFileStore,
     workspaces: WorkspaceManager,
     coordinator: IndexCoordinator,
+    eraser: RepresentationEraser,
     *,
     clock: Callable[[], datetime],
     index_batch: int,
@@ -314,6 +323,7 @@ def recover_on_startup(
     merged = CoordinatorReport()
     rebuilt = coordinator.validate_indexes(merged)
     requeued = coordinator.requeue_failed_operations()
+    erasure = eraser.resume()  # finish every erasure a crash interrupted, and an owed truncation
 
     passes = 0
     for _ in range(max_index_passes):
@@ -328,5 +338,14 @@ def recover_on_startup(
         if not (result.applied or result.retrying or result.failed):
             break  # nothing was due: the queue is caught up (or every remaining one is backing off)
     return StartupReport(
-        artifacts, missing, missing_managed, interrupted, cleanup, rebuilt, requeued, merged, passes
+        artifacts,
+        missing,
+        missing_managed,
+        interrupted,
+        cleanup,
+        rebuilt,
+        requeued,
+        merged,
+        passes,
+        erasure,
     )
