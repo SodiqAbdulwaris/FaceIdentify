@@ -334,8 +334,7 @@ def test_runs_with_identical_settings_each_keep_their_own_snapshot(
     factory: sessionmaker[Session], build: ModelFactory
 ) -> None:
     """§13 chooses one snapshot per run for unambiguous provenance: the fingerprint is not unique,
-    so identical settings do not collide. (The database does not stop two runs from *sharing* one
-    snapshot; that rests on the use cases, GitHub issue 51.)"""
+    so identical settings do not collide."""
     source = build.source()
     build.session.commit()
 
@@ -360,6 +359,28 @@ def test_runs_with_identical_settings_each_keep_their_own_snapshot(
     assert snapshots[0].id != snapshots[1].id
     assert snapshots[0].fingerprint_sha256 == snapshots[1].fingerprint_sha256
     assert [run.configuration_snapshot_id for run in runs] == [snap.id for snap in snapshots]
+
+
+def test_a_second_run_cannot_reuse_a_snapshot_a_run_already_uses(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    """One snapshot per run is a database guarantee (`uq_processing_runs_..._snapshot_id`)."""
+    source = build.source()
+    snapshot = build.snapshot()
+    build.session.commit()
+
+    def run() -> ProcessingRun:
+        return ProcessingRun(
+            id=build.new_id(), source_id=source.id, configuration_snapshot_id=snapshot.id,
+            state="PENDING", requested_at=build.clock(), created_at=build.clock(),
+            updated_at=build.clock(),
+        )  # fmt: skip
+
+    with factory() as session:
+        repository = ProcessingRunRepository(session)
+        repository.add(run())
+        with pytest.raises(IntegrityError):
+            repository.add(run())
 
 
 @pytest.mark.parametrize(

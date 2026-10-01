@@ -12,11 +12,12 @@ returns the row fresh. A transaction that has already read cannot do that: if an
 in between it fails at once with `SQLITE_BUSY_SNAPSHOT` (CONTEXT open question 20), which is why the
 lock comes first.
 
-A snapshot is meant to be immutable and one per run (§13): nothing here updates or deletes one,
-and the fingerprint is deliberately not unique, so two runs started with identical settings each
-keep their own snapshot. The *database* enforces neither (it would take a trigger and a unique
-constraint, a schema change: GitHub issue 51), so both rest on the use cases creating one snapshot
-for each run and never touching it afterwards.
+A snapshot is immutable and one per run (§13): nothing here updates or deletes one. One per run is
+enforced by the database (`UNIQUE(processing_runs.configuration_snapshot_id)`: a second run cannot
+reference a snapshot a run already uses), and the fingerprint is deliberately not unique, so two
+runs started with identical settings each keep their own snapshot. Immutability is not yet enforced
+by the database (SQLite allows an `UPDATE`); two triggers are decided for revision `0003` (GitHub
+issue 51), and until then it rests on nothing calling an update.
 """
 
 import hashlib
