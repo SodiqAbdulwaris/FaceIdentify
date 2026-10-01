@@ -20,6 +20,7 @@ from sqlalchemy import Engine, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.jobs.models import Job
+from backend.app.memory.erasure import ErasureReport, RepresentationEraser
 from backend.app.memory.index_coordinator import (
     CoordinatorReport,
     IndexCoordinator,
@@ -40,6 +41,7 @@ from backend.app.recovery.startup import (
     jobs_that_may_resume,
     recover_on_startup,
 )
+from backend.app.settings.app_state import WAL_TRUNCATION_OWED, AppStateRepository
 from backend.app.sources import artifact_storage, referenced_artifacts
 from backend.app.sources.artifact_storage import RecoveryReport, reserve_managed_artifact
 from backend.app.sources.models import Artifact, Source
@@ -89,8 +91,12 @@ def recover(
     max_index_passes: int = 5,
 ) -> StartupReport:  # fmt: skip
     build.session.commit()
+    eraser = RepresentationEraser(
+        factory, factory.kw["bind"], coordinator, clock=build.clock, new_id=build.new_id,
+        checkpoint_timeout_ms=0,
+    )  # fmt: skip
     return recover_on_startup(
-        factory, file_store, workspaces, coordinator, clock=build.clock,
+        factory, file_store, workspaces, coordinator, eraser, clock=build.clock,
         index_batch=index_batch, max_index_passes=max_index_passes,
     )  # fmt: skip
 
@@ -482,6 +488,7 @@ def clean_report() -> StartupReport:
         [],
         CoordinatorReport(),
         1,
+        ErasureReport(),
     )
 
 
@@ -515,6 +522,8 @@ def test_a_report_with_no_repairs_says_so() -> None:
         lambda r: r.index_operations.failed.append((uuid.uuid4(), "x")),
         lambda r: r.index_operations.rebuilt_spaces.append(uuid.uuid4()),
         lambda r: r.index_operations.purged_spaces.append(uuid.uuid4()),
+        lambda r: r.erasure.erased.append(uuid.uuid4()),
+        lambda r: setattr(r.erasure, "truncated", True),
     ],
     ids=[
         "artifact-finalized", "artifact-not-completed", "artifact-deleted",
@@ -522,7 +531,7 @@ def test_a_report_with_no_repairs_says_so() -> None:
         "job", "lease-cleared", "operation-requeued", "run", "segment", "job-paused",
         "job-cancelled", "run-paused", "run-cancelled", "workspace",
         "index-rebuilt", "operation-applied", "operation-retrying", "operation-failed",
-        "coordinator-rebuilt", "coordinator-purged",
+        "coordinator-rebuilt", "coordinator-purged", "erasure-finished", "log-truncated",
     ],
 )  # fmt: skip
 def test_any_repair_means_the_run_was_not_clean(repair: Callable[[StartupReport], object]) -> None:
@@ -544,8 +553,12 @@ def test_any_repair_means_the_run_was_not_clean(repair: Callable[[StartupReport]
         (lambda r: r.index_operations.unindexable.append(uuid.uuid4()), "cannot be indexed"),
         (lambda r: r.index_operations.retrying.append((uuid.uuid4(), "x")), "backing off"),
         (lambda r: r.index_operations.failed.append((uuid.uuid4(), "x")), "out of attempts"),
+        (lambda r: r.erasure.pending.append(uuid.uuid4()), "erasure steps outstanding"),
     ],
-    ids=["skipped", "staging", "delete-failed", "workspace", "unindexable", "retrying", "failed"],
+    ids=[
+        "skipped", "staging", "delete-failed", "workspace", "unindexable", "retrying", "failed",
+        "erasure",
+    ],
 )  # fmt: skip
 def test_unresolved_work_means_the_run_is_not_clean(
     unresolved: Callable[[StartupReport], object], what: str
@@ -1091,3 +1104,89 @@ def test_the_recovery_order_is_artifacts_work_workspaces_then_indexes(
 
     assert calls[:4] == ["artifacts", "work", "workspaces", "validate"]
     assert set(calls[4:]) == {"catch-up"}
+
+
+# --- erasures a crash interrupted (persistence §6.2, §25, §28; TESTING_STRATEGY PER-07, PER-08) --
+
+
+def test_startup_finishes_an_erasure_that_was_queued_and_nothing_else(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, workspaces: WorkspaceManager,
+    coordinator: IndexCoordinator, build: ModelFactory, sqlite_engine: Engine,
+) -> None:  # fmt: skip
+    space = build.representation_space(dimension=NDIM)
+    victim, survivor = active(build, space, 1), active(build, space, 2)
+    for rep in (victim, survivor):
+        build.index_operation(rep, operation="ADD")
+    recover(factory, file_store, workspaces, coordinator, build)  # both are in the index
+    assert open_index(coordinator, space).contains(1)
+    with factory() as session:  # step one of an erasure committed, then the process died
+        RepresentationEraser(
+            factory, sqlite_engine, coordinator, clock=build.clock, new_id=build.new_id
+        ).queue([victim.id])
+        session.commit()
+    assert reload(factory, Representation, victim.id).state == "ERASING"
+
+    report = recover(factory, file_store, workspaces, coordinator, build)
+
+    assert report.erasure.erased == [victim.id]
+    assert report.unresolved == []
+    erased = reload(factory, Representation, victim.id)
+    assert (erased.state, erased.vector, erased.ann_key) == ("ERASED", None, None)
+    assert not open_index(coordinator, space).contains(1)
+    assert open_index(coordinator, space).contains(2)
+    assert reload(factory, Representation, survivor.id).state == "ACTIVE"
+    with factory() as session:
+        assert AppStateRepository(session).get(WAL_TRUNCATION_OWED) is None
+
+    again = recover(factory, file_store, workspaces, coordinator, build)
+
+    assert again.erasure.erased == []  # nothing left to repair
+    assert not again.erasure.truncated
+
+
+def test_startup_truncates_a_log_that_an_earlier_erasure_left_owed(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, workspaces: WorkspaceManager,
+    coordinator: IndexCoordinator, build: ModelFactory,
+) -> None:  # fmt: skip
+    with factory() as session:  # ERASED was committed, then the process died before the checkpoint
+        AppStateRepository(session).set(WAL_TRUNCATION_OWED, "token", now=build.clock())
+        session.commit()
+
+    report = recover(factory, file_store, workspaces, coordinator, build)
+
+    assert report.erasure.truncated
+    assert not report.repaired_nothing
+    with factory() as session:
+        assert AppStateRepository(session).get(WAL_TRUNCATION_OWED) is None
+    assert recover(factory, file_store, workspaces, coordinator, build).repaired_nothing
+
+
+def test_an_erasure_that_cannot_finish_is_reported_unresolved_not_clean(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, workspaces: WorkspaceManager,
+    coordinator: IndexCoordinator, build: ModelFactory, sqlite_engine: Engine,
+) -> None:  # fmt: skip
+    space = build.representation_space(dimension=NDIM)
+    victim = active(build, space, 1)
+    build.index_operation(victim, operation="ADD")
+    recover(factory, file_store, workspaces, coordinator, build)
+    quarantined = coordinator.index_directory(space.id) / "quarantine" / "1"
+    quarantined.mkdir(parents=True)
+    copy = quarantined / f"index.{uuid.UUID(int=9).hex}.usearch"
+    copy.write_bytes(b"a copy of an index")
+    RepresentationEraser(
+        factory, sqlite_engine, coordinator, clock=build.clock, new_id=build.new_id
+    ).queue([victim.id])
+
+    with copy.open("rb"):  # an open handle: Windows refuses to delete the file
+        report = recover(factory, file_store, workspaces, coordinator, build)
+
+        assert report.erasure.pending == [victim.id]
+        assert report.unresolved == [
+            "2 erasure steps outstanding"
+        ]  # the blocked space, the representation
+        assert not report.clean
+        assert reload(factory, Representation, victim.id).state == "ERASING"
+
+    assert recover(factory, file_store, workspaces, coordinator, build).erasure.erased == [
+        victim.id
+    ]
