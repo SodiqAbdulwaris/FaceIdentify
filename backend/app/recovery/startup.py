@@ -10,6 +10,9 @@ ML worker and the scheduler. `recover_on_startup` is the recovery and index step
 2. In-flight work: a `RUNNING` job, processing run or execution segment belongs to a process that
    no longer exists, so it becomes `INTERRUPTED` and the job's lease is cleared (§23.2: "Interrupted
    active runs/segments become `INTERRUPTED`"; resuming creates new work, it does not reopen this).
+   A job or run that was `PAUSING` becomes `PAUSED` (nothing runs; the worker pausing it is gone)
+   and one that was `CANCELLING` becomes `CANCELLED` (the user's intent; its partial output stays
+   private), decided 2026-10-01 (CONTEXT open question 26).
 3. Workspaces: remove the temp workspace of every job that is over; keep those a job may resume.
 4. Indexes: validate every active space's index and rebuild what is missing or unusable, and give
    every `FAILED` `IndexOperation` one fresh set of attempts (persistence §28: "pending/failed").
@@ -22,11 +25,9 @@ keeps failing): it is retried once per start, bounded, and reported as *unresolv
 repair. It never turns a pending run's partial output into library memory, and it never assumes
 anything in memory survived.
 
-Not handled here, and left exactly as found: a run or job that was `PAUSING` or `CANCELLING` when
-the process died (decided 2026-10-01, CONTEXT open question 26: `PAUSED` and `CANCELLED`; not built
-yet, GitHub issue 30), a run that was `FINALIZING` or the acceptance of a run with a final
-checkpoint (needs the run lifecycle of M3), and the recovery of an interrupted runtime
-installation.
+Not handled here, and left exactly as found: a run that was `FINALIZING` or the acceptance of a run
+with a final checkpoint (needs the run lifecycle of M3), and the recovery of an interrupted runtime
+installation (GitHub issue 34).
 
 Precondition, like `recover_artifacts`: one process, no other user of the library, before workers
 start. Single-instance is the desktop shell's job (tech-stack §2).
@@ -36,6 +37,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -69,6 +71,12 @@ class InterruptedWork:
     # Jobs not `RUNNING` that still held a lease (and so are not in `jobs`): their state is
     # untouched, only the lease nobody can hold any more is cleared.
     leases_cleared: list[uuid.UUID] = field(default_factory=list)
+    # Work that was being paused or cancelled when the process died: `PAUSING` -> `PAUSED` and
+    # `CANCELLING` -> `CANCELLED`, for jobs and for runs.
+    jobs_paused: list[uuid.UUID] = field(default_factory=list)
+    jobs_cancelled: list[uuid.UUID] = field(default_factory=list)
+    runs_paused: list[uuid.UUID] = field(default_factory=list)
+    runs_cancelled: list[uuid.UUID] = field(default_factory=list)
 
 
 @dataclass
@@ -121,6 +129,10 @@ class StartupReport:
             or self.interrupted.runs
             or self.interrupted.segments
             or self.interrupted.leases_cleared
+            or self.interrupted.jobs_paused
+            or self.interrupted.jobs_cancelled
+            or self.interrupted.runs_paused
+            or self.interrupted.runs_cancelled
             or self.workspaces.removed
             or self.indexes_rebuilt
             or self.requeued_operations
@@ -140,12 +152,16 @@ class StartupReport:
 def interrupt_in_flight_work(
     session_factory: sessionmaker[Session], *, clock: Callable[[], datetime]
 ) -> InterruptedWork:
-    """Mark every `RUNNING` job, run and segment `INTERRUPTED`, in one transaction.
+    """Mark every `RUNNING` job, run and segment `INTERRUPTED`, a `PAUSING` job or run `PAUSED` and
+    a `CANCELLING` one `CANCELLED`, in one transaction.
 
     Each is a guarded `UPDATE ... RETURNING`, so a repeated run matches nothing and the first
     statement of the transaction is a write. A job's lease is cleared, since nobody holds it now:
-    for a `RUNNING` job as it is interrupted, and for any *other* job still holding one (an expired
-    or stale lease, persistence §28) with its state left alone.
+    for a `RUNNING`, `PAUSING` or `CANCELLING` job as it moves on, and for any *other* job still
+    holding one (an expired or stale lease, persistence §28) with its state left alone. A cancelled
+    job gets `ended_at`. A `PAUSING` or `CANCELLING` run's partial output is not touched: it stays
+    private and is never activated by recovery (§28), and a paused one can be resumed in a new
+    segment. The decision is the owner's (2026-10-01, CONTEXT open question 26).
     A segment ends at recovery time with no `ended_reason`: nothing recorded why it stopped, and the
     closest reasons (`WORKER_CRASH`, `SHUTDOWN`) would claim a cause that is not known.
     """
@@ -193,6 +209,14 @@ def interrupt_in_flight_work(
             .scalars()
             .all()
         )
+        jobs_paused = _move_jobs(session, JobState.PAUSING, JobState.PAUSED, now)
+        jobs_cancelled = _move_jobs(session, JobState.CANCELLING, JobState.CANCELLED, now)
+        runs_paused = _move_runs(
+            session, ProcessingRunState.PAUSING, ProcessingRunState.PAUSED, now
+        )
+        runs_cancelled = _move_runs(
+            session, ProcessingRunState.CANCELLING, ProcessingRunState.CANCELLED, now
+        )
         leased = (
             session.execute(
                 update(Job)
@@ -205,7 +229,45 @@ def interrupt_in_flight_work(
             .all()
         )
         session.commit()
-    return InterruptedWork(sorted(jobs), sorted(runs), sorted(segments), sorted(leased))
+    return InterruptedWork(
+        sorted(jobs), sorted(runs), sorted(segments), sorted(leased),
+        sorted(jobs_paused), sorted(jobs_cancelled), sorted(runs_paused), sorted(runs_cancelled),
+    )  # fmt: skip
+
+
+def _move_jobs(
+    session: Session, from_state: JobState, to_state: JobState, now: datetime
+) -> list[uuid.UUID]:
+    """Move every job in `from_state` to `to_state`, clear its lease, and end it if `to_state` is
+    a finished state."""
+    values: dict[str, Any] = {
+        "state": to_state, "lease_owner": None, "lease_expires_at": None, "updated_at": now,
+    }  # fmt: skip
+    if to_state in FINISHED_JOB_STATES:
+        values["ended_at"] = now
+    return list(
+        session.execute(
+            update(Job)
+            .where(Job.state == from_state)
+            .values(**values)
+            .returning(Job.id)
+            .execution_options(synchronize_session=False)
+        ).scalars()
+    )
+
+
+def _move_runs(
+    session: Session, from_state: ProcessingRunState, to_state: ProcessingRunState, now: datetime
+) -> list[uuid.UUID]:
+    return list(
+        session.execute(
+            update(ProcessingRun)
+            .where(ProcessingRun.state == from_state)
+            .values(state=to_state, revision=ProcessingRun.revision + 1, updated_at=now)
+            .returning(ProcessingRun.id)
+            .execution_options(synchronize_session=False)
+        ).scalars()
+    )
 
 
 def jobs_that_may_resume(session_factory: sessionmaker[Session]) -> set[uuid.UUID]:
