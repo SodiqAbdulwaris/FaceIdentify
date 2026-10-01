@@ -19,6 +19,7 @@ from backend.app.processing.models import ExecutionSegment, ProcessingCheckpoint
 from backend.app.processing.repository import CheckpointRepository, SegmentRepository
 from backend.infrastructure.db.engine import create_session_factory
 from tests.factories.models import ModelFactory
+from tests.fixtures.concurrency import rendezvous_before_write
 
 
 @pytest.fixture
@@ -162,7 +163,7 @@ def test_list_for_run_is_in_order_and_only_that_runs(
 
 
 def test_two_writers_starting_a_segment_at_once_get_one_segment_and_one_refusal(
-    factory: sessionmaker[Session], build: ModelFactory
+    sqlite_engine: Engine, factory: sessionmaker[Session], build: ModelFactory
 ) -> None:
     run = build.run()
     build.session.commit()
@@ -181,7 +182,10 @@ def test_two_writers_starting_a_segment_at_once_get_one_segment_and_one_refusal(
                 return False
             return True
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with (
+        rendezvous_before_write(sqlite_engine, "INSERT INTO execution_segments", parties=2),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
         outcomes = list(pool.map(attempt, [build.new_id(), build.new_id()]))
 
     assert sorted(outcomes) == [False, True]
@@ -232,22 +236,29 @@ def test_a_checkpoint_may_name_the_segment_that_wrote_it(
 
 
 def test_concurrent_checkpoint_writers_never_share_an_ordinal(
-    factory: sessionmaker[Session], build: ModelFactory
+    sqlite_engine: Engine, factory: sessionmaker[Session], build: ModelFactory
 ) -> None:
     run = build.run()
     build.session.commit()
     now = build.clock()
 
-    def write(_: int) -> None:
-        with factory() as session:
-            CheckpointRepository(session).append(
-                run.id, checkpoint_id=uuid.uuid4(), segment_id=None, kind="INTERMEDIATE",
-                payload_schema_version=1, payload={}, now=now,
-            )  # fmt: skip
-            session.commit()
+    ids = iter([build.new_id() for _ in range(16)])
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        list(pool.map(write, range(16)))
+    def write(batch: list[uuid.UUID]) -> None:
+        for checkpoint_id in batch:
+            with factory() as session:
+                CheckpointRepository(session).append(
+                    run.id, checkpoint_id=checkpoint_id, segment_id=None, kind="INTERMEDIATE",
+                    payload_schema_version=1, payload={}, now=now,
+                )  # fmt: skip
+                session.commit()
+
+    batches = [[next(ids) for _ in range(4)] for _ in range(4)]
+    with (
+        rendezvous_before_write(sqlite_engine, "INSERT INTO processing_checkpoints", parties=4),
+        ThreadPoolExecutor(max_workers=4) as pool,
+    ):
+        list(pool.map(write, batches))
 
     with factory() as session:
         ordinals = session.scalars(
@@ -376,7 +387,7 @@ def test_get_returns_the_row_as_the_database_has_it_now(
         assert (refreshed_segment.state, refreshed_checkpoint.state) == ("FAILED", "INVALIDATED")
 
 
-def test_list_for_run_orders_by_ordinal_not_by_insertion(
+def test_list_for_run_returns_ordinal_order_when_it_differs_from_insertion_order(
     factory: sessionmaker[Session], build: ModelFactory
 ) -> None:
     run = build.run()

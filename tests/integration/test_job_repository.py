@@ -18,6 +18,7 @@ from backend.app.jobs.models import Job
 from backend.app.jobs.repository import ClaimedJob, JobRepository
 from backend.infrastructure.db.engine import create_session_factory
 from tests.factories.models import ModelFactory
+from tests.fixtures.concurrency import rendezvous_before_write
 
 LEASE = timedelta(minutes=5)
 
@@ -222,7 +223,7 @@ def test_a_stale_cached_job_cannot_be_claimed_twice(
 
 
 def test_concurrent_workers_never_share_a_job(
-    factory: sessionmaker[Session], build: ModelFactory
+    sqlite_engine: Engine, factory: sessionmaker[Session], build: ModelFactory
 ) -> None:
     total = 24
     ids = {build.job().id for _ in range(total)}
@@ -239,7 +240,12 @@ def test_concurrent_workers_never_share_a_job(
                 return mine
             mine.append(claimed.id)
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    # Every worker is held at its first claim until all four have arrived, so a claim that reads
+    # before it writes has all of them read the same job first.
+    with (
+        rendezvous_before_write(sqlite_engine, "UPDATE jobs", parties=4),
+        ThreadPoolExecutor(max_workers=4) as pool,
+    ):
         results = list(pool.map(worker, [f"w{n}" for n in range(4)]))
 
     claimed_ids = [job_id for mine in results for job_id in mine]
