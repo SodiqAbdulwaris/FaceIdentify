@@ -1588,8 +1588,10 @@ validated. The previous active package remains usable.
 Running recovery more than once must not compound damage or duplicate
 state.
 
-> **Decision 2026-10-01:** every recovery step is a guarded transition from a named state, so
-> a repeat is a no-op and a crash between steps followed by a rerun reaches the same end state.
+> **Decision 2026-10-01:** each repair is a guarded transition from a named state, so after one
+> completed run a repeat finds nothing to repair and a crash between steps followed by a rerun reaches
+> the same end state. A condition that keeps failing externally is retried once per start and
+> reported as unresolved, not as a repair (PERSISTENCE_IMPLEMENTATION.md section 28).
 
 ------------------------------------------------------------------------
 

@@ -224,11 +224,11 @@ Deleting one source or identity must not inadvertently destroy unrelated or shar
 
 ### PER-06: Recovery idempotence
 
-Running recovery repeatedly must not duplicate state or compound damage. A second run reports no repair and leaves the database and files unchanged, including for each step of an erasure and for `PAUSING`/`CANCELLING` work.
+Running recovery repeatedly must not duplicate state or compound damage. After one completed run a second reports no repair and leaves the database and files unchanged, including for each step of an erasure and for `PAUSING`/`CANCELLING` work. A condition that keeps failing for an external reason is retried once per start and reported as unresolved; it is not a repair, and the test asserts it is reported, not that it is absent.
 
 ### PER-07: Erasure is crash-safe
 
-Stopping after any step of an erasure (queued, index changed, generation persisted, old generation removed, vector cleared) and rerunning recovery completes the erasure exactly once. The erased vector never reappears in the index or in recognition, and the representation is never reactivated.
+Stopping after any step of an erasure (queued; index changed; new generation persisted; old generation removed; `REMOVE` marked `APPLIED` but the representation still `ERASING`; vector cleared) and rerunning recovery completes the erasure exactly once. The erased vector never reappears in the index or in recognition, and the representation is never reactivated.
 
 ### JOB-01: Valid job transitions
 
@@ -264,11 +264,15 @@ A missing, incompatible or corrupt index must not destroy authoritative identity
 
 ### INDEX-03: Queued erasure is excluded from retrieval at once
 
-From the moment an erasure is queued, before the index changes, recognition never returns the representation, candidate revalidation rejects it, and an index rebuild does not include it.
+From the moment an erasure is queued, before the index changes, recognition never returns the representation: candidate revalidation resolves each `ann_key` to its representation row and rejects it (the test feeds a stale index that still holds the vector, with an `ACTIVE` identity), and an index rebuild does not include it.
 
 ### INDEX-04: Superseded index generations are retired
 
-A `REMOVE` is not applied while a superseded generation of that space remains on disk; after an erasure is finished, the erased vector's bytes are in no file of the index directory (current, superseded or quarantined). This is verified deletion, not a claim of physical erasure from SSD storage.
+A `REMOVE` is not applied while a superseded generation of that space remains on disk, and a locked superseded or quarantined file keeps the operation not `APPLIED` and the representation `ERASING` (retried, reported unresolved). After an erasure is finished, the erased vector's bytes are in no file under the index directory, searched recursively (current, superseded or quarantined). This is verified deletion, not a claim of physical erasure from SSD storage.
+
+### INDEX-05: Erasure and the coordinator do not race
+
+An `ADD` in flight when an erasure is queued, a second erasure of the same representation, a bulk forget that overlaps a coordinator pass, an attempted reactivation, and an identity merge or split touching an `ERASING` representation each leave the representation never retrievable, never reactivated, and the erasure convergent; settlement tolerates the superseded `ADD` having been deleted.
 
 ---
 
