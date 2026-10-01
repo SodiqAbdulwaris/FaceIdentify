@@ -88,6 +88,13 @@ five findings.
 | P3: wrong spec section (§12.2, not §15) and a requeue rationale the spec does not support | Fixed. The speculative `coalesce(started_at)` was removed along with its test |
 | P3: the entry listed a `test(jobs)` commit that did not exist, and the feature commit held the tests | Fixed: the unmerged branch was rebuilt as three commits (implementation, tests, docs) with the review fixes folded in, so the entry matches history |
 
+## Correction (PR 27)
+
+The threaded claim test above only started its threads together, which does not force them to
+overlap: a claim that read before it wrote was caught by it in 1 of 5 runs. It now holds every
+worker at its first `UPDATE` until all four have arrived (`tests/fixtures/concurrency.py`), and
+that mutant is caught in 5 of 5.
+
 ## Open issues / follow-ups
 
 - TST-022 continues with the other repositories in persistence §26, each when a use case needs it:
