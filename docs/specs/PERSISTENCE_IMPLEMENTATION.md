@@ -149,16 +149,24 @@ An equal dimension does not establish compatibility. A vector may only be compar
 | `identity_id` | nullable FK to `identities`, `RESTRICT` |
 | `processing_run_id`, `execution_segment_id` | non-null provenance FKs, `RESTRICT` |
 | `representation_space_id` | non-null FK, `RESTRICT` |
-| `state` | `PENDING`, `ACTIVE`, `SUPERSEDED`, `ERASED`, `DELETED` |
+| `state` | `PENDING`, `ACTIVE`, `SUPERSEDED`, `ERASING`, `ERASED`, `DELETED` |
 | `ann_key` | nullable unique positive signed 64-bit integer; required while ANN-eligible |
 | `vector` | non-null canonical float32 blob |
 | `vector_dimension` | non-null positive integer, checked against its space in application validation |
 | `quality_json` | nullable measured embedding/quality facts |
 | `created_at`, `activated_at`, `erased_at` | lifecycle |
 
-Use `UNIQUE(observation_id, representation_space_id)` for one persisted embedding per observation per semantic space. An active representation must have an active identity, an allocated `ann_key`, and a non-erased vector. `PENDING` representations are run-private and must never be placed in the global ANN index. `ERASED` retains provenance but has `vector = NULL`, `ann_key = NULL`, and a durable `REMOVE` operation must have been requested before final erasure.
+Use `UNIQUE(observation_id, representation_space_id)` for one persisted embedding per observation per semantic space. An active representation must have an active identity, an allocated `ann_key`, and a non-erased vector. `PENDING` representations are run-private and must never be placed in the global ANN index. `ERASED` retains provenance but has `vector = NULL`, `ann_key = NULL`, and is reached only through `ERASING` (below): its `REMOVE` operation must have been applied, and every superseded index generation that could hold its vector retired, before the vector is cleared.
 
 > **Decision 2026-09-23:** `vector` is nullable **only** for `ERASED`: a CHECK requires `vector` and `ann_key` to be NULL when `ERASED`, and `vector` to be present in every other state. This resolves the column table's "non-null" against the erasure rule above. (Owner decision, M1 PR #5.)
+
+> **Decision 2026-10-01 (owner; CONTEXT open question 25): erasure is two-step, and `ERASING` is the durable marker between the steps.**
+> 1. *Step one, one transaction:* the representation moves `ACTIVE` -> `ERASING` and a durable `REMOVE` operation is queued. `ERASING` still holds its `vector` and `ann_key` (the CHECK above is unchanged: they are NULL only for `ERASED`), but it is not `ACTIVE`, so it is **excluded from recognition, from candidate revalidation (section 23) and from every index rebuild from the moment step one commits**, before the index changes. A queued erasure is therefore never returned, whatever state the index file is in.
+> 2. *Step two:* only when the `REMOVE` is `APPLIED`, the index generation without the vector is persisted, and every superseded generation file of the space (and every quarantined one) has been verifiably removed (section 23), does the representation move `ERASING` -> `ERASED`, clearing `vector` and `ann_key`. This keeps "SQLite precedes the index" (INDEX-01) and needs no rebuild for a single erasure.
+> 3. *Bulk forget* batches: step one for every representation, then **one** rebuild of the space's index from SQLite (which already excludes them), retirement of the old generation, then step two for all. It never rebuilds once per representation.
+> 4. `ERASING` only ever moves forward to `ERASED`; it is never reactivated. Startup recovery (section 28) finds `ERASING` representations, queues the `REMOVE` if it is missing, and finishes step two when its conditions hold.
+> 5. This adds `ERASING` to the state CHECK of `representations`: a schema change delivered as a reviewed Alembic revision with the deletion work (TST-031), which is also the populated-database, batch-mode migration that CONTEXT open question 18 requires.
+> 6. The existing coordinator behaviour for a *keyless* `REMOVE` (rebuild the space and require the old generation to be gone) stays as the safety net for a representation that reached `ERASED` any other way.
 
 ### 6.3 `ann_key_sequences`
 
@@ -352,6 +360,8 @@ Build one USearch index per RepresentationSpace, never a mixed index. Index dire
 
 Recognition searches global active vectors plus a run-local pending index. The run-local index is rebuilt from pending representations for the run after a crash and is never authoritative. ANN output is only candidate `ann_key` values; SQLite revalidates space, state, identity, and current eligibility before `RecognitionService` calculates an assessment. Nearest neighbor is not an identity decision.
 
+> **Decision 2026-10-01 (owner; open question 25): retiring index generations.** A representation is eligible for recognition and for any index build only while it is `ACTIVE` with an `ACTIVE` identity; `ERASING` is never eligible (section 6.2). A `REMOVE` operation is not marked `APPLIED` until the generation without the vector is persisted **and every superseded generation file of that space has been verifiably removed** (unlinked and absent when the directory is listed again). A file that cannot be removed (locked) leaves the operation to retry with backoff; startup reports it as unresolved, and it is never reported applied while an old generation remains. Quarantined generations are kept only for diagnosis, with no time-based retention, and are deleted when an erasure in that space is finalized, because a copy of a vector that was erased is not diagnostic data; if one cannot be removed the erasure is not finalized. "Securely retired" here means this verified deletion, not a claim of physical erasure from SSD storage (TESTING_STRATEGY section 11).
+
 ## 24. SQLAlchemy engine and session factory
 
 Create one synchronous SQLAlchemy engine for the FastAPI backend, with `sqlite+pysqlite:///...`, `future=True`, `pool_pre_ping=False`, and `connect_args={"check_same_thread": False, "timeout": 5}`. Use SQLAlchemy's default SQLite pool appropriate to the packaged local process; do not share sessions across threads or processes. The ML worker has no database engine and no SQLite access.
@@ -418,6 +428,8 @@ Alembic revisions use SQLite-safe operations: batch table recreation when SQLite
 
 Startup ordering is DB/migrations, storage initialization, recovery, index validation/rebuild scheduling, runtime catalog/installation validation, ML supervisor, scheduler, then readiness. Recovery is idempotent and records only durable repairs; it must be safe to repeat after another crash.
 
+> **Decision 2026-10-01 (owner; open question 26): recovery is idempotent by construction.** Every recovery step is a guarded transition out of a named state (`UPDATE ... WHERE state = X`, or a delete of a named owned file), so a repeat finds nothing to do. A second run reports no repair and leaves the database and files unchanged; a crash between any two steps followed by a rerun reaches the same end state as an uninterrupted run. Tests inject a stop after each step and rerun (PER-06, PER-07).
+
 | Durable state found | Recovery action |
 |---|---|
 | `Artifact PENDING` | verify final/temp bytes and finalize to `AVAILABLE`, retry/clean owned temp data, or mark failure |
@@ -430,8 +442,13 @@ Startup ordering is DB/migrations, storage initialization, recovery, index valid
 | missing/corrupt/mismatched USearch file | quarantine/discard and queue `REBUILD_INDEX` from active SQLite vectors |
 | orphan processing temp workspace | remove only application-owned workspace after verifying no live run needs it |
 | interrupted runtime installation | verify bytes/hash then finalize, remove partial managed bytes, or mark failed |
+| `Job` or `ProcessingRun` in `PAUSING` | becomes `PAUSED`: the worker that was pausing it is gone and nothing runs; a job's lease is cleared and its running segment closes `INTERRUPTED`; resuming creates a new segment |
+| `Job` or `ProcessingRun` in `CANCELLING` | becomes `CANCELLED`: cancelling was the user's intent; a job gets `ended_at` and no lease; the run's pending output stays private and is never activated; its temp workspace becomes removable |
+| `Representation` in `ERASING` | ensure its `REMOVE` operation exists (queue it if missing); when that is `APPLIED` and the old generations are retired, finish erasure (`ERASED`); never reactivate |
 
 Recovery never turns a pending run's partial outputs into active library memory merely to make the UI look complete. It never assumes an ML worker response survived a crash. Readiness is capability-based: unavailable ML or rebuilding ANN can produce `DEGRADED` while SQLite/library browsing remains available.
+
+> **Decision 2026-10-01 (owner; open question 26):** the `PAUSING` and `CANCELLING` rows above are decided as written. A `RUNNING` job is still marked `INTERRUPTED` and never requeued (no spec defines when a requeue is safe). `FINALIZING` runs, pending output without a final checkpoint, and interrupted runtime installations stay as the table says and are implemented with the M3 run lifecycle and the runtime installer.
 
 ## 29. Migration and data-version compatibility policy
 

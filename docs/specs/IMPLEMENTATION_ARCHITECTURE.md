@@ -1530,6 +1530,10 @@ Recovery reconciles durable:
 Interrupted active runs/segments become `INTERRUPTED`. Resume creates a
 new ExecutionSegment so provenance remains correct.
 
+> **Decision 2026-10-01:** a job or run found `PAUSING` becomes `PAUSED`, and one found
+> `CANCELLING` becomes `CANCELLED` (nothing is running; cancelling was the user's intent and its
+> partial output stays private). See PERSISTENCE_IMPLEMENTATION.md section 28.
+
 Ordinary resumable processing may auto-requeue/resume with user
 notification. Repeated failures stop blind automatic retry.
 
@@ -1569,6 +1573,11 @@ If an external referenced source disappears:
 Pending durable IndexOperations can catch up after restart. If the index
 cannot be trusted, discard/rebuild it from SQLite.
 
+> **Decision 2026-10-01:** a representation being erased (`ERASING`) is excluded from
+> retrieval and from every rebuild at once, and an index generation that may hold an erased
+> vector is removed and verified gone before the erasure is finished. See
+> PERSISTENCE_IMPLEMENTATION.md sections 6.2 and 23.
+
 ### 23.7 Runtime installation recovery
 
 A staged/incomplete runtime install never becomes `AVAILABLE` until
@@ -1578,6 +1587,9 @@ validated. The previous active package remains usable.
 
 Running recovery more than once must not compound damage or duplicate
 state.
+
+> **Decision 2026-10-01:** every recovery step is a guarded transition from a named state, so
+> a repeat is a no-op and a crash between steps followed by a rerun reaches the same end state.
 
 ------------------------------------------------------------------------
 

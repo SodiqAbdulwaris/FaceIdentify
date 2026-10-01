@@ -224,7 +224,11 @@ Deleting one source or identity must not inadvertently destroy unrelated or shar
 
 ### PER-06: Recovery idempotence
 
-Running recovery repeatedly must not duplicate state or compound damage.
+Running recovery repeatedly must not duplicate state or compound damage. A second run reports no repair and leaves the database and files unchanged, including for each step of an erasure and for `PAUSING`/`CANCELLING` work.
+
+### PER-07: Erasure is crash-safe
+
+Stopping after any step of an erasure (queued, index changed, generation persisted, old generation removed, vector cleared) and rerunning recovery completes the erasure exactly once. The erased vector never reappears in the index or in recognition, and the representation is never reactivated.
 
 ### JOB-01: Valid job transitions
 
@@ -257,6 +261,14 @@ An authoritative representation change and its durable indexing intent must comm
 ### INDEX-02: Rebuildability
 
 A missing, incompatible or corrupt index must not destroy authoritative identity memory.
+
+### INDEX-03: Queued erasure is excluded from retrieval at once
+
+From the moment an erasure is queued, before the index changes, recognition never returns the representation, candidate revalidation rejects it, and an index rebuild does not include it.
+
+### INDEX-04: Superseded index generations are retired
+
+A `REMOVE` is not applied while a superseded generation of that space remains on disk; after an erasure is finished, the erased vector's bytes are in no file of the index directory (current, superseded or quarantined). This is verified deletion, not a claim of physical erasure from SSD storage.
 
 ---
 
@@ -393,8 +405,10 @@ Construct representative interrupted states involving:
 - Pending index operations.
 - Abandoned temporary workspaces.
 - Interrupted runtime installations.
+- Jobs and runs found `PAUSING` or `CANCELLING`.
+- Representations found `ERASING`, at each step of the erasure.
 
-Run recovery repeatedly and verify idempotence.
+Run recovery repeatedly and verify idempotence, and inject a stop after each recovery step and rerun to verify the same end state.
 
 Include a smaller set of process-level tests that terminate real subprocesses.
 
@@ -620,7 +634,7 @@ Security tests must cover the following boundaries.
 
 **Deletion:** Cleanup and recovery must respect authoritative deletion state.
 
-Logical deletion must not be represented as guaranteed physical erasure from SSD storage.
+Logical deletion must not be represented as guaranteed physical erasure from SSD storage. Retiring an index generation means verified deletion of its file, and the same caveat applies.
 
 ---
 
