@@ -51,7 +51,10 @@ perfectly active, and an identity-only check would accept it. The review of PR 4
   id, since the caller needs them for the assessment and for evidence, and loads the rows it needs itself.
 - **Not built:** the search use case that calls it, and the assessment that follows (M3).
 
-## A defect found on the way (issue #48, not fixed here)
+## A defect found on the way (issue #48; decided afterwards, see below)
+
+*Update 2026-10-01:* the owner decided uniqueness per space, `UNIQUE(representation_space_id, ann_key)`, as
+revision `0003` (not yet built); this was also CONTEXT's older open question 13, which I had not noticed.
 
 `representations.ann_key` is globally `UNIQUE`, but `ann_key_sequences` has one row per space and each starts
 at 1. A throwaway test showed two spaces both allocating `1`, and the second `ACTIVE` representation raising

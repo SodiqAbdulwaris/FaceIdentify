@@ -232,7 +232,7 @@ Stopping after any step of an erasure (queued; index changed; new generation per
 
 ### PER-08: Erasure leaves no residue in SQLite
 
-With `secure_delete` on and the truncating checkpoint done, the erased vector's bytes are absent from the main database file and from the write-ahead log (a byte search of both). An erasure whose checkpoint could not complete is reported with outstanding cleanup, never as complete, and a later retry completes it. This verifies the SQLite files only: it is not a claim of physical erasure from SSD storage, filesystem snapshots or backups.
+With `secure_delete` on and the truncating checkpoint done, the erased vector's bytes are absent from the main database file and from the write-ahead log (a byte search of both). An erasure whose checkpoint could not complete is reported with outstanding cleanup, never as complete, and a later retry completes it; a crash after the vector is cleared and before the checkpoint leaves the cleanup recorded as owed, and startup completes it. This verifies the SQLite files only: it is not a claim of physical erasure from SSD storage, filesystem snapshots or backups.
 
 ### PER-09: Snapshots are immutable and one per run
 

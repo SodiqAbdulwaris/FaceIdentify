@@ -171,19 +171,10 @@ Unresolved items need the user's decision. Do not settle them silently.
     (PR #7) therefore records no Evidence; the Person's own `revision`/`updated_at` are the only
     audit trail. Decide whether to add a kind, or whether this is intentional (a name change
     isn't identity/visual evidence, only an Identity's link to a Person is).
-13. **Open: `representations.ann_key` global uniqueness vs per-space sequences.**
-    PERSISTENCE_IMPLEMENTATION.md §21 says "unique `ann_key`" as a plain table-wide index, but
-    §6.3's `ann_key_sequences` allocates independently per `representation_space_id`, each
-    starting at 1. Two different ACTIVE spaces can therefore legitimately both allocate key 1,
-    which the current global `UNIQUE(ann_key)` (PR #4) would reject. **Nothing in the current
-    backend can construct two simultaneously-ACTIVE spaces**, so this cannot happen through any
-    code path today (only directly in tests) — but if it ever did,
-    `assign_representation_to_identity` would surface a raw, unguarded `sqlite3.IntegrityError`,
-    not a domain error (PR #6 reviewed this and deliberately left it unguarded rather than invent
-    RepresentationSpace lifecycle policy the specs don't define). A future multi-space scenario
-    (e.g. a model upgrade with two ACTIVE spaces briefly overlapping) would need either
-    `UNIQUE(representation_space_id, ann_key)` or a single global sequence. Decide before M3
-    introduces a second concurrently-active space.
+13. ~~Open: `representations.ann_key` global uniqueness vs per-space sequences.~~ **Decided 2026-10-01 (owner,
+    issue 48; the same conflict as question 28, which re-found it):** `UNIQUE(representation_space_id, ann_key)`,
+    revision `0003`, not yet built. Until it is, two simultaneously ACTIVE spaces still collide (no code path
+    creates them today).
 14. **Open (M6): job claim order.** `jobs.priority` is a string, so `ORDER BY priority` is
     alphabetical and the `(state, priority, created_at)` index cannot serve INTERACTIVE-first
     claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
@@ -309,7 +300,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     (issue 34):**
     `FINALIZING` runs (revalidate and accept without redoing ML, needing `AcceptProcessingRunUseCase`), a
     run with pending output and no final checkpoint, and interrupted runtime installations.
-28. ~~Open: `ann_key` is globally unique but allocated per space.~~ **Decided 2026-10-01 (owner, issue 48):**
+28. ~~Open: `ann_key` is globally unique but allocated per space (the same conflict as question 13).~~ **Decided 2026-10-01 (owner, issue 48):**
     an `ann_key` is unique within its space, `UNIQUE(representation_space_id, ann_key)`, as revision `0003`
     (specs: persistence 6.2, 6.3). Every index lookup and removal carries the space and the key; allocation
     stays at ANN-eligibility time (question 21, provisional) and run-local indexes keep ephemeral labels.
@@ -318,14 +309,17 @@ Unresolved items need the user's decision. Do not settle them silently.
     was not, in PR 50, and corrected it). Immutability is two triggers (revision `0003`): `UPDATE` always aborts,
     `DELETE` aborts while a run references the snapshot. **Mine, to confirm with TST-031:** deleting a run
     retains its snapshot as historical evidence; permanent deletion of a Source deletes its runs and then their
-    now-unreferenced snapshots, the only way one is removed. Snapshots carry every value needed to reproduce a
+    now-unreferenced snapshots (the database allows any caller to delete an unreferenced snapshot, so "only
+    the lifecycle does" is the application's rule, not a database guarantee). Snapshots carry every value needed to reproduce a
     run, never references to mutable rows (persistence 13).
 30. **Decided 2026-10-01 (owner, issue 31): `PRAGMA secure_delete = ON` on every connection, and a
     `wal_checkpoint(TRUNCATE)` after each erasure batch commits**, retried later if readers prevent it, with the
     erasure reported as having outstanding cleanup until it succeeds. Not a guarantee of physical erasure.
     The owner's sequence is merged with question 25's: queue and exclude (`ERASING`); apply the index removal or
     publish a replacement generation; retire old and quarantined generations; clear the vector and key and
-    commit; checkpoint; verify (persistence 6.2 item 9, 25). Built: nothing yet.
+    commit; checkpoint; verify (persistence 6.2 item 9, 25). A durable "WAL truncation owed" marker is needed
+    (set with the clearing transaction, cleared after a successful truncation) so a crash between them is
+    recoverable; its mechanism is for the owner to confirm (issue 52). Built: nothing yet.
 27. **Agreed provisional direction (owner, 2026-10-01), to be validated when the erasure and import use
     cases that append operations begin: how an obsolete `IndexOperation` is superseded.** Persistence
     §17 says that creating an opposite operation "must supersede/coalesce the obsolete desired state
