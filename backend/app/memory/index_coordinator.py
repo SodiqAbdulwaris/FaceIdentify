@@ -38,16 +38,18 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from sqlalchemy import CursorResult, exists, select, update
-from sqlalchemy.orm import Session, aliased, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.identities.models import Identity, IdentityState
+from backend.app.memory.index_operation_repository import (
+    DueOperation,
+    IndexOperationRepository,
+)
 from backend.app.memory.models import (
-    IndexOperation,
     IndexOperationKind,
     IndexOperationState,
     Representation,
@@ -100,14 +102,6 @@ class _Effect(StrEnum):
     PURGE = "PURGE"  # the representation is erased: only a rebuild can guarantee it is gone
 
 
-@dataclass(frozen=True)
-class _Claimed:
-    id: uuid.UUID
-    representation_id: uuid.UUID
-    space_id: uuid.UUID
-    kind: str
-
-
 def _vector(blob: bytes, ndim: int) -> NDArray[np.float32]:
     """Canonical storage is contiguous little-endian float32 (§23): exactly `ndim` finite values."""
     if len(blob) != 4 * ndim:
@@ -145,7 +139,7 @@ class IndexCoordinator:
         serialized: two threads calling this cannot both load, change and persist one index."""
         with self._lock:
             report = CoordinatorReport()
-            by_space: dict[uuid.UUID, list[_Claimed]] = {}
+            by_space: dict[uuid.UUID, list[DueOperation]] = {}
             for claimed in self._claim(limit):
                 by_space.setdefault(claimed.space_id, []).append(claimed)
             for space_id, operations in by_space.items():
@@ -259,66 +253,19 @@ class IndexCoordinator:
         requeued: list[uuid.UUID] = []
         with self._lock:
             with self._sessions() as session:
-                failed = (
-                    session.execute(
-                        select(IndexOperation.id)
-                        .where(IndexOperation.state == IndexOperationState.FAILED)
-                        .order_by(IndexOperation.created_at.desc(), IndexOperation.id)
-                    )
-                    .scalars()
-                    .all()
-                )
+                failed = IndexOperationRepository(session).failed_ids()
             with self._sessions() as session:
-                other = aliased(IndexOperation)
-                for operation_id in failed:
-                    result = cast(
-                        "CursorResult[Any]",
-                        session.execute(
-                            update(IndexOperation)
-                            .where(
-                                IndexOperation.id == operation_id,
-                                IndexOperation.state == IndexOperationState.FAILED,
-                                ~exists().where(
-                                    other.state == IndexOperationState.PENDING,
-                                    other.representation_id == IndexOperation.representation_id,
-                                    other.operation == IndexOperation.operation,
-                                ),
-                            )
-                            .values(
-                                state=IndexOperationState.PENDING,
-                                attempt_count=0,
-                                not_before_at=now,
-                                updated_at=now,
-                            )
-                        ),
-                    )
-                    if result.rowcount:
-                        requeued.append(operation_id)
+                repository = IndexOperationRepository(session)
+                requeued = [op for op in failed if repository.requeue(op, now=now)]
                 session.commit()
         return requeued
 
-    def _claim(self, limit: int) -> list[_Claimed]:
+    def _claim(self, limit: int) -> list[DueOperation]:
         with self._sessions() as session:
-            rows = session.execute(
-                select(
-                    IndexOperation.id,
-                    IndexOperation.representation_id,
-                    IndexOperation.representation_space_id,
-                    IndexOperation.operation,
-                )
-                .where(
-                    IndexOperation.state == IndexOperationState.PENDING,
-                    IndexOperation.not_before_at <= self._clock(),
-                )
-                .order_by(
-                    IndexOperation.not_before_at, IndexOperation.created_at, IndexOperation.id
-                )
-                .limit(limit)
-            ).all()
-        return [_Claimed(row[0], row[1], row[2], row[3]) for row in rows]
+            return IndexOperationRepository(session).due(now=self._clock(), limit=limit)
 
     def _apply_space(
-        self, space_id: uuid.UUID, operations: list[_Claimed], report: CoordinatorReport
+        self, space_id: uuid.UUID, operations: list[DueOperation], report: CoordinatorReport
     ) -> None:
         outcomes: dict[uuid.UUID, str | None] = {}  # operation id -> error, or None if applied
         try:
@@ -357,7 +304,7 @@ class IndexCoordinator:
         space_id: uuid.UUID,
         ndim: int,
         metric: str,
-        operations: list[_Claimed],
+        operations: list[DueOperation],
         outcomes: dict[uuid.UUID, str | None],
         report: CoordinatorReport,
     ) -> None:
@@ -423,7 +370,7 @@ class IndexCoordinator:
                     continue
                 yield ann_key, vector
 
-    def _apply_one(self, index: RepresentationIndex, operation: _Claimed, ndim: int) -> _Effect:
+    def _apply_one(self, index: RepresentationIndex, operation: DueOperation, ndim: int) -> _Effect:
         """Re-read the representation and make the index match."""
         with self._sessions() as session:
             row = session.execute(
@@ -463,15 +410,9 @@ class IndexCoordinator:
         """
         now = self._clock()
         with self._sessions() as session:
-            seen = {
-                row[0]: row[1]
-                for row in session.execute(
-                    select(IndexOperation.id, IndexOperation.attempt_count).where(
-                        IndexOperation.id.in_(list(outcomes))
-                    )
-                )
-            }
+            seen = IndexOperationRepository(session).attempt_counts(list(outcomes))
         with self._sessions() as session:
+            repository = IndexOperationRepository(session)
             for operation_id, error in outcomes.items():
                 attempts = seen[operation_id]
                 if error is None:
@@ -493,23 +434,10 @@ class IndexCoordinator:
                         "failure_code": APPLY_ERROR,
                         "failure_detail": error[:500],
                     }
-                result = cast(
-                    "CursorResult[Any]",
-                    session.execute(
-                        update(IndexOperation)
-                        .where(
-                            IndexOperation.id == operation_id,
-                            IndexOperation.state == IndexOperationState.PENDING,
-                        )
-                        .values(
-                            attempt_count=attempts + 1,
-                            last_attempt_at=now,
-                            updated_at=now,
-                            **values,
-                        )
-                    ),
+                settled = repository.settle(
+                    operation_id, attempts=attempts + 1, now=now, values=values
                 )
-                if result.rowcount == 0:
+                if not settled:
                     continue  # settled by someone else meanwhile
                 if error is None:
                     report.applied.append(operation_id)
