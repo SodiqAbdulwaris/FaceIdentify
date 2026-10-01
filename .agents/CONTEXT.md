@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-01 (segment and checkpoint repositories)_
+_Last updated: 2026-10-01 (IndexOperation repository)_
 
 ## Current state
 
@@ -15,7 +15,7 @@ _Last updated: 2026-10-01 (segment and checkpoint repositories)_
   storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
   `IndexOperation`s into it (TST-028) and the cross-storage failure matrix (TST-029) are done;
   startup recovery (TST-030) is partly done (see open question 26); TST-022 (repository contract) has its
-  `JobRepository`, `SegmentRepository` and `CheckpointRepository`; TST-031 is next.
+  `JobRepository`, `SegmentRepository`, `CheckpointRepository` and `IndexOperationRepository`; TST-031 is next.
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
   bootstrap commit and the project foundation (PR #1, merged 2026-09-23). It is protected by
@@ -285,6 +285,18 @@ Unresolved items need the user's decision. Do not settle them silently.
     `PAUSING` -> `PAUSED` and `CANCELLING` -> `CANCELLED` (finish the user's intent; nothing is
     running), everything else decided with the M3 run lifecycle and the runtime installer. Jobs are
     always `INTERRUPTED`, never requeued, because no spec defines when a requeue is safe.
+27. **Decision taken, open to your veto: how an obsolete `IndexOperation` is superseded.** Persistence
+    §17 says that creating an opposite operation "must supersede/coalesce the obsolete desired state
+    in the use case", and names no mechanism. It matters: `REMOVE` means absent whatever SQLite
+    says, so a `REMOVE` left pending would run after, and undo, a later `ADD` that was skipped as a
+    duplicate of an earlier one (ADD, REMOVE, ADD ends with the representation missing from the
+    index). `IndexOperationRepository.append_batch` now **deletes** a pending operation of the
+    opposite kind for the same representation before inserting the new one. Deleting was chosen
+    because there is no `SUPERSEDED` state, `APPLIED` would claim something that never happened, and
+    `FAILED` is requeued at startup, which would resurrect it; the row was never applied, so nothing
+    that happened is lost. **Alternative:** add a `SUPERSEDED` state (a schema change and an Alembic
+    revision) to keep the history of what was asked. Recommendation: keep deleting unless you want
+    that audit trail.
 
 ## M1 delivery (complete)
 
@@ -322,7 +334,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 5. ~~Storage Manager follow-ups for TST-025~~ Done: referenced imports, missing-file detection,
    relinking, temporary workspaces, recycle/restore, conservative cleanup and storage usage (see
    above).
-6. The rest of M2: TST-022 (repository contract; `JobRepository`, `SegmentRepository`, `CheckpointRepository` done, others as use cases need them), ~~TST-027 (USearch integration)~~ done, ~~TST-028
+6. The rest of M2: TST-022 (repository contract; `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository` done, others as use cases need them), ~~TST-027 (USearch integration)~~ done, ~~TST-028
    (IndexOperation replay)~~ done, ~~TST-029 (cross-storage failure)~~ done, ~~TST-030 (startup recovery beyond
    artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion).
 

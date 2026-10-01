@@ -68,3 +68,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-01 | [M2: cross-storage failures](2026-10-01-m2-cross-storage-failures.md) | done; TST-029 |
 | 2026-10-01 | [M2: Job repository](2026-10-01-m2-job-repository.md) | partial; TST-022 in progress |
 | 2026-10-01 | [M2: segment and checkpoint repositories](2026-10-01-m2-segment-checkpoint-repositories.md) | partial; TST-022 in progress |
+| 2026-10-01 | [M2: IndexOperation repository](2026-10-01-m2-index-operation-repository.md) | partial; TST-022 in progress; open question 27 |
