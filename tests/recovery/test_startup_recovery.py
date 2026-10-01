@@ -407,7 +407,15 @@ def test_a_workspace_is_kept_for_every_job_that_is_not_over(
 
 def clean_report() -> StartupReport:
     return StartupReport(
-        RecoveryReport(), [], InterruptedWork(), WorkspaceCleanup(), [], [], CoordinatorReport(), 1
+        RecoveryReport(),
+        [],
+        [],
+        InterruptedWork(),
+        WorkspaceCleanup(),
+        [],
+        [],
+        CoordinatorReport(),
+        1,
     )
 
 
@@ -424,6 +432,7 @@ def test_a_report_with_no_repairs_says_so() -> None:
         lambda r: r.artifacts.delete_failed.append(uuid.uuid4()),
         lambda r: r.artifacts.staging_removed.append("a.part"),
         lambda r: r.missing_references.append(uuid.uuid4()),
+        lambda r: r.missing_managed.append(uuid.uuid4()),
         lambda r: r.interrupted.jobs.append(uuid.uuid4()),
         lambda r: r.interrupted.leases_cleared.append(uuid.uuid4()),
         lambda r: r.requeued_operations.append(uuid.uuid4()),
@@ -439,8 +448,8 @@ def test_a_report_with_no_repairs_says_so() -> None:
     ],
     ids=[
         "artifact-finalized", "artifact-not-completed", "artifact-deleted",
-        "artifact-delete-failed", "staging-removed", "missing-reference", "job", "lease-cleared",
-        "operation-requeued", "run", "segment", "workspace",
+        "artifact-delete-failed", "staging-removed", "missing-reference", "missing-managed",
+        "job", "lease-cleared", "operation-requeued", "run", "segment", "workspace",
         "index-rebuilt", "operation-applied", "operation-retrying", "operation-failed",
         "coordinator-rebuilt", "coordinator-purged",
     ],
