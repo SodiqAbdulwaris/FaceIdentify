@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from sqlalchemy import Engine, update
+from sqlalchemy import Engine, delete, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.memory.index_coordinator import (
@@ -96,6 +96,35 @@ def generation(coordinator: IndexCoordinator, space: RepresentationSpace) -> uui
 
 
 # --- applying operations ---------------------------------------------------------------------
+
+
+def test_an_operation_deleted_while_it_was_in_flight_is_skipped_and_the_rest_are_settled(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """`append_batch` supersedes a pending operation by deleting it, which can happen after the
+    coordinator has claimed it and before it settles (open question 27). That must not fail the pass
+    or leave the other operations of the batch unsettled."""
+    superseded = queue(build, active(build, space, 7), "ADD")
+    other = queue(build, active(build, space, 8), "ADD")
+    real_persist = RepresentationIndex.persist
+
+    def persist_after_a_supersede(
+        self: RepresentationIndex, *args: object, **kwargs: object
+    ) -> object:
+        with factory() as session:
+            session.execute(delete(IndexOperation).where(IndexOperation.id == superseded.id))
+            session.commit()
+        return real_persist(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(RepresentationIndex, "persist", persist_after_a_supersede)
+
+    report = run(coordinator, build)
+
+    assert report.applied == [other.id]
+    assert load_op(factory, other.id).state == "APPLIED"
+    with factory() as session:
+        assert session.get(IndexOperation, superseded.id) is None
 
 
 def test_an_add_puts_the_representation_in_the_index_and_marks_the_operation_applied(

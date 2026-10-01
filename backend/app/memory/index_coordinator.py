@@ -414,6 +414,8 @@ class IndexCoordinator:
         with self._sessions() as session:
             repository = IndexOperationRepository(session)
             for operation_id, error in outcomes.items():
+                if operation_id not in seen:
+                    continue  # deleted meanwhile: superseded by an opposite operation (question 27)
                 attempts = seen[operation_id]
                 if error is None:
                     values: dict[str, object] = {
