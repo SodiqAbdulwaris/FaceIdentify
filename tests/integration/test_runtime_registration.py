@@ -42,6 +42,7 @@ from backend.app.runtime.registration import (
     space_key,
 )
 from backend.app.sources.models import Artifact, ArtifactKind, ArtifactState, StorageMode
+from backend.app.sources.referenced_artifacts import mark_missing_referenced_originals
 from backend.infrastructure.db.engine import create_session_factory
 from tests.fixtures.deterministic import SeededUUIDs
 
@@ -57,6 +58,7 @@ EMBEDDER_CONTRACT = {
     "compatibility_version": "1",
 }
 DETECTOR_CONTRACT = {"preprocessing_contract": "scrfd-letterbox-v1"}
+CONTENT: dict[str, bytes] = {}  # sha256 hex -> the bytes `manifest_dict` declared
 
 
 def manifest_dict(
@@ -70,6 +72,7 @@ def manifest_dict(
     requirements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     def export(component: str, file: str, data: bytes, precision: str = "FP32") -> dict[str, Any]:
+        CONTENT[hashlib.sha256(data).hexdigest()] = data
         return {
             "component": component,
             "file": file,
@@ -119,9 +122,14 @@ def manifest_dict(
     }  # fmt: skip
 
 
-def installed(directory: Path, manifest: dict[str, Any]) -> InstalledPackage:
-    """A package as the installer leaves it: a directory with its manifest (and files)."""
+def installed(base: Path, manifest: dict[str, Any]) -> InstalledPackage:
+    """A package as the installer leaves it: `base/<key>` with its manifest and its files."""
+    directory = base / manifest["key"]
     directory.mkdir(parents=True, exist_ok=True)
+    for export in manifest["exports"]:
+        target = directory / export["file"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(CONTENT[export["sha256"]])
     text = json.dumps(manifest)
     (directory / "manifest.json").write_text(text, encoding="utf-8")
     parsed = parse_manifest(text)
@@ -222,7 +230,7 @@ def test_every_file_is_a_referenced_artifact_never_a_managed_copy(
         assert embedder.sha256 == hashlib.sha256(EMBEDDER_BYTES).digest()
         assert embedder.size_bytes == len(EMBEDDER_BYTES)
         (folder,) = [a for a in artifacts.values() if a.kind == ArtifactKind.RUNTIME_PACKAGE]
-        assert folder.external_path == str(package.path)
+        assert folder.external_path == str(package.path / "manifest.json")
         manifest_bytes = (package.path / "manifest.json").read_bytes()
         assert folder.sha256 == hashlib.sha256(manifest_bytes).digest()  # the manifest's hash
         assert folder.size_bytes == len(manifest_bytes)
@@ -640,9 +648,143 @@ def test_a_manifest_that_does_not_say_what_a_space_needs_is_refused(
 
 
 def test_ids_come_from_the_callers_generator(
+    factory: sessionmaker[Session], clock: Callable[[], Any], new_id: SeededUUIDs, tmp_path: Path
+) -> None:
+    made: list[uuid.UUID] = []
+
+    def counting() -> uuid.UUID:
+        made.append(new_id())
+        return made[-1]
+
+    with factory() as session:
+        result = register_package(
+            session, installed(tmp_path / "pkg", manifest_dict()), new_id=counting, clock=clock
+        )
+        session.commit()
+    with factory() as session:
+        stored = set(session.scalars(select(Artifact.id))) | set(
+            session.scalars(select(Component.id))
+        )
+        assert stored <= set(made)
+        assert result.runtime_package_id in made
+        assert result.installation_id in made
+
+
+# --- what is on disk is what is recorded --------------------------------------------------------
+
+
+def test_startup_does_not_mark_a_registered_package_missing(
+    factory: sessionmaker[Session], register: Any, clock: Callable[[], Any], tmp_path: Path
+) -> None:
+    with factory() as session:
+        register(session, installed(tmp_path / "pkg", manifest_dict()))
+        session.commit()
+    assert mark_missing_referenced_originals(factory, clock=clock) == []
+    with factory() as session:
+        assert {a.state for a in session.scalars(select(Artifact))} == {ArtifactState.AVAILABLE}
+
+
+def test_a_file_that_changed_since_installation_is_not_registered_under_its_old_digest(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path
+) -> None:
+    package = installed(tmp_path / "pkg", manifest_dict())
+    (package.path / "models" / "embedder.onnx").write_bytes(b"swapped after install")
+    with factory() as session, pytest.raises(RegistrationError, match="embedder.onnx"):
+        register(session, package)
+    with factory() as session:
+        assert count(session, ModelExport) == 0
+        assert count(session, RepresentationSpace) == 0
+
+
+def test_a_missing_file_is_not_registered(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path
+) -> None:
+    package = installed(tmp_path / "pkg", manifest_dict())
+    (package.path / "models" / "detector.onnx").unlink()
+    with factory() as session, pytest.raises(RegistrationError, match="missing"):
+        register(session, package)
+
+
+def test_a_manifest_that_is_not_the_one_given_is_refused(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path
+) -> None:
+    package = installed(tmp_path / "pkg", manifest_dict())
+    changed = manifest_dict(requirements={"gpu": ["any"]})
+    (package.path / "manifest.json").write_text(json.dumps(changed), encoding="utf-8")
+    with factory() as session, pytest.raises(RegistrationError, match="not the one given"):
+        register(session, package)
+
+
+@pytest.mark.parametrize("damage", ["delete", "garbage"])
+def test_a_manifest_that_cannot_be_read_is_refused(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path, damage: str
+) -> None:
+    package = installed(tmp_path / "pkg", manifest_dict())
+    manifest = package.path / "manifest.json"
+    if damage == "delete":
+        manifest.unlink()
+    else:
+        manifest.write_bytes(b"{not json")
+    with factory() as session, pytest.raises(RegistrationError, match="cannot be read"):
+        register(session, package)
+
+
+def test_a_package_outside_the_directory_its_key_names_is_refused(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path
+) -> None:
+    package = installed(tmp_path / "pkg", manifest_dict())
+    elsewhere = InstalledPackage(package.key, package.version, tmp_path / "pkg", package.manifest)
+    with factory() as session, pytest.raises(RegistrationError, match="directory its key names"):
+        register(session, elsewhere)
+
+
+# --- one library, two machines -------------------------------------------------------------------
+
+
+def test_the_same_package_in_another_place_adds_an_installation_and_shares_the_rest(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path
+) -> None:
+    manifest = manifest_dict()
+    here = installed(tmp_path / "machine-a", manifest)
+    there = installed(tmp_path / "machine-b", manifest)  # the library opened on another machine
+    with factory() as session:
+        first = register(session, here)
+        second = register(session, there)
+        session.commit()
+    assert first.runtime_package_id == second.runtime_package_id
+    assert first.installation_id != second.installation_id
+    assert [e.model_export_id for e in first.exports] == [e.model_export_id for e in second.exports]
+    assert [e.representation_space_id for e in first.exports] == [
+        e.representation_space_id for e in second.exports
+    ]
+    assert {e.artifact_id for e in first.exports}.isdisjoint(
+        {e.artifact_id for e in second.exports}
+    )
+    with factory() as session:
+        assert count(session, RuntimePackage) == 1
+        assert count(session, RuntimePackageInstallation) == 2
+        assert count(session, InstalledModelExport) == 4
+        assert count(session, ModelExport) == 2
+        assert count(session, RepresentationSpace) == 1
+        assert count(session, RuntimeVariant) == 2
+        paths = {a.external_path for a in session.scalars(select(Artifact))}
+        assert str(there.path / "models" / "embedder.onnx") in paths
+        assert register(session, there) == second  # and each place registers idempotently
+        assert register(session, here) == first
+
+
+def test_a_refused_registration_leaves_nothing_even_if_the_caller_commits_anyway(
     factory: sessionmaker[Session], register: Any, tmp_path: Path
 ) -> None:
     with factory() as session:
-        result = register(session, installed(tmp_path / "pkg", manifest_dict()))
-        assert isinstance(result.runtime_package_id, uuid.UUID)
+        register(session, installed(tmp_path / "a", manifest_dict("one")))
         session.commit()
+    broken = installed(tmp_path / "b", manifest_dict("two", requirements={"gpu": ["any"]}))
+    with factory() as session:
+        with pytest.raises(RegistrationError):
+            register(session, broken)
+        session.commit()  # the caller ignores the error
+    with factory() as session:
+        assert count(session, RuntimePackage) == 1
+        assert count(session, RuntimePackageInstallation) == 1
+        assert count(session, Artifact) == 3
