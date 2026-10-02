@@ -5,6 +5,7 @@ description = "Local Windows desktop application for visual identity recognition
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
+    "pillow>=12.3.0",
     "sqlalchemy>=2.0",
     "usearch>=2.0",
 ]

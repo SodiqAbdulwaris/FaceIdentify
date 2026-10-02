@@ -94,3 +94,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [M3: shared-memory ownership](2026-10-02-m3-shared-memory.md) | done; TST-034 passing |
 | 2026-10-02 | [M3: the ML worker loop](2026-10-02-m3-ml-worker-loop.md) | done; step 5b, first half |
 | 2026-10-02 | [M3: the ML supervisor](2026-10-02-m3-ml-supervisor.md) | done; TST-035 passing |
+| 2026-10-02 | [M3: decoding still images](2026-10-02-m3-image-decode.md) | done; TST-037 passing |
