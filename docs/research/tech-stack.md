@@ -200,6 +200,8 @@ Do not maintain multiple ANN engines in parallel without a demonstrated reason.
 
 **OpenCV** is used for CV/image utilities and preprocessing/postprocessing where appropriate. OpenCV VideoCapture is not the canonical media architecture.
 
+> **Decision 2026-10-02 (owner; M3): Pillow and NumPy are the baseline for still images, OpenCV is not a baseline dependency.** Pillow is the canonical still-image decoder (decoding, EXIF orientation, RGB conversion, basic validation); NumPy holds the result and implements the model-specific preprocessing as an explicit, versioned contract (input size, RGB or BGR order, resize behaviour, normalisation, tensor layout, dtype), which is part of an embedding space's provenance. A reference SCRFD or ArcFace implementation that happens to use OpenCV (`cv2.resize`, `cv2.dnn.blobFromImage`) does not make it a requirement: those operations are reproduced to the model's contract. OpenCV is introduced only for a demonstrated need that the existing media and preprocessing stack cannot meet cleanly (camera handling, specialised geometric transforms, drawing, tracking, ...). The "LOCKED direction" for OpenCV in the table below is therefore not exercised in M3. Built: `backend/infrastructure/media/image.py` (dependency `pillow`).
+
 If PyAV becomes problematic for a particular flow, that flow may use direct FFmpeg subprocess/pipe processing.
 
 ## 7. ML Development and Production
