@@ -93,7 +93,7 @@ def _database_path() -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)  # at most the root and `database`: validated
         return path
     legacy = os.environ.get("FACEIDENTIFY_DATABASE_PATH")  # deprecated
-    if legacy:
+    if legacy and legacy.strip():
         return Path(legacy)
     raise RuntimeError(
         f"no library to migrate: set {LIBRARY_ROOT_ENV} (or pass the database path to Alembic as "

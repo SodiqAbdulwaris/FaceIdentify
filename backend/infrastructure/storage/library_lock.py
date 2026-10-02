@@ -23,6 +23,7 @@ command line does not take it: a migration started by hand while a backend is ru
 refused (the lifecycle, issue 33, migrates under the lock).
 """
 
+import contextlib
 import errno
 import sys
 from pathlib import Path
@@ -74,7 +75,11 @@ class LibraryLock:
                 " (or on another computer); close it first"
             ) from error
         except BaseException:
-            handle.close()  # never leave the file (and so the lock) open on any other failure
+            # Any other failure (an interrupt just after the lock was taken, say): do not leave the
+            # lock to the garbage collector or to the operating system's own timing.
+            with contextlib.suppress(OSError):
+                _unlock(handle)
+            handle.close()
             raise
         self._file = handle
 
