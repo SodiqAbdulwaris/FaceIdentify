@@ -1590,6 +1590,8 @@ MATCH_EXISTING_IDENTITY
 CREATE_NEW_IDENTITY
 ```
 
+> **Decision 2026-10-02 (owner; M3 plan): there are three persisted recognition outcomes, `MATCH_EXISTING`, `CREATE_NEW` and `ABSTAIN`.** `ABSTAIN` records that the decision engine intentionally made no identity assignment; ambiguous candidate evidence is an abstention *reason* (for example `AMBIGUOUS_CANDIDATES`), not a separate outcome. An abstention must never be represented as `CREATE_NEW` with low confidence. The candidate evidence (top candidates, scores, decision-engine version, thresholds) is kept; the accepted representation is `ACTIVE` with no identity (Persistence section 6.2, decision 2026-10-02) until later resolved. This supersedes the two-value list above.
+
 ---
 
 # 53. Phase 7 — Atomic Acceptance

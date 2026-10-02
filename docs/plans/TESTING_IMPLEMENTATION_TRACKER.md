@@ -1,7 +1,7 @@
 # FaceIdentify — Testing Implementation Tracker
 
 **Version:** 1.0  
-**Status:** M0 complete (TST-008 factories, PR #5); M1 complete (TST-011 through TST-020, PR #10)  
+**Status:** M0 complete (TST-008 factories, PR #5); M1 complete (TST-011 through TST-020, PR #10); M2 complete except TST-030 (waits for M3, issue 34); M3 started 2026-10-02 (see the M2 status table and `.agents/CONTEXT.md`)  
 **Related document:** `TESTING_STRATEGY.md`
 
 ## 1. Tracking conventions

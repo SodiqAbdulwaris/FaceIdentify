@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-02 (Q21 finalised)_
+_Last updated: 2026-10-02 (M3 decisions recorded)_
 
 ## Current state
 
@@ -423,7 +423,8 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    (IndexOperation replay)~~ done, ~~TST-029 (cross-storage failure)~~ done, ~~TST-030 (startup recovery beyond
    artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion: representation erasure
    done; Source deletion, Recycle Bin cleanup and identity-level forget remain).
-7. Owner's build order (2026-10-01): ~~the remaining repositories (issue 32)~~ done, ~~the downgrade policy (35)~~ done, ~~the library root and lock (36, 39)~~ built and wired into `open_library`, ~~lifespan wiring and process-kill tests (33)~~ done except the FastAPI lifespan itself (no web app exists yet),
+7. **M3 (single-image ML integration) is planned and started (2026-10-02).** The approved plan has 14 steps (the docs/decision PR, a targeted issue 66, the ML IPC contract, the headless runtime installer, the worker, import and decode, SCRFD and ArcFace, the run-local index, recognition, orchestration, `AcceptProcessingRunUseCase`, issue 34 recovery, the first-slice end-to-end test and crash matrix, closing M3). Decisions recorded: reference models and the headless installer (ML spec 18.1), three recognition outcomes (Roadmap phase 6), `ACTIVE` representations without an identity for `ABSTAIN`, with migration 0005 relaxing only the identity half of the CHECK (Persistence 6.2). Governing rule: everything before acceptance is private and discardable; SQLite becomes authoritative atomically at acceptance; the index follows asynchronously. TST-044 is after M3. Q16 is decided only if M3 makes it unavoidable.
+8. Owner's build order (2026-10-01): ~~the remaining repositories (issue 32)~~ done, ~~the downgrade policy (35)~~ done, ~~the library root and lock (36, 39)~~ built and wired into `open_library`, ~~lifespan wiring and process-kill tests (33)~~ done except the FastAPI lifespan itself (no web app exists yet),
    the rest of Q26 (34), the downgrade policy (35, question 19), the library root (36, question 17), and the
    validations Q20, Q21, Q23, Q27 (37 to 41, all final now except for the M3 run-local index of Q21), deriving a missing original's availability from its artifact (Q24).
    Issue 55 (block `INSERT OR REPLACE` on snapshots) stays optional and unbuilt unless the owner asks.
