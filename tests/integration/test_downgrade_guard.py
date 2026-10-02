@@ -33,6 +33,7 @@ from backend.infrastructure.db.downgrade_guard import (
     ALLOW_DESTRUCTIVE_DOWNGRADE_ENV,
     INTERNAL_TABLES,
     DestructiveDowngradeRefused,
+    populated_tables,
 )
 from backend.infrastructure.db.engine import create_sqlite_engine
 from tests.factories.models import ModelFactory
@@ -352,3 +353,65 @@ def test_a_table_name_with_a_quote_does_not_break_the_check(
 
     with pytest.raises(DestructiveDowngradeRefused, match="odd"):
         downgrade(monkeypatch, path, "0003", allow_destructive=False)
+
+
+SHARED = "X'000000000000000000000000000000AA'"  # an artifact the catalog uses
+ABSENT = "X'000000000000000000000000000000BB'"  # an id no artifact has (foreign keys are off)
+STAMP = "'2026-01-01 00:00:00.000000'"
+
+
+@pytest.mark.parametrize(
+    "user_row",
+    [
+        # (the table's INSERT, alone: its other artifact column points at nothing)
+        f"INSERT INTO sources (id, kind, state, display_name, original_artifact_id, created_at,"
+        f" updated_at) VALUES (X'01', 'IMAGE', 'ACTIVE', 'a.jpg', {SHARED}, {STAMP}, {STAMP})",
+        f"INSERT INTO sources (id, kind, state, display_name, original_artifact_id,"
+        f" thumbnail_artifact_id, created_at, updated_at)"
+        f" VALUES (X'01', 'IMAGE', 'ACTIVE', 'a.jpg', {ABSENT}, {SHARED}, {STAMP}, {STAMP})",
+        f"INSERT INTO observations (id, source_id, processing_run_id, execution_segment_id,"
+        f" face_crop_artifact_id, state, sequence_in_run, bbox_x, bbox_y, bbox_width, bbox_height,"
+        f" detector_component_version_id, created_at) VALUES (X'01', X'02', X'03', X'04',"
+        f" {SHARED}, 'ACTIVE', 0, 0.1, 0.1, 0.2, 0.3, X'05', {STAMP})",
+    ],
+    ids=["source original", "source thumbnail", "observation face crop"],
+)
+def test_an_artifact_a_user_row_uses_is_data_even_if_the_catalog_uses_it_too(
+    user_row: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing in the schema stops one artifact being shared, so a user's original, thumbnail or
+    face crop must not hide behind a catalog row that references the same artifact. Each reference
+    is tested alone: the artifacts table is what must be reported, not just the table that holds
+    the user row."""
+    path = tmp_path / "library.db"
+    migrate(monkeypatch, path, "head")
+    with sqlite3.connect(path) as connection:  # plain sqlite3: foreign keys are not enforced
+        connection.execute(
+            "INSERT INTO artifacts (id, kind, storage_mode, state, storage_key, sha256,"
+            " size_bytes, created_at) VALUES ("
+            f"{SHARED}, 'SOURCE_ORIGINAL', 'MANAGED', 'AVAILABLE',"
+            f" 'originals/{'a' * 32}', zeroblob(32), 5, {STAMP})"
+        )
+        connection.execute(
+            "INSERT INTO model_exports (id, component_version_id, format, precision, artifact_id,"
+            f" sha256, input_contract_json, created_at) VALUES (X'10', X'11', 'ONNX', 'FP16',"
+            f" {SHARED}, zeroblob(32), '{{}}', {STAMP})"
+        )
+        connection.commit()
+        with_catalog_only = populated_names(connection)
+        connection.execute(user_row)
+        connection.commit()
+        with_user_row = populated_names(connection)
+
+    assert with_catalog_only == []  # the catalog's own artifact (and export) is not data
+    assert "artifacts" in with_user_row  # but a user row using it makes it data
+
+
+def populated_names(connection: sqlite3.Connection) -> list[str]:
+    """`populated_tables` for the database behind a plain sqlite3 connection."""
+    engine = create_sqlite_engine(Path(connection.execute("PRAGMA database_list").fetchone()[2]))
+    try:
+        with engine.connect() as sa_connection:
+            return populated_tables(sa_connection)
+    finally:
+        engine.dispose()

@@ -64,15 +64,21 @@ def _quoted(name: str) -> str:
 
 
 # An installed model or runtime package keeps its bytes as an `artifacts` row, so a freshly
-# initialised library has artifact rows that are catalog, not user data. Only an artifact that no
-# catalog table references counts (a source original, a crop, a thumbnail...).
-_CATALOG_ARTIFACTS = (
-    "SELECT artifact_id FROM model_exports"
-    " UNION SELECT artifact_id FROM installed_model_exports"
-    " UNION SELECT artifact_id FROM runtime_package_installations"
-)
+# initialised library has artifact rows that are catalog, not user data. An artifact counts as data
+# unless a catalog table references it *and* no source or observation does (nothing in the schema
+# stops one artifact being shared, so a user's thumbnail or crop is never hidden behind a catalog
+# row). `NOT EXISTS`, not `NOT IN`: a NULL in a subquery would make `NOT IN` match nothing.
 _ROW_QUERIES = {
-    "artifacts": f"SELECT 1 FROM artifacts WHERE id NOT IN ({_CATALOG_ARTIFACTS}) LIMIT 1",
+    "artifacts": """
+        SELECT 1 FROM artifacts AS a WHERE
+            (NOT EXISTS (SELECT 1 FROM model_exports WHERE artifact_id = a.id)
+             AND NOT EXISTS (SELECT 1 FROM installed_model_exports WHERE artifact_id = a.id)
+             AND NOT EXISTS (SELECT 1 FROM runtime_package_installations WHERE artifact_id = a.id))
+            OR EXISTS (SELECT 1 FROM sources
+                       WHERE original_artifact_id = a.id OR thumbnail_artifact_id = a.id)
+            OR EXISTS (SELECT 1 FROM observations WHERE face_crop_artifact_id = a.id)
+        LIMIT 1
+    """,
 }
 
 
