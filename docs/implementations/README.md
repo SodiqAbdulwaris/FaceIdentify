@@ -97,3 +97,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [M3: decoding still images](2026-10-02-m3-image-decode.md) | done; TST-037 passing |
 | 2026-10-02 | [M3: importing an image as a Source](2026-10-02-m3-import-source.md) | done; TST-036 passing |
 | 2026-10-02 | [M3: the reference detector and embedder contracts](2026-10-02-m3-perception-contracts.md) | partial; step 7, first part |
+| 2026-10-02 | [M3: ONNX Runtime detection and representation in the worker](2026-10-02-m3-onnx-handlers.md) | partial; step 7, second part |
