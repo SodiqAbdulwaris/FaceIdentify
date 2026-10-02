@@ -1,10 +1,12 @@
 """Alembic environment (PERSISTENCE_IMPLEMENTATION.md §27: "Use a normal Alembic environment at
 `backend/alembic/`... The first revision is `0001_initial_schema`").
 
-No Storage Manager / app-data path resolver exists yet (a later milestone), so the database path
-for 'online' mode comes from the `FACEIDENTIFY_DATABASE_PATH` environment variable rather than a
-fixed `alembic.ini` URL or an invented default location. 'offline' mode (`--sql`) and autogenerate
-comparisons only need `target_metadata`, so they work without it.
+The database path for 'online' mode derives from the library root (CONTEXT open question 17): the
+application passes the one resolved path as `config.attributes["database_path"]`; the command line
+uses `FACEIDENTIFY_LIBRARY_ROOT` (`<root>/database/library.db`). `FACEIDENTIFY_DATABASE_PATH`, a
+bare file path, is the old way and is deprecated: it still works so existing scripts and tests do,
+but nothing in the application reads it. There is deliberately no default location. 'offline' mode
+(`--sql`) and autogenerate comparisons only need `target_metadata`, so they work without any of it.
 """
 
 import os
@@ -19,6 +21,8 @@ from sqlalchemy import Connection
 
 from backend.app.models import Base
 from backend.infrastructure.db.engine import create_sqlite_engine
+from backend.infrastructure.storage.layout import database_path_for
+from backend.infrastructure.storage.library_root import LIBRARY_ROOT_ENV
 
 config = context.config
 
@@ -77,14 +81,28 @@ def _require_no_foreign_key_violations(
         )
 
 
+def _database_path() -> Path:
+    """The library database to migrate: an explicit path, else the library root's, else the
+    deprecated bare path. Nothing is guessed."""
+    explicit = config.attributes.get("database_path")
+    if explicit:
+        return Path(explicit)
+    root = os.environ.get(LIBRARY_ROOT_ENV)
+    if root:
+        path = database_path_for(Path(root))
+        path.parent.mkdir(parents=True, exist_ok=True)  # a new library: the folder SQLite needs
+        return path
+    legacy = os.environ.get("FACEIDENTIFY_DATABASE_PATH")  # deprecated
+    if legacy:
+        return Path(legacy)
+    raise RuntimeError(
+        f"no library to migrate: set {LIBRARY_ROOT_ENV} (or pass the database path to Alembic as "
+        "config.attributes['database_path']); see backend/alembic/env.py."
+    )
+
+
 def run_migrations_online() -> None:
-    database_path = os.environ.get("FACEIDENTIFY_DATABASE_PATH")
-    if not database_path:
-        raise RuntimeError(
-            "FACEIDENTIFY_DATABASE_PATH is not set. Alembic needs the library database's file "
-            "path to run migrations online (see backend/alembic/env.py)."
-        )
-    connectable = create_sqlite_engine(Path(database_path))
+    connectable = create_sqlite_engine(_database_path())
     try:
         with connectable.connect() as connection:
             # render_as_batch: SQLite can only change most constraints by recreating the table
