@@ -155,7 +155,9 @@ def mark_artifact_available(
     )
 
 
-def _mark_write_not_completed(session: Session, artifact_id: uuid.UUID, detail: str) -> None:
+def mark_write_not_completed(session: Session, artifact_id: uuid.UUID, detail: str) -> None:
+    """A reservation whose bytes never reached their key: MISSING, with the reason. For a caller
+    that does the three steps itself (the primitives above) and whose write failed."""
     transition_artifact(
         session,
         artifact_id,
@@ -193,7 +195,7 @@ def create_managed_artifact(
         stored = store.store(storage_key, source)
     except Exception as error:
         with session_factory() as session:
-            _mark_write_not_completed(session, artifact_id, f"{type(error).__name__}: {error}")
+            mark_write_not_completed(session, artifact_id, f"{type(error).__name__}: {error}")
             session.commit()
         raise
 
@@ -402,7 +404,7 @@ def recover_artifacts(
                 mark_artifact_available(session, artifact_id, stored, clock=clock)
                 report.finalized.append(artifact_id)
             else:
-                _mark_write_not_completed(session, artifact_id, "interrupted before finalization")
+                mark_write_not_completed(session, artifact_id, "interrupted before finalization")
                 report.write_not_completed.append(artifact_id)
             session.commit()
 

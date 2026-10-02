@@ -95,3 +95,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [M3: the ML worker loop](2026-10-02-m3-ml-worker-loop.md) | done; step 5b, first half |
 | 2026-10-02 | [M3: the ML supervisor](2026-10-02-m3-ml-supervisor.md) | done; TST-035 passing |
 | 2026-10-02 | [M3: decoding still images](2026-10-02-m3-image-decode.md) | done; TST-037 passing |
+| 2026-10-02 | [M3: importing an image as a Source](2026-10-02-m3-import-source.md) | done; TST-036 passing |
