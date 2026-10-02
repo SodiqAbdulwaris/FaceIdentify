@@ -32,6 +32,7 @@ from backend.ml.contracts.protocol import (
     MLErrorCode,
     MLOperation,
     MLStatus,
+    WorkerState,
 )
 from backend.ml.contracts.shared_memory import SharedMemoryDescriptor, describe
 
@@ -55,11 +56,15 @@ def detect_request(**changes: Any) -> MLRequest:
 def represent_request() -> MLRequest:
     face = FaceGeometry(0, 0, (0.1, 0.1, 0.5, 0.6), ((0.2, 0.2), (0.4, 0.2)))
     return MLRequest(
-        request_id="r-2",
+        request_id="r-1",
         operation=MLOperation.GENERATE_REPRESENTATIONS,
         component="cv-2",
         input=GenerateRepresentationsInput((IMAGE,), (face,)),
     )
+
+
+def request_for(operation: MLOperation) -> MLRequest:
+    return detect_request() if operation is MLOperation.DETECT_FACES else represent_request()
 
 
 def success(output: Any, operation: MLOperation) -> MLResponse:
@@ -94,6 +99,11 @@ def test_options_and_context_are_optional_on_the_wire() -> None:
 
     assert parsed.options == {}
     assert parsed.execution_context == ExecutionContext()
+
+
+def test_an_execution_context_may_be_empty_or_partly_filled() -> None:
+    assert ExecutionContext.from_wire({}) == ExecutionContext()
+    assert ExecutionContext.from_wire({"job_id": "j"}) == ExecutionContext(job_id="j")
 
 
 def test_the_worker_exposes_no_application_domain_operation() -> None:
@@ -192,12 +202,15 @@ def test_a_detection_request_needs_at_least_one_image() -> None:
 
 def test_an_image_must_be_three_channel_uint8() -> None:
     gray = describe("g", "uint8", (480, 640, 1), readonly=True)
-    wire = detect_request(input=DetectFacesInput((gray,))).to_wire()
+    wire = detect_request().to_wire()
+    wire["input"]["images"] = [gray.to_wire()]
 
     with pytest.raises(ContractError) as raised:
-        MLRequest.from_wire(wire)
-
+        DetectFacesInput((gray,))
     assert raised.value.code is MLErrorCode.INVALID_INPUT
+    with pytest.raises(ContractError) as from_the_wire:
+        MLRequest.from_wire(wire)
+    assert from_the_wire.value.code is MLErrorCode.INVALID_INPUT
 
 
 # --- responses -----------------------------------------------------------------------------------
@@ -206,7 +219,7 @@ def test_an_image_must_be_three_channel_uint8() -> None:
 def test_zero_detected_faces_is_a_successful_response() -> None:
     response = success(DetectFacesOutput(()), MLOperation.DETECT_FACES)
 
-    parsed = MLResponse.from_wire(over_the_wire(response.to_wire()), MLOperation.DETECT_FACES)
+    parsed = MLResponse.from_wire(over_the_wire(response.to_wire()), detect_request())
 
     assert parsed == response
     assert parsed.status is MLStatus.SUCCESS
@@ -229,7 +242,10 @@ def test_detections_and_representations_survive_the_wire() -> None:
         (representations, MLOperation.GENERATE_REPRESENTATIONS),
     ):
         response = success(output, operation)
-        assert MLResponse.from_wire(over_the_wire(response.to_wire()), operation) == response
+        assert (
+            MLResponse.from_wire(over_the_wire(response.to_wire()), request_for(operation))
+            == response
+        )
 
 
 def test_the_embedding_dimension_is_not_assumed_to_be_512() -> None:
@@ -256,7 +272,7 @@ def test_an_error_response_carries_an_error_code_and_no_output() -> None:
         error=MLError(MLErrorCode.OUT_OF_MEMORY, "no room for the model"),
     )
 
-    parsed = MLResponse.from_wire(over_the_wire(response.to_wire()), MLOperation.DETECT_FACES)
+    parsed = MLResponse.from_wire(over_the_wire(response.to_wire()), detect_request())
 
     assert parsed == response
     assert parsed.output is None
@@ -289,7 +305,7 @@ def test_a_response_is_checked_against_the_operation_that_was_asked_for() -> Non
     wire["output"] = {"representations": []}
 
     with pytest.raises(ContractError):
-        MLResponse.from_wire(wire, MLOperation.DETECT_FACES)
+        MLResponse.from_wire(wire, detect_request())
 
 
 def broken_response(**changes: Any) -> dict[str, Any]:
@@ -317,7 +333,132 @@ def broken_response(**changes: Any) -> dict[str, Any]:
 )
 def test_a_malformed_response_is_refused(changes: dict[str, Any]) -> None:
     with pytest.raises(ContractError):
-        MLResponse.from_wire(broken_response(**changes), MLOperation.DETECT_FACES)
+        MLResponse.from_wire(broken_response(**changes), detect_request())
+
+
+def test_a_response_must_answer_the_request_it_is_read_against() -> None:
+    wire = success(DetectFacesOutput(()), MLOperation.DETECT_FACES).to_wire()
+
+    with pytest.raises(ContractError, match="different request"):
+        MLResponse.from_wire(wire, detect_request(request_id="r-other"))
+    with pytest.raises(ContractError, match="different request"):
+        success(DetectFacesOutput(()), MLOperation.DETECT_FACES).check_answers(represent_request())
+
+
+def test_a_detection_may_only_refer_to_an_image_that_was_sent() -> None:
+    wire = success(
+        DetectFacesOutput((Detection(1, 0, (0.1, 0.1, 0.5, 0.6), 0.9),)), MLOperation.DETECT_FACES
+    ).to_wire()
+
+    with pytest.raises(ContractError, match="refers to image 1"):
+        MLResponse.from_wire(over_the_wire(wire), detect_request())
+
+
+def test_a_representation_may_only_be_for_a_face_that_was_asked_about() -> None:
+    answer = GenerateRepresentationsOutput(
+        (RepresentationResult(0, 5, 512, "float32", "l2", EMBEDDING),)
+    )
+    wire = success(answer, MLOperation.GENERATE_REPRESENTATIONS).to_wire()
+
+    with pytest.raises(ContractError, match="not requested"):
+        MLResponse.from_wire(over_the_wire(wire), represent_request())
+
+
+GOOD_BOX = (0.1, 0.1, 0.5, 0.6)
+STATUS_AS_TEXT_SUCCESS: Any = "SUCCESS"  # a str is not an MLStatus
+STATUS_AS_TEXT_ERROR: Any = "ERROR"
+BAD_IN_PROCESS: list[Any] = [
+    lambda: DetectFacesInput((describe("g", "uint8", (4, 4, 1), readonly=True),)),
+    lambda: GenerateRepresentationsInput((IMAGE,), (FaceGeometry(99, 0, GOOD_BOX),)),
+    lambda: FaceGeometry(0, 0, (0.5, 0.1, 0.1, 0.6)),
+    lambda: FaceGeometry(True, 0, GOOD_BOX),
+    lambda: Detection(0, 0, GOOD_BOX, float("nan")),
+    lambda: Detection(-1, 0, GOOD_BOX, 0.5),
+    lambda: detect_request(component=7),
+    lambda: detect_request(request_id=""),
+    lambda: detect_request(operation="DETECT_FACES"),
+    lambda: detect_request(options=[]),
+    lambda: detect_request(execution_context={}),
+    lambda: detect_request(version=2),
+    lambda: ExecutionContext(job_id=5),  # type: ignore[arg-type]
+    lambda: ExecutionProvenance("", "rv", "p", "d"),
+    lambda: MLError("INFERENCE_FAILED", "x"),  # type: ignore[arg-type]
+    lambda: MLError(MLErrorCode.INFERENCE_FAILED, ""),
+    lambda: MLResponse("r", STATUS_AS_TEXT_SUCCESS, MLOperation.DETECT_FACES),
+    lambda: MLResponse(
+        "r",
+        STATUS_AS_TEXT_ERROR,
+        MLOperation.DETECT_FACES,
+        error=MLError(MLErrorCode.INFERENCE_FAILED, "x"),
+    ),
+    lambda: MLResponse("r", MLStatus.ERROR, MLOperation.DETECT_FACES, timings=[]),  # type: ignore[arg-type]
+    lambda: MLResponse(
+        "r",
+        MLStatus.ERROR,
+        MLOperation.DETECT_FACES,
+        error=MLError(MLErrorCode.INFERENCE_FAILED, "x"),
+        timings={"": 1.0},
+    ),
+    lambda: DetectFacesOutput([]),  # type: ignore[arg-type]
+    lambda: GenerateRepresentationsOutput([]),  # type: ignore[arg-type]
+    lambda: GenerateRepresentationsInput((IMAGE,), []),  # type: ignore[arg-type]
+    lambda: RepresentationResult(0, 0, 512, "float32", "l2", "emb"),  # type: ignore[arg-type]
+    lambda: FaceGeometry(0, 0, GOOD_BOX, landmarks=[(0.1, 0.1)]),  # type: ignore[arg-type]
+    lambda: FaceGeometry(0, 0, GOOD_BOX, landmarks=((0.1, 0.1, 0.2),)),  # type: ignore[arg-type]
+    lambda: FaceGeometry(0, 0, [0.1, 0.1, 0.5, 0.6]),  # type: ignore[arg-type]
+    lambda: DetectFacesInput([IMAGE]),  # type: ignore[arg-type]
+    lambda: DetectFacesInput(("img",)),  # type: ignore[arg-type]
+]
+
+
+@pytest.mark.parametrize("build", BAD_IN_PROCESS)
+def test_a_message_built_in_process_is_validated_like_one_read_from_the_wire(build: Any) -> None:
+    with pytest.raises(ContractError):
+        build()
+
+
+def test_an_integer_too_large_for_a_float_is_a_contract_error_not_an_overflow() -> None:
+    wire = over_the_wire(success(DetectFacesOutput(()), MLOperation.DETECT_FACES).to_wire())
+    wire["timings"] = {"inference_ms": 10**400}
+
+    with pytest.raises(ContractError, match="too large"):
+        MLResponse.from_wire(wire, detect_request())
+
+
+def test_a_non_string_where_a_name_belongs_is_reported_as_such() -> None:
+    with pytest.raises(ContractError, match="non-empty string"):
+        parse_frame({"type": 5})
+    wire = detect_request().to_wire()
+    wire["operation"] = 5
+    with pytest.raises(ContractError, match="non-empty string"):
+        MLRequest.from_wire(wire)
+    bad = over_the_wire(success(DetectFacesOutput(()), MLOperation.DETECT_FACES).to_wire())
+    bad["error"] = {"code": 7, "message": "x"}
+    with pytest.raises(ContractError, match="non-empty string"):
+        MLResponse.from_wire(bad, detect_request())
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"score": float("inf")}, {"score": True}, {"input_index": -1}, {"detection_index": False}],
+)
+def test_a_detection_needs_a_finite_score_and_non_negative_indexes(changes: dict[str, Any]) -> None:
+    base = over_the_wire(Detection(0, 0, GOOD_BOX, 0.9).to_wire())
+
+    with pytest.raises(ContractError):
+        Detection.from_wire({**base, **changes})
+
+
+def test_the_worker_states_are_those_of_the_spec() -> None:
+    assert [state.value for state in WorkerState] == [
+        "STOPPED",
+        "STARTING",
+        "READY",
+        "BUSY",
+        "STOPPING",
+        "UNAVAILABLE",
+        "FAILED",
+    ]
 
 
 def test_every_spec_error_code_exists() -> None:
@@ -344,6 +485,13 @@ def test_a_descriptor_survives_the_wire() -> None:
     assert SharedMemoryDescriptor.from_wire(over_the_wire(IMAGE.to_wire())) == IMAGE
 
 
+def test_describe_refuses_an_unknown_dtype() -> None:
+    with pytest.raises(ContractError) as raised:
+        describe("x", "complex128", (2,), readonly=True)
+
+    assert raised.value.code is MLErrorCode.SHARED_MEMORY_INVALID
+
+
 def test_a_real_segment_may_be_larger_than_its_array() -> None:
     padded = describe("img", "uint8", (4, 4, 3), readonly=False, size_bytes=4096)
 
@@ -363,6 +511,8 @@ def test_a_real_segment_may_be_larger_than_its_array() -> None:
         {"strides": [12, 3]},
         {"size_bytes": 10},  # the shape does not fit
         {"size_bytes": 0},
+        {"size_bytes": True},
+        {"shape": [4.0, 4, 3]},
         {"readonly": "yes"},
         {"extra": 1},
     ],
@@ -386,7 +536,7 @@ def test_a_descriptor_is_checked_even_when_built_in_process() -> None:
     assert raised.value.code is MLErrorCode.SHARED_MEMORY_INVALID
     with pytest.raises(ContractError, match="at least 1"):
         SharedMemoryDescriptor("x", 100, "uint8", (0, 10), (10, 1), "C", True)
-    with pytest.raises(ContractError, match="at least 1"):
+    with pytest.raises(ContractError, match="at least one dimension"):
         SharedMemoryDescriptor("x", 100, "uint8", (), (), "C", True)
     with pytest.raises(ContractError, match="needs a name"):
         SharedMemoryDescriptor("", 100, "uint8", (10, 10), (10, 1), "C", True)

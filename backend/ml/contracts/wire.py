@@ -37,9 +37,15 @@ def integer(value: Any, what: str, *, minimum: int | None = None) -> int:
 
 
 def number(value: Any, what: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         raise invalid(f"{what} must be a finite number")
-    return float(value)
+    try:
+        result = float(value)  # an integer too large for a float is not a number we can use
+    except OverflowError:
+        raise invalid(f"{what} is too large") from None
+    if not math.isfinite(result):
+        raise invalid(f"{what} must be a finite number")
+    return result
 
 
 def boolean(value: Any, what: str) -> bool:
@@ -59,7 +65,8 @@ def optional_string(value: Any, what: str) -> str | None:
 
 
 def error_code(value: Any, what: str) -> MLErrorCode:
+    name = string(value, what)
     try:
-        return MLErrorCode(string(value, what))
+        return MLErrorCode(name)
     except ValueError:
-        raise invalid(f"{what}: unknown error code {value!r}") from None
+        raise invalid(f"{what}: unknown error code {name!r}") from None
