@@ -232,7 +232,7 @@ def test_downgrade_restores_the_old_check_and_keeps_the_rows_when_nothing_is_era
     seen: list[int] = []
     patch_revision(monkeypatch, "0002", after_downgrade=record_enforcement(seen))
 
-    downgrade(monkeypatch, path, "0001")
+    downgrade(monkeypatch, path, "0001", allow_destructive=True)
 
     assert_untouched_at_0001(path, before)
     assert seen == [
@@ -249,7 +249,7 @@ def test_a_downgrade_that_leaves_a_dangling_reference_is_rolled_back(
     patch_revision(monkeypatch, "0002", after_downgrade=dangle(DANGLING_UPDATE))
 
     with pytest.raises(RuntimeError, match="foreign key violation"):
-        downgrade(monkeypatch, path, "0001")
+        downgrade(monkeypatch, path, "0001", allow_destructive=True)
 
     assert version(path) == "0002"
     assert dump(path) == before
@@ -270,7 +270,7 @@ def test_downgrade_is_refused_atomically_while_a_representation_is_erasing(
     before = dump(path)
 
     with pytest.raises(Exception, match="CHECK constraint failed"):
-        downgrade(monkeypatch, path, "0001")
+        downgrade(monkeypatch, path, "0001", allow_destructive=True)
 
     assert version(path) == "0002"
     assert dump(path) == before

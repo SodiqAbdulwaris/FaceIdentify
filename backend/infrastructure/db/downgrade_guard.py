@@ -11,8 +11,16 @@ the database exactly as it was.
 *Populated* means a table other than the internal ones below has a row. Internal tables are
 bookkeeping and re-creatable metadata that exist in a freshly initialised library (the migration
 stamp, the owed-truncation marker, the settings singletons, the runtime and model catalog and the
-representation spaces with their key sequences); a new table is data until it is listed here, so
-forgetting to list one errs on the side of refusing.
+representation spaces); a new table is data until it is listed here, so forgetting to list one
+errs on the side of refusing. `ann_key_sequences` is deliberately *not* internal: it is the
+never-reused allocator of index keys, so once a representation has been indexed, dropping it could
+let a key be handed out again while an index file survives.
+
+An *offline* run (`alembic downgrade ... --sql`) only prints a script for review and changes
+nothing, and it has no database to inspect, so the guard lets it through.
+
+Each revision imports this module, so a later change to the list changes what already shipped
+revisions do; that is intended (the list is policy, not schema), as with `types`.
 
 The explicit override is `FACEIDENTIFY_ALLOW_DESTRUCTIVE_DOWNGRADE=1`. The application never sets it
 and nothing in the library reads it back; it is for a developer or a test that really wants the
@@ -21,6 +29,7 @@ data gone.
 
 import os
 
+from alembic import context
 from sqlalchemy import Connection
 
 ALLOW_DESTRUCTIVE_DOWNGRADE_ENV = "FACEIDENTIFY_ALLOW_DESTRUCTIVE_DOWNGRADE"
@@ -42,7 +51,6 @@ INTERNAL_TABLES = frozenset(
         "runtime_packages",
         "runtime_package_installations",
         "representation_spaces",
-        "ann_key_sequences",
     }
 )
 
@@ -51,8 +59,25 @@ class DestructiveDowngradeRefused(RuntimeError):
     """The library holds data and the downgrade could destroy it."""
 
 
+def _quoted(name: str) -> str:
+    return name.replace('"', '""')
+
+
+# An installed model or runtime package keeps its bytes as an `artifacts` row, so a freshly
+# initialised library has artifact rows that are catalog, not user data. Only an artifact that no
+# catalog table references counts (a source original, a crop, a thumbnail...).
+_CATALOG_ARTIFACTS = (
+    "SELECT artifact_id FROM model_exports"
+    " UNION SELECT artifact_id FROM installed_model_exports"
+    " UNION SELECT artifact_id FROM runtime_package_installations"
+)
+_ROW_QUERIES = {
+    "artifacts": f"SELECT 1 FROM artifacts WHERE id NOT IN ({_CATALOG_ARTIFACTS}) LIMIT 1",
+}
+
+
 def populated_tables(connection: Connection) -> list[str]:
-    """The tables, other than the internal ones, that hold at least one row."""
+    """The tables, other than the internal ones, that hold at least one row of data."""
     names = connection.exec_driver_sql(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
         " ORDER BY name"
@@ -61,14 +86,17 @@ def populated_tables(connection: Connection) -> list[str]:
         name
         for name in names
         if name not in INTERNAL_TABLES
-        and connection.exec_driver_sql(f'SELECT 1 FROM "{name}" LIMIT 1').first() is not None  # noqa: S608
+        and connection.exec_driver_sql(
+            _ROW_QUERIES.get(name) or f'SELECT 1 FROM "{_quoted(name)}" LIMIT 1'
+        ).first()
+        is not None
     ]
 
 
 def require_destructive_downgrade_allowed(connection: Connection) -> None:
     """Call first in every revision's `downgrade()`. Raises `DestructiveDowngradeRefused` when the
     library is populated and the override is not set to exactly `1`."""
-    if os.environ.get(ALLOW_DESTRUCTIVE_DOWNGRADE_ENV) == "1":
+    if context.is_offline_mode() or os.environ.get(ALLOW_DESTRUCTIVE_DOWNGRADE_ENV) == "1":
         return
     populated = populated_tables(connection)
     if populated:

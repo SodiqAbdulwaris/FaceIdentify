@@ -8,25 +8,41 @@ data, and a revision that forgets the guard fails the build.
 """
 
 import ast
+import io
 import sqlite3
 from pathlib import Path
 
 import pytest
+from alembic import command
 from sqlalchemy.orm import Session
 
+from backend.app.memory.repository import RepresentationRepository
+from backend.app.models import Base
+from backend.app.runtime.models import (
+    InstalledModelExport,
+    ModelExport,
+    RecognitionCalibrationProfile,
+    RuntimePackage,
+    RuntimePackageInstallation,
+    RuntimeVariant,
+    RuntimeVariantRepresentationSpace,
+)
 from backend.app.settings.app_state import AppStateRepository
 from backend.app.settings.repository import SettingsRepository
 from backend.infrastructure.db.downgrade_guard import (
     ALLOW_DESTRUCTIVE_DOWNGRADE_ENV,
+    INTERNAL_TABLES,
     DestructiveDowngradeRefused,
 )
 from backend.infrastructure.db.engine import create_sqlite_engine
 from tests.factories.models import ModelFactory
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 from tests.fixtures.migrations import downgrade, dump, migrate, version
+from tests.fixtures.persistence import alembic_config
 
 VERSIONS = Path(__file__).parents[2] / "backend" / "alembic" / "versions"
-REVISIONS = ["0001", "0002", "0003", "0004"]
+REVISION_FILES = sorted(VERSIONS.glob("*.py"))  # every revision, including future ones
+REVISIONS = [file.stem.split("_")[0] for file in REVISION_FILES]
 
 
 def insert_identity(path: Path) -> None:
@@ -61,26 +77,6 @@ def sqlite_tables(path: Path) -> set[str]:
         }
 
 
-def test_bookkeeping_and_re_creatable_metadata_do_not_count_as_data(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
-) -> None:
-    path = tmp_path / "library.db"
-    migrate(monkeypatch, path, "head")
-    engine = create_sqlite_engine(path)
-    try:
-        with Session(engine) as session:
-            build = ModelFactory(session, clock, new_id)
-            build.component_version()  # a catalog row
-            build.representation_space()  # a space (and the component it needs)
-            SettingsRepository(session).bootstrap(now=clock())
-            AppStateRepository(session).set("wal_truncation_owed", "token", now=clock())
-            session.commit()
-    finally:
-        engine.dispose()
-
-    downgrade(monkeypatch, path, "base", allow_destructive=False)  # no refusal
-
-
 # --- a library with data --------------------------------------------------------------------------
 
 
@@ -92,7 +88,7 @@ def test_a_populated_library_is_refused_at_every_revision_before_anything_change
     migrate(monkeypatch, path, revision)
     insert_identity(path)
     before = dump(path)
-    previous = f"{int(revision) - 1:04d}" if revision != "0001" else "base"
+    previous = REVISIONS[REVISIONS.index(revision) - 1] if revision != REVISIONS[0] else "base"
 
     with pytest.raises(DestructiveDowngradeRefused, match=r"holds data \(identities\)"):
         downgrade(monkeypatch, path, previous, allow_destructive=False)
@@ -175,8 +171,10 @@ def test_a_table_the_guard_does_not_know_counts_as_data(
 # --- no revision can forget the guard ------------------------------------------------------
 
 
-@pytest.mark.parametrize("revision_file", sorted(VERSIONS.glob("0*.py")), ids=lambda p: p.stem[:4])
-def test_every_revision_starts_its_downgrade_with_the_guard(revision_file: Path) -> None:
+@pytest.mark.parametrize("revision_file", REVISION_FILES, ids=lambda p: p.stem[:4])
+def test_every_revision_starts_its_downgrade_with_the_guard_on_its_own_connection(
+    revision_file: Path,
+) -> None:
     module = ast.parse(revision_file.read_text(encoding="utf-8"))
     (downgrade_function,) = [
         node
@@ -191,6 +189,166 @@ def test_every_revision_starts_its_downgrade_with_the_guard(revision_file: Path)
 
     first = statements[0]
     assert isinstance(first, ast.Expr)
-    assert isinstance(first.value, ast.Call)
-    assert isinstance(first.value.func, ast.Name)
-    assert first.value.func.id == "require_destructive_downgrade_allowed"
+    assert ast.unparse(first.value) == "require_destructive_downgrade_allowed(op.get_bind())"
+
+
+# --- the list of internal tables ------------------------------------------------------------------
+
+
+def test_the_internal_tables_all_exist_and_the_ones_a_library_starts_with_are_all_seeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    """A table named by mistake would only make the guard stricter, silently; and a table the
+    guard does not count must be one a freshly initialised library really holds rows in. So seed
+    every one, downgrade to the bottom without the override, and fail if the seeding and the list
+    ever differ."""
+    path = tmp_path / "library.db"
+    migrate(monkeypatch, path, "head")
+    engine = create_sqlite_engine(path)
+    try:
+        with Session(engine) as session:
+            build = ModelFactory(session, clock, new_id)
+            seed_every_internal_table(build, clock)
+            session.commit()
+    finally:
+        engine.dispose()
+    with sqlite3.connect(path) as connection:
+        seeded = {
+            name
+            for name in INTERNAL_TABLES
+            if connection.execute(f'SELECT 1 FROM "{name}" LIMIT 1').fetchone() is not None
+        }
+    assert seeded == INTERNAL_TABLES
+    assert INTERNAL_TABLES - {"alembic_version"} <= set(Base.metadata.tables)
+
+    downgrade(monkeypatch, path, "base", allow_destructive=False)  # none of it counts as data
+
+
+def seed_every_internal_table(build: ModelFactory, clock: FrozenClock) -> None:
+    version_row = build.component_version()
+    space = build.representation_space()
+    export = build.add(
+        ModelExport(
+            id=build.new_id(), component_version_id=version_row.id, format="ONNX",
+            precision="FP16", artifact_id=build.artifact().id, sha256=bytes(32),
+            input_contract_json={}, created_at=clock(),
+        )
+    )  # fmt: skip
+    build.add(
+        InstalledModelExport(
+            id=build.new_id(), model_export_id=export.id, artifact_id=build.artifact().id,
+            state="INSTALLED",
+        )
+    )  # fmt: skip
+    variant = build.add(
+        RuntimeVariant(
+            id=build.new_id(), model_export_id=export.id, provider="CPU", device_kind="CPU",
+            variant_key="cpu", requirements_json={}, state="AVAILABLE",
+        )
+    )  # fmt: skip
+    build.add(
+        RuntimeVariantRepresentationSpace(
+            runtime_variant_id=variant.id, representation_space_id=space.id,
+            validation_json={}, state="VALIDATED",
+        )
+    )  # fmt: skip
+    build.add(
+        RecognitionCalibrationProfile(
+            id=build.new_id(), representation_space_id=space.id, version="v1", state="ACTIVE",
+            parameters_json={}, schema_version=1, created_at=clock(),
+        )
+    )  # fmt: skip
+    package = build.add(
+        RuntimePackage(
+            id=build.new_id(), key="core", manifest_schema_version=1, manifest_json={},
+            state="TRUSTED", created_at=clock(),
+        )
+    )  # fmt: skip
+    build.add(
+        RuntimePackageInstallation(
+            id=build.new_id(), runtime_package_id=package.id, artifact_id=build.artifact().id,
+            state="INSTALLED",
+        )
+    )  # fmt: skip
+    SettingsRepository(build.session).bootstrap(now=clock())
+    AppStateRepository(build.session).set("wal_truncation_owed", "token", now=clock())
+
+
+def test_a_setting_column_added_later_forces_a_review_of_the_guard() -> None:
+    """The settings tables are internal because they hold only defaults today (id, revision,
+    updated_at). Once a group has a value column it holds user choices, and a row no longer proves
+    the library is empty: whoever adds one must revisit the guard, and this test says so."""
+    managed = {"id", "revision", "updated_at"}
+    for table in ("processing_settings", "storage_settings", "runtime_settings"):
+        assert {column.name for column in Base.metadata.tables[table].columns} == managed, (
+            f"{table} now has a setting column: decide whether the downgrade guard still treats"
+            " its rows as internal (backend/infrastructure/db/downgrade_guard.py)"
+        )
+
+
+# --- an offline run -------------------------------------------------------------------------------
+
+
+def test_an_offline_downgrade_prints_its_script_and_is_not_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(ALLOW_DESTRUCTIVE_DOWNGRADE_ENV, raising=False)
+    config = alembic_config()
+    config.output_buffer = io.StringIO()
+
+    command.downgrade(config, "0004:0003", sql=True)
+
+    assert "DROP TABLE app_state" in config.output_buffer.getvalue()
+
+
+def test_only_an_artifact_no_catalog_row_uses_counts_as_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    """Installed models and packages keep their bytes as artifacts (so a fresh library has such
+    rows); a source original or any other artifact is the user's."""
+    path = tmp_path / "library.db"
+    migrate(monkeypatch, path, "head")
+    engine = create_sqlite_engine(path)
+    try:
+        with Session(engine) as session:
+            build = ModelFactory(session, clock, new_id)
+            seed_every_internal_table(build, clock)  # the artifacts it creates are the catalog's
+            session.commit()
+            build.artifact()  # one that nothing in the catalog references
+            session.commit()
+    finally:
+        engine.dispose()
+
+    with pytest.raises(DestructiveDowngradeRefused, match=r"holds data \(artifacts\)"):
+        downgrade(monkeypatch, path, "0003", allow_destructive=False)
+
+
+def test_the_key_allocator_is_data_because_a_key_must_never_be_handed_out_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    path = tmp_path / "library.db"
+    migrate(monkeypatch, path, "head")
+    engine = create_sqlite_engine(path)
+    try:
+        with Session(engine) as session:
+            space = ModelFactory(session, clock, new_id).representation_space()
+            RepresentationRepository(session).allocate_ann_key(space.id)
+            session.commit()
+    finally:
+        engine.dispose()
+
+    with pytest.raises(DestructiveDowngradeRefused, match=r"holds data \(ann_key_sequences\)"):
+        downgrade(monkeypatch, path, "0003", allow_destructive=False)
+
+
+def test_a_table_name_with_a_quote_does_not_break_the_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "library.db"
+    migrate(monkeypatch, path, "head")
+    with sqlite3.connect(path) as connection:
+        connection.execute('CREATE TABLE "odd""name" (id INTEGER)')
+        connection.execute('INSERT INTO "odd""name" VALUES (1)')
+
+    with pytest.raises(DestructiveDowngradeRefused, match="odd"):
+        downgrade(monkeypatch, path, "0003", allow_destructive=False)
