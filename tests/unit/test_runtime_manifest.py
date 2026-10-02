@@ -3,9 +3,6 @@
 import copy
 import hashlib
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +16,7 @@ from backend.app.runtime.manifest import (
     parse_manifest,
     safe_relative_path,
 )
+from tests.fixtures.links import link_directory
 
 DETECTOR = b"detector weights"
 EMBEDDER = b"embedder weights"
@@ -156,6 +154,14 @@ def test_bytes_are_accepted_as_well_as_text() -> None:
         (["requirements", "os"], ["\u200bwindows"], "control or invisible"),
         (["components", 0, "kind"], "FACE\u202eDETECTOR", "control or invisible"),
         (["key"], 5, "non-empty"),
+        (["key"], "Upper", "valid package key"),
+        (["key"], "a/b", "valid package key"),
+        (["key"], "a b", "valid package key"),
+        (["key"], "-lead", "valid package key"),
+        (["key"], "trail.", "valid package key"),
+        (["key"], "nul", "valid package key"),
+        (["key"], "com1.x", "valid package key"),
+        (["key"], "k" * 65, "valid package key"),
         (["version"], None, "non-empty"),
         (["requirements"], [], "must be an object"),
         (["requirements", "os"], [], "non-empty list"),
@@ -399,16 +405,6 @@ def test_a_declared_path_that_cannot_be_resolved_is_reported_not_raised(
     monkeypatch.setattr(Path, "resolve", resolve)
 
     assert file_problems(tmp_path, manifest) == ["models/embedder.onnx: cannot be resolved"]
-
-
-def link_directory(link: Path, target: Path) -> None:
-    """A directory link without special privileges (a junction on Windows)."""
-    if sys.platform == "win32":
-        subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True, capture_output=True
-        )
-    else:  # pragma: no cover - the suite runs on Windows
-        os.symlink(target, link, target_is_directory=True)
 
 
 def test_a_declared_file_reached_through_a_link_out_of_the_package_is_refused(

@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.app.memory.erasure import RepresentationEraser
 from backend.app.memory.index_coordinator import IndexCoordinator, RetryPolicy
 from backend.app.recovery.startup import StartupReport, recover_on_startup
+from backend.app.runtime.package_store import RuntimePackageStore
 from backend.infrastructure.db.engine import create_session_factory, create_sqlite_engine
 from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.storage.files import ManagedFileStore
@@ -84,6 +85,7 @@ class OpenLibrary:
     coordinator: IndexCoordinator
     eraser: RepresentationEraser
     unit_of_work: UnitOfWork
+    packages: RuntimePackageStore
     startup: StartupReport
 
 
@@ -169,11 +171,12 @@ def open_library(
         eraser = RepresentationEraser(
             session_factory, engine, coordinator, clock=clock, new_id=new_id
         )
+        packages = RuntimePackageStore(roots, new_id=new_id)
         startup = recover_on_startup(
-            session_factory, store, workspaces, coordinator, eraser,
+            session_factory, store, workspaces, coordinator, eraser, packages,
             clock=clock, index_batch=index_batch, max_index_passes=max_index_passes,
         )  # fmt: skip
         yield OpenLibrary(
             roots, engine, session_factory, store, workspaces, coordinator, eraser,
-            UnitOfWork(engine, retry=transaction_retry), startup,
+            UnitOfWork(engine, retry=transaction_retry), packages, startup,
         )  # fmt: skip

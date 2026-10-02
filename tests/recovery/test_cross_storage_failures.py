@@ -24,6 +24,7 @@ from backend.app.memory.erasure import RepresentationEraser
 from backend.app.memory.index_coordinator import IndexCoordinator, RetryPolicy
 from backend.app.memory.models import IndexOperation, Representation, RepresentationSpace
 from backend.app.recovery.startup import StartupReport, recover_on_startup
+from backend.app.runtime.package_store import RuntimePackageStore
 from backend.app.sources.artifact_storage import (
     MANAGED_FILE_MISSING,
     WRITE_NOT_COMPLETED,
@@ -84,6 +85,7 @@ class Library:
         )  # fmt: skip
         return recover_on_startup(
             self.factory, self.store, self.workspaces, self.coordinator, eraser,
+            RuntimePackageStore(self.roots, new_id=self.build.new_id),
             clock=self.build.clock, index_batch=50, max_index_passes=5,
         )  # fmt: skip
 

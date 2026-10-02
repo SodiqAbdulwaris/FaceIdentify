@@ -29,8 +29,8 @@ repair. It never turns a pending run's partial output into library memory, and i
 anything in memory survived.
 
 Not handled here, and left exactly as found: a run that was `FINALIZING` or the acceptance of a run
-with a final checkpoint (needs the run lifecycle of M3), and the recovery of an interrupted runtime
-installation (GitHub issue 34).
+with a final checkpoint (needs the run lifecycle of M3). An interrupted runtime package installation
+is settled from what is on disk (`RuntimePackageStore.recover`).
 
 Precondition, like `recover_artifacts`: one process, no other user of the library, before workers
 start. Single-instance is the desktop shell's job (tech-stack §2).
@@ -56,6 +56,7 @@ from backend.app.processing.models import (
     ProcessingRun,
     ProcessingRunState,
 )
+from backend.app.runtime.package_store import InstallRecoveryReport, RuntimePackageStore
 from backend.app.sources.artifact_storage import (
     RecoveryReport,
     mark_missing_managed_files,
@@ -95,6 +96,7 @@ class StartupReport:
     index_operations: CoordinatorReport
     index_passes: int
     erasure: ErasureReport
+    packages: InstallRecoveryReport
 
     @property
     def unresolved(self) -> list[str]:
@@ -113,6 +115,8 @@ class StartupReport:
             "index operations backing off": len(operations.retrying),
             "index operations out of attempts": len(operations.failed),
             "erasure steps outstanding": len(self.erasure.outstanding_cleanup),
+            "package install directories left": len(self.packages.left),
+            "installed packages that are not complete": len(self.packages.invalid),
         }
         return [f"{count} {what}" for what, count in counts.items() if count]
 
@@ -149,6 +153,8 @@ class StartupReport:
             or operations.purged_spaces
             or self.erasure.erased
             or self.erasure.truncated
+            or self.packages.published
+            or self.packages.removed
         )
 
     @property
@@ -305,6 +311,7 @@ def recover_on_startup(
     workspaces: WorkspaceManager,
     coordinator: IndexCoordinator,
     eraser: RepresentationEraser,
+    packages: RuntimePackageStore,
     *,
     clock: Callable[[], datetime],
     index_batch: int,
@@ -324,6 +331,7 @@ def recover_on_startup(
     rebuilt = coordinator.validate_indexes(merged)
     requeued = coordinator.requeue_failed_operations()
     erasure = eraser.resume()  # finish every erasure a crash interrupted, and an owed truncation
+    installs = packages.recover()  # publish a complete staged package, remove the rest
 
     passes = 0
     for _ in range(max_index_passes):
@@ -348,4 +356,5 @@ def recover_on_startup(
         merged,
         passes,
         erasure,
+        installs,
     )

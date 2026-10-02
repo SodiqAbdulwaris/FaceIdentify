@@ -90,3 +90,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [M3: planning and decisions](2026-10-02-m3-decisions.md) | done; docs only |
 | 2026-10-02 | [M3: the ML worker IPC contract](2026-10-02-m3-ml-ipc-contract.md) | done; TST-033 passing |
 | 2026-10-02 | [M3: the runtime package manifest](2026-10-02-m3-runtime-manifest.md) | done; step 4a |
+| 2026-10-02 | [M3: the runtime package store](2026-10-02-m3-runtime-package-store.md) | done; step 4b, issue 34 in part |

@@ -41,6 +41,7 @@ from backend.app.recovery.startup import (
     jobs_that_may_resume,
     recover_on_startup,
 )
+from backend.app.runtime.package_store import InstallRecoveryReport, RuntimePackageStore
 from backend.app.settings.app_state import WAL_TRUNCATION_OWED, AppStateRepository
 from backend.app.sources import artifact_storage, referenced_artifacts
 from backend.app.sources.artifact_storage import RecoveryReport, reserve_managed_artifact
@@ -56,6 +57,7 @@ from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.workspaces import WorkspaceCleanup, WorkspaceManager
 from tests.factories.models import ModelFactory, float32_vector
 from tests.fixtures.persistence import AppDirs
+from tests.fixtures.runtime_packages import FACTS, build_package
 
 NDIM = 4
 DATA = b"a managed original whose final rename completed"
@@ -96,7 +98,8 @@ def recover(
         checkpoint_timeout_ms=0,
     )  # fmt: skip
     return recover_on_startup(
-        factory, file_store, workspaces, coordinator, eraser, clock=build.clock,
+        factory, file_store, workspaces, coordinator, eraser,
+        RuntimePackageStore(file_store.roots, new_id=build.new_id), clock=build.clock,
         index_batch=index_batch, max_index_passes=max_index_passes,
     )  # fmt: skip
 
@@ -489,6 +492,7 @@ def clean_report() -> StartupReport:
         CoordinatorReport(),
         1,
         ErasureReport(),
+        InstallRecoveryReport(),
     )
 
 
@@ -524,6 +528,8 @@ def test_a_report_with_no_repairs_says_so() -> None:
         lambda r: r.index_operations.purged_spaces.append(uuid.uuid4()),
         lambda r: r.erasure.erased.append(uuid.uuid4()),
         lambda r: setattr(r.erasure, "truncated", True),
+        lambda r: r.packages.published.append("reference-cpu"),
+        lambda r: r.packages.removed.append("reference-cpu.0123"),
     ],
     ids=[
         "artifact-finalized", "artifact-not-completed", "artifact-deleted",
@@ -532,6 +538,7 @@ def test_a_report_with_no_repairs_says_so() -> None:
         "job-cancelled", "run-paused", "run-cancelled", "workspace",
         "index-rebuilt", "operation-applied", "operation-retrying", "operation-failed",
         "coordinator-rebuilt", "coordinator-purged", "erasure-finished", "log-truncated",
+        "package-published", "package-staging-removed",
     ],
 )  # fmt: skip
 def test_any_repair_means_the_run_was_not_clean(repair: Callable[[StartupReport], object]) -> None:
@@ -554,10 +561,12 @@ def test_any_repair_means_the_run_was_not_clean(repair: Callable[[StartupReport]
         (lambda r: r.index_operations.retrying.append((uuid.uuid4(), "x")), "backing off"),
         (lambda r: r.index_operations.failed.append((uuid.uuid4(), "x")), "out of attempts"),
         (lambda r: r.erasure.pending.append(uuid.uuid4()), "erasure steps outstanding"),
+        (lambda r: r.packages.left.append("a.0123"), "package install directories left"),
+        (lambda r: r.packages.invalid.append("reference-cpu"), "packages that are not complete"),
     ],
     ids=[
         "skipped", "staging", "delete-failed", "workspace", "unindexable", "retrying", "failed",
-        "erasure",
+        "erasure", "package-left", "package-invalid",
     ],
 )  # fmt: skip
 def test_unresolved_work_means_the_run_is_not_clean(
@@ -569,6 +578,42 @@ def test_unresolved_work_means_the_run_is_not_clean(
 
     assert not report.clean
     assert any(what in item for item in report.unresolved)
+
+
+class _Died(BaseException):
+    """The installing process was killed: not an Exception, so nothing cleans up after it."""
+
+
+def test_startup_publishes_an_install_that_was_complete_and_removes_one_that_was_not(
+    factory: sessionmaker[Session], file_store: ManagedFileStore, workspaces: WorkspaceManager,
+    coordinator: IndexCoordinator, build: ModelFactory, tmp_path: Path,
+) -> None:  # fmt: skip
+    def die_at(step: str) -> Callable[[str], None]:
+        def checkpoint(reached: str) -> None:
+            if reached == step:
+                raise _Died
+
+        return checkpoint
+
+    for key, step in (("finished-cpu", "marked"), ("unfinished-cpu", "copied")):
+        package = build_package(tmp_path / key, key)
+        with pytest.raises(_Died):
+            RuntimePackageStore(
+                file_store.roots, new_id=build.new_id, checkpoint=die_at(step)
+            ).install(package, FACTS)
+
+    report = recover(factory, file_store, workspaces, coordinator, build)
+
+    assert report.packages.published == ["finished-cpu"]
+    assert len(report.packages.removed) == 1
+    assert not report.repaired_nothing
+    assert report.unresolved == []
+    store = RuntimePackageStore(file_store.roots, new_id=build.new_id)
+    assert [p.key for p in store.installed()] == ["finished-cpu"]
+    assert (
+        recover(factory, file_store, workspaces, coordinator, build).packages
+        == InstallRecoveryReport()
+    )
 
 
 def test_foreign_entries_under_the_workspace_folder_are_not_unresolved_work() -> None:
