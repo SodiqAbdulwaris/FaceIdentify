@@ -7,6 +7,7 @@ already exists, never into a half-made Source.
 
 import hashlib
 import io
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,8 @@ from typing import Any
 import numpy as np
 import pytest
 from PIL import Image
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, event, func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.jobs.models import Job
@@ -406,11 +408,116 @@ def test_a_write_that_fails_is_recorded_and_leaves_no_source(
     assert list(world.store.managed_files()) == []
 
 
+def test_a_failed_marking_does_not_hide_why_the_write_failed(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = world.file("a.png", png_bytes())
+    importer = world.importer()
+    real = importer._uow.write
+    calls: list[int] = []
+
+    def write_that_fails_the_second_time(work: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 2:  # the marking after the failed write
+            raise RuntimeError("the database is gone")
+        return real(work)
+
+    monkeypatch.setattr(importer._uow, "write", write_that_fails_the_second_time)
+    monkeypatch.setattr(
+        world.store, "store", lambda key, source: (_ for _ in ()).throw(OSError("disk full"))
+    )
+
+    with pytest.raises(OSError, match="disk full"):  # not the marking's RuntimeError
+        importer.import_managed(path)
+
+    assert world.count(Source) == 0
+    with world.factory() as session:
+        (artifact,) = session.scalars(select(Artifact)).all()
+    assert artifact.state == ArtifactState.PENDING  # left for startup recovery
+    settle(world)
+    with world.factory() as session:
+        (settled,) = session.scalars(select(Artifact)).all()
+    assert (settled.state, settled.failure_code) == (ArtifactState.MISSING, "WRITE_NOT_COMPLETED")
+
+
+# --- a transaction that has to be retried -----------------------------------------------------
+
+
+def busy() -> OperationalError:
+    inner = sqlite3.OperationalError("database is locked")
+    inner.sqlite_errorcode = sqlite3.SQLITE_BUSY
+    return OperationalError("COMMIT", {}, inner)
+
+
+def test_a_retried_transaction_leaves_one_artifact_and_one_source(world: World) -> None:
+    commits: list[int] = []
+
+    def fail_the_first_commit_of_each_write(session: Session) -> None:
+        commits.append(1)
+        if len(commits) in (1, 3):  # the reservation, then the publication, on their first try
+            raise busy()
+
+    event.listen(Session, "before_commit", fail_the_first_commit_of_each_write)
+    try:
+        imported = world.importer().import_managed(world.file("a.png", png_bytes()))
+    finally:
+        event.remove(Session, "before_commit", fail_the_first_commit_of_each_write)
+
+    assert len(commits) == 4  # two attempts of each of the two transactions
+    assert world.count(Source) == 1
+    assert world.count(Artifact) == 1  # the rolled-back attempts left nothing behind
+    assert world.artifact(imported.artifact_id).state == ArtifactState.AVAILABLE
+    assert list(world.store.managed_files()) == [world.artifact(imported.artifact_id).storage_key]
+    assert settle_report(world).finalized == []  # and nothing for recovery to do
+
+
+def test_a_retried_referenced_import_leaves_one_artifact_and_one_source(world: World) -> None:
+    commits: list[int] = []
+
+    def fail_the_first_commit(session: Session) -> None:
+        commits.append(1)
+        if len(commits) == 1:
+            raise busy()
+
+    event.listen(Session, "before_commit", fail_the_first_commit)
+    try:
+        world.importer().import_referenced(world.file("a.png", png_bytes()))
+    finally:
+        event.remove(Session, "before_commit", fail_the_first_commit)
+
+    assert len(commits) == 2
+    assert (world.count(Source), world.count(Artifact)) == (1, 1)
+
+
+def test_referenced_imports_made_at_the_same_time_all_succeed(world: World) -> None:
+    paths = [world.file(f"r{n}.png", png_bytes()) for n in range(4)]
+    failures: list[BaseException] = []
+
+    def run(path: Path) -> None:
+        try:
+            world.importer().import_referenced(path)
+        except BaseException as error:
+            failures.append(error)
+
+    threads = [threading.Thread(target=run, args=(p,)) for p in paths]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+
+    assert failures == []
+    assert (world.count(Source), world.count(Artifact)) == (4, 4)
+
+
 # --- a crash at each step ---------------------------------------------------------------------
 
 
+def settle_report(world: World) -> Any:
+    return recover_artifacts(world.factory, world.store, clock=world.clock)
+
+
 def settle(world: World) -> None:
-    recover_artifacts(world.factory, world.store, clock=world.clock)
+    settle_report(world)
 
 
 def test_a_crash_after_the_reservation_leaves_a_missing_artifact_and_no_source(

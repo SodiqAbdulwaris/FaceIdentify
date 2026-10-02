@@ -19,6 +19,7 @@ Importing the same file twice makes two Sources: the specs ask for no deduplicat
 is the user's own entry, not a unique file.
 """
 
+import contextlib
 import hashlib
 import io
 import uuid
@@ -105,7 +106,12 @@ class ImportSourceUseCase:
             stored = self._store.store(key, io.BytesIO(data))
         except Exception as error:
             detail = f"{type(error).__name__}: {error}"
-            self._uow.write(lambda session: mark_write_not_completed(session, artifact_id, detail))
+            # Best effort: if even this write fails, the caller must still see why the file could
+            # not be written, and the reservation stays PENDING for startup recovery to settle.
+            with contextlib.suppress(Exception):
+                self._uow.write(
+                    lambda session: mark_write_not_completed(session, artifact_id, detail)
+                )
             raise
         self._checkpoint("stored")
         source_id = self._uow.write(
