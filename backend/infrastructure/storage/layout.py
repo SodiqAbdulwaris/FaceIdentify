@@ -40,6 +40,11 @@ class UnsafeStorageKeyError(ValueError):
     """A storage key that is malformed or would resolve outside the managed directories."""
 
 
+def database_path_for(library_root: Path) -> Path:
+    """Where a library keeps its database: the one definition of that path."""
+    return library_root / "database" / "library.db"
+
+
 @dataclass(frozen=True)
 class StorageRoots:
     library_root: Path
@@ -47,7 +52,7 @@ class StorageRoots:
 
     @property
     def database_path(self) -> Path:
-        return self.library_root / "database" / "library.db"
+        return database_path_for(self.library_root)
 
     @property
     def staging(self) -> Path:

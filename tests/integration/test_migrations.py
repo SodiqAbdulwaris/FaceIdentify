@@ -19,6 +19,7 @@ from sqlalchemy.exc import OperationalError
 
 from backend.app.models import Base
 from backend.infrastructure.db.engine import create_sqlite_engine
+from backend.infrastructure.storage.library_root import LIBRARY_ROOT_ENV
 from tests.fixtures.persistence import alembic_config
 
 DATABASE_PATH_ENV = "FACEIDENTIFY_DATABASE_PATH"
@@ -218,9 +219,10 @@ def test_a_failed_migration_leaves_an_existing_database_exactly_as_it_was(
 # --- environment ------------------------------------------------------------------------------
 
 
-def test_running_migrations_requires_the_database_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_running_migrations_requires_a_library_to_migrate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(DATABASE_PATH_ENV, raising=False)
-    with pytest.raises(RuntimeError, match=DATABASE_PATH_ENV):
+    monkeypatch.delenv(LIBRARY_ROOT_ENV, raising=False)
+    with pytest.raises(RuntimeError, match=LIBRARY_ROOT_ENV):
         command.upgrade(alembic_config(), "head")
 
 
