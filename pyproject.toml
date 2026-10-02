@@ -5,6 +5,8 @@ description = "Local Windows desktop application for visual identity recognition
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
+    "numpy>=2.0",
+    "onnxruntime>=1.30.0",
     "pillow>=12.3.0",
     "sqlalchemy>=2.0",
     "usearch>=2.0",
@@ -18,8 +20,8 @@ dev = [
     "httpx>=0.27",
     "hypothesis>=6.100",
     "ruff>=0.8",
-    "numpy>=2.0",
     "mypy>=1.13",
+    "onnx>=1.23.1",
 ]
 
 # ponytail: no build-system yet; `backend` is imported via pytest's pythonpath.
@@ -69,6 +71,11 @@ strict = true
 warn_unreachable = true
 # usearch is only partially annotated (e.g. Index.reset); don't let that force Any-casts.
 untyped_calls_exclude = ["usearch"]
+
+# onnxruntime ships no type information: its objects are Any to mypy.
+[[tool.mypy.overrides]]
+module = ["onnxruntime", "onnxruntime.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py312"
