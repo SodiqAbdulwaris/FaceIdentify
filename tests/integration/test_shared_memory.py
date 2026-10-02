@@ -9,17 +9,19 @@ import json
 import subprocess
 import sys
 from multiprocessing import shared_memory
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
 
+from backend.infrastructure.resources import shared_memory as shm_module
 from backend.infrastructure.resources.shared_memory import (
     NAME_PREFIX,
     AttachedSegment,
     OwnedSegment,
     SegmentInUseError,
     SegmentLedger,
-    cleanup_stale,
 )
 from backend.ml.contracts.protocol import ContractError, MLErrorCode
 from backend.ml.contracts.shared_memory import SharedMemoryDescriptor, describe
@@ -188,6 +190,151 @@ def test_a_segment_someone_else_already_unlinked_is_still_released(
     assert owned.closed
 
 
+def test_a_receiver_never_unlinks_what_it_closes(
+    owned: OwnedSegment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unlinked: list[str] = []
+    monkeypatch.setattr(
+        shared_memory.SharedMemory, "unlink", lambda self: unlinked.append(self.name)
+    )
+
+    with AttachedSegment(owned.descriptor):
+        pass
+    assert unlinked == []
+
+    owned.release()
+    assert unlinked == [owned.name]  # only the creator unlinks
+
+
+def test_a_name_that_is_not_one_of_ours_is_refused_before_it_is_opened(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(
+        shared_memory,
+        "SharedMemory",
+        lambda name, **kw: opened.append(name),
+    )
+
+    with pytest.raises(ContractError) as raised:
+        AttachedSegment(describe("Global\\someone-elses", "uint8", (4,), readonly=True))
+
+    assert raised.value.code is MLErrorCode.SHARED_MEMORY_INVALID
+    assert opened == []
+
+
+def test_a_close_that_fails_leaves_the_segment_open_to_be_tried_again(
+    owned: OwnedSegment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = shared_memory.SharedMemory.close
+    attempts: list[int] = []
+
+    def flaky(self: shared_memory.SharedMemory) -> None:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise OSError("handle busy")
+        real(self)
+
+    monkeypatch.setattr(shared_memory.SharedMemory, "close", flaky)
+
+    with pytest.raises(OSError, match="busy"):
+        owned.release()
+    assert not owned.closed  # not reported released while the handle is still open
+
+    owned.release()
+    assert owned.closed
+
+
+def test_a_release_cannot_slip_in_while_a_view_is_being_built(
+    owned: OwnedSegment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refused: list[bool] = []
+    real: Any = np.ndarray
+
+    def build_then_race(*args: object, **kwargs: object) -> object:
+        try:
+            owned.release()  # another thread, at the one moment between the check and the array
+        except SegmentInUseError:
+            refused.append(True)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(shm_module, "np", SimpleNamespace(ndarray=build_then_race))
+
+    with owned.view():
+        pass
+
+    assert refused == [True]
+    assert not owned.closed
+    owned.release()
+
+
+def test_a_view_that_cannot_be_built_does_not_stay_counted(
+    owned: OwnedSegment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: object, **kwargs: object) -> object:
+        raise TypeError("cannot build")
+
+    monkeypatch.setattr(shm_module, "np", SimpleNamespace(ndarray=fail))
+    with pytest.raises(TypeError), owned.view():
+        pass
+    monkeypatch.undo()
+
+    owned.release()  # nothing is left counted
+    assert owned.closed
+
+
+def test_a_context_manager_leaves_the_error_that_is_already_failing_to_propagate(
+    new_id: SeededUUIDs, owned: OwnedSegment
+) -> None:
+    failure = RuntimeError("inference failed")
+    attached = AttachedSegment(owned.descriptor)
+    view = attached.view()
+    view.__enter__()
+    ledger = SegmentLedger(new_id=new_id)
+    other = ledger.create("uint8", (4,))
+    other_view = other.view()
+    other_view.__enter__()
+
+    # With a view still open and an error in flight, exiting says nothing (the error is the news)...
+    attached.__exit__(RuntimeError, failure, None)
+    ledger.__exit__(RuntimeError, failure, None)
+    assert not attached.closed
+    assert ledger.names == [other.name]  # ...and nothing was released from under the view
+
+    view.__exit__(None, None, None)
+    other_view.__exit__(None, None, None)
+    attached.close()
+    ledger.release_all()
+    owned.release()
+
+
+def test_a_ledger_that_ends_cleanly_over_an_open_view_says_so(new_id: SeededUUIDs) -> None:
+    ledger = SegmentLedger(new_id=new_id)
+    view = ledger.create("uint8", (4,)).view()
+    view.__enter__()
+
+    with pytest.raises(SegmentInUseError):
+        ledger.__exit__(None, None, None)
+
+    view.__exit__(None, None, None)
+    ledger.release_all()
+
+
+def test_a_context_manager_that_ends_cleanly_over_an_open_view_says_so(
+    owned: OwnedSegment,
+) -> None:
+    attached = AttachedSegment(owned.descriptor)
+    view = attached.view()
+    view.__enter__()
+
+    with pytest.raises(SegmentInUseError):
+        attached.__exit__(None, None, None)
+
+    view.__exit__(None, None, None)
+    attached.close()
+    owned.release()
+
+
 def test_releasing_twice_is_harmless(owned: OwnedSegment) -> None:
     owned.release()
     owned.release()
@@ -249,7 +396,17 @@ def test_a_copy_outlives_the_handle_it_came_from(owned: OwnedSegment) -> None:
     assert data.tolist() == [1, 2, 3, 4]
 
 
-def test_an_unsupported_dtype_or_shape_allocates_nothing(new_id: SeededUUIDs) -> None:
+def test_an_unsupported_dtype_or_shape_allocates_nothing(
+    new_id: SeededUUIDs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created: list[object] = []
+    real = shared_memory.SharedMemory
+
+    def counting(*args: Any, **kwargs: Any) -> shared_memory.SharedMemory:
+        created.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(shared_memory, "SharedMemory", counting)
     ledger = SegmentLedger(new_id=new_id)
 
     with pytest.raises(ContractError):
@@ -258,10 +415,7 @@ def test_an_unsupported_dtype_or_shape_allocates_nothing(new_id: SeededUUIDs) ->
         ledger.create("uint8", (0, 3))
 
     assert ledger.names == []
-
-
-def test_cleaning_up_stale_segments_has_nothing_to_do_where_the_os_frees_them() -> None:
-    assert cleanup_stale() == []
+    assert created == []  # refused before anything was allocated
 
 
 # --- the ledger ----------------------------------------------------------------------------------
@@ -425,4 +579,4 @@ def test_when_the_creator_dies_what_it_made_is_freed_once_every_handle_is_closed
     if sys.platform == "win32":
         assert gone(descriptor)  # the operating system freed it with the last handle
     else:  # pragma: no cover - the suite runs on Windows
-        assert cleanup_stale()  # a POSIX segment outlives its creator until cleaned up
+        pytest.skip("a POSIX segment outlives its creator; this application is Windows-only")

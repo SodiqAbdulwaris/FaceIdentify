@@ -9,25 +9,31 @@ did not create. Shared memory is never authoritative: if everything is lost, not
 
 On Windows a segment lives until the last handle to it is closed and `unlink` does nothing, so a
 process that dies releases everything it held without anyone's help, and there are no stale
-segments to clean up after a crash of the whole application. On POSIX a segment is a file that
-outlives its creator, which is what `unlink` and `cleanup_stale` are for.
+segments to clean up after a crash of the whole application (API and Contracts section 46's
+startup cleanup has nothing to do here). On POSIX a segment is a file that outlives its creator
+and would need `unlink`, and a cleanup at startup, which this Windows application does not have.
 
 Memory safety: closing a segment while a numpy array over it still exists is not an error that
 NumPy or Python reports, and touching that array afterwards crashes the process. So no segment
 hands out a long-lived array. Access is through `view()`, a context manager that counts live
 views (a segment with one cannot be released or closed), `copy()` and `write()`. A view must not
-be kept past its `with` block.
+be kept past its `with` block, and that is NOT enforced: an array saved from a view (or a slice of
+it) still points at the memory after the segment is released. (Tracking the arrays instead would
+refuse a release whenever the `as` variable of a finished `with` block is still in scope, which is
+the normal way to write one.) `readonly` is advisory too: it is a flag on a view the receiver is
+handed, and any process that can open the segment by name could write to it. The `size_bytes` of an
+owner's descriptor is the size the operating system gave the segment (a multiple of the page size),
+not the length of the payload.
 
 A descriptor is self-consistent but does not say where the real segment ends, so `attach` checks
 the size of the segment it actually opened before anyone reads through the descriptor.
 """
 
-import sys
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from multiprocessing import shared_memory
-from pathlib import Path
 from types import TracebackType
 from typing import Any
 
@@ -57,6 +63,7 @@ class _Segment:
         self.descriptor = descriptor
         self._writable = writable
         self._views = 0
+        self._lock = threading.Lock()
 
     @property
     def closed(self) -> bool:
@@ -65,17 +72,22 @@ class _Segment:
     @contextmanager
     def view(self) -> Iterator[np.ndarray[Any, Any]]:
         """The segment's memory as an array, valid only inside the `with` block."""
-        if self._segment is None:
-            raise ValueError("the segment has been closed")
-        array: np.ndarray[Any, Any] = np.ndarray(
-            self.descriptor.shape, dtype=self.descriptor.dtype, buffer=self._segment.buf
-        )
-        array.flags.writeable = self._writable
-        self._views += 1
+        with (
+            self._lock
+        ):  # counted in before the memory is touched, so a release cannot slip between
+            if self._segment is None:
+                raise ValueError("the segment has been closed")
+            segment = self._segment
+            self._views += 1
         try:
+            array: np.ndarray[Any, Any] = np.ndarray(
+                self.descriptor.shape, dtype=self.descriptor.dtype, buffer=segment.buf
+            )
+            array.flags.writeable = self._writable
             yield array
         finally:
-            self._views -= 1
+            with self._lock:
+                self._views -= 1
 
     def copy(self) -> np.ndarray[Any, Any]:
         """The data, detached from the segment, so the handle can be closed."""
@@ -84,13 +96,15 @@ class _Segment:
 
     def _close(self) -> shared_memory.SharedMemory | None:
         """Close this process's handle (idempotent); returns the handle it closed, if any."""
-        if self._segment is None:
-            return None
-        if self._views:
-            raise SegmentInUseError("a view of the segment is still open")
-        segment, self._segment = self._segment, None
-        segment.close()
-        return segment
+        with self._lock:
+            if self._segment is None:
+                return None
+            if self._views:
+                raise SegmentInUseError("a view of the segment is still open")
+            segment = self._segment
+            segment.close()  # if this raises the segment is still ours to close
+            self._segment = None
+            return segment
 
 
 class OwnedSegment(_Segment):
@@ -135,6 +149,10 @@ class AttachedSegment(_Segment):
     """A segment someone else created, opened to read (or, if the descriptor says so, write)."""
 
     def __init__(self, descriptor: SharedMemoryDescriptor) -> None:
+        if not descriptor.name.startswith(NAME_PREFIX):
+            raise ContractError(
+                MLErrorCode.SHARED_MEMORY_INVALID, f"{descriptor.name!r} is not one of our segments"
+            )
         try:
             segment = shared_memory.SharedMemory(name=descriptor.name)
         except FileNotFoundError:
@@ -164,7 +182,11 @@ class AttachedSegment(_Segment):
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        self.close()
+        try:
+            self.close()
+        except SegmentInUseError:
+            if exc_type is None:  # (when something else is already failing, that is the news)
+                raise
 
 
 class SegmentLedger:
@@ -219,19 +241,8 @@ class SegmentLedger:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        self.release_all()
-
-
-def cleanup_stale() -> list[str]:
-    """Remove segments left by an application that crashed, by name prefix. On Windows there is
-    nothing to do: the operating system frees a segment when its last handle goes. On POSIX the
-    segments are files in `/dev/shm`. Best effort, and only ever our own prefix."""
-    removed: list[str] = []
-    if sys.platform != "win32":  # pragma: no cover - the suite runs on Windows
-        for entry in Path("/dev/shm").glob(f"{NAME_PREFIX}*"):
-            try:
-                entry.unlink()
-            except OSError:
-                continue
-            removed.append(entry.name)
-    return removed
+        try:
+            self.release_all()
+        except SegmentInUseError:
+            if exc_type is None:
+                raise
