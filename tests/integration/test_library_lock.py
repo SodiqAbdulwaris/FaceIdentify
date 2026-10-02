@@ -20,7 +20,7 @@ from backend.infrastructure.storage.library_lock import (
     LibraryLockedError,
 )
 from backend.infrastructure.storage.library_root import InvalidLibraryRootError
-from tests.fixtures.processes import close_streams, kill_tree, start_until
+from tests.fixtures.processes import acquire_soon, close_streams, kill_tree, start_until
 
 HOLDER = """
 import sys
@@ -40,20 +40,6 @@ def is_held(lock: LibraryLock) -> bool:
 def start_holder(root: Path) -> subprocess.Popen[str]:
     """A second process that holds the library until it is told to stop, or killed."""
     return start_until(HOLDER, str(root), ready="HELD")
-
-
-def acquire_soon(root: Path, seconds: float = 10) -> None:
-    """The lock of a process that has just ended is released by the operating system, which is not
-    instantaneous after `TerminateProcess`: allow it a moment, and no more."""
-    deadline = time.monotonic() + seconds
-    while True:
-        try:
-            with LibraryLock(root):
-                return
-        except LibraryLockedError:
-            if time.monotonic() > deadline:
-                raise
-            time.sleep(0.1)
 
 
 def test_the_lock_is_a_file_under_the_database_folder_created_on_demand(tmp_path: Path) -> None:

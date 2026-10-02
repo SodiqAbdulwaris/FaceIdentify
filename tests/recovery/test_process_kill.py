@@ -25,7 +25,7 @@ from backend.app.sources.models import Artifact
 from backend.infrastructure.storage.library_lock import LibraryLockedError
 from tests.factories.models import ModelFactory, float32_vector
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
-from tests.fixtures.processes import close_streams, kill_tree, start_until
+from tests.fixtures.processes import acquire_soon, close_streams, kill_tree, start_until
 
 CHILD = """
 import sys, uuid
@@ -35,8 +35,9 @@ from pathlib import Path
 from backend.app.lifecycle import open_library
 from backend.app.memory.index_coordinator import RetryPolicy
 
-library, local, mode, subject = sys.argv[1:5]
-now = lambda: datetime.now(UTC)
+library, local, mode, subject, instant = sys.argv[1:6]
+fixed = datetime.fromisoformat(instant)
+now = lambda: fixed  # the parent's clock, so nothing here depends on the wall clock
 with open_library(
     library_root=Path(library), local_state_root=Path(local), clock=now, new_id=uuid.uuid4,
     retry=RetryPolicy(max_attempts=3, backoff=lambda n: timedelta(minutes=n)),
@@ -86,14 +87,18 @@ class Library:
         )  # fmt: skip
 
     def start_child(self, mode: str, subject: str = "-") -> subprocess.Popen[str]:
-        return start_until(CHILD, str(self.root), str(self.local), mode, subject, ready="READY")
+        instant = self.clock().isoformat()
+        return start_until(
+            CHILD, str(self.root), str(self.local), mode, subject, instant, ready="READY"
+        )
 
-
-def kill(child: subprocess.Popen[str]) -> None:
-    try:
-        kill_tree(child)  # no chance to release or finish anything
-    finally:
-        close_streams(child)
+    def kill(self, child: subprocess.Popen[str]) -> None:
+        """Kill the child's whole tree, then wait for the operating system to free its lock."""
+        try:
+            kill_tree(child)  # no chance to release or finish anything
+        finally:
+            close_streams(child)
+        acquire_soon(self.root)
 
 
 def files_with(directory: Path, needle: bytes) -> list[Path]:
@@ -113,7 +118,7 @@ def test_a_live_backend_blocks_a_second_one_and_a_killed_one_does_not(library: L
         with pytest.raises(LibraryLockedError), library.open():
             pass  # the child is alive and holds the library
     finally:
-        kill(child)
+        library.kill(child)
 
     with library.open() as reopened:  # killed without releasing anything: the OS freed the lock
         assert reopened.startup.clean
@@ -126,7 +131,7 @@ def test_a_backend_killed_while_it_ran_a_job_is_recovered_on_the_next_start(
         job_id = ModelFactory(session, clock, new_id).job(state="QUEUED").id
         session.commit()
 
-    kill(library.start_child("job-running"))
+    library.kill(library.start_child("job-running"))
 
     with library.open() as reopened:
         assert reopened.startup.interrupted.jobs == [job_id]
@@ -159,8 +164,7 @@ def test_a_backend_killed_after_queueing_an_erasure_finishes_it_on_the_next_star
         indexes = opened.roots.local_state_root / "indexes"
         assert files_with(indexes, float32_vector(SECRET))
 
-    kill(library.start_child("erase-queued", str(victim_id)))
-    clock.advance(hours=24 * 365)  # the child queued its work by the real clock, ours is frozen
+    library.kill(library.start_child("erase-queued", str(victim_id)))
 
     with library.open() as reopened:
         assert reopened.startup.erasure.erased == [victim_id]
@@ -192,7 +196,7 @@ def test_a_backend_killed_mid_import_leaves_nothing_the_next_start_cannot_settle
     with library.open():
         pass
 
-    kill(library.start_child("artifact-pending"))
+    library.kill(library.start_child("artifact-pending"))
 
     with library.open() as reopened:
         report = reopened.startup.artifacts

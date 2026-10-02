@@ -4,16 +4,17 @@
 `open_library` is the one place the startup order lives, as a context manager a FastAPI lifespan
 wraps (no web framework is needed to build or test it):
 
-1. the roots are validated (`validate_library_root`, `validate_distinct_roots`): nothing is created
-   for a typo or for nested roots;
-2. **the library lock is taken** (`LibraryLock`): before the layout, the migrations, recovery or any
-   other mutation, and a second backend on the same library fails here, clearly;
-3. the layout is created (idempotent; nothing is removed);
-4. the schema is migrated to `head` (Alembic; a database *newer* than this application fails safely
-   with `DatabaseNewerThanApplicationError` instead of being touched);
+1. the roots are validated (`validate_library_root`, `resolve_local_state_root`,
+   `validate_distinct_roots`): nothing is created for a typo or for nested roots;
+2. **the library lock is taken** (`LibraryLock`): before the schema, the layout, recovery or any
+   other mutation, and a second backend on the same library fails here, clearly. (Taking it creates
+   only the library's `database` folder and the lock file.)
+3. the schema is migrated to `head` (Alembic; a database *newer* than this application, or one this
+   application did not create, is refused untouched);
+4. the folder layout is created (idempotent; nothing is removed);
 5. the engine, the Storage Manager, the IndexCoordinator and the eraser are built, and
    `recover_on_startup` reconciles what a crash left half done (artifacts, in-flight work, indexes,
-   erasures), exactly in the order of §28;
+   erasures), in the order of §28;
 6. the caller gets an `OpenLibrary` and runs; leaving the block disposes the engine and releases the
    lock, and so does a failure at any earlier step, so a failed start never leaves the library held.
 
@@ -28,7 +29,7 @@ persisted library setting (the shell passes the resolved root in).
 import sqlite3
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +48,7 @@ from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.library_lock import LibraryLock
 from backend.infrastructure.storage.library_root import (
+    resolve_local_state_root,
     validate_distinct_roots,
     validate_library_root,
 )
@@ -56,14 +58,21 @@ ALEMBIC_DIRECTORY = Path(__file__).resolve().parents[1] / "alembic"
 
 
 class DatabaseNewerThanApplicationError(RuntimeError):
-    """The library's database is at a revision this application does not know
-    (`DATABASE_SCHEMA_NEWER_THAN_APPLICATION`, persistence §27): it was written by a newer version,
-    and is neither migrated nor downgraded."""
+    """The library's database is stamped with a revision this application does not know
+    (`DATABASE_SCHEMA_NEWER_THAN_APPLICATION`, persistence §27): it was written by a newer version
+    (or is not ours), and is neither migrated nor downgraded."""
+
+
+class ForeignDatabaseError(RuntimeError):
+    """The database file holds tables but no migration stamp: it is not a FaceIdentify library
+    this application created, and migrating it would add our tables to somebody else's data."""
 
 
 @dataclass(frozen=True)
 class OpenLibrary:
-    """Everything the backend needs from an opened library. Valid only inside the `with` block."""
+    """Everything the backend needs from an opened library. Valid only inside the `with` block:
+    leaving it disposes the engine, so a session the caller still holds then keeps the database
+    file open after the lock is released; close them first."""
 
     roots: StorageRoots
     engine: Engine
@@ -77,32 +86,50 @@ class OpenLibrary:
 
 def _alembic_config(database_path: Path) -> Config:
     config = Config()
-    config.set_main_option("script_location", str(ALEMBIC_DIRECTORY))
+    # (ConfigParser interpolation: a literal percent sign in an install path must be doubled)
+    config.set_main_option("script_location", str(ALEMBIC_DIRECTORY).replace("%", "%%"))
     config.attributes["database_path"] = database_path
     config.attributes["configure_logger"] = False  # this is a host process: keep its logging
     return config
 
 
-def _stamped_revision(database_path: Path) -> str | None:
-    """The revision the database is stamped with, or None for a new database."""
-    with sqlite3.connect(database_path) as connection:
-        try:
-            row = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-        except sqlite3.OperationalError:  # no such table: not migrated yet
-            return None
-    return None if row is None else str(row[0])
+def _inspect(database_path: Path) -> tuple[set[str], bool]:
+    """(the revisions the database is stamped with, whether it holds any table other than the stamp
+    itself). Read-only, so a database that is refused is not even checkpointed. A new or empty
+    database is `(set(), False)`."""
+    if not database_path.exists():
+        return set(), False
+    with closing(sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)) as connection:
+        tables = {
+            name
+            for (name,) in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        stamps: set[str] = set()
+        if "alembic_version" in tables:
+            stamps = {
+                str(row[0]) for row in connection.execute("SELECT version_num FROM alembic_version")
+            }
+    return stamps, bool(tables - {"alembic_version"})
 
 
 def migrate(database_path: Path) -> None:
     """Bring the database to `head`. A database stamped with a revision this application does not
-    have is refused untouched (it is newer, or foreign)."""
+    have (newer, or foreign) and one that holds tables but no stamp are refused untouched; a
+    database stamped with an older known revision is upgraded."""
     config = _alembic_config(database_path)
-    stamped = _stamped_revision(database_path)
+    stamps, has_tables = _inspect(database_path)
     known = {script.revision for script in ScriptDirectory.from_config(config).walk_revisions()}
-    if stamped is not None and stamped not in known:
+    if stamps - known:
         raise DatabaseNewerThanApplicationError(
-            f"the library database is at revision {stamped!r}, which this version of the "
-            "application does not know: it was written by a newer version"
+            f"the library database is at revision {sorted(stamps - known)}, which this version of "
+            "the application does not know: it was written by a newer version"
+        )
+    if not stamps and has_tables:
+        raise ForeignDatabaseError(
+            "the library database holds tables but no migration stamp: it is not a library this "
+            "application created, so it is left as it is"
         )
     command.upgrade(config, "head")
 
@@ -120,21 +147,21 @@ def open_library(
 ) -> Iterator[OpenLibrary]:
     """Open the library for the life of the `with` block (see the module docstring)."""
     library_root = validate_library_root(library_root)
+    local_state_root = resolve_local_state_root(explicit=local_state_root)
     validate_distinct_roots(library_root, local_state_root)
     with ExitStack() as cleanup:
-        cleanup.enter_context(LibraryLock(library_root))  # before anything is created or changed
+        cleanup.enter_context(LibraryLock(library_root))  # before anything else is changed
         roots = StorageRoots(library_root=library_root, local_state_root=local_state_root)
-        roots.ensure_layout()
         migrate(roots.database_path)
+        roots.ensure_layout()
         engine = create_sqlite_engine(roots.database_path)
         cleanup.callback(engine.dispose)  # the file and its log are released before the lock is
         session_factory = create_session_factory(engine)
         store = ManagedFileStore(roots)
         workspaces = WorkspaceManager(roots)
         coordinator = IndexCoordinator(
-            session_factory, roots.local_state_root / "indexes",
-            clock=clock, new_id=new_id, retry=retry,
-        )  # fmt: skip
+            session_factory, roots.indexes, clock=clock, new_id=new_id, retry=retry
+        )
         eraser = RepresentationEraser(
             session_factory, engine, coordinator, clock=clock, new_id=new_id
         )
