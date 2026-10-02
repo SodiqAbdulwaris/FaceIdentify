@@ -1501,6 +1501,8 @@ worker allocates
 
 The receiver does not silently assume ownership.
 
+> **Decision 2026-10-02 (agent, M3 step 5; found by a crash while testing): segments are accessed through scoped views, never through a retained array.** Closing a shared-memory segment while a NumPy array over it still exists raises nothing in Python or NumPy, and touching that array afterwards crashes the process (a segmentation fault). So `backend/infrastructure/resources/shared_memory.py` hands out no long-lived array: `OwnedSegment` and `AttachedSegment` expose `view()` (a context manager counting open views; a segment with one cannot be released or closed), `copy()` and, for the owner, `write()`. A view must not be kept past its `with` block. A descriptor is also checked against the real segment's size on attach. On Windows a segment lives until its last handle closes (`unlink` does nothing), so a dead process frees what it held and there is nothing stale to clean up; `cleanup_stale` exists for POSIX.
+
 ---
 
 # 46. SharedMemory Recovery
