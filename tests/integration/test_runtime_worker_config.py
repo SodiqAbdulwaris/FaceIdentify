@@ -21,6 +21,7 @@ from backend.app.runtime.models import (
     Component,
     ComponentVersion,
     InstalledModelExport,
+    RuntimeVariant,
     RuntimeVariantRepresentationSpace,
 )
 from backend.app.runtime.package_store import InstalledPackage, RuntimePackageStore
@@ -43,6 +44,7 @@ from tests.fixtures.catalog_packages import (
     package_files,
 )
 from tests.fixtures.deterministic import SeededUUIDs
+from tests.fixtures.links import link_directory
 
 CPU = "CPUExecutionProvider"
 CUDA = "CUDAExecutionProvider"
@@ -476,3 +478,106 @@ def test_the_same_weights_under_two_component_versions_each_keep_their_own_versi
         next(e for e in second.exports if e.component_key == "embedder").component_version_id,
     }
     assert {v.package_key for v in plan.embedder} == {"pkg-one", "pkg-two"}
+
+
+# --- from the PR 86 review -----------------------------------------------------------------------
+
+
+def test_a_path_recorded_through_a_link_is_confined_and_the_worker_gets_the_real_one(
+    library: Library, store: RuntimePackageStore, factory: sessionmaker[Session], tmp_path: Path
+) -> None:
+    package = library.install(manifest_dict())
+    registered = library.register(package)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link_directory(outside / "models-link", package.path / "models")
+    detector = next(e for e in registered.exports if e.component_key == "detector")
+    with factory() as session:
+        artifact = session.get(Artifact, detector.artifact_id)
+        assert artifact is not None
+        artifact.external_path = str(outside / "models-link" / "detector.onnx")  # not in the root
+        session.commit()
+    plan = library.plan(registered)
+    assert plan.detector[0].model_path == (package.path / "models" / "detector.onnx").resolve()
+    assert outside not in plan.detector[0].model_path.parents
+    assert "models-link" not in plan.worker_config()
+
+
+def test_a_link_out_of_the_root_to_somewhere_else_is_not_a_model_path(
+    library: Library, factory: sessionmaker[Session], tmp_path: Path
+) -> None:
+    registered = library.register(library.install(manifest_dict()))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "detector.onnx").write_bytes(DETECTOR_BYTES)
+    link_directory(tmp_path / "link", elsewhere)
+    detector = next(e for e in registered.exports if e.component_key == "detector")
+    with factory() as session:
+        artifact = session.get(Artifact, detector.artifact_id)
+        assert artifact is not None
+        artifact.external_path = str(tmp_path / "link" / "detector.onnx")
+        session.commit()
+    with pytest.raises(RuntimeUnavailableError, match="not in this machine's"):
+        library.plan(registered)
+
+
+@pytest.mark.parametrize("state", ["RETIRED", "FAILED", ""])
+def test_a_runtime_variant_that_is_not_usable_is_not_planned(
+    library: Library, factory: sessionmaker[Session], state: str
+) -> None:
+    registered = library.register(library.install(manifest_dict()))
+    with factory() as session:
+        session.execute(update(RuntimeVariant).values(state=state))
+        session.commit()
+    with pytest.raises(RuntimeUnavailableError) as refused:
+        library.plan(registered)
+    assert refused.value.what == "the detector"
+    assert any("is " + state in reason for reason in refused.value.reasons)
+
+
+def test_a_validated_variant_is_planned(library: Library, factory: sessionmaker[Session]) -> None:
+    registered = library.register(library.install(manifest_dict()))
+    with factory() as session:
+        session.execute(update(RuntimeVariant).values(state="VALIDATED"))
+        session.commit()
+    assert library.plan(registered).detector
+
+
+@pytest.mark.parametrize("fault", ["damaged", "provider", "no-installation"])
+def test_the_embedder_is_named_when_it_is_the_embedder_that_cannot_run(
+    library: Library, factory: sessionmaker[Session], fault: str
+) -> None:
+    package = library.install(manifest_dict(extra_embedder_export=EMBEDDER_FP16_BYTES))
+    registered = library.register(package)
+    full = next(e for e in registered.exports if e.file == "models/embedder.onnx")
+    with factory() as session:
+        if fault == "damaged":  # an installation record that points at a file the manifest lacks
+            artifact = session.get(Artifact, full.artifact_id)
+            assert artifact is not None
+            artifact.external_path = str(package.path / "models" / "undeclared.onnx")
+        elif fault == "provider":
+            session.execute(
+                update(RuntimeVariant)
+                .where(RuntimeVariant.id.in_(set(full.variant_ids.values())))
+                .values(provider="DmlExecutionProvider")
+            )
+        else:
+            session.execute(
+                update(InstalledModelExport)
+                .where(InstalledModelExport.model_export_id == full.model_export_id)
+                .values(state="REMOVED")
+            )
+        session.commit()
+    with pytest.raises(RuntimeUnavailableError) as refused:
+        library.plan(registered, representation_space_id=full.representation_space_id)
+    assert refused.value.what == "the representation model"
+
+
+def test_a_variant_validated_for_the_space_is_planned(
+    library: Library, factory: sessionmaker[Session]
+) -> None:
+    registered = library.register(library.install(manifest_dict()))
+    with factory() as session:
+        session.execute(update(RuntimeVariantRepresentationSpace).values(state="VALIDATED"))
+        session.commit()
+    assert library.plan(registered).embedder

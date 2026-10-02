@@ -44,12 +44,21 @@ from backend.app.runtime.models import (
     RuntimeVariantRepresentationSpace,
 )
 from backend.app.runtime.package_store import RuntimePackageStore
-from backend.app.runtime.registration import DECLARED, DETECTOR, EMBEDDER, INSTALLED
+from backend.app.runtime.registration import (
+    DECLARED,
+    DETECTOR,
+    EMBEDDER,
+    INSTALLED,
+    REGISTERED,
+    VALIDATED,
+)
 from backend.app.sources.models import Artifact, ArtifactState
 
 # The compatibility states under which a variant may produce a space's vectors. `DECLARED` is the
 # manifest's claim (registration); `VALIDATED` is reserved for the later equivalence validation.
-USABLE_COMPATIBILITY = (DECLARED, "VALIDATED")
+USABLE_COMPATIBILITY = (DECLARED, VALIDATED)
+# The states a runtime variant itself may be in to be planned (a retired or failed one is not).
+USABLE_VARIANT_STATES = (REGISTERED, VALIDATED)
 
 
 class RuntimeUnavailableError(Exception):
@@ -70,7 +79,7 @@ class PlannedVariant:
     provider: str
     device: str
     package_key: str
-    model_path: Path
+    model_path: Path  # inside this machine's package directory, resolved
     sha256: bytes
 
 
@@ -132,7 +141,7 @@ class _Machine:
             self._problems[key] = self._store.verify(key)
         if self._problems[key]:
             return f"package {key!r} is damaged: " + "; ".join(self._problems[key])
-        return key, path
+        return key, self._root / relative  # (the confined path itself, never a link to it)
 
 
 def _variants_of(
@@ -175,6 +184,9 @@ def _variants_of(
         ).all()
         for variant in variants:
             if allowed is not None and variant.id not in allowed:
+                continue
+            if variant.state not in USABLE_VARIANT_STATES:
+                reasons.append(f"variant {variant.variant_key!r} is {variant.state}")
                 continue
             if variant.provider not in providers:
                 reasons.append(f"variant {variant.variant_key!r} needs {variant.provider}")

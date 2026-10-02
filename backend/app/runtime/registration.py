@@ -80,6 +80,7 @@ EMBEDDER = "FACE_REPRESENTATION"
 REGISTERED = "REGISTERED"
 INSTALLED = "INSTALLED"
 DECLARED = "DECLARED"
+VALIDATED = "VALIDATED"  # (set by the later equivalence validation, never by registration)
 FINGERPRINT_SCHEME = "rs1"
 _DETECTOR_KEYS = {"preprocessing_contract"}
 _EMBEDDER_KEYS = {
