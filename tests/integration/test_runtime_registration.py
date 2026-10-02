@@ -69,6 +69,15 @@ def register(
     return call
 
 
+def register_once(
+    factory: sessionmaker[Session], register: Any, package: InstalledPackage
+) -> RegisteredPackage:
+    with factory() as session:
+        result: RegisteredPackage = register(session, package)
+        session.commit()
+    return result
+
+
 def count(session: Session, model: Any) -> int:
     return int(session.scalar(select(func.count()).select_from(model)) or 0)
 
@@ -174,7 +183,6 @@ def test_an_embedder_export_is_one_representation_space_with_the_recorded_identi
         session.commit()
     digest = hashlib.sha256(EMBEDDER_BYTES).hexdigest()
     identity = {
-        "family": "arcface",
         "weights_digest": digest,
         "dimension": 512,
         "preprocessing_contract": "arcface-112-similarity-v1",
@@ -212,7 +220,6 @@ def test_an_embedder_export_is_one_representation_space_with_the_recorded_identi
 @pytest.mark.parametrize(
     "change",
     [
-        {"family": "adaface"},
         {"dimension": 256},
         {"preprocessing_contract": "arcface-112-similarity-v2"},
         {"normalization": "NONE"},
@@ -231,8 +238,18 @@ def test_the_fingerprint_scheme_is_pinned() -> None:
     identity = space_identity(EMBEDDER_CONTRACT, "ab" * 32)
     assert (
         space_key(identity)
-        == "rs1:a4802a9ca39a96417fe1fd730a5e20aa43af15838bb71f25b9e44e876e2f1a29"
+        == "rs1:2bb676c87205ab9c54f51c2f7ea0c4eb30ea26fd11c02620e539a9bebaa61145"
     )
+
+
+@pytest.mark.parametrize("family", ["adaface", "ArcFace", "arc-face", "insightface-arcface", ""])
+def test_the_model_family_is_a_description_not_part_of_the_identity(family: str) -> None:
+    """A human-controlled label must not split a space (owner decision 2026-10-02): the weights
+    digest and the explicit contracts decide compatibility."""
+    base = space_key(space_identity(EMBEDDER_CONTRACT, "ab" * 32))
+    renamed = EMBEDDER_CONTRACT | {"family": family}
+    assert space_key(space_identity(renamed, "ab" * 32)) == base
+    assert "family" not in space_identity(renamed, "ab" * 32)
 
 
 def test_the_fingerprint_ignores_everything_but_the_identity() -> None:
@@ -297,6 +314,29 @@ def test_the_same_weights_under_another_provider_are_the_same_space(
         }
         compat = session.scalars(select(RuntimeVariantRepresentationSpace)).all()
         assert len(compat) == 2  # both embedder variants point at the one space
+
+
+def test_the_same_weights_announced_with_another_family_spelling_are_still_one_space(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path
+) -> None:
+    first = register_once(factory, register, installed(tmp_path / "a", manifest_dict("one")))
+    respelled = manifest_dict("two", embedder_contract=EMBEDDER_CONTRACT | {"family": "ArcFace"})
+    respelled["components"][1]["version"] = "1.1.0"  # (a contract is immutable per version)
+    second = register_once(factory, register, installed(tmp_path / "b", respelled))
+    spaces = {
+        e.representation_space_id
+        for r in (first, second)
+        for e in r.exports
+        if e.representation_space_id
+    }
+    assert len(spaces) == 1
+    with factory() as session:
+        space = session.scalars(select(RepresentationSpace)).one()
+        assert "family" not in space.contract_json  # (the family stays on its component version)
+        families = {
+            v.contract_json.get("family") for v in session.scalars(select(ComponentVersion))
+        } - {None}
+        assert families == {"arcface", "ArcFace"}
 
 
 def test_other_weights_are_another_space_even_for_the_same_component_version(

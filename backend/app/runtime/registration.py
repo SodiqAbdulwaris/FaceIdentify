@@ -17,22 +17,28 @@ it never commits):
   records that point at them; a library moved to another machine finds them `MISSING` and says so,
   it never substitutes another package;
 * for every export of a `FACE_REPRESENTATION` component, one `RepresentationSpace`, whose identity
-  is what the owner decided (ML 18.1): the model family, the weights digest, the dimensionality,
-  the preprocessing contract version, the normalisation and its contract version, and the model
-  compatibility version, and **not** the execution provider; its `semantic_key` is the SHA-256
-  fingerprint of that record, so equal identities are one space and anything else is another. The
-  weights digest is the export file's SHA-256: every export is one complete weight artifact, so two
-  exports of one model (two precisions) are two spaces. A model with several weight artifacts needs
-  the aggregate scheme ML 18.1 leaves undefined; the manifest cannot express it yet, so it is not
-  invented here;
+  is what the owner decided (ML 18.1, as amended 2026-10-02): the weights digest, the
+  dimensionality, the preprocessing contract version, the normalisation and its contract version,
+  and the model compatibility version; **not** the execution provider, the runtime variant, the
+  device or the runtime requirements, and **not** the model `family`, a human-controlled label
+  (`ArcFace` and `arc-face` must not make two spaces: the digest and the explicit contracts decide
+  compatibility, the family only describes). `compatibility_version` is its own field, not folded
+  into the preprocessing contract: a deliberate, documented boundary, bumped only when
+  representations must become incompatible although everything else is unchanged. The
+  `semantic_key` is the SHA-256 fingerprint of that record, so equal identities are one space and
+  anything else is another. The weights digest is the export file's SHA-256: every export is one
+  complete weight artifact, so two exports of one model (two precisions) are two spaces. A model
+  with several weight artifacts needs the aggregate scheme ML 18.1 leaves undefined; the manifest
+  cannot express it yet, so it is not invented here;
 * for every variant of such an export, a compatibility row to its space in the state `DECLARED`:
   the manifest says the variant runs that export, which is a claim; numerical equivalence of
   another provider is validated later and moves it on.
 
 What a component's manifest `contract` must say (this is the agent's convention for the two
 reference kinds, validated here): a `FACE_DETECTOR` names its `preprocessing_contract`; a
-`FACE_REPRESENTATION` names `family`, `dimension`, `preprocessing_contract`, `normalization`,
-`normalization_contract_version` and `compatibility_version`.
+`FACE_REPRESENTATION` names `family` (required, descriptive, not part of the identity),
+`dimension`, `preprocessing_contract`, `normalization`, `normalization_contract_version` and
+`compatibility_version`. (Owner-approved 2026-10-02, with `family` outside the identity.)
 
 Registering the same package again (same key, same manifest, same place) finds what it made and
 returns the same ids; a different manifest under the same key is refused. The same package at
@@ -118,9 +124,9 @@ class RegisteredPackage:
 
 
 def space_identity(contract: Mapping[str, Any], weights_digest: str) -> dict[str, Any]:
-    """The record a representation space is identified by (ML 18.1). No execution provider."""
+    """The record a representation space is identified by (ML 18.1, amended 2026-10-02). Not the
+    execution provider, the variant or the model `family`: none of them decides compatibility."""
     return {
-        "family": contract["family"],
         "weights_digest": weights_digest,
         "dimension": contract["dimension"],
         "preprocessing_contract": contract["preprocessing_contract"],
