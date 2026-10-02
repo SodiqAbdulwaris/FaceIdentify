@@ -281,6 +281,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     **2026-10-01 (owner): pre-approved for finalisation with item 3:** `ann_key` is allocated when a representation becomes
     ANN-eligible, unique within its space; run-local indexes use their own ephemeral labels and never depend on permanent
     keys of transactions that might roll back.
+    **Finalised 2026-10-02:** Persistence §6.3 amended (issue 38).
 22. ~~Storage layout: three specs disagreed~~ **Resolved 2026-09-25 (owner):** tech-stack §15's
     two roots are authoritative (library root with `database/library.db` and managed bytes;
     `%LOCALAPPDATA%` for derived data). Managed writes stage in `<Library Root>/staging/` so the
@@ -342,7 +343,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     (specs: persistence 6.2, 6.3), **built** in revision `0003`. Every index lookup and removal carries the
     space and the key (already true: an index belongs to one space, and `resolve_ann_candidates` looks keys
     up by the pair); allocation
-    stays at ANN-eligibility time (question 21, provisional) and run-local indexes keep ephemeral labels.
+    stays at ANN-eligibility time (question 21, final) and run-local indexes keep ephemeral labels.
 29. **Decided 2026-10-01 (owner, issue 51): snapshots are immutable and one per run, in the database.** One
     snapshot per run is already enforced (`uq_processing_runs_configuration_snapshot_id`; I had wrongly said it
     was not, in PR 50, and corrected it). Immutability is two triggers (revision `0003`, **built**): `UPDATE` always aborts,
@@ -424,7 +425,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    done; Source deletion, Recycle Bin cleanup and identity-level forget remain).
 7. Owner's build order (2026-10-01): ~~the remaining repositories (issue 32)~~ done, ~~the downgrade policy (35)~~ done, ~~the library root and lock (36, 39)~~ built and wired into `open_library`, ~~lifespan wiring and process-kill tests (33)~~ done except the FastAPI lifespan itself (no web app exists yet),
    the rest of Q26 (34), the downgrade policy (35, question 19), the library root (36, question 17), and the
-   provisional validations Q20, Q21, Q23, Q27 (37 to 41), deriving a missing original's availability from its artifact (Q24).
+   validations Q20, Q21, Q23, Q27 (37 to 41, all final now except for the M3 run-local index of Q21), deriving a missing original's availability from its artifact (Q24).
    Issue 55 (block `INSERT OR REPLACE` on snapshots) stays optional and unbuilt unless the owner asks.
 
 Model rules: CHECK constraints only where a spec defines the complete value set; otherwise a
