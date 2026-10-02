@@ -86,3 +86,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [M2: refuse a destructive downgrade of a populated library](2026-10-02-m2-downgrade-guard.md) | done; issue #35 |
 | 2026-10-02 | [M2: the library root and the library lock](2026-10-02-m2-library-root-and-lock.md) | done; issues #36, #39 |
 | 2026-10-02 | [M2: the library lifecycle and real process-kill tests](2026-10-02-m2-library-lifecycle.md) | done; issue #33 |
+| 2026-10-02 | [M2: the write unit of work](2026-10-02-m2-unit-of-work.md) | done; issue #37 |

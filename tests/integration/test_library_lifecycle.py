@@ -31,6 +31,7 @@ from backend.app.lifecycle import (
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.recovery.startup import recover_on_startup
 from backend.infrastructure.db.downgrade_guard import ALLOW_DESTRUCTIVE_DOWNGRADE_ENV
+from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.library_lock import LibraryLock, LibraryLockedError
 from backend.infrastructure.storage.library_root import InvalidLibraryRootError
@@ -51,6 +52,7 @@ class Opener:
         arguments: dict[str, Any] = dict(
             library_root=self.library, local_state_root=self.local, clock=self.clock,
             new_id=self.new_id, index_batch=50, max_index_passes=5,
+            transaction_retry=TransactionRetry(max_attempts=3, backoff=lambda n: 0.1 * n),
             retry=RetryPolicy(max_attempts=3, backoff=lambda n: timedelta(minutes=n)),
         )  # fmt: skip
         return open_library(**(arguments | overrides))
@@ -113,6 +115,8 @@ def test_a_new_library_is_laid_out_migrated_and_recovered_cleanly(opener: Opener
 
         with library.session_factory() as session:  # the services are wired to the real database
             assert session.scalar(select(Job.id)) is None
+        assert isinstance(library.unit_of_work, UnitOfWork)  # and the write path is available
+        assert library.unit_of_work.write(lambda session: session.scalar(select(Job.id))) is None
 
 
 def test_a_root_given_through_a_link_is_used_as_the_real_folder(
