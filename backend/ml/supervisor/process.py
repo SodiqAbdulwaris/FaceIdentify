@@ -54,11 +54,11 @@ def kill_process_tree(pid: int) -> None:
 class ProcessWorker:
     """A worker running in its own process, reached over a pipe."""
 
-    def __init__(self, factory_path: str) -> None:
+    def __init__(self, factory_path: str, config: str | None = None) -> None:
         context = multiprocessing.get_context("spawn")
         self.connection, child_end = context.Pipe()
         self._process = context.Process(
-            target=worker_entry, args=(child_end, factory_path), daemon=True
+            target=worker_entry, args=(child_end, factory_path, config), daemon=True
         )
         self._process.start()
         # The child holds its own copy; keeping this one would hide the child's death from the
