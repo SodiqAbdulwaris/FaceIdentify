@@ -231,6 +231,26 @@ def test_a_busy_transaction_is_rolled_back_and_run_again_from_the_start(counter:
     assert rows(counter) == 2  # the original row and only the successful attempt's insert
 
 
+def test_a_busy_commit_is_retried_whole(counter: Engine) -> None:
+    uow = UnitOfWork(counter, retry=RETRY, sleep=Sleeps())
+    commits = 0
+
+    def fail_first_commit(session: Session) -> None:
+        nonlocal commits
+        commits += 1
+        if commits == 1:
+            raise busy()
+
+    event.listen(Session, "before_commit", fail_first_commit)
+    try:
+        uow.write(lambda session: session.execute(text("INSERT INTO counter VALUES (7, 0)")))
+    finally:
+        event.remove(Session, "before_commit", fail_first_commit)
+
+    assert commits == 2
+    assert rows(counter) == 2  # the first attempt's insert was rolled back, the second's kept
+
+
 def test_every_busy_variant_is_retried(counter: Engine) -> None:
     uow = UnitOfWork(counter, retry=TransactionRetry(2, lambda n: 0.0), sleep=Sleeps())
     for code in (
