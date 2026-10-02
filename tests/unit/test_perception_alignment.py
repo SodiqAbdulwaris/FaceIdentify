@@ -184,3 +184,17 @@ def test_a_vector_that_is_not_one_is_a_model_failure(raw: np.ndarray[Any, Any]) 
     with pytest.raises(ContractError) as refused:
         canonical_vector(raw, 4)
     assert refused.value.code is MLErrorCode.INFERENCE_FAILED
+
+
+def test_alignment_refuses_an_image_that_is_not_canonical() -> None:
+    with pytest.raises(ContractError) as refused:
+        align(picture(112, 112).astype(np.float32), landmarks_of(TEMPLATE, 112, 112), CONTRACT)
+    assert refused.value.code is MLErrorCode.INVALID_INPUT
+
+
+def test_a_landmark_that_is_not_a_number_is_refused_as_a_contract_error() -> None:
+    points = TEMPLATE.copy()
+    points[2, 0] = np.nan
+    with pytest.raises(ContractError) as refused:
+        similarity_transform(points, TEMPLATE)
+    assert refused.value.code is MLErrorCode.INVALID_INPUT

@@ -79,8 +79,14 @@ def test_letterbox_keeps_channels_in_rgb_order() -> None:
 
 def test_letterbox_shrinks_a_larger_image_and_leaves_a_tiny_one_at_least_one_pixel() -> None:
     assert letterbox(np.zeros((1280, 1280, 3), np.uint8), CONTRACT).scale == 0.5
-    for shape in ((1, 5000, 3), (5000, 1, 3)):  # a one-pixel-wide image is still one pixel wide
-        assert letterbox(np.zeros(shape, np.uint8), CONTRACT).tensor.shape == (1, 3, SIZE, SIZE)
+    assert letterbox(np.zeros((5, 640, 3), np.uint8), CONTRACT).tensor.shape == (1, 3, SIZE, SIZE)
+
+
+@pytest.mark.parametrize("shape", [(1, 5000, 3), (5000, 1, 3), (4, 5000, 3)])
+def test_an_image_too_thin_to_keep_its_shape_is_refused_not_distorted(shape: Any) -> None:
+    with pytest.raises(ContractError, match="thin") as refused:
+        letterbox(np.zeros(shape, np.uint8), CONTRACT)
+    assert refused.value.code is MLErrorCode.INVALID_INPUT
 
 
 @pytest.mark.parametrize(
@@ -90,6 +96,7 @@ def test_letterbox_shrinks_a_larger_image_and_leaves_a_tiny_one_at_least_one_pix
         np.zeros((10, 10, 4), np.uint8),
         np.zeros((10, 10, 3), np.float32),
         np.zeros((0, 10, 3), np.uint8),
+        np.zeros((0, 0, 3), np.uint8),
     ],
 )
 def test_letterbox_refuses_what_is_not_a_canonical_image(image: np.ndarray[Any, Any]) -> None:
@@ -105,6 +112,7 @@ def test_letterbox_refuses_what_is_not_a_canonical_image(image: np.ndarray[Any, 
         {"input_size": 100},
         {"std": 0},
         {"score_threshold": 1.5},
+        {"score_threshold": 0},
         {"nms_iou": 0},
     ],
 )
@@ -291,3 +299,33 @@ def test_a_box_over_each_border_is_clipped_to_it_and_a_landmark_on_the_edge_is_i
 
 def test_a_box_that_only_touches_the_bottom_border_has_nothing_inside() -> None:
     assert decode(face_at(40, 79, (1, -3, 1, 5)), CONTRACT, 1.0, (656, 640)) == []
+
+
+@pytest.mark.parametrize(
+    ("scale", "size"),
+    [
+        (0.0, (640, 640)),
+        (-1.0, (640, 640)),
+        (float("nan"), (640, 640)),
+        (1.0, (0, 640)),
+        (1.0, (640, 0)),
+    ],
+)
+def test_a_scale_or_image_size_that_cannot_be_right_is_refused(
+    scale: float, size: tuple[int, int]
+) -> None:
+    with pytest.raises(ContractError) as refused:
+        decode(blank_outputs(), CONTRACT, scale, size)
+    assert refused.value.code is MLErrorCode.INVALID_INPUT
+
+
+def test_an_unusable_detection_does_not_suppress_a_usable_neighbour() -> None:
+    outputs = blank_outputs()
+    plant(outputs, level=0, column=40, row=30, score=0.7)  # fine
+    # A better-scoring, overlapping detection one anchor over whose landmark is outside.
+    index = (30 * 80 + 41) * ANCHORS_PER_CELL
+    outputs[0][index, 0] = 0.95
+    outputs[3][index] = (2, 2, 2, 2)
+    outputs[6][index] = (0, 0, 0, 0, 0, 0, 0, 0, 0, -200)
+    faces = decode(outputs, CONTRACT, 1.0, (640, 640))
+    assert [round(f.score, 1) for f in faces] == [0.7]
