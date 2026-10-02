@@ -3,14 +3,16 @@ versioned contract (ML_COMPONENTS_AND_EVALUATION.md sections 6.1, 8.1 and 9.1).
 
 Model-independent NumPy and Pillow, no ONNX Runtime and no weights. Changing the template, the
 crop size, the pixel normalisation or the vector normalisation is a compatibility change, not an
-implementation detail (section 8.1): it changes `VERSION`, and a representation space records it.
+implementation detail (section 8.1): `VERSION` names the defaults below, a contract built with
+other numbers needs its own version from whoever makes it, and a representation space records it.
 
 The contract (`arcface-112-similarity-v1`):
 
-* alignment: the five landmarks (left eye, right eye, nose, left mouth corner, right mouth corner,
-  as seen in the image) are mapped onto `TEMPLATE` by the least-squares similarity transform
-  (rotation, uniform scale, translation; never a reflection) and the image is resampled
-  bilinearly into a `crop_size` square; pixels outside the image are black;
+* alignment (Pillow's bilinear resampling, which differs numerically from a four-tap
+  `INTER_LINEAR`): the five landmarks (left eye, right eye, nose, left mouth corner, right
+  mouth corner, as seen in the image) are mapped onto `TEMPLATE` by the least-squares
+  similarity transform (rotation, uniform scale, translation; never a reflection) and the
+  image is resampled bilinearly into a `crop_size` square; pixels outside it are black;
 * model input: RGB, `(pixel - mean) / std`, channels first, `float32`, one face per tensor;
 * output: a finite vector of the model's dimension, divided by its L2 norm so that every stored
   vector has norm one (a zero or non-finite vector is refused, never stored as is).
@@ -65,7 +67,7 @@ def similarity_transform(
     mean_source, mean_target = source.mean(axis=0), target.mean(axis=0)
     centred_source, centred_target = source - mean_source, target - mean_target
     variance = float((centred_source**2).sum() / len(source))
-    if variance < 1e-12:
+    if not np.isfinite(variance) or variance < 1e-12:
         raise _invalid("the landmarks are all at one point")
     u, singular, vt = np.linalg.svd(centred_target.T @ centred_source / len(source))
     signs = np.ones(2)
@@ -84,6 +86,8 @@ def align(
 ) -> NDArray[np.uint8]:
     """The aligned crop (crop_size x crop_size x 3, uint8) of one face. `landmarks` are the
     five points normalised to the image, in the order of `TEMPLATE`."""
+    if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
+        raise _invalid("an image must be uint8 HWC, 3 channels")
     if len(landmarks) != len(TEMPLATE):
         raise _invalid(f"alignment needs {len(TEMPLATE)} landmarks, got {len(landmarks)}")
     height, width = image.shape[:2]

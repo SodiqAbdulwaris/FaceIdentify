@@ -6,21 +6,31 @@ detector gets its own contract and its own version; changing anything below chan
 
 The contract (`scrfd-letterbox-v1`):
 
-* input: the decoded RGB image is scaled by one factor so that its longer side is `input_size`
-  (bilinear), pasted at the top-left of a zero-filled `input_size` square, normalised as
-  `(pixel - mean) / std`, channels first, `float32`, one image per tensor;
+* input: the decoded RGB image is scaled by one factor so that its longer side is `input_size`,
+  pasted at the top-left of a zero-filled `input_size` square, normalised as
+  `(pixel - mean) / std`, channels first, `float32`, one image per tensor. RGB is the pinned
+  contract (the reference's blob also swaps to RGB) and is validated against the real export when
+  its weights are available (issue 69). The resampler is Pillow's bilinear, which averages over a
+  reduction, unlike a four-tap `INTER_LINEAR`: a known divergence. An image whose short side
+  would shrink below one pixel is refused, not distorted;
 * outputs: nine tensors, three per stride (8, 16, 32): scores `(cells * 2, 1)`, box distances
-  `(cells * 2, 4)` and five landmark offsets `(cells * 2, 10)`, in that order (all scores, then all
-  boxes, then all landmarks); a leading batch axis of one is accepted. Two anchors per grid cell,
-  centred on `(column * stride, row * stride)`, distances and offsets in units of the stride;
-* postprocessing: keep scores of at least `score_threshold`, greedy non-maximum suppression at
-  `nms_iou`, divide by the scale to get original pixels, then normalise to the image.
+  `(cells * 2, 4)` and five landmark offsets `(cells * 2, 10)`, in that order (all scores, then
+  all boxes, then all landmarks); the score column is already the face score, selected from the
+  graph's softmax pair by whatever runs the model; a leading batch axis of one is accepted. Two
+  anchors per grid cell, centred on `(column * stride, row * stride)`, distances and offsets in
+  units of the stride;
+* postprocessing: keep scores of at least `score_threshold`, divide by the scale to get original
+  pixels, reject what cannot be used (below), then greedy non-maximum suppression at `nms_iou` on
+  the boxes that remain (continuous box areas, not the reference's pixel-inclusive `+ 1`: a
+  deliberate difference of a few percent in the overlap), then normalise to the image.
 
-Detections the contract cannot use are rejected here, before alignment (section 4.1): a box is
+Detections the contract cannot use are rejected here, before suppression and alignment
+(section 4.1): a box is
 clipped to the image (a face cut off by the border is still a face) and dropped if nothing is left;
 a detection with a landmark outside the image is dropped, because alignment from a guessed point
 would be a silent error. The numbers are the reference model's published defaults and are
-provisional like every threshold (section 18.1).
+provisional like every threshold (section 18.1). `VERSION` names the defaults below: a contract
+built with other numbers is a different contract and needs its own version from whoever makes it.
 """
 
 from dataclasses import dataclass
@@ -53,7 +63,7 @@ class DetectorContract:
             raise ValueError(f"input_size must be a positive multiple of {max(STRIDES)}")
         if self.std <= 0:
             raise ValueError("std must be positive")
-        if not (0 <= self.score_threshold <= 1 and 0 < self.nms_iou <= 1):
+        if not (0 < self.score_threshold <= 1 and 0 < self.nms_iou <= 1):
             raise ValueError("the thresholds are fractions")
 
 
@@ -83,8 +93,9 @@ def letterbox(image: NDArray[np.uint8], contract: DetectorContract) -> Letterbox
         raise ContractError(MLErrorCode.INVALID_INPUT, "an image has no pixels")
     size = contract.input_size
     scale = size / max(height, width)
-    new_width = max(1, round(width * scale))
-    new_height = max(1, round(height * scale))
+    if min(width, height) * scale < 1:  # (rounding a sliver up to a pixel would distort it)
+        raise ContractError(MLErrorCode.INVALID_INPUT, "an image this thin cannot be detected on")
+    new_width, new_height = round(width * scale), round(height * scale)
     resized = Image.fromarray(image).resize((new_width, new_height), Image.Resampling.BILINEAR)
     canvas = np.zeros((size, size, 3), dtype=np.float32)
     canvas[:new_height, :new_width] = np.asarray(resized, dtype=np.float32)
@@ -143,6 +154,10 @@ def decode(
     if len(outputs) != 3 * len(STRIDES):
         raise _bad_output(f"{len(outputs)} tensors, expected {3 * len(STRIDES)}")
     height, width = image_size
+    if not (letterboxed_scale > 0 and min(height, width) >= 1):
+        raise ContractError(
+            MLErrorCode.INVALID_INPUT, "the scale and the image size must be positive"
+        )
     boxes: list[Floats] = []
     scores: list[Floats] = []
     points: list[Floats] = []
@@ -170,33 +185,27 @@ def decode(
     all_boxes = np.concatenate(boxes) / letterboxed_scale
     all_scores = np.concatenate(scores)
     all_points = np.concatenate(points) / letterboxed_scale
-    found: list[FoundFace] = []
-    for index in non_maximum_suppression(all_boxes, all_scores, contract.nms_iou):
-        face = _normalised(
-            all_boxes[index], all_points[index], float(all_scores[index]), width, height
+    all_boxes[:, [0, 2]] = np.clip(all_boxes[:, [0, 2]], 0.0, width)
+    all_boxes[:, [1, 3]] = np.clip(all_boxes[:, [1, 3]], 0.0, height)
+    usable = (
+        (all_boxes[:, 0] < all_boxes[:, 2])
+        & (all_boxes[:, 1] < all_boxes[:, 3])
+        & (all_points[:, :, 0] >= 0).all(axis=1)
+        & (all_points[:, :, 0] <= width).all(axis=1)
+        & (all_points[:, :, 1] >= 0).all(axis=1)
+        & (all_points[:, :, 1] <= height).all(axis=1)
+    )
+    all_boxes, all_scores, all_points = all_boxes[usable], all_scores[usable], all_points[usable]
+    return [
+        FoundFace(
+            box=(
+                float(all_boxes[i, 0]) / width,
+                float(all_boxes[i, 1]) / height,
+                float(all_boxes[i, 2]) / width,
+                float(all_boxes[i, 3]) / height,
+            ),
+            score=float(all_scores[i]),
+            landmarks=tuple((float(x) / width, float(y) / height) for x, y in all_points[i]),
         )
-        if face is not None:
-            found.append(face)
-    return found
-
-
-def _normalised(
-    box: Floats, landmarks: Floats, score: float, width: int, height: int
-) -> FoundFace | None:
-    x0, y0 = max(0.0, float(box[0])), max(0.0, float(box[1]))
-    x1, y1 = min(float(width), float(box[2])), min(float(height), float(box[3]))
-    if not (x0 < x1 and y0 < y1):
-        return None
-    inside = (
-        (landmarks[:, 0] >= 0)
-        & (landmarks[:, 0] <= width)
-        & (landmarks[:, 1] >= 0)
-        & (landmarks[:, 1] <= height)
-    )
-    if not inside.all():
-        return None
-    return FoundFace(
-        box=(x0 / width, y0 / height, x1 / width, y1 / height),
-        score=score,
-        landmarks=tuple((float(x) / width, float(y) / height) for x, y in landmarks),
-    )
+        for i in non_maximum_suppression(all_boxes, all_scores, contract.nms_iou)
+    ]
