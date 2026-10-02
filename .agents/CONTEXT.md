@@ -18,7 +18,7 @@ _Last updated: 2026-10-02 (M3 step 5 complete: the ML supervisor)_
   `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository`, `SettingsRepository` and `RuntimeCatalogRepository` (TST-022 has its mechanics for every listed repository; Artifact is `artifact_storage.py`); the library root and lock (`library_root.py`, `library_lock.py`; not yet called by a lifecycle) and the downgrade guard are built; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
-  #29 to #41, #48, #51 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
+  #29 to #41, #48, #51, #57, #66, #69, #71, #79, #80 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
   `docs/implementations/2026-10-01-decide-q25-q26-erasure-and-recovery.md`). When something becomes pending,
   open an issue for it.
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
@@ -325,7 +325,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     (`backend/app/memory/erasure.py`), coordinator retirement of old generations before a `REMOVE` is applied, recovery of
     `ERASING` and the tests. Owner answers: `ACTIVE`, `PENDING` and `SUPERSEDED` may be erased (a keyless one skips the
     index work); representation-level erasure writes no Evidence (section 7's Evidence is for the identity-level forget).
-    **Agent finding (issue opened, awaiting the owner):** persistence 6.2 item 2 says a single erasure "needs no rebuild",
+    **Agent finding, decided by the owner 2026-10-02 (issue 57):** persistence 6.2 item 2 said a single erasure "needs no rebuild",
     but a USearch generation saved after `remove()` still holds the vector's bytes (probed), so the `REMOVE` of an `ERASING`
     representation rebuilds the space (one rebuild per space for a bulk). The keyless-`REMOVE` rebuild stays as a safety net.
     SQLite's own residue is question 30.
@@ -334,10 +334,10 @@ Unresolved items need the user's decision. Do not settle them silently.
     partial output stays private and is never activated). A `RUNNING` job is `INTERRUPTED`, never
     requeued. Recovery is idempotent by construction (guarded transitions), tested by a stop after each
     step and a rerun. **Built** (PR for issue 30): the `PAUSING`/`CANCELLING` transitions in
-    `backend/app/recovery/startup.py`. **Still open, for the M3 run lifecycle and the runtime installer
+    `backend/app/recovery/startup.py`. **Still open, for the M3 run lifecycle
     (issue 34):**
-    `FINALIZING` runs (revalidate and accept without redoing ML, needing `AcceptProcessingRunUseCase`), a
-    run with pending output and no final checkpoint, and interrupted runtime installations.
+    `FINALIZING` runs (revalidate and accept without redoing ML, needing `AcceptProcessingRunUseCase`) and a
+    run with pending output and no final checkpoint. (Interrupted runtime installations are built: `RuntimePackageStore.recover`.)
 28. ~~Open: `ann_key` is globally unique but allocated per space (the same conflict as question 13).~~ **Decided 2026-10-01 (owner, issue 48):**
     an `ann_key` is unique within its space, `UNIQUE(representation_space_id, ann_key)`, as revision `0003`
     (specs: persistence 6.2, 6.3), **built** in revision `0003`. Every index lookup and removal carries the
