@@ -612,6 +612,8 @@ Runtime package manifests are declarative and versioned. Installation
 logic is application code, not arbitrary executable logic embedded in a
 manifest.
 
+> **Decision 2026-10-02 (agent, within the owner's M3 headless-installer scope; owner to confirm, issue 71): manifest schema version 1.** A manifest is one JSON object with exactly: `schema_version` (1), `key`, `version`, `requirements` (fact name to the list of accepted values, for example `os` and `architecture`; a requirement is met only by a known, matching fact), `components` (`key`, `kind`, `version`, `contract`), `exports` (`component`, package-relative `file`, `format`, `precision`, `sha256` as 64 lowercase hex, `size_bytes`, `input_contract`, and `provenance` with `license`, `source` and `redistributable`) and `variants` (`export_file`, `provider`, `device_kind`, `variant_key`, `requirements`). They mirror the catalog tables one to one. Parsing is strict: exact keys and types, no duplicate JSON keys, no NaN, every reference resolves, names are unique (files case-insensitively, because of Windows), and every path is a safe relative path (no absolute path, drive, backslash, `.` or `..`, trailing dot or space, or reserved device name). Provenance is mandatory so that weights of unclear licence are recorded as such (issue 69). Built: `backend/app/runtime/manifest.py`.
+
 A package installation follows:
 
 ``` text
