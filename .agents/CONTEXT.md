@@ -15,7 +15,7 @@ _Last updated: 2026-10-02 (library root and library lock)_
   storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
   `IndexOperation`s into it (TST-028) and the cross-storage failure matrix (TST-029) are done;
   startup recovery (TST-030) is partly done (see open question 26); TST-022 (repository contract) has its
-  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository`, `SettingsRepository` and `RuntimeCatalogRepository` (TST-022 has its mechanics for every listed repository; Artifact is `artifact_storage.py`); TST-031's representation erasure is built (Source deletion and identity-level forget are not).
+  `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository`, `SettingsRepository` and `RuntimeCatalogRepository` (TST-022 has its mechanics for every listed repository; Artifact is `artifact_storage.py`); the library root and lock (`library_root.py`, `library_lock.py`; not yet called by a lifecycle) and the downgrade guard are built; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
   #29 to #41, #48, #51 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
@@ -128,7 +128,7 @@ git config core.hooksPath .githooks   # enable commit-msg + pre-push hooks (once
 git switch -c feat/short-description  # every change starts on a branch (rules/branches.md)
 # PR review: follow the procedure in .agents/rules/branches.md (Review section)
 uv run pytest                          # fast backend tests
-uv run alembic upgrade head           # migrate the DB at $env:FACEIDENTIFY_DATABASE_PATH (backend/alembic/README)
+uv run alembic upgrade head           # migrate the DB under $env:FACEIDENTIFY_LIBRARY_ROOT (backend/alembic/README)
 uv run ruff format --check . && uv run ruff check . && uv run mypy
 uv run mypy --platform linux          # CI's static job runs on Linux; Windows-only APIs need sys.platform guards
 npm test && npm run typecheck && npm run lint && npm run build
@@ -418,7 +418,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    (IndexOperation replay)~~ done, ~~TST-029 (cross-storage failure)~~ done, ~~TST-030 (startup recovery beyond
    artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion: representation erasure
    done; Source deletion, Recycle Bin cleanup and identity-level forget remain).
-7. Owner's build order (2026-10-01): ~~the remaining repositories (issue 32)~~ done, then lifespan wiring and process-kill tests (33),
+7. Owner's build order (2026-10-01): ~~the remaining repositories (issue 32)~~ done, ~~the downgrade policy (35)~~ done, the library root and lock (36, 39) built but not yet wired, then lifespan wiring and process-kill tests (33),
    the rest of Q26 (34), the downgrade policy (35, question 19), the library root (36, question 17), and the
    provisional validations Q20, Q21, Q23, Q27 (37 to 41), deriving a missing original's availability from its artifact (Q24).
    Issue 55 (block `INSERT OR REPLACE` on snapshots) stays optional and unbuilt unless the owner asks.

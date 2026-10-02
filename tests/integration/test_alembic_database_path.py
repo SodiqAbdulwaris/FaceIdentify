@@ -13,7 +13,7 @@ import pytest
 from alembic import command
 
 from backend.infrastructure.storage.layout import database_path_for
-from backend.infrastructure.storage.library_root import LIBRARY_ROOT_ENV
+from backend.infrastructure.storage.library_root import LIBRARY_ROOT_ENV, InvalidLibraryRootError
 from tests.fixtures.migrations import DATABASE_PATH_ENV
 from tests.fixtures.persistence import alembic_config
 
@@ -86,7 +86,56 @@ def test_the_deprecated_path_still_works_when_nothing_else_is_given(
     assert stamped(legacy) == "0001"
 
 
-def test_nothing_is_guessed_when_no_library_is_given(tmp_path: Path) -> None:
+def test_nothing_is_guessed_when_no_library_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # a guessing implementation would write here ...
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))  # ... or here
+
     with pytest.raises(RuntimeError, match=LIBRARY_ROOT_ENV):
         command.upgrade(alembic_config(), "0001")
+
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("blank", ["", " ", "   "])
+def test_a_blank_library_root_counts_as_not_given(
+    blank: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy = tmp_path / "legacy.db"
+    monkeypatch.setenv(LIBRARY_ROOT_ENV, blank)
+    monkeypatch.setenv(DATABASE_PATH_ENV, str(legacy))
+
+    command.upgrade(alembic_config(), "0001")
+
+    assert stamped(legacy) == "0001"
+
+
+def test_the_library_root_is_validated_like_the_applications(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    file = tmp_path / "file"
+    file.write_text("x")
+    monkeypatch.chdir(tmp_path)
+
+    for bad, message in (
+        ("relative", "absolute"),
+        (str(file), "not a directory"),
+        (str(tmp_path / "typo" / "library"), "does not exist"),
+    ):
+        monkeypatch.setenv(LIBRARY_ROOT_ENV, bad)
+        with pytest.raises(InvalidLibraryRootError, match=message):
+            command.upgrade(alembic_config(), "0001")
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["file"]  # nothing was created
+
+
+def test_a_new_library_folder_inside_an_existing_one_is_created_with_its_database_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "new-library"
+    monkeypatch.setenv(LIBRARY_ROOT_ENV, str(root))
+
+    command.upgrade(alembic_config(), "0001")
+
+    assert stamped(root / "database" / "library.db") == "0001"
