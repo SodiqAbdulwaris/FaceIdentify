@@ -593,3 +593,17 @@ class MLResponse:
             for result in self.output.representations:
                 if (result.input_index, result.face_index) not in asked:
                     raise invalid("a representation is for a face that was not requested")
+
+
+def error_wire(request_id: str, code: MLErrorCode, message: str) -> dict[str, Any]:
+    """An ERROR response as it goes on the wire, for a request that may not even have parsed (so
+    that its operation is unknown): the answer must still carry the request's id."""
+    return {
+        "version": PROTOCOL_VERSION,
+        "request_id": string(request_id, "request_id"),
+        "status": MLStatus.ERROR.value,
+        "output": None,
+        "execution": None,
+        "timings": {},
+        "error": MLError(code, message).to_wire(),
+    }

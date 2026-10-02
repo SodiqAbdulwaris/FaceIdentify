@@ -1610,6 +1610,8 @@ SHUTDOWN_ACK
 
 The protocol remains intentionally small.
 
+> **Decision 2026-10-02 (agent, M3 step 5; the spec does not say what the worker does with input it cannot use): the worker loop.** `backend/ml/worker/loop.py` serves the protocol: HELLO, wait for INITIALIZE (at this protocol version), READY, then EXECUTE, RELEASE_OUTPUT, PING until SHUTDOWN (acknowledged) or the parent goes away (a closed connection). Every EXECUTE gets exactly one response and none of these stops the worker: a request that does not parse is answered under its own `request_id` (or `unknown` if it has none) with `INVALID_REQUEST`, `UNSUPPORTED_PROTOCOL_VERSION` or `SHARED_MEMORY_INVALID`; an operation with no handler is `COMPONENT_NOT_AVAILABLE`; a handler that raises is `INFERENCE_FAILED` (or `OUT_OF_MEMORY`, or the code of a `WorkerError`/`ContractError` it raised, such as `SHARED_MEMORY_UNAVAILABLE`). A stream the worker cannot follow (an unreadable frame, or a frame a parent does not send, such as READY) ends the worker rather than being guessed at; the supervisor sees that as a worker failure. The segments a request's result is carried in are kept until RELEASE_OUTPUT for that request; a request that fails releases at once what it made, and never what other requests made; everything still owned is released when the worker leaves, however it leaves.
+
 ---
 
 # 50. Worker Failure

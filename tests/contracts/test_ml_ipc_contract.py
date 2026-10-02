@@ -24,6 +24,7 @@ from backend.ml.contracts.messages import (
     MLRequest,
     MLResponse,
     RepresentationResult,
+    error_wire,
 )
 from backend.ml.contracts.protocol import (
     PROTOCOL_VERSION,
@@ -474,6 +475,20 @@ def test_the_worker_states_are_those_of_the_spec() -> None:
         "UNAVAILABLE",
         "FAILED",
     ]
+
+
+def test_an_error_response_can_be_built_for_a_request_that_never_parsed() -> None:
+    wire = error_wire("r-1", MLErrorCode.INVALID_REQUEST, "no such operation")
+
+    parsed = MLResponse.from_wire(over_the_wire(wire), detect_request())
+
+    assert parsed.status is MLStatus.ERROR
+    assert parsed.request_id == "r-1"
+    assert parsed.error == MLError(MLErrorCode.INVALID_REQUEST, "no such operation")
+    assert parsed.output is None
+    for bad_id, bad_message in (("", "x"), ("r-1", "")):
+        with pytest.raises(ContractError):
+            error_wire(bad_id, MLErrorCode.INVALID_REQUEST, bad_message)
 
 
 def test_every_spec_error_code_exists() -> None:
