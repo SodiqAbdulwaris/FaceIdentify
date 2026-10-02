@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-02 (the write unit of work, Q20)_
+_Last updated: 2026-10-02 (Q21 finalised)_
 
 ## Current state
 
@@ -262,7 +262,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     non-idempotent work outside the transaction; exhaustion becomes a retryable application/API error. If implementation
     contradicts an existing spec, isolate that part and open an issue.
     **Built 2026-10-02:** `UnitOfWork.write` begins with `BEGIN IMMEDIATE` (engine execution option `sqlite_begin_immediate`), retries the whole transaction on SQLITE_BUSY/LOCKED (decided by result code, not text) with the caller's attempts and back-off (no defaults), and raises `DatabaseBusyError`. `work` must be a function of the session only. `open_library` exposes it as `OpenLibrary.unit_of_work`. The existing services (`IndexCoordinator`, `RepresentationEraser`, recovery) still use the plain session factory, so they still begin deferred; moving them onto `UnitOfWork` is issue 66.
-21. **Open: when `ann_key` is allocated, and whether a rolled-back key may be reused.** Two spec
+21. **Final (issue 38; spec §6.3 amended 2026-10-02): allocation at ANN-eligibility, run-local index uses ephemeral labels.** Original question follows. Two spec
     passages pull apart. Persistence §6.3 allocates "in the same short transaction that creates
     representations... keys are never reused", and the run-local pending index (§23, "Recognition
     searches global active vectors plus a run-local pending index... ANN output is only candidate
