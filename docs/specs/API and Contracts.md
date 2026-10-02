@@ -191,6 +191,8 @@ For referenced imports, the application stores a verified reference to an extern
 
 Referenced originals are never deleted by the application.
 
+> **Decision 2026-10-02 (agent, M3 step 6; the spec leaves these open): how an image import behaves.** `ImportSourceUseCase` (`backend/app/sources/import_source.py`) reads the file once, into memory and up to a byte limit the caller sets, and decodes it (a JPEG, PNG, BMP or WebP, up to a pixel limit the caller sets) before anything is written, so a file that is not a usable image leaves no trace and what is validated is what is stored. A managed import then reserves a `PENDING` artifact, writes the bytes to its key, and in ONE transaction makes the artifact `AVAILABLE` and adds the Source; a crash leaves only what startup recovery already settles (a reservation without a file becomes `MISSING`, a written file without a Source becomes an `AVAILABLE` artifact nothing refers to; never a half-made Source). A referenced import checks the file's size first (inspecting hashes the whole file), then hashes and reads it and refuses it if the bytes read are not the bytes hashed. The Source records the size as shown (the orientation applied), has no thumbnail yet, and no Job or run is created: import is not processing. Importing the same file twice makes two Sources (no deduplication: a Source is the user's own entry). The blank-name check comes before the file is looked at.
+
 ---
 
 ## 5.2 Source queries
