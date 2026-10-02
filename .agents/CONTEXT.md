@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-02 (library root and library lock)_
+_Last updated: 2026-10-02 (the library lifecycle and process-kill tests)_
 
 ## Current state
 
@@ -87,13 +87,16 @@ _Last updated: 2026-10-02 (library root and library lock)_
   stale leases from any job, removes
   workspaces of finished jobs whose run is over too, marks a managed artifact whose file is gone
   `MISSING` (and refuses to run at all if the library root is not there; `reverify_managed_artifact`
-  brings one back, but nothing calls it yet), validates every active space's index (a stale one is rebuilt from SQLite, not just a
+  brings one back, but nothing calls it yet; `open_library` calls recovery at startup), validates every active space's index (a stale one is rebuilt from SQLite, not just a
   missing or corrupt one), gives
   `FAILED` `IndexOperation`s one fresh set of attempts and catches up pending ones in bounded
   passes; idempotent, survives a crash after any step, and reports what is `unresolved`. It relies
-  on the single-process precondition (open questions 20 and 23) and nothing calls it yet (no
-  application lifespan). The remaining backend
-  packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app, no
+  on the single-process precondition (open questions 20 and 23), which `open_library` (`backend/app/lifecycle.py`) now
+  provides: it validates the roots, takes the library lock, lays out the folders, migrates (a database stamped with a revision
+  this version does not know is refused untouched: `DatabaseNewerThanApplicationError`), builds the engine, Storage Manager,
+  IndexCoordinator and eraser, runs `recover_on_startup`, and releases the lock and the engine on exit or on any failed step.
+  The FastAPI lifespan that wraps it does not exist yet. The remaining backend
+  packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app (so no lifespan yet), no
   source-import use case and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
   Vitest. It is a placeholder `App` shell only; no features.
@@ -290,7 +293,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     on a file in the library (e.g. `<Library>/database/.lock`) for its whole lifetime and refuses to
     start without it, before migrations and recovery. Decide with the startup/lifespan work.
     **2026-10-01 (owner): agreed provisional direction** (the recommendation above), to be validated with the startup/lifespan work.
-    **2026-10-01 (owner): finalised and built as `backend/infrastructure/storage/library_lock.py` (an OS-level non-blocking lock, released by a crash or kill; tested with real subprocesses); wiring it before migrations and recovery is issue 33:** an exclusive library-lifetime lock at
+    **2026-10-01 (owner): finalised and built as `backend/infrastructure/storage/library_lock.py` (an OS-level non-blocking lock, released by a crash or kill; tested with real subprocesses) and wired first in `open_library`, before the layout, the migrations and recovery, with a killed real backend freeing it (issue 33):** an exclusive library-lifetime lock at
     `<LibraryRoot>/database/.lock`, taken after question 17's resolution and validation and before migrations, recovery,
     workers or any mutation; another live owner fails startup for that library; released on orderly shutdown; an OS-level
     lock so a crash never leaves the library locked.
@@ -418,7 +421,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
    (IndexOperation replay)~~ done, ~~TST-029 (cross-storage failure)~~ done, ~~TST-030 (startup recovery beyond
    artifacts)~~ partly done (open question 26 and the lifespan wiring remain), TST-031 (deletion: representation erasure
    done; Source deletion, Recycle Bin cleanup and identity-level forget remain).
-7. Owner's build order (2026-10-01): ~~the remaining repositories (issue 32)~~ done, ~~the downgrade policy (35)~~ done, the library root and lock (36, 39) built but not yet wired, then lifespan wiring and process-kill tests (33),
+7. Owner's build order (2026-10-01): ~~the remaining repositories (issue 32)~~ done, ~~the downgrade policy (35)~~ done, ~~the library root and lock (36, 39)~~ built and wired into `open_library`, ~~lifespan wiring and process-kill tests (33)~~ done except the FastAPI lifespan itself (no web app exists yet), and process-kill tests (33),
    the rest of Q26 (34), the downgrade policy (35, question 19), the library root (36, question 17), and the
    provisional validations Q20, Q21, Q23, Q27 (37 to 41), deriving a missing original's availability from its artifact (Q24).
    Issue 55 (block `INSERT OR REPLACE` on snapshots) stays optional and unbuilt unless the owner asks.
