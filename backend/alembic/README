@@ -26,7 +26,7 @@ output is for review only: it has neither the foreign key pragma nor the check, 
 other than the internal bookkeeping and re-creatable metadata listed in
 `backend/infrastructure/db/downgrade_guard.py`) is refused before it changes anything. For development
 only, set `FACEIDENTIFY_ALLOW_DESTRUCTIVE_DOWNGRADE=1` to allow it; the application never sets it.
-Production only upgrades and recovers with a corrective revision. Every revision's `downgrade()` must
+An offline run (`downgrade ... --sql`) only prints a script and is let through. Production only upgrades and recovers with a corrective revision. Every revision's `downgrade()` must
 start with `require_destructive_downgrade_allowed(op.get_bind())` (a test enforces it).
 
 Changing a model means adding a reviewed revision:

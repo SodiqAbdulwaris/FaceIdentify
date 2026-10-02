@@ -97,7 +97,7 @@ def test_downgrade_drops_the_table_and_leaves_everything_else(
     before = dump(path)
     migrate(monkeypatch, path, "0004")
 
-    downgrade(monkeypatch, path, "0003")
+    downgrade(monkeypatch, path, "0003", allow_destructive=True)
 
     assert version(path) == "0003"
     assert dump(path) == before

@@ -15,7 +15,7 @@
   that revision and, each revision being its own transaction, leaves the database exactly as it was.
 - `tests/fixtures/migrations.py` `downgrade()` opts in to the override by default (`allow_destructive=False` for the guard's
   own tests); the existing downgrade tests are otherwise unchanged.
-- `tests/integration/test_downgrade_guard.py` (19), spec note on persistence section 27, `backend/alembic/README`, CONTEXT.
+- `tests/integration/test_downgrade_guard.py` (24), spec note on persistence section 27, `backend/alembic/README`, CONTEXT.
 
 ## Why
 
@@ -28,6 +28,10 @@ development-only override that the application never sets; recovery goes forward
   runtime/model catalog, `representation_spaces` and `ann_key_sequences`: a fresh library has rows there. This list is my
   reading of the owner's definition (recorded in the spec note and CONTEXT); a table that is not on it counts as data, so
   forgetting one errs on the side of refusing. Revisit if a catalog row should count as data.
+- **An offline run is let through.** `alembic downgrade ... --sql` only prints a script, and its connection is a mock with
+  no database to inspect (the first version of the guard crashed there; a review caught it and a test now pins it).
+- **Artifacts:** installed models and packages keep their bytes as `artifacts` rows, so a fresh library has some; an artifact
+  counts as data only if no catalog table references it. `ann_key_sequences` is *not* internal (the never-reused allocator).
 - **A guard in each revision, not in `env.py`:** `env.py` runs after a step (`on_version_apply`) or cannot tell the direction
   reliably, while the revision's own first statement runs before anything changes. The risk, a future revision forgetting it,
   is closed by an AST test over every revision file.
@@ -37,10 +41,14 @@ development-only override that the application never sets; recovery goes forward
 
 ## Verification
 
-- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1076 passed, backend coverage 100%.
-  8 mutations (the exact override, the override ignored, the refusal removed, two internal tables removed from the list, an
+- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1081 passed, backend coverage 100%.
+  15 mutations (the exact override, the override ignored, the refusal removed, two internal tables removed from the list, an
   unknown table, the guard missing from one revision, the guard not first in another): each broken, shown to fail a test and
   restored byte-identical.
+- **Review** (Explore subagent; Codex over its limit until 2026-10-03), posted on PR 62: one major, fixed (the offline crash).
+  Fixed: `ann_key_sequences` and artifacts as above, a test that seeds every internal table and compares with the list, a test
+  that a setting column added later forces a review of the guard, the revision list derived from the files, the AST test also
+  checks the argument, the test helper is safe by default, quoting of table names. Answered: the first commit's size.
 - **Not verified:** a downgrade through the `alembic` command line (the tests call `command.downgrade`).
 
 ## Open issues / follow-ups

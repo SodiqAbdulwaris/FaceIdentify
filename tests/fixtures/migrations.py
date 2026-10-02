@@ -30,11 +30,10 @@ def migrate(monkeypatch: pytest.MonkeyPatch, path: Path, revision: str) -> None:
 
 
 def downgrade(
-    monkeypatch: pytest.MonkeyPatch, path: Path, revision: str, *, allow_destructive: bool = True
+    monkeypatch: pytest.MonkeyPatch, path: Path, revision: str, *, allow_destructive: bool = False
 ) -> None:
     """Downgrade `path`. A downgrade of a populated library is refused unless the development
-    override is set, so the tests of a revision's downgrade opt in; the tests of the guard itself
-    pass `allow_destructive=False`."""
+    override is set: a test that downgrades data on purpose passes `allow_destructive=True`."""
     monkeypatch.setenv(DATABASE_PATH_ENV, str(path))
     if allow_destructive:
         monkeypatch.setenv(ALLOW_DESTRUCTIVE_DOWNGRADE_ENV, "1")

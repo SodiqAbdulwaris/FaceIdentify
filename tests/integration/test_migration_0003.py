@@ -345,7 +345,7 @@ def test_downgrade_restores_the_table_wide_constraint_and_drops_the_triggers(
     before = dump(path)
     migrate(monkeypatch, path, "0003")
 
-    downgrade(monkeypatch, path, "0002")
+    downgrade(monkeypatch, path, "0002", allow_destructive=True)
 
     assert_untouched_at_0002(path, before)
     used, _ = snapshot_ids(path)
@@ -380,7 +380,7 @@ def test_downgrade_is_refused_atomically_while_two_spaces_hold_the_same_key(
     before = dump(path)
 
     with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
-        downgrade(monkeypatch, path, "0002")
+        downgrade(monkeypatch, path, "0002", allow_destructive=True)
 
     assert version(path) == "0003"
     assert dump(path) == before
