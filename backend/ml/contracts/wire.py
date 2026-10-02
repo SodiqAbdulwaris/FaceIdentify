@@ -19,7 +19,7 @@ def exact_keys(
     missing = required - value.keys()
     extra = value.keys() - required - optional
     if missing or extra:
-        raise invalid(f"{what}: missing {sorted(missing)}, unexpected {sorted(extra)}")
+        raise invalid(f"{what}: missing {sorted(missing)}, unexpected {sorted(map(str, extra))}")
 
 
 def string(value: Any, what: str) -> str:

@@ -515,6 +515,10 @@ class MLResponse:
         for name, seconds in self.timings.items():
             string(name, "timing name")
             number(seconds, name)
+        if self.execution is not None and not isinstance(self.execution, ExecutionProvenance):
+            raise invalid("execution must be an ExecutionProvenance")
+        if self.error is not None and not isinstance(self.error, MLError):
+            raise invalid("error must be an MLError")
         if self.status is MLStatus.SUCCESS:
             if self.error is not None or self.output is None or self.execution is None:
                 raise invalid("a SUCCESS response has an output and its execution, and no error")

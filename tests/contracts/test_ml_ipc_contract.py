@@ -332,8 +332,13 @@ def broken_response(**changes: Any) -> dict[str, Any]:
     ],
 )
 def test_a_malformed_response_is_refused(changes: dict[str, Any]) -> None:
-    with pytest.raises(ContractError):
+    with pytest.raises(ContractError) as raised:
         MLResponse.from_wire(broken_response(**changes), detect_request())
+
+    assert raised.value.code in {
+        MLErrorCode.INVALID_REQUEST,
+        MLErrorCode.UNSUPPORTED_PROTOCOL_VERSION,
+    }
 
 
 def test_a_response_must_answer_the_request_it_is_read_against() -> None:
@@ -367,6 +372,8 @@ def test_a_representation_may_only_be_for_a_face_that_was_asked_about() -> None:
 GOOD_BOX = (0.1, 0.1, 0.5, 0.6)
 STATUS_AS_TEXT_SUCCESS: Any = "SUCCESS"  # a str is not an MLStatus
 STATUS_AS_TEXT_ERROR: Any = "ERROR"
+NOT_PROVENANCE: Any = 42
+NOT_AN_ERROR: Any = "boom"
 BAD_IN_PROCESS: list[Any] = [
     lambda: DetectFacesInput((describe("g", "uint8", (4, 4, 1), readonly=True),)),
     lambda: GenerateRepresentationsInput((IMAGE,), (FaceGeometry(99, 0, GOOD_BOX),)),
@@ -399,6 +406,14 @@ BAD_IN_PROCESS: list[Any] = [
         error=MLError(MLErrorCode.INFERENCE_FAILED, "x"),
         timings={"": 1.0},
     ),
+    lambda: MLResponse(
+        "r",
+        MLStatus.SUCCESS,
+        MLOperation.DETECT_FACES,
+        execution=NOT_PROVENANCE,
+        output=DetectFacesOutput(()),
+    ),
+    lambda: MLResponse("r", MLStatus.ERROR, MLOperation.DETECT_FACES, error=NOT_AN_ERROR),
     lambda: DetectFacesOutput([]),  # type: ignore[arg-type]
     lambda: GenerateRepresentationsOutput([]),  # type: ignore[arg-type]
     lambda: GenerateRepresentationsInput((IMAGE,), []),  # type: ignore[arg-type]
@@ -485,6 +500,49 @@ def test_a_descriptor_survives_the_wire() -> None:
     assert SharedMemoryDescriptor.from_wire(over_the_wire(IMAGE.to_wire())) == IMAGE
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("x", 48, "uint8", (4, 4, 3), (12, 3, 1), "C", "yes"),
+        ("x", 48, "uint8", (4.0, 4, 3), (12, 3, 1), "C", True),
+        ("x", 48, "uint8", (4, 4, 3), (12.0, 3, 1), "C", True),
+        ("x", 48, "uint8", [4, 4, 3], (12, 3, 1), "C", True),
+        ("x", 48, "uint8", (4, 4, 3), [12, 3, 1], "C", True),
+        ("x", "huge", "uint8", (4, 4, 3), (12, 3, 1), "C", True),
+        ("x", True, "uint8", (4, 4, 3), (12, 3, 1), "C", True),
+        (7, 48, "uint8", (4, 4, 3), (12, 3, 1), "C", True),
+        ("x", 48, 8, (4, 4, 3), (12, 3, 1), "C", True),
+        ("x", 48, "uint8", (4, 4, 3), (12, 3, 1), None, True),
+        ("x", 48, [], (4, 4, 3), (12, 3, 1), "C", True),  # unhashable
+        ("x", 48, "uint8", (4, 4, 3), (12, 3, 1), [], True),
+    ],
+)
+def test_a_descriptor_built_in_process_has_the_types_the_wire_requires(arguments: Any) -> None:
+    with pytest.raises(ContractError) as raised:
+        SharedMemoryDescriptor(*arguments)
+
+    assert raised.value.code is MLErrorCode.SHARED_MEMORY_INVALID
+
+
+def test_describe_refuses_a_readonly_that_is_not_a_boolean() -> None:
+    with pytest.raises(ContractError):
+        describe("x", "uint8", (4, 4, 3), readonly="yes")  # type: ignore[arg-type]
+
+
+def test_mixed_type_keys_are_a_contract_error_not_a_type_error() -> None:
+    with pytest.raises(ContractError, match="unexpected"):
+        MLRequest.from_wire({1: "a", "x": "b"})
+
+
+def test_only_a_uint8_three_channel_image_is_accepted_even_when_the_segment_is_consistent() -> None:
+    float_image = describe("f", "float32", (4, 4, 3), readonly=True)
+
+    with pytest.raises(ContractError) as raised:
+        DetectFacesInput((float_image,))
+
+    assert raised.value.code is MLErrorCode.INVALID_INPUT
+
+
 def test_describe_refuses_an_unknown_dtype() -> None:
     with pytest.raises(ContractError) as raised:
         describe("x", "complex128", (2,), readonly=True)
@@ -538,7 +596,7 @@ def test_a_descriptor_is_checked_even_when_built_in_process() -> None:
         SharedMemoryDescriptor("x", 100, "uint8", (0, 10), (10, 1), "C", True)
     with pytest.raises(ContractError, match="at least one dimension"):
         SharedMemoryDescriptor("x", 100, "uint8", (), (), "C", True)
-    with pytest.raises(ContractError, match="needs a name"):
+    with pytest.raises(ContractError, match="name must be a non-empty string"):
         SharedMemoryDescriptor("", 100, "uint8", (10, 10), (10, 1), "C", True)
 
 

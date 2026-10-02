@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from math import prod
 from typing import Any
 
-from backend.ml.contracts.protocol import ContractError, MLErrorCode
+from backend.ml.contracts.protocol import ContractError, MLErrorCode, invalid
 from backend.ml.contracts.wire import (
     as_mapping,
     boolean,
@@ -41,8 +41,18 @@ class SharedMemoryDescriptor:
     readonly: bool
 
     def __post_init__(self) -> None:
-        if not self.name:
-            raise _bad("a segment needs a name")
+        try:  # the types first: a descriptor built in process is held to the wire's rules
+            string(self.name, "name")
+            integer(self.size_bytes, "size_bytes", minimum=1)
+            string(self.dtype, "dtype")
+            string(self.layout, "layout")
+            boolean(self.readonly, "readonly")
+            if not isinstance(self.shape, tuple) or not isinstance(self.strides, tuple):
+                raise invalid("shape and strides are tuples")
+            for number_ in (*self.shape, *self.strides):
+                integer(number_, "shape and strides")
+        except ContractError as error:
+            raise _bad(error.message) from error
         if self.dtype not in ITEM_SIZES:
             raise _bad(f"unsupported dtype {self.dtype!r}")
         if self.layout not in LAYOUTS:
