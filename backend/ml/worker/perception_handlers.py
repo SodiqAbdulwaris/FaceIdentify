@@ -8,12 +8,18 @@ act on, which includes choosing another variant, rather than a worker that never
 A request names the component version it wants in `component`, and the variant in
 `options["runtime_variant_id"]` (needed only when the component has more than one).
 
+Each variant states the pre/postprocessing contract its component version needs (from the
+component version's own contract record). A variant whose contract is not the one this module
+implements for its kind is not served: the answer is `COMPONENT_NOT_AVAILABLE` naming both, never
+vectors from the wrong pipeline under the right provenance.
+
 This module knows the contracts of the two reference models (`scrfd-letterbox-v1`,
 `arcface-112-similarity-v1`) and nothing about any other model; a different model is a different
 module and a different contract version. It never touches the database.
 """
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,8 +47,13 @@ from backend.ml.worker.onnx_session import load_session
 DETECTOR = "FACE_DETECTOR"
 EMBEDDER = "FACE_REPRESENTATION"
 _KINDS = {DETECTOR, EMBEDDER}
+# The contract each kind of component is served with: this module implements these two and no
+# other, so a variant that needs another is not served (and never reported as if it were).
+CONTRACTS = {DETECTOR: detection.VERSION, EMBEDDER: alignment.VERSION}
+_SHA256 = re.compile(r"[0-9a-f]{64}")  # (matched whole: `$` would let a final newline by)
 _FIELDS = {
     "component_version_id",
+    "contract",
     "kind",
     "runtime_variant_id",
     "model_path",
@@ -59,6 +70,7 @@ class ConfigError(ValueError):
 @dataclass(frozen=True, slots=True)
 class VariantConfig:
     component_version_id: str
+    contract: str  # the pre/postprocessing contract this component version needs
     kind: str
     runtime_variant_id: str
     model_path: Path
@@ -69,9 +81,9 @@ class VariantConfig:
 
 
 def parse_config(text: str) -> tuple[VariantConfig, ...]:
-    """`{"variants": [{component_version_id, kind, runtime_variant_id, model_path, sha256,
-    provider, device, [dimension]}]}`: exact keys, a variant id only once, an embedder with a
-    dimension and a detector without one."""
+    """`{"variants": [{component_version_id, contract, kind, runtime_variant_id, model_path,
+    sha256, provider, device, [dimension]}]}`: exact keys, a variant id only once, an embedder
+    with a dimension and a detector without one."""
     try:
         raw = json.loads(text)
     except json.JSONDecodeError as error:
@@ -91,12 +103,8 @@ def parse_config(text: str) -> tuple[VariantConfig, ...]:
             raise ConfigError("a variant's fields are non-empty strings")
         if strings["kind"] not in _KINDS:
             raise ConfigError(f"unknown component kind {strings['kind']!r}")
-        try:
-            digest = bytes.fromhex(strings["sha256"])
-        except ValueError:
-            digest = b""
-        if len(digest) != 32:
-            raise ConfigError("sha256 must be 64 hexadecimal characters")
+        if not _SHA256.fullmatch(strings["sha256"]):
+            raise ConfigError("sha256 must be 64 lowercase hexadecimal characters")
         dimension = entry.get("dimension")
         if strings["kind"] == EMBEDDER:
             if isinstance(dimension, bool) or not isinstance(dimension, int) or dimension < 1:
@@ -106,10 +114,11 @@ def parse_config(text: str) -> tuple[VariantConfig, ...]:
         variants.append(
             VariantConfig(
                 component_version_id=strings["component_version_id"],
+                contract=strings["contract"],
                 kind=strings["kind"],
                 runtime_variant_id=strings["runtime_variant_id"],
                 model_path=Path(strings["model_path"]),
-                sha256=digest,
+                sha256=bytes.fromhex(strings["sha256"]),
                 provider=strings["provider"],
                 device=strings["device"],
                 dimension=dimension,
@@ -142,17 +151,25 @@ class _Components:
         wanted = request.options.get("runtime_variant_id")
         if wanted is not None:
             candidates = [v for v in candidates if v.runtime_variant_id == wanted]
-        elif len(candidates) > 1:
-            raise WorkerError(
-                MLErrorCode.INVALID_REQUEST,
-                f"{request.component} has several variants: name one in runtime_variant_id",
-            )
         if not candidates:
             raise WorkerError(
                 MLErrorCode.COMPONENT_NOT_AVAILABLE,
                 f"no {kind} variant for component {request.component!r}"
                 + ("" if wanted is None else f" and variant {wanted!r}"),
             )
+        served = [v for v in candidates if v.contract == CONTRACTS[kind]]
+        if not served:
+            raise WorkerError(
+                MLErrorCode.COMPONENT_NOT_AVAILABLE,
+                f"{request.component} needs the contract {candidates[0].contract!r}; this worker "
+                f"implements {CONTRACTS[kind]!r} for a {kind}",
+            )
+        if len(served) > 1:  # (only an unnamed request can get here: ids are unique)
+            raise WorkerError(
+                MLErrorCode.INVALID_REQUEST,
+                f"{request.component} has several variants: name one in runtime_variant_id",
+            )
+        candidates = served
         (variant,) = candidates
         session = self._sessions.get(variant.runtime_variant_id)
         if session is None:
@@ -196,14 +213,12 @@ def build_handlers(
     config_text: str,
     *,
     loader: Callable[[Path, bytes, str], ort.InferenceSession] = load_session,
-    detector_contract: detection.DetectorContract | None = None,
-    embedder_contract: alignment.EmbedderContract | None = None,
 ) -> dict[MLOperation, Handler]:
     """The worker factory: the operations the configuration has a variant for."""
     variants = parse_config(config_text)
     components = _Components(variants, loader)
-    detector_rules = detector_contract or detection.DetectorContract()
-    embedder_rules = embedder_contract or alignment.EmbedderContract()
+    detector_rules = detection.DetectorContract()
+    embedder_rules = alignment.EmbedderContract()
 
     def detect(request: MLRequest, context: HandlerContext) -> HandlerResult:
         variant, session = components.resolve(request, DETECTOR)

@@ -35,6 +35,7 @@ from backend.ml.worker.loop import Handler, HandlerContext, WorkerError
 from backend.ml.worker.main import load_handlers
 from backend.ml.worker.onnx_session import load_session
 from backend.ml.worker.perception_handlers import (
+    CONTRACTS,
     DETECTOR,
     EMBEDDER,
     ConfigError,
@@ -73,6 +74,7 @@ def variant(
 ) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "component_version_id": component or f"cv-{kind}",
+        "contract": CONTRACTS[kind],
         "kind": kind,
         "runtime_variant_id": runtime_variant or f"rv-{kind}-{provider}",
         "model_path": str(path),
@@ -166,6 +168,15 @@ def test_a_valid_configuration_is_read(models: dict[str, Any]) -> None:
         lambda e: e.update(kind="FACE_QUALITY"),
         lambda e: e.update(sha256="zz" * 32),
         lambda e: e.update(sha256="ab" * 31),
+        lambda e: e.update(sha256="ab" * 32 + "c"),  # one character too many
+        lambda e: e.update(sha256="x" + "ab" * 32),
+        lambda e: e.update(
+            sha256="ab" * 32 + chr(10)
+        ),  # a trailing newline: `$` alone would let it by
+        lambda e: e.update(sha256="AB" * 32),  # upper case: the manifest refuses it too
+        lambda e: e.update(sha256=" ".join(["ab"] * 32)),  # (`bytes.fromhex` would accept this)
+        lambda e: e.pop("contract"),
+        lambda e: e.update(contract=""),
         lambda e: e.update(device=""),
         lambda e: e.update(model_path=5),
         lambda e: e.update(dimension=4),  # a detector has none
@@ -197,6 +208,48 @@ def test_an_embedder_needs_a_positive_integer_dimension(
 def test_a_configuration_that_is_not_a_list_of_variants_is_refused(text: str) -> None:
     with pytest.raises(ConfigError):
         parse_config(text)
+
+
+def test_the_contracts_served_are_the_two_reference_ones() -> None:
+    assert CONTRACTS == {
+        DETECTOR: "scrfd-letterbox-v1",
+        EMBEDDER: "arcface-112-similarity-v1",
+    }
+
+
+def test_a_variant_that_needs_another_pipeline_is_not_served_and_never_reported_as_served(
+    models: dict[str, Any], ledger: SegmentLedger
+) -> None:
+    other = dict(models["entries"][0], contract="some-other-detector-v7")
+    handlers = build_handlers(config_of(other))
+    with pytest.raises(WorkerError, match="some-other-detector-v7") as refused:
+        run(handlers, detect_request((image_segment(ledger, picture(640, 480)),)), ledger)
+    assert refused.value.code is MLErrorCode.COMPONENT_NOT_AVAILABLE
+    other_embedder = dict(models["entries"][1], contract="some-other-embedder-v7")
+    handlers = build_handlers(config_of(other_embedder))
+    face = FaceGeometry(0, 0, (0.2, 0.2, 0.8, 0.8), template_landmarks(2, 224))
+    with pytest.raises(WorkerError, match="some-other-embedder-v7") as refused:
+        run(
+            handlers,
+            represent_request((image_segment(ledger, picture(224, 224)),), (face,)),
+            ledger,
+        )
+    assert refused.value.code is MLErrorCode.COMPONENT_NOT_AVAILABLE
+
+
+def test_a_variant_with_the_right_contract_is_still_served_beside_one_with_another(
+    models: dict[str, Any], ledger: SegmentLedger
+) -> None:
+    right = models["entries"][0]
+    wrong = dict(right, runtime_variant_id="rv-wrong", contract="some-other-detector-v7")
+    handlers = build_handlers(config_of(wrong, right))
+    image = image_segment(ledger, picture(640, 480))
+    # unnamed: only the served one is a candidate, so there is nothing to choose between
+    assert len(run(handlers, detect_request((image,)), ledger).detections) == 1
+    named = detect_request((image,), runtime_variant_id="rv-wrong")
+    with pytest.raises(WorkerError) as refused:
+        run(handlers, named, ledger)
+    assert refused.value.code is MLErrorCode.COMPONENT_NOT_AVAILABLE
 
 
 def test_a_variant_id_may_be_used_only_once(models: dict[str, Any]) -> None:
