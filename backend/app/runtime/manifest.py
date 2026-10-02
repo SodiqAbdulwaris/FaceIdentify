@@ -188,6 +188,11 @@ def parse_manifest(text: str | bytes) -> PackageManifest:
     _unique([c.key for c in components], "component key")
     exports = tuple(_export(e) for e in _list(data["exports"], "exports", non_empty=True))
     _unique([e.file.lower() for e in exports], "export file")  # case-insensitive: Windows
+    paths = {e.file.lower() for e in exports}
+    for export in exports:
+        parts = export.file.lower().split("/")
+        if any("/".join(parts[:i]) in paths for i in range(1, len(parts))):
+            raise ManifestError(f"export {export.file!r} is inside another export")
     component_keys = {c.key for c in components}
     for export in exports:
         if export.component not in component_keys:

@@ -20,6 +20,7 @@ from backend.app.runtime.package_store import (
     IncompatiblePackageError,
     InvalidPackageError,
     PackageExistsError,
+    PackageInstallError,
     RuntimePackageStore,
 )
 from backend.infrastructure.storage.layout import StorageRoots
@@ -119,14 +120,35 @@ def test_a_cleanup_that_fails_does_not_hide_why_the_install_failed(
         store_for(storage_roots, new_id).install(source, FACTS)
 
 
-def test_a_published_directory_that_is_not_complete_is_not_installed_over(
+def test_installing_replaces_a_published_directory_that_is_not_complete(
     storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path
 ) -> None:
     store = store_for(storage_roots, new_id)
     package = store.install(source, FACTS)
     (package.path / MARKER_FILE).unlink()
+    (package.path / "leftover.txt").write_text("from the damaged install")
 
-    with pytest.raises(PackageExistsError):
+    healed = store.install(source, FACTS)
+
+    assert store.installed() == [healed]
+    assert store.verify("reference-cpu") == []
+    assert not (healed.path / "leftover.txt").exists()
+    assert store.recover().invalid == []
+
+
+def test_an_incomplete_directory_that_cannot_be_removed_stops_the_install_with_a_clear_error(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = store_for(storage_roots, new_id)
+    package = store.install(source, FACTS)
+    (package.path / MARKER_FILE).unlink()
+
+    def locked(path: object, *args: object, **kwargs: object) -> None:
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(shutil, "rmtree", locked)
+
+    with pytest.raises(PackageInstallError, match="cannot be removed"):
         store.install(source, FACTS)
 
 
@@ -211,9 +233,9 @@ def test_a_failure_to_publish_removes_the_staging_directory(
     def refuse(src: object, dst: object) -> None:
         raise PermissionError("denied")
 
-    monkeypatch.setattr(os, "replace", refuse)
+    monkeypatch.setattr(os, "rename", refuse)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(PackageInstallError, match="denied"):
         store_for(storage_roots, new_id).install(source, FACTS)
 
     assert staging_names(storage_roots) == []
@@ -248,6 +270,21 @@ def test_the_loser_of_a_race_over_a_different_package_is_refused(
     def checkpoint(step: str) -> None:
         if step == "marked":
             rival.install(other, FACTS)
+
+    loser = RuntimePackageStore(storage_roots, new_id=new_id, checkpoint=checkpoint)
+
+    with pytest.raises(PackageExistsError):
+        loser.install(source, FACTS)
+
+    assert staging_names(storage_roots) == []
+
+
+def test_a_rival_that_leaves_an_incomplete_directory_in_the_way_is_not_taken_for_a_package(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path
+) -> None:
+    def checkpoint(step: str) -> None:
+        if step == "marked":
+            (storage_roots.runtime_packages / "reference-cpu").mkdir()
 
     loser = RuntimePackageStore(storage_roots, new_id=new_id, checkpoint=checkpoint)
 
@@ -426,6 +463,54 @@ def test_a_complete_staging_directory_for_a_key_already_installed_is_dropped(
     assert [p.key for p in store.installed()] == ["reference-cpu"]
 
 
+def test_recovery_publishes_a_complete_staged_package_over_an_incomplete_published_one(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path
+) -> None:
+    store = store_for(storage_roots, new_id)
+    package = store.install(source, FACTS)
+    (package.path / MARKER_FILE).unlink()  # damaged
+    with pytest.raises(Crash):
+        store_for(storage_roots, new_id, crash_at="marked").install(source, FACTS)
+    # (that install replaced the damaged directory before it was killed; damage it again)
+    assert not (storage_roots.runtime_packages / "reference-cpu").exists()
+    damaged = storage_roots.runtime_packages / "reference-cpu"
+    damaged.mkdir()
+    (damaged / "partial.bin").write_bytes(b"half")
+
+    report = store_for(storage_roots, new_id).recover()
+
+    assert report.published == ["reference-cpu"]
+    assert report.invalid == []
+    assert store.verify("reference-cpu") == []
+
+
+def test_a_staging_entry_that_is_not_named_key_dot_token_is_left_alone(
+    storage_roots: StorageRoots, new_id: SeededUUIDs
+) -> None:
+    (storage_roots.installation / "nodot").mkdir()
+
+    report = store_for(storage_roots, new_id).recover()
+
+    assert report.left == [("nodot", "not a staging directory of ours")]
+    assert (storage_roots.installation / "nodot").is_dir()
+    assert report.removed == []
+
+
+def test_a_checkpoint_that_fails_with_an_ordinary_error_cleans_up_after_itself(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path
+) -> None:
+    def checkpoint(step: str) -> None:
+        if step == "staged":
+            raise RuntimeError("boom")
+
+    store = RuntimePackageStore(storage_roots, new_id=new_id, checkpoint=checkpoint)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        store.install(source, FACTS)
+
+    assert staging_names(storage_roots) == []
+
+
 def test_a_staging_directory_for_the_wrong_key_is_removed(
     storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path
 ) -> None:
@@ -449,7 +534,7 @@ def test_something_that_is_not_a_directory_in_staging_is_reported_and_not_delete
 
     report = store_for(storage_roots, new_id).recover()
 
-    assert report.left == ["notes.txt"]
+    assert [name for name, _why in report.left] == ["notes.txt"]
     assert stray.exists()
 
 
@@ -469,7 +554,7 @@ def test_a_directory_that_cannot_be_removed_is_left_and_the_rest_are_still_settl
 
     report = store_for(storage_roots, new_id).recover()
 
-    assert report.left == [f"a-key.{'0' * 32}"]
+    assert report.left == [(f"a-key.{'0' * 32}", "PermissionError: in use")]
     assert report.removed == [f"b-key.{'1' * 32}"]
 
 
@@ -482,11 +567,12 @@ def test_a_complete_staging_directory_that_cannot_be_published_is_left(
     def refuse(src: object, dst: object) -> None:
         raise PermissionError("denied")
 
-    monkeypatch.setattr(os, "replace", refuse)
+    monkeypatch.setattr(os, "rename", refuse)
 
     report = store_for(storage_roots, new_id).recover()
 
-    assert len(report.left) == 1
+    assert [name for name, _why in report.left] == [next(storage_roots.installation.iterdir()).name]
+    assert "denied" in report.left[0][1]
     assert report.published == []
 
 

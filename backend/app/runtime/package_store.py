@@ -10,13 +10,19 @@ A package is installed in four steps that never touch the published place until 
 2. copy the manifest into it, byte for byte;
 3. write the marker `.installed` last, holding the manifest's hash: a directory with a valid
    marker is complete, one without is not;
-4. publish with one `os.replace` of the whole directory to `<local state>/runtime/packages/<key>`.
+4. publish with one `os.rename` of the whole directory to `<local state>/runtime/packages/<key>`,
+   which fails rather than overwrite anything that is there.
 
 So a package is either absent or complete where anyone looks, and what a crash leaves behind is
 decided from what is on disk: nothing relies on the interrupted process having written down that
 it was interrupted. `recover` publishes a staging directory that is complete and removes every
 other one. This layer knows nothing of the database; registering what is installed in the catalog
 is a separate step.
+
+What this guarantees: a killed or crashed process (the case that is tested). Every file is flushed
+before the marker and the marker before the rename, but no directory entry is flushed (Windows has
+no portable way to), so after a power cut a directory the marker calls complete may in principle
+lack a file whose entry was lost; `verify` finds that, and a package is cheap to install again.
 """
 
 import hashlib
@@ -71,7 +77,9 @@ class InstallRecoveryReport:
         default_factory=list
     )  # a complete staging directory, now installed
     removed: list[str] = field(default_factory=list)  # an incomplete or superseded one, deleted
-    left: list[str] = field(default_factory=list)  # something we could not or should not remove
+    left: list[tuple[str, str]] = field(
+        default_factory=list
+    )  # (name, why) not removed or published
     invalid: list[str] = field(default_factory=list)  # a published directory that is not complete
 
 
@@ -81,6 +89,13 @@ def _no_checkpoint(step: str) -> None:
 
 def _sha256_of(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _flush_write(path: Path, data: bytes) -> None:
+    with path.open("xb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
 
 
 class RuntimePackageStore:
@@ -96,10 +111,11 @@ class RuntimePackageStore:
         self._new_id = new_id
         self._checkpoint = checkpoint
 
-    # --- reading ----------------------------------------------------------------------------
+    # --- reading ---------------------------------------------------------------------------------
 
     def installed(self) -> list[InstalledPackage]:
-        """The packages that are complete. A directory that is not never appears here."""
+        """The packages whose directory is complete (marker and manifest agree). It does not
+        re-read the payload: a file deleted afterwards is found by `verify`."""
         if not self._published.is_dir():
             return []
         found = (self._read_complete(entry) for entry in sorted(self._published.iterdir()))
@@ -115,11 +131,13 @@ class RuntimePackageStore:
             return [f"{key}: not installed"]
         return file_problems(package.path, package.manifest)
 
-    # --- installing -------------------------------------------------------------------------
+    # --- installing ------------------------------------------------------------------------------
 
     def install(self, source: Path, facts: Mapping[str, str]) -> InstalledPackage:
         """Install the package in the directory `source` (a `manifest.json` and its files).
-        Installing what is already installed, byte for byte, changes nothing."""
+        Installing what is already installed, byte for byte, changes nothing. A published
+        directory that is not complete holds nothing worth keeping and is replaced; a complete
+        one is never replaced. Every failure is a `PackageInstallError`."""
         manifest_bytes = self._read_manifest(source)
         manifest = self._parse(manifest_bytes)
         problems = incompatibilities(manifest, facts)
@@ -131,42 +149,63 @@ class RuntimePackageStore:
 
         final = self._published / manifest.key
         if final.exists():
-            return self._already_installed(final, manifest_bytes)
+            existing = self._complete_with(final, manifest_bytes)
+            if existing is not None:
+                return existing
+            self._discard_incomplete(final, manifest.key)
 
         stage = self._staging / f"{manifest.key}.{self._new_id().hex}"
-        self._published.mkdir(parents=True, exist_ok=True)
-        stage.mkdir(parents=True)
-        self._checkpoint("staged")
         try:
+            self._published.mkdir(parents=True, exist_ok=True)
+            stage.mkdir(parents=True)
+            self._checkpoint("staged")
             self._copy_verified(source, stage, manifest)
-            (stage / MANIFEST_FILE).write_bytes(manifest_bytes)
+            _flush_write(stage / MANIFEST_FILE, manifest_bytes)
             self._checkpoint("copied")
             self._write_marker(stage, manifest_bytes)
             self._checkpoint("marked")
             try:
-                os.replace(stage, final)
-            except OSError:
-                if final.exists():  # another process published the same key first
-                    shutil.rmtree(stage, ignore_errors=True)
-                    return self._already_installed(final, manifest_bytes)
-                raise
+                os.rename(stage, final)
+            except FileExistsError:  # another process published this key first
+                shutil.rmtree(stage, ignore_errors=True)
+                existing = self._complete_with(final, manifest_bytes)
+                if existing is None:
+                    raise PackageExistsError(
+                        f"{manifest.key}: a different package is installed under this key"
+                    ) from None
+                return existing
             self._checkpoint("published")
+        except PackageInstallError:
+            shutil.rmtree(stage, ignore_errors=True)
+            raise
+        except OSError as error:
+            shutil.rmtree(stage, ignore_errors=True)
+            raise PackageInstallError(f"{manifest.key}: {error}") from error
         except Exception:
             shutil.rmtree(stage, ignore_errors=True)
             raise
-        package = self._read_complete(final)
-        assert package is not None  # we just published a marked directory
-        return package
+        return InstalledPackage(manifest.key, manifest.version, final, manifest)
 
-    def _already_installed(self, final: Path, manifest_bytes: bytes) -> InstalledPackage:
-        package = self._read_complete(final)
-        if package is None or _sha256_of(manifest_bytes) != _sha256_of(
-            (final / MANIFEST_FILE).read_bytes()
-        ):
+    def _complete_with(self, directory: Path, manifest_bytes: bytes) -> InstalledPackage | None:
+        """The package in `directory` if it is complete and its manifest is exactly this one;
+        None if it is incomplete; `PackageExistsError` if it is a different package."""
+        package = self._read_complete(directory)
+        if package is None:
+            return None
+        if _sha256_of((directory / MANIFEST_FILE).read_bytes()) != _sha256_of(manifest_bytes):
             raise PackageExistsError(
-                f"{final.name}: a different package is installed under this key"
+                f"{directory.name}: a different package is installed under this key"
             )
         return package
+
+    @staticmethod
+    def _discard_incomplete(directory: Path, key: str) -> None:
+        try:
+            shutil.rmtree(directory)
+        except OSError as error:
+            raise PackageInstallError(
+                f"{key}: an incomplete package is in the way and cannot be removed: {error}"
+            ) from error
 
     @staticmethod
     def _read_manifest(source: Path) -> bytes:
@@ -203,12 +242,9 @@ class RuntimePackageStore:
 
     @staticmethod
     def _write_marker(stage: Path, manifest_bytes: bytes) -> None:
-        with (stage / MARKER_FILE).open("wb") as marker:
-            marker.write(_sha256_of(manifest_bytes).encode("ascii"))
-            marker.flush()
-            os.fsync(marker.fileno())
+        _flush_write(stage / MARKER_FILE, _sha256_of(manifest_bytes).encode("ascii"))
 
-    # --- what a directory is ----------------------------------------------------------------
+    # --- what a directory is -----------------------------------------------------------------
 
     def _read_complete(self, directory: Path) -> InstalledPackage | None:
         """The package a directory holds if it is complete: a marker whose hash is that of the
@@ -226,14 +262,14 @@ class RuntimePackageStore:
             return None
         return InstalledPackage(manifest.key, manifest.version, directory, manifest)
 
-    # --- recovery ---------------------------------------------------------------------------
+    # --- recovery ----------------------------------------------------------------------------
 
     def recover(self) -> InstallRecoveryReport:
         """Settle what an interrupted install left behind, from what is on disk. A complete
         staging directory is published (its marker was the last thing written, so the copy is
-        whole); every other staging directory is removed; a published directory that is not
-        complete is reported and left alone. Idempotent, and one stuck directory does not stop
-        the rest."""
+        whole), replacing a published directory of that key that is not complete; every other
+        staging directory is removed; a published directory that is not complete is reported
+        and left alone. Idempotent, and one stuck directory does not stop the rest."""
         report = InstallRecoveryReport()
         if self._staging.is_dir():
             for entry in sorted(self._staging.iterdir()):
@@ -246,21 +282,27 @@ class RuntimePackageStore:
         return report
 
     def _settle(self, entry: Path, report: InstallRecoveryReport) -> None:
-        key = entry.name.rpartition(".")[0]
+        key, dot, _token = entry.name.rpartition(".")
+        if not dot:  # not named <key>.<token>: not ours to settle
+            report.left.append((entry.name, "not a staging directory of ours"))
+            return
         package = self._read_complete(entry)
         final = self._published / key
-        if package is not None and package.key == key and not final.exists():
-            try:
-                self._published.mkdir(parents=True, exist_ok=True)
-                os.replace(entry, final)
-            except OSError:
-                report.left.append(entry.name)
-            else:
-                report.published.append(key)
-            return
+        if package is not None and package.key == key:
+            if not final.exists() or self._read_complete(final) is None:
+                try:
+                    self._published.mkdir(parents=True, exist_ok=True)
+                    if final.exists():
+                        shutil.rmtree(final)  # incomplete: nothing in it is worth keeping
+                    os.rename(entry, final)
+                except OSError as error:
+                    report.left.append((entry.name, f"{type(error).__name__}: {error}"))
+                else:
+                    report.published.append(key)
+                return
         try:
             shutil.rmtree(entry)
-        except OSError:
-            report.left.append(entry.name)
+        except OSError as error:
+            report.left.append((entry.name, f"{type(error).__name__}: {error}"))
         else:
             report.removed.append(entry.name)
