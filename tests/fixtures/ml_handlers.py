@@ -108,3 +108,8 @@ def build_detector_only() -> dict[MLOperation, Handler]:
 
 def build_broken() -> dict[MLOperation, Handler]:
     raise RuntimeError("the models could not be loaded")
+
+
+def build_hanging() -> dict[MLOperation, Handler]:
+    time.sleep(3600)  # loading the models never finishes
+    return {}

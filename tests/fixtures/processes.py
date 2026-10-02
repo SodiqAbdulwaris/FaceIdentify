@@ -70,3 +70,24 @@ def acquire_soon(root: Path, seconds: float = 10) -> None:
             if time.monotonic() > deadline:
                 raise
             time.sleep(0.1)
+
+
+def process_alive(pid: int) -> bool:
+    """Whether a process with this id is running (Windows: asked of the task list)."""
+    listing = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout
+    return f'"{pid}"' in listing
+
+
+def wait_until_gone(pid: int, seconds: float = 30) -> bool:
+    """True once the process has ended, waiting up to `seconds` for it."""
+    deadline = time.monotonic() + seconds
+    while process_alive(pid):
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.2)
+    return True
