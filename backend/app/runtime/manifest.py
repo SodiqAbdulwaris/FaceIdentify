@@ -19,6 +19,9 @@ from backend.infrastructure.storage.files import digest_path
 
 SCHEMA_VERSION = 1
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+# A package key names a directory: lower-case letters, digits, dots, hyphens and underscores,
+# starting and ending with a letter or digit, so no separator, trailing dot or case alias.
+_PACKAGE_KEY = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
 _WINDOWS_RESERVED = frozenset(
     {
         "con",
@@ -201,8 +204,11 @@ def parse_manifest(text: str | bytes) -> PackageManifest:
             raise ManifestError(f"variant {variant.variant_key!r} names unknown export file")
         resolved.append(replace(variant, export_file=file))
     variants = tuple(resolved)
+    key = _str(data["key"], "key")
+    if not _PACKAGE_KEY.match(key) or key.split(".")[0] in _WINDOWS_RESERVED:
+        raise ManifestError(f"key {key!r} is not a valid package key")
     return PackageManifest(
-        key=_str(data["key"], "key"),
+        key=key,
         version=_str(data["version"], "version"),
         requirements=requirements,
         components=components,

@@ -116,6 +116,7 @@ def test_a_new_library_is_laid_out_migrated_and_recovered_cleanly(opener: Opener
         with library.session_factory() as session:  # the services are wired to the real database
             assert session.scalar(select(Job.id)) is None
         assert isinstance(library.unit_of_work, UnitOfWork)  # and the write path is available
+        assert library.packages.installed() == []  # and so is the runtime package store
         assert library.unit_of_work.write(lambda session: session.scalar(select(Job.id))) is None
 
 

@@ -63,6 +63,16 @@ class StorageRoots:
         """Where the per-space vector indexes live: machine-local, derived data."""
         return self.local_state_root / "indexes"
 
+    @property
+    def runtime_packages(self) -> Path:
+        """Where installed runtime packages are published: machine-local, one directory per key."""
+        return self.local_state_root / "runtime" / "packages"
+
+    @property
+    def installation(self) -> Path:
+        """Where a package is staged while it installs, on the same volume as its final place."""
+        return self.local_state_root / "installation"
+
     def ensure_layout(self) -> None:
         """Create every directory of both roots. Idempotent; never removes anything."""
         for name in LIBRARY_DIRECTORIES:
