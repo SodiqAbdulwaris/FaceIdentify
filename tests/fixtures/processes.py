@@ -8,8 +8,11 @@ the whole tree is killed.
 
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from backend.infrastructure.storage.library_lock import LibraryLock, LibraryLockedError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,7 +38,7 @@ def start_until(script: str, *arguments: str, ready: str) -> subprocess.Popen[st
     process does not outlive the test and the failure says what it printed."""
     process = subprocess.Popen(
         [sys.executable, "-c", script, *arguments],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         cwd=REPOSITORY_ROOT,
     )  # fmt: skip
     assert process.stdout is not None
@@ -44,8 +47,8 @@ def start_until(script: str, *arguments: str, ready: str) -> subprocess.Popen[st
         line = pool.submit(process.stdout.readline).result(timeout=60)
         if line.strip() != ready:
             kill_tree(process)  # (so reading what it said cannot block)
-            said = process.stderr.read() if process.stderr else ""
-            raise AssertionError(f"expected {ready!r}, got {line!r}; stderr: {said}")
+            said = process.stdout.read()  # (error output is merged into it, so nothing blocks)
+            raise AssertionError(f"expected {ready!r}, got {line!r}; then: {said}")
     except BaseException:
         kill_tree(process)  # first: the reader thread is waiting on this process's output
         pool.shutdown(wait=False)
@@ -53,3 +56,17 @@ def start_until(script: str, *arguments: str, ready: str) -> subprocess.Popen[st
         raise
     pool.shutdown(wait=False)
     return process
+
+
+def acquire_soon(root: Path, seconds: float = 10) -> None:
+    """Take and release the library lock, allowing a just-killed holder's lock a moment to go: the
+    operating system releases it after `TerminateProcess`, which is not instantaneous."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            with LibraryLock(root):
+                return
+        except LibraryLockedError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.1)

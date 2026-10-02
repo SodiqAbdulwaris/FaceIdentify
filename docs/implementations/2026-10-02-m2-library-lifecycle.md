@@ -20,7 +20,7 @@
   `recover_on_startup`; the clock and the id source are injected.
 - `tests/fixtures/processes.py`: `start_until` (run a script, wait for a line, with a start-up timeout and cleanup on any
   failure), `kill_tree` (the Windows launcher/child tree), `close_streams`; the lock tests use it too.
-- `tests/integration/test_library_lifecycle.py` (13) and `tests/recovery/test_process_kill.py` (4).
+- `tests/integration/test_library_lifecycle.py` (19) and `tests/recovery/test_process_kill.py` (4).
 
 ## Why
 
@@ -32,19 +32,30 @@ real processes.
 
 - The lifecycle is framework-free (a context manager): the FastAPI lifespan is a three-line wrapper when the app exists, and
   adding FastAPI now would have been a dependency without a use.
-- Layout creation comes after the lock (and creates the local state folders too), before the migration: the database folder
-  must exist for SQLite.
-- The kill tests run the child with the real wall clock; the parent's frozen test clock is advanced past it before the
-  next start, otherwise the child's work is not yet "due".
+- The schema is migrated right after the lock (taking the lock creates the `database` folder), and the layout (all the
+  library and local-state folders) is created after that: a database that is refused as newer or foreign therefore has
+  nothing created around it. The first version of the lifecycle laid out first, on a wrong reason (a review caught it).
+- The kill tests pass the parent's frozen clock reading to the child (`now` is a fixed instant there), so nothing depends on the
+  wall clock; after a kill the test waits for the operating system to free the lock before it reopens (releasing a killed
+  process's lock is not instantaneous).
 - Not covered by a kill test: a kill in the middle of a migration (each revision is its own transaction and that is tested in
   `test_migration_*`), and a kill between two steps of the erasure (each step is tested in process: PER-07).
 
 ## Verification
 
-- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1144 passed, backend coverage 100%.
+- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1150 passed, backend coverage 100%.
   14 mutations (the validations, the lock first, migrate before layout, the engine disposal, the newer-database refusal,
   the unstamped database, recovery called, the index folder, and the recovery steps the kill tests rely on), each broken, shown
   to fail a test and restored byte-identical; the kill tests ran 5 times without a failure.
+- **Review** (Explore subagent; Codex over its limit until 2026-10-03), posted on PR 64: no blocker. Fixed: the migration moved
+  before the layout; `local_state_root` is validated and canonicalised like the library root (a relative one created folders in
+  the working directory); `_inspect` swallowed every `OperationalError` as "no such table" (it now reads the stamp read-only and
+  only a missing table means none), reads every stamp row, and a database with tables but no stamp is refused as
+  `ForeignDatabaseError`; a `%` in the install path no longer breaks the Alembic config; the test time bomb (the child used the
+  wall clock) and the race after a kill; stderr is merged so a chatty child cannot block; the engine-disposed-before-lock order is
+  pinned; an older known revision is upgraded and a downgrade switch in the environment does not matter. One mutant survives by
+  design: the read-only open of the stamp changes nothing observable once the connection closes. Answered: the commit split (the
+  tests of a commit follow it in the next one; they are one change reviewed together).
 - **Not verified:** a kill on a network share or removable drive; a non-Windows platform.
 
 ## Open issues / follow-ups

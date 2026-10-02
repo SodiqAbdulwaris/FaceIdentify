@@ -58,6 +58,11 @@ class StorageRoots:
     def staging(self) -> Path:
         return self.library_root / "staging"
 
+    @property
+    def indexes(self) -> Path:
+        """Where the per-space vector indexes live: machine-local, derived data."""
+        return self.local_state_root / "indexes"
+
     def ensure_layout(self) -> None:
         """Create every directory of both roots. Idempotent; never removes anything."""
         for name in LIBRARY_DIRECTORIES:

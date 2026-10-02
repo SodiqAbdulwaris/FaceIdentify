@@ -1,27 +1,36 @@
 """Opening a library for the life of the backend (M2: TST-030; persistence sections 27 and 28;
 issue 33).
 
-`open_library` takes the library lock before it creates or changes anything, then migrates, builds
-the services and recovers, in the order of section 28; leaving the block, or failing at any step,
-disposes the engine and releases the lock. A database from a newer version is refused untouched.
+`open_library` takes the library lock before it creates or changes anything, then migrates, lays out
+the folders, builds the services and recovers, in the order of section 28; leaving the block, or
+failing at any step, disposes the engine and then releases the lock. A database from a newer
+version, and one that is not ours, is refused untouched.
 """
 
 import hashlib
+import shutil
 import sqlite3
 import uuid
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, closing
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from alembic import command
+from sqlalchemy import Engine, select
 
 from backend.app import lifecycle
 from backend.app.jobs.models import Job
-from backend.app.lifecycle import DatabaseNewerThanApplicationError, OpenLibrary, open_library
+from backend.app.lifecycle import (
+    DatabaseNewerThanApplicationError,
+    ForeignDatabaseError,
+    OpenLibrary,
+    open_library,
+)
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.recovery.startup import recover_on_startup
+from backend.infrastructure.db.downgrade_guard import ALLOW_DESTRUCTIVE_DOWNGRADE_ENV
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.library_lock import LibraryLock, LibraryLockedError
 from backend.infrastructure.storage.library_root import InvalidLibraryRootError
@@ -69,6 +78,25 @@ def lock_is_free(library: Path) -> bool:
         return False
 
 
+def unlink_database(opener: Opener) -> None:
+    """Delete the database and its log: fails on Windows if a connection is still holding them."""
+    for suffix in ("", "-wal", "-shm"):
+        Path(str(opener.database) + suffix).unlink(missing_ok=True)
+
+
+def stamps(opener: Opener) -> list[tuple[str]]:
+    with closing(sqlite3.connect(opener.database)) as connection:
+        return connection.execute("SELECT version_num FROM alembic_version").fetchall()
+
+
+def create_database(opener: Opener, *statements: str) -> None:
+    (opener.library / "database").mkdir()
+    with closing(sqlite3.connect(opener.database)) as connection:
+        for statement in statements:
+            connection.execute(statement)
+        connection.commit()
+
+
 # --- opening --------------------------------------------------------------------------------------
 
 
@@ -78,11 +106,8 @@ def test_a_new_library_is_laid_out_migrated_and_recovered_cleanly(opener: Opener
         assert opener.database.is_file()
         assert (opener.library / "staging").is_dir()
         assert (opener.local / "indexes").is_dir()
-        with sqlite3.connect(opener.database) as connection:
-            stamp = connection.execute("SELECT version_num FROM alembic_version").fetchone()
-        assert stamp is not None
+        assert stamps(opener)
         assert library.startup.clean  # nothing to repair, nothing unresolved
-
         index_directory = library.coordinator.index_directory(uuid.UUID(int=1))
         assert index_directory.parent == opener.local / "indexes"  # machine-local, derived data
 
@@ -109,22 +134,18 @@ def test_the_library_stays_locked_while_open_and_is_free_after(opener: Opener) -
 
 
 def test_opening_again_is_idempotent_and_still_clean(opener: Opener) -> None:
-    def stamp() -> str:
-        with sqlite3.connect(opener.database) as connection:
-            return str(connection.execute("SELECT version_num FROM alembic_version").fetchone()[0])
-
     with opener():
-        first = stamp()
+        first = stamps(opener)
 
     with opener() as library:
         assert library.startup.clean
-    assert stamp() == first
+    assert stamps(opener) == first
 
 
 # --- the order ------------------------------------------------------------------------------------
 
 
-def test_the_lock_comes_before_the_layout_the_migrations_and_recovery(
+def test_the_lock_comes_first_then_the_schema_the_layout_and_recovery(
     opener: Opener, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[str] = []
@@ -157,7 +178,7 @@ def test_the_lock_comes_before_the_layout_the_migrations_and_recovery(
     with opener():
         pass
 
-    assert calls == ["lock", "layout", "migrate", "recover"]
+    assert calls == ["lock", "migrate", "layout", "recover"]
 
 
 def test_a_library_held_by_someone_else_is_not_laid_out_migrated_or_recovered(
@@ -172,10 +193,18 @@ def test_a_library_held_by_someone_else_is_not_laid_out_migrated_or_recovered(
     assert not opener.local.exists()
 
 
-def test_roots_that_cannot_be_used_create_nothing(opener: Opener, tmp_path: Path) -> None:
+def test_roots_that_cannot_be_used_create_nothing(
+    opener: Opener, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     with (
         pytest.raises(InvalidLibraryRootError, match="absolute"),
         opener(library_root=Path("relative")),
+    ):
+        pass
+    with (
+        pytest.raises(InvalidLibraryRootError, match="absolute"),
+        opener(local_state_root=Path("relative-local")),
     ):
         pass
     with (
@@ -190,17 +219,18 @@ def test_roots_that_cannot_be_used_create_nothing(opener: Opener, tmp_path: Path
         pass
 
     assert list(opener.library.iterdir()) == []  # not even the lock file
-    assert not (tmp_path / "typo").exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["library"]  # nothing anywhere
 
 
-# --- a database from a newer version --------------------------------------------------------------
+# --- a database that is newer, older or not ours ------------------------------------------
 
 
 def test_a_database_stamped_with_an_unknown_revision_is_refused_untouched(opener: Opener) -> None:
-    (opener.library / "database").mkdir()
-    with sqlite3.connect(opener.database) as connection:
-        connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-        connection.execute("INSERT INTO alembic_version VALUES ('9999')")
+    create_database(
+        opener,
+        "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)",
+        "INSERT INTO alembic_version VALUES ('9999')",
+    )
     before = digest(opener.database)
 
     with pytest.raises(DatabaseNewerThanApplicationError, match="9999"), opener():
@@ -208,17 +238,75 @@ def test_a_database_stamped_with_an_unknown_revision_is_refused_untouched(opener
 
     assert digest(opener.database) == before  # neither migrated nor downgraded
     assert lock_is_free(opener.library)  # and the library is not left held
+    assert not (opener.library / "staging").exists()  # nor laid out around it
+    assert not opener.local.exists()
 
 
-def test_a_database_that_is_not_stamped_yet_is_migrated(opener: Opener) -> None:
-    (opener.library / "database").mkdir()
-    sqlite3.connect(opener.database).close()  # an empty file: a first run that was interrupted
+def test_one_unknown_stamp_among_several_is_enough_to_refuse(opener: Opener) -> None:
+    create_database(
+        opener,
+        "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)",
+        "INSERT INTO alembic_version VALUES ('0001')",
+        "INSERT INTO alembic_version VALUES ('9999')",
+    )
+
+    with pytest.raises(DatabaseNewerThanApplicationError, match="9999"), opener():
+        pass
+
+
+def test_a_database_with_tables_but_no_stamp_is_not_ours_and_is_left_alone(opener: Opener) -> None:
+    create_database(
+        opener,
+        "CREATE TABLE somebody_elses_data (id INTEGER)",
+        "INSERT INTO somebody_elses_data VALUES (1)",
+    )
+    before = digest(opener.database)
+
+    with pytest.raises(ForeignDatabaseError, match="no migration stamp"), opener():
+        pass
+
+    assert digest(opener.database) == before
+    assert lock_is_free(opener.library)
+
+
+def test_an_empty_database_file_is_a_first_run_that_was_interrupted_and_is_migrated(
+    opener: Opener,
+) -> None:
+    create_database(opener)
 
     with opener() as library:
         assert library.startup.clean
 
 
-# --- failures leave nothing held ------------------------------------------------------------------
+def test_a_database_stamped_with_an_older_known_revision_is_upgraded_whatever_the_environment(
+    opener: Opener, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (opener.library / "database").mkdir()
+    command.upgrade(lifecycle._alembic_config(opener.database), "0003")
+    assert stamps(opener) == [("0003",)]
+    monkeypatch.setenv(ALLOW_DESTRUCTIVE_DOWNGRADE_ENV, "1")  # a downgrade switch: no effect here
+
+    with opener() as library:
+        assert library.startup.clean
+    assert stamps(opener) == [("0004",)]
+
+
+def test_an_install_path_with_a_percent_sign_still_migrates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Alembic reads the script folder through a config parser that interpolates `%`."""
+    odd = tmp_path / "100%" / "alembic"
+    shutil.copytree(lifecycle.ALEMBIC_DIRECTORY, odd, ignore=shutil.ignore_patterns("__pycache__"))
+    monkeypatch.setattr(lifecycle, "ALEMBIC_DIRECTORY", odd)
+    database = tmp_path / "library.db"
+
+    lifecycle.migrate(database)
+
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchall()
+
+
+# --- failures leave nothing held -----------------------------------------------------------
 
 
 @pytest.mark.parametrize("step", ["migrate", "recover_on_startup"])
@@ -233,10 +321,48 @@ def test_a_failure_while_starting_releases_the_lock_and_the_database(
     with pytest.raises(RuntimeError, match=f"{step} failed"), opener():
         pass
 
-    monkeypatch.undo()
     assert lock_is_free(opener.library)
-    for suffix in ("", "-wal", "-shm"):  # no connection is left holding the files
-        Path(str(opener.database) + suffix).unlink(missing_ok=True)
+    unlink_database(opener)
+
+
+def test_a_failure_while_laying_out_the_folders_releases_the_lock(
+    opener: Opener, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fails(self: StorageRoots) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(StorageRoots, "ensure_layout", fails)
+
+    with pytest.raises(OSError, match="disk full"), opener():
+        pass
+
+    assert lock_is_free(opener.library)
+
+
+def test_the_engine_is_disposed_before_the_lock_is_released(
+    opener: Opener, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order: list[str] = []
+    real_dispose, real_release = Engine.dispose, LibraryLock.release
+
+    def dispose(self: Engine, close: bool = True) -> None:
+        order.append("dispose")
+        real_dispose(self, close)
+
+    def release(self: LibraryLock) -> None:
+        order.append("release")
+        real_release(self)
+
+    monkeypatch.setattr(Engine, "dispose", dispose)
+    monkeypatch.setattr(LibraryLock, "release", release)
+
+    with opener():
+        pass
+
+    # (the migration's own engine is disposed too, earlier: the last dispose is the library's)
+    assert order.count("release") == 1
+    assert "dispose" in order
+    assert order[-1] == "release"  # nothing is disposed after the lock is gone
 
 
 def test_leaving_the_block_with_an_error_releases_everything_too(opener: Opener) -> None:
@@ -244,11 +370,10 @@ def test_leaving_the_block_with_an_error_releases_everything_too(opener: Opener)
         raise RuntimeError("boom")
 
     assert lock_is_free(opener.library)
-    for suffix in ("", "-wal", "-shm"):
-        Path(str(opener.database) + suffix).unlink(missing_ok=True)
+    unlink_database(opener)
 
 
-# --- recovery runs ------------------------------------------------------------------------
+# --- recovery runs -----------------------------------------------------------------------------
 
 
 def test_what_a_crash_left_running_is_recovered_when_the_library_is_opened(
