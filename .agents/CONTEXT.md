@@ -3,11 +3,11 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-02 (M3 decisions recorded)_
+_Last updated: 2026-10-02 (M3 decisions recorded; open points issue 71)_
 
 ## Current state
 
-- **Milestone:** M0 and M1 (domain integrity) are complete and merged. M2 (persistence) has
+- **Milestone:** M0 and M1 (domain integrity) are complete and merged. **M3 (single-image ML integration) started 2026-10-02 (item 7 below).** M2 (persistence) is complete except issue 34; it had
   started: Alembic and the initial migration (TST-032, in progress), SQLite WAL behaviour
   (TST-021), use-case transaction rollback (TST-023), optimistic concurrency (TST-024), managed
   artifact finalization (TST-026) and the Storage Manager (TST-025: managed core, referenced

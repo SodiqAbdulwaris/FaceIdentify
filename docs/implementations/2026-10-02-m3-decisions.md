@@ -13,3 +13,14 @@ Date: 2026-10-02. Documentation only; no code.
 
 ## Documents that disagree (resolved)
 Persistence wins over the API contract for `previous_job_id` (not `retry_of_job_id`) and for the index returning `ann_key`; the Qdrant text in `processing-architecture-v1.md` is superseded by USearch; Run `COMPLETED` does not wait for index operations to be `APPLIED` (Persistence section 12).
+
+## Open points found by the review (Q6: recommendations, owner to confirm; issue 71)
+1. **Occurrence and Evidence for `ABSTAIN`.** `occurrences.identity_id` is non-null and one face makes one occurrence, so an abstained face cannot have one; `EvidenceKind` has no abstention kind. Recommendation: an abstention writes no Occurrence; its candidate evidence is kept in `evidence_candidates` (already allows a NULL identity), so no second schema change.
+2. **Resolving an abstained representation later.** `assign_representation_to_identity` needs `PENDING` and allocates a new key; a new path must set the identity on an `ACTIVE` identity-less row, keep its `ann_key` and queue no `ADD`. Recommendation: a separate use case, built after M3.
+3. **Identity-level forget.** It works through `identity_id`, so it cannot reach identity-less representations; they are erased through representation or Source erasure. Recommendation: state this in the forget spec.
+4. **Two meanings of `ABSTAIN`.** The estimator outcome (ML spec) differs from the persisted outcome. Recommendation: the persisted `ABSTAIN` covers the estimator's AMBIGUOUS and ABSTAIN and the policy action `PRESERVE_UNRESOLVED`.
+5. **"Weights digest" in the space identity.** A space has `semantic_key`, `component_version_id`, `dimension`, `contract_json`, `normalization`; the digest lives on `ModelExport.sha256`. Recommendation: the space's `contract_json` records the export digest, and a different export or precision is a different space unless proven equivalent.
+6. **Where migration 0005 lands:** with the acceptance use case (step 11 of the plan), because that is the first writer of an identity-less `ACTIVE` row.
+
+## Changes migration 0005 will require (from the review)
+`backend/app/memory/models.py` (the CHECK) and a new revision (recreate `representations`; downgrade guard first and a refusal while an identity-less `ACTIVE` row exists); `resolve_ann_candidates` (outer join, `RecognitionCandidate.identity_id` optional); `index_coordinator.py` (the four identity joins: `_active_keys`, `_active_entries`, `_apply_one` twice); `assign_representation_to_identity` docstrings; tests: `test_memory_models`, `test_memory_repositories`, `test_ann_candidate_revalidation`, `test_index_coordinator`, `fixtures/consistency.py`, the property test docstring, the head pins (`test_migrations`, `test_library_lifecycle`, `test_downgrade_guard`), and a new `test_migration_0005` (populated upgrade, both CHECK halves, rollback, offline `--sql`, refused downgrade).
