@@ -111,6 +111,11 @@ class RuntimePackageStore:
         self._new_id = new_id
         self._checkpoint = checkpoint
 
+    @property
+    def root(self) -> Path:
+        """The directory installed packages are published in (`<key>` under it)."""
+        return self._published
+
     # --- reading ---------------------------------------------------------------------------------
 
     def installed(self) -> list[InstalledPackage]:
