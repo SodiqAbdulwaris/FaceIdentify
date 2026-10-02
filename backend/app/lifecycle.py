@@ -18,9 +18,10 @@ wraps (no web framework is needed to build or test it):
 6. the caller gets an `OpenLibrary` and runs; leaving the block disposes the engine and releases the
    lock, and so does a failure at any earlier step, so a failed start never leaves the library held.
 
-Nothing here has a default for a threshold that has not been measured: the retry policy and the two
-index catch-up limits are the caller's, as for `recover_on_startup`. The clock and the id source are
-injected, as everywhere, so tests are deterministic.
+Nothing here has a default for a threshold that has not been measured: the index operation retry
+policy, the transaction retry policy (`UnitOfWork`: `BEGIN IMMEDIATE` and whole-transaction retry,
+CONTEXT open question 20) and the two index catch-up limits are the caller's. The clock and the id
+source are injected, as everywhere, so tests are deterministic.
 
 What it does not do: start the ML worker or the scheduler (later milestones), or read the shell's
 persisted library setting (the shell passes the resolved root in).
@@ -44,6 +45,7 @@ from backend.app.memory.erasure import RepresentationEraser
 from backend.app.memory.index_coordinator import IndexCoordinator, RetryPolicy
 from backend.app.recovery.startup import StartupReport, recover_on_startup
 from backend.infrastructure.db.engine import create_session_factory, create_sqlite_engine
+from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.library_lock import LibraryLock
@@ -81,6 +83,7 @@ class OpenLibrary:
     workspaces: WorkspaceManager
     coordinator: IndexCoordinator
     eraser: RepresentationEraser
+    unit_of_work: UnitOfWork
     startup: StartupReport
 
 
@@ -142,6 +145,7 @@ def open_library(
     clock: Callable[[], datetime],
     new_id: Callable[[], uuid.UUID],
     retry: RetryPolicy,
+    transaction_retry: TransactionRetry,
     index_batch: int,
     max_index_passes: int,
 ) -> Iterator[OpenLibrary]:
@@ -170,5 +174,6 @@ def open_library(
             clock=clock, index_batch=index_batch, max_index_passes=max_index_passes,
         )  # fmt: skip
         yield OpenLibrary(
-            roots, engine, session_factory, store, workspaces, coordinator, eraser, startup
-        )
+            roots, engine, session_factory, store, workspaces, coordinator, eraser,
+            UnitOfWork(engine, retry=transaction_retry), startup,
+        )  # fmt: skip

@@ -19,6 +19,10 @@ SQLITE_PRAGMAS = (
 )
 
 
+# The execution option that makes a connection's transactions begin with `BEGIN IMMEDIATE`.
+BEGIN_IMMEDIATE = "sqlite_begin_immediate"
+
+
 # Deterministic constraint names. SQLite can only change constraints by recreating the table
 # (Alembic batch mode), which needs every constraint to have a stable name.
 NAMING_CONVENTION = {
@@ -63,9 +67,13 @@ def _disable_driver_transactions(
 def _begin(connection: Connection) -> None:
     # AUTOCOMMIT connections (VACUUM, WAL checkpoints, Alembic batch-mode PRAGMAs) must stay
     # outside a transaction, so they get no BEGIN.
-    if connection.get_execution_options().get("isolation_level") == "AUTOCOMMIT":
+    options = connection.get_execution_options()
+    if options.get("isolation_level") == "AUTOCOMMIT":
         return
-    connection.exec_driver_sql("BEGIN")
+    # A write unit of work takes SQLite's one write lock as it begins and so queues for it
+    # (`busy_timeout`) instead of reading first and then failing at once with SQLITE_BUSY_SNAPSHOT
+    # when another writer commits in between (CONTEXT open question 20, unit_of_work.py).
+    connection.exec_driver_sql("BEGIN IMMEDIATE" if options.get(BEGIN_IMMEDIATE) else "BEGIN")
 
 
 def create_sqlite_engine(database_path: Path) -> Engine:

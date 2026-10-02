@@ -22,6 +22,7 @@ from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.memory.models import Representation
 from backend.app.settings.app_state import WAL_TRUNCATION_OWED, AppStateRepository
 from backend.app.sources.models import Artifact
+from backend.infrastructure.db.unit_of_work import TransactionRetry
 from backend.infrastructure.storage.library_lock import LibraryLockedError
 from tests.factories.models import ModelFactory, float32_vector
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
@@ -34,6 +35,7 @@ from pathlib import Path
 
 from backend.app.lifecycle import open_library
 from backend.app.memory.index_coordinator import RetryPolicy
+from backend.infrastructure.db.unit_of_work import TransactionRetry
 
 library, local, mode, subject, instant = sys.argv[1:6]
 fixed = datetime.fromisoformat(instant)
@@ -42,6 +44,7 @@ with open_library(
     library_root=Path(library), local_state_root=Path(local), clock=now, new_id=uuid.uuid4,
     retry=RetryPolicy(max_attempts=3, backoff=lambda n: timedelta(minutes=n)),
     index_batch=50, max_index_passes=5,
+    transaction_retry=TransactionRetry(max_attempts=3, backoff=lambda n: 0.1 * n),
 ) as lib:
     if mode == "erase-queued":
         lib.eraser.queue([uuid.UUID(subject)])  # step one committed; nothing else done
@@ -83,6 +86,7 @@ class Library:
         return open_library(
             library_root=self.root, local_state_root=self.local, clock=self.clock,
             new_id=self.new_id, index_batch=50, max_index_passes=5,
+            transaction_retry=TransactionRetry(max_attempts=3, backoff=lambda n: 0.1 * n),
             retry=RetryPolicy(max_attempts=3, backoff=lambda n: timedelta(minutes=n)),
         )  # fmt: skip
 
