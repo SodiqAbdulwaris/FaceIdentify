@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-02 (M3 step 7: worker config planned; space-state and provenance decisions recorded)_
+_Last updated: 2026-10-02 (M3 step 7: worker config built; space-state and provenance decisions recorded)_
 
 ## Current state
 

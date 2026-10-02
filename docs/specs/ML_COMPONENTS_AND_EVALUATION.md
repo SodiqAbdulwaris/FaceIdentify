@@ -266,13 +266,15 @@ The fingerprint is canonical identification of an already-established configurat
 - Operational states are `REGISTERED`, `VALIDATED`, `ACTIVE`, and `RETIRED`; they do not replace component/export/runtime records.
 - Calibration and estimator support are representation-space-specific.
 
-> **Decision 2026-10-02 (owner; CONTEXT open question 31):** the list of operational states above is a registration process followed by a lifecycle, and only the lifecycle is persisted. Discover, validate and register are steps before a `RepresentationSpace` exists; the persisted states are `ACTIVE` and `DEPRECATED` (Persistence 6.1), and `RETIRED` is `DEPRECATED`. Whether a runtime variant is validated for a space is recorded on the variant's compatibility row (`DECLARED`, later `VALIDATED`), not on the space. `RepresentationSpace.component_version_id` is origin provenance, not a list of every component version that produced vectors in the space; the space's identity is compatibility, and what produced each representation is execution provenance.
+> **Decision 2026-10-02 (owner; CONTEXT open question 31):** the list of operational states above is a registration process followed by a lifecycle, and only the lifecycle is persisted. Discover, validate and register are steps before a `RepresentationSpace` exists; the persisted states of a `RepresentationSpace` are `ACTIVE` and `DEPRECATED` (Persistence 6.1), and `RETIRED` is `DEPRECATED`. This is about the space only: a runtime variant's, export's or package's own `state` column is a separate vocabulary that is still unconstrained (CONTEXT open question 11). Whether a runtime variant is validated for a space is recorded on the variant's compatibility row (`DECLARED`, later `VALIDATED`), not on the space. `RepresentationSpace.component_version_id` is origin provenance, not a list of every component version that produced vectors in the space; the space's identity is compatibility, and what produced each representation is execution provenance.
 
 The persistence contract requires one USearch index per space. It holds compact `ann_key` values only; SQLite revalidates eligibility, state, identity, and space after ANN candidate generation. Unknown identities remain eligible. A corrupt/missing/mismatched index is rebuilt from active SQLite vectors.
 
 ## 9.3 Upgrade and partial migration
 
 Register → validate → inventory reprocessable observations → generate new representations → build index → evaluate recognition → activate. Do not overwrite old vectors. An identity absent from the active space cannot be retrieved there; incomplete coverage must be reported and must never become an `UNKNOWN` claim.
+
+> **Decision 2026-10-02 (owner; CONTEXT open question 31):** in this sequence the compatibility contract is validated before the space is registered (a persisted `RepresentationSpace` has only the states `ACTIVE` and `DEPRECATED`, see the note in 9.2), and "activate" means selecting the space for new recognition processing in the processing configuration; it is not a persisted state transition of the space, and registration does neither.
 
 ## 9.4 Deferred register
 
@@ -390,6 +392,8 @@ The hierarchy is locked: `Component → ComponentVersion → ModelExport → Run
 An upgrade passes independently: artifact compatibility, numerical compatibility, representation compatibility, recognition compatibility, and operational compatibility. Installation or successful initialization alone passes none of the later gates.
 
 For an embedder change, retain historical vectors and decisions, create new spaces/representations through reprocessing, validate migration coverage, build a distinct index, evaluate it, and only then activate. Rollback changes active configuration; it does not rewrite history. Estimator/calibration/policy upgrades likewise produce new versioned records and retain prior decision provenance.
+
+> **Decision 2026-10-02 (owner; CONTEXT open question 31):** "activate" here is the same selection in the processing configuration as in 9.3, not a persisted state of a `RepresentationSpace`; rollback is likewise a configuration change.
 
 Do not activate a configuration with unapproved failure behavior, missing rollback path, unsupported evidence schema, or incomplete migration coverage whose recognition effect has not been evaluated. In-flight jobs preserve their snapshot/runtime provenance and do not silently switch configuration mid-segment.
 
