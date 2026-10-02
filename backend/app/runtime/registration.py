@@ -11,7 +11,8 @@ it never commits):
   identity or created. Catalog rows are immutable (section 18), so a row that exists with
   different content is an error, never an update; two packages that ship the same component
   version and the same weights (a CPU package and a CUDA package, say) share those rows;
-* a `REFERENCED` artifact for each export's file and for the package directory (the bytes stay
+* a `REFERENCED` artifact for each export's file and for the package's manifest file (a regular
+  file, which is what startup checks; the bytes stay
   machine-local in the package, never in the library: Architecture 12.2), and the installation
   records that point at them; a library moved to another machine finds them `MISSING` and says so,
   it never substitutes another package;
@@ -33,8 +34,10 @@ reference kinds, validated here): a `FACE_DETECTOR` names its `preprocessing_con
 `FACE_REPRESENTATION` names `family`, `dimension`, `preprocessing_contract`, `normalization`,
 `normalization_contract_version` and `compatibility_version`.
 
-Registering the same package again (same key, same manifest) finds what it made and returns the
-same ids; a different manifest under the same key is refused.
+Registering the same package again (same key, same manifest, same place) finds what it made and
+returns the same ids; a different manifest under the same key is refused. The same package at
+another place (the library opened on another machine) records that installation and shares every
+other row. One code path does both: nothing is "rebuilt".
 """
 
 import hashlib
@@ -43,13 +46,21 @@ import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.memory.models import RepresentationSpace
-from backend.app.runtime.manifest import ComponentSpec, ExportSpec, PackageManifest
+from backend.app.runtime.manifest import (
+    ComponentSpec,
+    ExportSpec,
+    ManifestError,
+    PackageManifest,
+    file_problems,
+    parse_manifest,
+)
 from backend.app.runtime.models import (
     Component,
     ComponentVersion,
@@ -169,49 +180,65 @@ class _Registrar:
         self.new_id = new_id
         self.now = clock()
 
-    def run(self) -> RegisteredPackage:
-        manifest_bytes = (self.package.path / MANIFEST_FILE).read_bytes()
+    def run(self, manifest_bytes: bytes) -> RegisteredPackage:
         stored: dict[str, Any] = json.loads(manifest_bytes)
-        existing = self.catalog.package_by_key(self.manifest.key)
-        if existing is not None:
-            if existing.manifest_json != stored:
-                raise RegistrationError(
-                    f"{self.manifest.key}: a different package is registered under this key"
-                )
-            return self._rebuild(existing)
         components = {c.key: c for c in self.manifest.components}
         versions = {key: self._component_version(spec) for key, spec in components.items()}
-        package_artifact = self._artifact(
-            ArtifactKind.RUNTIME_PACKAGE,
-            str(self.package.path),
-            hashlib.sha256(manifest_bytes).digest(),
-            len(manifest_bytes),
-            MANIFEST_FILE,
-        )
-        row = self.catalog.add(
-            RuntimePackage(
-                id=self.new_id(),
-                key=self.manifest.key,
-                manifest_schema_version=self.manifest.schema_version,
-                manifest_json=stored,
-                state=REGISTERED,
-                created_at=self.now,
+        row = self.catalog.package_by_key(self.manifest.key)
+        if row is None:
+            row = self.catalog.add(
+                RuntimePackage(
+                    id=self.new_id(),
+                    key=self.manifest.key,
+                    manifest_schema_version=self.manifest.schema_version,
+                    manifest_json=stored,
+                    state=REGISTERED,
+                    created_at=self.now,
+                )
             )
-        )
-        installation = self.catalog.add(
-            RuntimePackageInstallation(
-                id=self.new_id(),
-                runtime_package_id=row.id,
-                artifact_id=package_artifact.id,
-                state=INSTALLED,
-                installed_at=self.now,
+        elif row.manifest_json != stored:
+            raise RegistrationError(
+                f"{self.manifest.key}: a different package is registered under this key"
             )
-        )
+        installation = self._installation(row, manifest_bytes)
         exports = tuple(
             self._export(spec, components[spec.component], versions[spec.component])
             for spec in self.manifest.exports
         )
         return RegisteredPackage(row.id, installation.id, exports)
+
+    def _installation(
+        self, row: RuntimePackage, manifest_bytes: bytes
+    ) -> RuntimePackageInstallation:
+        """This machine's installation of the package: found by where it is, or recorded. The
+        package row is shared by every machine that opens the library; where the bytes are is not
+        (the path names the package's own directory, so it identifies the package too).
+        The artifact is the manifest file, not the directory: an artifact is file-like and startup
+        checks that a referenced one is a regular file."""
+        path = str(self.package.path / MANIFEST_FILE)
+        found = self.session.scalar(
+            select(RuntimePackageInstallation)
+            .join(Artifact, Artifact.id == RuntimePackageInstallation.artifact_id)
+            .where(Artifact.external_path == path)
+        )
+        if found is not None:
+            return found
+        artifact = self._artifact(
+            ArtifactKind.RUNTIME_PACKAGE,
+            path,
+            hashlib.sha256(manifest_bytes).digest(),
+            len(manifest_bytes),
+            MANIFEST_FILE,
+        )
+        return self.catalog.add(
+            RuntimePackageInstallation(
+                id=self.new_id(),
+                runtime_package_id=row.id,
+                artifact_id=artifact.id,
+                state=INSTALLED,
+                installed_at=self.now,
+            )
+        )
 
     # --- components ------------------------------------------------------------------------
 
@@ -266,19 +293,23 @@ class _Registrar:
         self.session.flush()
         return artifact
 
+    def _model_artifact(self, spec: ExportSpec, path: Path) -> Artifact:
+        return self._artifact(
+            ArtifactKind.MODEL_EXPORT, str(path), spec.sha256, spec.size_bytes, path.name
+        )
+
     def _export(
         self, spec: ExportSpec, component: ComponentSpec, version: ComponentVersion
     ) -> RegisteredExport:
         path = self.package.path / spec.file
-        artifact = self._artifact(
-            ArtifactKind.MODEL_EXPORT, str(path), spec.sha256, spec.size_bytes, path.name
-        )
         export = self.session.scalar(
             select(ModelExport).where(
                 ModelExport.component_version_id == version.id, ModelExport.sha256 == spec.sha256
             )
         )
+        artifact: Artifact | None = None
         if export is None:
+            artifact = self._model_artifact(spec, path)
             export = self.catalog.add(
                 ModelExport(
                     id=self.new_id(),
@@ -300,15 +331,22 @@ class _Registrar:
                 f"{spec.file}: these weights are registered with another format, precision or "
                 "input contract, which are immutable"
             )
-        self.catalog.add(
-            InstalledModelExport(
-                id=self.new_id(),
-                model_export_id=export.id,
-                artifact_id=artifact.id,
-                state=INSTALLED,
-                installed_at=self.now,
-            )
+        installed = self.session.scalar(
+            select(InstalledModelExport)
+            .join(Artifact, Artifact.id == InstalledModelExport.artifact_id)
+            .where(Artifact.external_path == str(path))
         )
+        if installed is None:  # (this location is new: the weights may be known from another)
+            artifact = artifact or self._model_artifact(spec, path)
+            installed = self.catalog.add(
+                InstalledModelExport(
+                    id=self.new_id(),
+                    model_export_id=export.id,
+                    artifact_id=artifact.id,
+                    state=INSTALLED,
+                    installed_at=self.now,
+                )
+            )
         space_id = self._space(component, spec, version) if component.kind == EMBEDDER else None
         variants = {
             variant.variant_key: self._variant(export, variant, space_id)
@@ -316,8 +354,8 @@ class _Registrar:
             if variant.export_file == spec.file
         }
         return RegisteredExport(
-            spec.file, component.key, component.kind, version.id, export.id, artifact.id,
-            variants, space_id,
+            spec.file, component.key, component.kind, version.id, export.id,
+            installed.artifact_id, variants, space_id,
         )  # fmt: skip
 
     def _variant(self, export: ModelExport, spec: Any, space_id: uuid.UUID | None) -> uuid.UUID:
@@ -390,63 +428,6 @@ class _Registrar:
             raise RegistrationError(f"space {key} is registered with another identity record")
         return space.id
 
-    # --- registering again -------------------------------------------------------------------
-
-    def _rebuild(self, package_row: RuntimePackage) -> RegisteredPackage:
-        """What a first registration of this package made, found again from the catalog."""
-        installation = self.catalog.package_installations(package_row.id)[0]
-        components = {c.key: c for c in self.manifest.components}
-        exports: list[RegisteredExport] = []
-        for spec in self.manifest.exports:
-            component = components[spec.component]
-            row = self.catalog.component_by_key(component.key)
-            assert row is not None  # (registered with the package)
-            version = next(
-                v
-                for v in self.catalog.versions_of(row.id)
-                if v.semantic_version == component.version
-            )
-            export = self.session.scalars(
-                select(ModelExport).where(
-                    ModelExport.component_version_id == version.id,
-                    ModelExport.sha256 == spec.sha256,
-                )
-            ).one()
-            installed = self.session.scalars(
-                select(InstalledModelExport)
-                .join(Artifact, Artifact.id == InstalledModelExport.artifact_id)
-                .where(
-                    InstalledModelExport.model_export_id == export.id,
-                    Artifact.external_path == str(self.package.path / spec.file),
-                )
-            ).one()
-            space_id = None
-            if component.kind == EMBEDDER:
-                identity = space_identity(component.contract, spec.sha256.hex())
-                space_id = self.session.scalars(
-                    select(RepresentationSpace.id).where(
-                        RepresentationSpace.semantic_key == space_key(identity)
-                    )
-                ).one()
-            variants = {
-                v.variant_key: self._variant(export, v, space_id)
-                for v in self.manifest.variants
-                if v.export_file == spec.file
-            }
-            exports.append(
-                RegisteredExport(
-                    spec.file,
-                    component.key,
-                    component.kind,
-                    version.id,
-                    export.id,
-                    installed.artifact_id,
-                    variants,
-                    space_id,
-                )  # fmt: skip
-            )
-        return RegisteredPackage(package_row.id, installation.id, tuple(exports))
-
 
 def register_package(
     session: Session,
@@ -455,6 +436,31 @@ def register_package(
     new_id: Callable[[], uuid.UUID],
     clock: Callable[[], datetime],
 ) -> RegisteredPackage:
-    """Record `package` in the catalog, inside the caller's transaction (see the module doc)."""
-    _check_contracts(package.manifest)
-    return _Registrar(session, package, new_id, clock).run()
+    """Record `package` in the catalog, inside the caller's transaction (see the module doc).
+
+    What is recorded is what is on disk now: the package must live in the directory named by its
+    key, its manifest file must parse to the manifest given, and every declared file must still
+    have its declared size and hash (the weights digest is the identity of a representation space,
+    so it is never copied from a claim). The work is done in a savepoint, so a refused
+    registration leaves nothing in the caller's transaction even if the caller commits anyway.
+    Find-or-create reads before it writes: run it inside `UnitOfWork.write`, which takes the write
+    lock first, or a concurrent registration surfaces as an `IntegrityError` (it fails safe).
+    """
+    manifest = package.manifest
+    if package.path.name != manifest.key:
+        raise RegistrationError(
+            f"{manifest.key}: the package is not in the directory its key names"
+        )
+    try:
+        manifest_bytes = (package.path / MANIFEST_FILE).read_bytes()
+        on_disk = parse_manifest(manifest_bytes)
+    except (OSError, ManifestError) as error:
+        raise RegistrationError(f"{manifest.key}: the manifest cannot be read ({error})") from error
+    if on_disk != manifest:
+        raise RegistrationError(f"{manifest.key}: the manifest on disk is not the one given")
+    problems = file_problems(package.path, manifest)
+    if problems:
+        raise RegistrationError(f"{manifest.key}: " + "; ".join(problems))
+    _check_contracts(manifest)
+    with session.begin_nested():
+        return _Registrar(session, package, new_id, clock).run(manifest_bytes)
