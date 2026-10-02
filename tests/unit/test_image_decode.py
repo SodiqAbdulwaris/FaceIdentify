@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageFile
 
 from backend.infrastructure.media.image import (
     CorruptImageError,
@@ -131,13 +131,23 @@ def test_sixteen_bit_grey_is_scaled_not_clipped() -> None:
     assert np.array_equal(decoded.pixels[..., 0], decoded.pixels[..., 2])
 
 
-def test_a_cmyk_jpeg_becomes_rgb() -> None:
-    cmyk = Image.fromarray(picture()).convert("CMYK")
+def smooth_picture() -> np.ndarray[Any, Any]:
+    picture_ = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
+    picture_[..., 0] = np.linspace(0, 255, WIDTH, dtype=np.uint8)
+    picture_[..., 1] = np.linspace(0, 255, HEIGHT, dtype=np.uint8)[:, None]
+    picture_[..., 2] = 90
+    return picture_
 
-    decoded = decode_image(encode(cmyk, "JPEG"), max_pixels=LIMIT)
+
+def test_a_cmyk_jpeg_becomes_the_same_colours_in_rgb() -> None:
+    cmyk = Image.fromarray(smooth_picture()).convert("CMYK")
+    expected = np.asarray(cmyk.convert("RGB"), dtype=int)
+
+    decoded = decode_image(encode(cmyk, "JPEG", quality=95), max_pixels=LIMIT)
 
     assert decoded.pixels.shape == (HEIGHT, WIDTH, 3)
     assert decoded.pixels.dtype == np.uint8
+    assert np.abs(decoded.pixels.astype(int) - expected).mean() < 6  # (right colours, lossy)
 
 
 # --- the camera's orientation ------------------------------------------------------------------
@@ -170,7 +180,7 @@ def test_every_exif_orientation_is_applied(orientation: int) -> None:
     assert np.array_equal(upright.pixels, UPRIGHT[orientation](stored.pixels))
 
 
-@pytest.mark.parametrize("orientation", [3, 6, 8])
+@pytest.mark.parametrize("orientation", range(1, 9))
 @pytest.mark.parametrize("fmt", ["PNG", "WEBP"])
 def test_orientation_is_applied_in_the_other_formats_too(fmt: str, orientation: int) -> None:
     decoded = decode_image(with_orientation(fmt, orientation), max_pixels=LIMIT)
@@ -178,11 +188,55 @@ def test_orientation_is_applied_in_the_other_formats_too(fmt: str, orientation: 
     assert np.array_equal(decoded.pixels, UPRIGHT[orientation](picture()))
 
 
+@pytest.mark.parametrize("value", [0, 9, 65535])
+def test_an_orientation_that_means_nothing_leaves_the_picture_as_stored(value: int) -> None:
+    decoded = decode_image(with_orientation("JPEG", value), max_pixels=LIMIT)
+    stored = decode_image(with_orientation("JPEG", 1), max_pixels=LIMIT)
+
+    assert np.array_equal(decoded.pixels, stored.pixels)
+
+
+def test_damaged_exif_does_not_make_a_picture_unusable() -> None:
+    jpeg = encoded("JPEG")
+    payload = b"Exif" + bytes(2) + b"II*" + bytes(1) + bytes([8, 0, 0, 0, 5, 0])  # cut short
+    app1 = b"\xff\xe1" + struct.pack(">H", len(payload) + 2) + payload
+    damaged = jpeg[:2] + app1 + jpeg[2:]
+
+    decoded = decode_image(damaged, max_pixels=LIMIT)  # (no warning escapes either)
+
+    assert (decoded.width, decoded.height) == (WIDTH, HEIGHT)
+
+
 def test_the_header_is_the_stored_size_and_the_pixels_are_the_upright_one() -> None:
     decoded = decode_image(with_orientation("JPEG", 6), max_pixels=LIMIT)
 
     assert (decoded.header.width, decoded.header.height) == (WIDTH, HEIGHT)
     assert (decoded.width, decoded.height) == (HEIGHT, WIDTH)
+
+
+# --- animation -----------------------------------------------------------------------------------
+
+
+def test_an_animated_webp_yields_its_first_frame() -> None:
+    first, second = picture(), picture()[::-1]
+    out = io.BytesIO()
+    Image.fromarray(first).save(
+        out, "WEBP", save_all=True, append_images=[Image.fromarray(second)], lossless=True
+    )
+
+    decoded = decode_image(out.getvalue(), max_pixels=LIMIT)
+
+    assert np.array_equal(decoded.pixels, first)
+
+
+def test_an_animated_png_yields_its_first_frame() -> None:
+    first, second = picture(), picture()[::-1]
+    out = io.BytesIO()
+    Image.fromarray(first).save(out, "PNG", save_all=True, append_images=[Image.fromarray(second)])
+
+    decoded = decode_image(out.getvalue(), max_pixels=LIMIT)
+
+    assert np.array_equal(decoded.pixels, first)
 
 
 # --- the size limit ----------------------------------------------------------------------------
@@ -208,29 +262,74 @@ def png_header_claiming(width: int, height: int) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", b"") + chunk(b"IEND", b"")
 
 
-def test_an_enormous_image_is_refused_from_its_header_without_decoding_anything(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.fixture
+def arm_tripwire(monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
+    """Call it to make any decoding of pixels fail the test. (Armed on demand, because making the
+    images to test with decodes pixels too.) It sits on Pillow's real decode entry."""
+
+    def arm() -> None:
+        def never(self: Image.Image) -> None:
+            raise AssertionError("a pixel was decoded")
+
+        monkeypatch.setattr(ImageFile.ImageFile, "load", never)
+        monkeypatch.setattr(Image.Image, "load", never)
+
+    return arm
+
+
+def test_the_tripwire_does_fire_when_a_real_decode_happens(
+    arm_tripwire: Callable[[], None],
 ) -> None:
-    def never(self: Image.Image) -> None:
-        raise AssertionError("a pixel was decoded")
+    data = encoded("PNG")
+    arm_tripwire()
 
-    monkeypatch.setattr(Image.Image, "load", never)
-    data = png_header_claiming(60_000, 60_000)
-
-    assert read_header(data).width == 60_000  # (no decompression-bomb warning either)
-    with pytest.raises(ImageTooLargeError):
+    with pytest.raises(AssertionError, match="a pixel was decoded"):
         decode_image(data, max_pixels=LIMIT)
 
 
-def test_reading_a_header_decodes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    data = encoded("JPEG")  # (made before the patch: encoding loads pixels too)
+def test_reading_a_header_decodes_nothing(arm_tripwire: Callable[[], None]) -> None:
+    data = [encoded(fmt) for fmt in ("PNG", "JPEG", "BMP", "WEBP")]
+    arm_tripwire()
 
-    def never(self: Image.Image) -> None:
-        raise AssertionError("a pixel was decoded")
+    assert [read_header(d).format for d in data] == ["PNG", "JPEG", "BMP", "WEBP"]
 
-    monkeypatch.setattr(Image.Image, "load", never)
 
-    assert read_header(data).format == "JPEG"
+def test_an_image_over_the_limit_is_refused_before_anything_is_decoded(
+    arm_tripwire: Callable[[], None],
+) -> None:
+    data = encoded("PNG")
+    arm_tripwire()
+
+    with pytest.raises(ImageTooLargeError, match="more than the 2399 allowed"):
+        decode_image(data, max_pixels=WIDTH * HEIGHT - 1)
+
+
+def test_an_enormous_image_is_refused_by_pillows_ceiling_without_decoding(
+    arm_tripwire: Callable[[], None],
+) -> None:
+    arm_tripwire()
+    data = png_header_claiming(60_000, 60_000)  # 3.6 billion pixels
+
+    with pytest.raises(ImageTooLargeError, match="ever open"):
+        read_header(data)
+    with pytest.raises(ImageTooLargeError, match="ever open"):
+        decode_image(data, max_pixels=10**12)  # (even a caller that allows everything)
+
+
+def test_an_image_between_pillows_limit_and_twice_it_is_left_to_the_callers_limit(
+    arm_tripwire: Callable[[], None],
+) -> None:
+    arm_tripwire()
+    data = png_header_claiming(12_000, 9_000)  # 108 million pixels: Pillow only warns here
+
+    assert read_header(data).width == 12_000  # (and no warning escapes: warnings are errors here)
+    with pytest.raises(ImageTooLargeError, match="more than the 1000000 allowed"):
+        decode_image(data, max_pixels=LIMIT)
+
+
+def test_pillows_global_decompression_guard_is_left_as_it_was() -> None:
+    assert Image.MAX_IMAGE_PIXELS is not None
+    assert Image.MAX_IMAGE_PIXELS < 10**9
 
 
 # --- what is not an image we take ----------------------------------------------------------------
@@ -287,6 +386,29 @@ def test_a_valid_header_over_garbage_pixels_is_corrupt() -> None:
     assert read_header(bytes(data)).format == "PNG"  # the header is fine...
     with pytest.raises(CorruptImageError):
         decode_image(bytes(data), max_pixels=LIMIT)  # ...the pixels are not
+
+
+def test_something_that_only_begins_like_a_bmp_is_corrupt_not_unsupported() -> None:
+    with pytest.raises(CorruptImageError) as raised:
+        read_header(b"BM" + b"not really a bitmap" * 4)
+
+    assert str(raised.value) == "the image header cannot be read (OSError)"  # (not Pillow's words)
+
+
+def test_other_riff_files_are_unsupported_not_corrupt() -> None:
+    with pytest.raises(UnsupportedImageError):
+        read_header(b"RIFF" + bytes(4) + b"WAVEfmt " + bytes(20))
+
+
+def test_an_error_message_does_not_pass_on_the_decoders_own_words() -> None:
+    data = bytearray(encoded("PNG"))
+    start = data.index(b"IDAT") + 4
+    data[start : start + 40] = bytes(40)
+
+    with pytest.raises(CorruptImageError) as raised:
+        decode_image(bytes(data), max_pixels=LIMIT)
+
+    assert str(raised.value) == "the PNG cannot be decoded (OSError)"
 
 
 def test_a_png_naming_a_zero_size_is_corrupt() -> None:

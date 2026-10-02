@@ -10,24 +10,32 @@ the model that needs it.
 
 Everything that is not plain 8-bit colour is converted to three 8-bit channels: alpha is dropped,
 palettes and greys are expanded, and 16-bit grey is scaled (Pillow's own conversion would clip it).
+An animated image yields its first frame.
+
+Limits. `max_pixels` bounds the pixels of one image, and Pillow's own decompression-bomb guard is
+left in force as a ceiling above it (about 179 million pixels), turned into `ImageTooLargeError`;
+the guard is a process-wide setting and is not touched here. Nothing bounds the number of *bytes*
+handed over: the caller, which already holds them, bounds the file it reads. Decoding peaks at a
+few times `max_pixels * 3` bytes (Pillow's buffer, the converted copy, then the caller's copy into
+shared memory), which is worth knowing when choosing `max_pixels`.
 """
 
 import io
 import re
+import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image, ImageOps, UnidentifiedImageError
-
-# The size check below happens before any pixel is decoded and uses the caller's limit, so
-# Pillow's own decompression-bomb guard (a fixed global limit that warns) is not wanted.
-Image.MAX_IMAGE_PIXELS = None
 
 FORMATS = ("JPEG", "PNG", "BMP", "WEBP")
 MIME_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "BMP": "image/bmp", "WEBP": "image/webp"}
 _SIXTEEN_BIT_GREY = "I;16"  # (what Pillow calls a 16-bit grey PNG, the only such input)
-# How each of the four formats begins (a WebP is a RIFF container naming WEBP at byte 8).
+# How each of the four formats begins (a WebP is a RIFF container naming WEBP at byte 8). A file
+# that begins like one of them but cannot be opened is damaged; any other is simply not ours.
 _SIGNATURES = re.compile(rb"\x89PNG\r\n\x1a\n|\xff\xd8|BM|RIFF....WEBP", re.DOTALL)
 
 
@@ -44,7 +52,7 @@ class CorruptImageError(ImageError):
 
 
 class ImageTooLargeError(ImageError):
-    """More pixels than the caller allows."""
+    """More pixels than the caller allows (or than Pillow's own ceiling does)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +65,7 @@ class ImageHeader:
 
 @dataclass(frozen=True, slots=True)
 class DecodedImage:
-    pixels: np.ndarray[Any, Any]  # RGB, uint8, height x width x 3, contiguous
+    pixels: NDArray[np.uint8]  # RGB, height x width x 3, contiguous, writable
     header: ImageHeader
 
     @property
@@ -69,10 +77,25 @@ class DecodedImage:
         return int(self.pixels.shape[1])
 
 
+@contextmanager
+def _pillow_warnings_that_are_not_ours() -> Iterator[None]:
+    """Pillow warns about two things that are not problems here (and a warning treated as an error
+    would turn either into an exception): an image between its size limit and twice it, where the
+    caller's limit decides; and damaged EXIF, where the picture is still a picture and simply has
+    no orientation applied. Pillow reads EXIF both when it opens a JPEG and when it transposes."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+        warnings.filterwarnings("ignore", message="Corrupt EXIF", category=UserWarning)
+        yield
+
+
 def _open(data: bytes) -> Image.Image:
     """Open lazily: this reads the header and nothing else."""
     try:
-        return Image.open(io.BytesIO(data), formats=list(FORMATS))
+        with _pillow_warnings_that_are_not_ours():
+            return Image.open(io.BytesIO(data), formats=list(FORMATS))
+    except Image.DecompressionBombError:
+        raise ImageTooLargeError("the image is larger than the decoder will ever open") from None
     except UnidentifiedImageError:
         # Pillow says this both for a format it does not know and for one of the four whose header
         # is cut short or damaged, so the signature decides which it was.
@@ -80,7 +103,9 @@ def _open(data: bytes) -> Image.Image:
             raise CorruptImageError("the image header is cut short or damaged") from None
         raise UnsupportedImageError("not a JPEG, PNG, BMP or WebP image") from None
     except (OSError, ValueError, SyntaxError) as error:
-        raise CorruptImageError(f"the image header cannot be read ({error})") from error
+        raise CorruptImageError(
+            f"the image header cannot be read ({type(error).__name__})"
+        ) from error
 
 
 def _header_of(image: Image.Image) -> ImageHeader:
@@ -94,7 +119,7 @@ def read_header(data: bytes) -> ImageHeader:
     return _header_of(_open(data))
 
 
-def _to_rgb(image: Image.Image) -> np.ndarray[Any, Any]:
+def _to_rgb(image: Image.Image) -> NDArray[np.uint8]:
     if image.mode == _SIXTEEN_BIT_GREY:
         grey = np.asarray(image, dtype=np.uint32)
         scaled = ((grey * 255 + 32767) // 65535).astype(np.uint8)  # (rounded, not clipped)
@@ -114,7 +139,10 @@ def decode_image(data: bytes, *, max_pixels: int) -> DecodedImage:
             f"{header.width} by {header.height} pixels is more than the {max_pixels} allowed"
         )
     try:
-        upright = ImageOps.exif_transpose(image)
-        return DecodedImage(_to_rgb(upright), header)
+        with _pillow_warnings_that_are_not_ours():
+            upright = ImageOps.exif_transpose(image)
+            return DecodedImage(_to_rgb(upright), header)
     except (OSError, ValueError, SyntaxError) as error:
-        raise CorruptImageError(f"the {header.format} cannot be decoded ({error})") from error
+        raise CorruptImageError(
+            f"the {header.format} cannot be decoded ({type(error).__name__})"
+        ) from error
