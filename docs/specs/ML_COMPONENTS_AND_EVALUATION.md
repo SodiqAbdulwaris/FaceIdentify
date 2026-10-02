@@ -266,6 +266,8 @@ The fingerprint is canonical identification of an already-established configurat
 - Operational states are `REGISTERED`, `VALIDATED`, `ACTIVE`, and `RETIRED`; they do not replace component/export/runtime records.
 - Calibration and estimator support are representation-space-specific.
 
+> **Decision 2026-10-02 (owner; CONTEXT open question 31):** the list of operational states above is a registration process followed by a lifecycle, and only the lifecycle is persisted. Discover, validate and register are steps before a `RepresentationSpace` exists; the persisted states are `ACTIVE` and `DEPRECATED` (Persistence 6.1), and `RETIRED` is `DEPRECATED`. Whether a runtime variant is validated for a space is recorded on the variant's compatibility row (`DECLARED`, later `VALIDATED`), not on the space. `RepresentationSpace.component_version_id` is origin provenance, not a list of every component version that produced vectors in the space; the space's identity is compatibility, and what produced each representation is execution provenance.
+
 The persistence contract requires one USearch index per space. It holds compact `ann_key` values only; SQLite revalidates eligibility, state, identity, and space after ANN candidate generation. Unknown identities remain eligible. A corrupt/missing/mismatched index is rebuilt from active SQLite vectors.
 
 ## 9.3 Upgrade and partial migration

@@ -140,6 +140,8 @@ Detection output is persisted before embedding settlement. A meaningful crop may
 
 An equal dimension does not establish compatibility. A vector may only be compared, indexed, or calibrated with vectors in the same `representation_space_id`. Do not update a vector's space merely because a new model has the same output shape.
 
+> **Decision 2026-10-02 (owner; CONTEXT open question 31): the two persisted states stand, and what `component_version_id` means.** (1) A persisted `RepresentationSpace` is `ACTIVE` or `DEPRECATED`, and nothing else: the ML spec's `REGISTERED`, `VALIDATED`, `ACTIVE`, `RETIRED` (ML 9.2) mix a registration process (discover, validate, register) with the durable lifecycle. A space becomes a row only once its compatibility contract is validated enough to register, so `REGISTERED` and `VALIDATED` are not persisted states; `RETIRED` is `DEPRECATED`. A newly registered valid space is `ACTIVE`. (2) `component_version_id` is **origin provenance**: the component version that established (first registered) the space. It does not mean that only that version ever produced vectors in the space. A later component version with identical space-defining semantics shares the existing space and does not overwrite the column, and spaces are not duplicated to preserve provenance. Which component version, export and runtime actually produced a given representation is execution provenance, recorded per run and segment, not on the space. The invariant: **space identity describes compatibility; execution provenance describes what produced the data.**
+
 ### 6.2 `representations`
 
 | Column | Rule |
@@ -501,6 +503,8 @@ There is no single application data version. Version dimensions include the rele
 Versioned JSON rows retain their original payload and schema version. Readers may normalize old versions in memory, but the application writes only the current version. An old snapshot uses its documented historical default semantics, never current Settings. An unknown newer semantic version is rejected safely; an unsupported old version remains preserved but may have reduced detail available.
 
 Vectors remain attached to their original RepresentationSpace forever. A new embedding model creates a new ComponentVersion, RepresentationSpace, and Representations through re-embedding from retained imagery; it is not an SQL update of old `representation_space_id` values. Deprecated spaces remain historical and can be excluded from V1 normal recognition. Calibration profiles are immutable; a newer profile can interpret eligible old vectors in the same validated space, but it never rewrites historical Evidence confidence.
+
+> **Decision 2026-10-02 (owner; CONTEXT open question 31):** a new embedding model (different weights, or any other part of the space identity of ML 18.1) is a new space, as above. A new component version whose space-defining identity is identical is not: it shares the existing space (see 6.1).
 
 USearch manifests validate their format, space ID, and generation ID on startup. Any incompatibility rebuilds from canonical SQLite vectors. Model installation bytes may be removed without invalidating historical semantic metadata; exact historical reprocessing is unavailable unless a compatible export is installed. Managed originals are preserved exactly across storage-layout changes; `storage_key`, hashes, durable intent, and StorageManager compatibility support a later background move without an unsafe startup rewrite.
 
