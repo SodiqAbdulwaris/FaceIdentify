@@ -20,7 +20,6 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.memory.models import RepresentationSpace
-from backend.app.runtime.manifest import parse_manifest
 from backend.app.runtime.models import (
     Component,
     ComponentVersion,
@@ -44,96 +43,15 @@ from backend.app.runtime.registration import (
 from backend.app.sources.models import Artifact, ArtifactKind, ArtifactState, StorageMode
 from backend.app.sources.referenced_artifacts import mark_missing_referenced_originals
 from backend.infrastructure.db.engine import create_session_factory
+from tests.fixtures.catalog_packages import (
+    DETECTOR_BYTES,
+    EMBEDDER_BYTES,
+    EMBEDDER_CONTRACT,
+    EMBEDDER_FP16_BYTES,
+    installed,
+    manifest_dict,
+)
 from tests.fixtures.deterministic import SeededUUIDs
-
-DETECTOR_BYTES = b"detector weights"
-EMBEDDER_BYTES = b"embedder weights"
-EMBEDDER_FP16_BYTES = b"embedder weights, half precision"
-EMBEDDER_CONTRACT = {
-    "family": "arcface",
-    "dimension": 512,
-    "preprocessing_contract": "arcface-112-similarity-v1",
-    "normalization": "L2_NORMALIZED",
-    "normalization_contract_version": "l2-v1",
-    "compatibility_version": "1",
-}
-DETECTOR_CONTRACT = {"preprocessing_contract": "scrfd-letterbox-v1"}
-CONTENT: dict[str, bytes] = {}  # sha256 hex -> the bytes `manifest_dict` declared
-
-
-def manifest_dict(
-    key: str = "reference-cpu",
-    *,
-    provider: str = "CPUExecutionProvider",
-    device: str = "CPU",
-    embedder: bytes = EMBEDDER_BYTES,
-    embedder_contract: dict[str, Any] | None = None,
-    extra_embedder_export: bytes | None = None,
-    requirements: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    def export(component: str, file: str, data: bytes, precision: str = "FP32") -> dict[str, Any]:
-        CONTENT[hashlib.sha256(data).hexdigest()] = data
-        return {
-            "component": component,
-            "file": file,
-            "format": "ONNX",
-            "precision": precision,
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "size_bytes": len(data),
-            "input_contract": {"layout": "NCHW"},
-            "provenance": {"license": "MIT", "source": "fixture", "redistributable": False},
-        }
-
-    def variant(file: str, name: str) -> dict[str, Any]:
-        return {
-            "export_file": file,
-            "provider": provider,
-            "device_kind": device,
-            "variant_key": name,
-            "requirements": requirements or {},
-        }
-
-    exports = [
-        export("detector", "models/detector.onnx", DETECTOR_BYTES),
-        export("embedder", "models/embedder.onnx", embedder),
-    ]
-    variants = [
-        variant("models/detector.onnx", f"detector-{device}"),
-        variant("models/embedder.onnx", f"embedder-{device}"),
-    ]
-    if extra_embedder_export is not None:
-        exports.append(
-            export("embedder", "models/embedder-fp16.onnx", extra_embedder_export, "FP16")
-        )
-        variants.append(variant("models/embedder-fp16.onnx", f"embedder-fp16-{device}"))
-    return {
-        "schema_version": 1,
-        "key": key,
-        "version": "1.0.0",
-        "requirements": {},
-        "components": [
-            {"key": "detector", "kind": "FACE_DETECTOR", "version": "1.0.0",
-             "contract": copy.deepcopy(DETECTOR_CONTRACT)},
-            {"key": "embedder", "kind": "FACE_REPRESENTATION", "version": "1.0.0",
-             "contract": copy.deepcopy(embedder_contract or EMBEDDER_CONTRACT)},
-        ],
-        "exports": exports,
-        "variants": variants,
-    }  # fmt: skip
-
-
-def installed(base: Path, manifest: dict[str, Any]) -> InstalledPackage:
-    """A package as the installer leaves it: `base/<key>` with its manifest and its files."""
-    directory = base / manifest["key"]
-    directory.mkdir(parents=True, exist_ok=True)
-    for export in manifest["exports"]:
-        target = directory / export["file"]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(CONTENT[export["sha256"]])
-    text = json.dumps(manifest)
-    (directory / "manifest.json").write_text(text, encoding="utf-8")
-    parsed = parse_manifest(text)
-    return InstalledPackage(parsed.key, parsed.version, directory, parsed)
 
 
 @pytest.fixture
