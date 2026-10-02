@@ -5,6 +5,7 @@ is checked against the real segment, nothing is closed under an open view, and a
 frees what it held.
 """
 
+import gc
 import json
 import subprocess
 import sys
@@ -44,6 +45,15 @@ def owned(new_id: SeededUUIDs) -> OwnedSegment:
     return segment
 
 
+def leave_a_stray_handle_to_be_collected(owned: OwnedSegment) -> None:
+    """What an earlier test leaves behind: another handle to a segment of the same (seeded) name,
+    finalised by the collector at some later moment. `SharedMemory.__del__` calls `close()`, so a
+    test that patches `close` for the whole class sees that call too; this makes it happen now."""
+    stray = shared_memory.SharedMemory(name=owned.name)
+    del stray
+    gc.collect()
+
+
 # --- one process ---------------------------------------------------------------------------------
 
 
@@ -69,23 +79,29 @@ def test_releasing_and_closing_close_the_handle_explicitly_not_by_garbage_collec
     owned: OwnedSegment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     closed: list[str] = []
+    watched: set[int] = set()  # ids, not the handles: see below
     real = shared_memory.SharedMemory.close
 
     def spy(self: shared_memory.SharedMemory) -> None:
-        # (only this test's segment: a garbage-collected one elsewhere also closes through here)
-        if self.name == owned.name:
+        # Only these two handles, not every handle: one left behind by an earlier test has the same
+        # (seeded) name and is closed through here when the collector finalises it. They are matched
+        # by id, and held by this test's own frame, never by this function's closure: a patched
+        # function that is the last owner of the objects whose finaliser calls it is freed, on
+        # undo, with those objects still to be finalised, and the finaliser calls a dead function.
+        if id(self) in watched:
             closed.append(self.name)
         real(self)
 
     monkeypatch.setattr(shared_memory.SharedMemory, "close", spy)
+    leave_a_stray_handle_to_be_collected(owned)  # (it closes through `spy` too)
     attached = AttachedSegment(owned.descriptor)
-    keep = [attached._segment, owned._segment]  # (so only an explicit close can close them)
+    handles = (attached._segment, owned._segment)  # (held by this frame: only an explicit close)
+    watched.update(id(handle) for handle in handles)
 
     attached.close()
     owned.release()
 
     assert closed == [owned.name, owned.name]
-    del keep
 
 
 def test_the_descriptor_names_a_segment_big_enough_for_the_array(owned: OwnedSegment) -> None:
@@ -230,9 +246,13 @@ def test_a_close_that_fails_leaves_the_segment_open_to_be_tried_again(
 ) -> None:
     real = shared_memory.SharedMemory.close
     attempts: list[int] = []
+    handle = owned._segment  # (held by this frame until the test ends; the closure sees its id)
+    handle_id = id(handle)
 
     def flaky(self: shared_memory.SharedMemory) -> None:
-        if self.name != owned.name:  # (a garbage-collected segment elsewhere closes through here)
+        # This handle only, not every handle: one left behind by an earlier test has the same
+        # (seeded) name, and the collector closes it through here, even if closed already.
+        if id(self) != handle_id:
             real(self)
             return
         attempts.append(1)
@@ -241,6 +261,7 @@ def test_a_close_that_fails_leaves_the_segment_open_to_be_tried_again(
         real(self)
 
     monkeypatch.setattr(shared_memory.SharedMemory, "close", flaky)
+    leave_a_stray_handle_to_be_collected(owned)  # (it closes through `flaky` too)
 
     with pytest.raises(OSError, match="busy"):
         owned.release()
