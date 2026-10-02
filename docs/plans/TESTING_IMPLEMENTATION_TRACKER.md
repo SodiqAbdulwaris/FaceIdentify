@@ -182,6 +182,12 @@ started.
 
 **Milestone gate:** A single image can be imported, processed, represented, recognised and persisted.
 
+**M3 status** (started 2026-10-02; plan in `.agents/CONTEXT.md` item 7):
+
+| ID | Status | Evidence / remaining work |
+|---|---|---|
+| TST-033 | `PASSING` | `tests/contracts/test_ml_ipc_contract.py` (88): every request, response, descriptor and control frame round-trips as plain JSON-compatible dicts; malformed ones are refused with the spec's error code (INVALID_REQUEST, UNSUPPORTED_PROTOCOL_VERSION, SHARED_MEMORY_INVALID, INVALID_INPUT); zero faces is a SUCCESS; a response is exactly one of output and error; a descriptor whose shape does not fit its segment or is not contiguous is refused before anything is read; the embedding dimension is not assumed. 29 mutations, all caught. Built in `backend/ml/contracts/` with the standard library only (no pydantic) |
+
 ---
 
 ## M4 — API and desktop vertical slice
