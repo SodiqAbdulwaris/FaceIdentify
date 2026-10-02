@@ -1,8 +1,9 @@
 """The shared-memory descriptor (API and Contracts.md sections 44-46).
 
 Large inputs and outputs travel as descriptors, not through the control channel. A descriptor is
-validated before anyone touches the segment it names: the claimed shape must fit the claimed size,
-so a corrupt or hostile descriptor cannot make a reader step outside the segment.
+validated before anyone touches the segment it names: the claimed shape must fit the claimed size.
+That makes a descriptor self-consistent; it does not tie it to a real segment, so whoever attaches
+a segment must check that its actual size covers `size_bytes` before reading.
 """
 
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ from backend.ml.contracts.wire import (
 )
 
 # dtype name -> bytes per element. The canonical image is uint8; embeddings are little-endian
-# float32 (Persistence section 5); the others are what detection geometry and tests may need.
+# float32 (Persistence section 23); the rest are allowed for other arrays (float16 is not yet).
 ITEM_SIZES = {"uint8": 1, "float32": 4, "float64": 8, "int32": 4, "int64": 8}
 LAYOUTS = frozenset({"C"})  # contiguous, row-major
 
@@ -46,7 +47,9 @@ class SharedMemoryDescriptor:
             raise _bad(f"unsupported dtype {self.dtype!r}")
         if self.layout not in LAYOUTS:
             raise _bad(f"unsupported layout {self.layout!r}")
-        if not self.shape or any(dim < 1 for dim in self.shape):
+        if not self.shape:
+            raise _bad("a segment holds an array with at least one dimension")
+        if any(dim < 1 for dim in self.shape):
             raise _bad("every dimension must be at least 1")
         item = ITEM_SIZES[self.dtype]
         if self.strides != contiguous_strides(self.shape, item):
@@ -105,7 +108,9 @@ def describe(
 ) -> SharedMemoryDescriptor:
     """A descriptor for a contiguous array in a segment of `size_bytes` (default: exactly its size;
     the operating system may round a real segment up, which is allowed)."""
-    item = ITEM_SIZES[dtype]
+    item = ITEM_SIZES.get(dtype)
+    if item is None:
+        raise _bad(f"unsupported dtype {dtype!r}")
     return SharedMemoryDescriptor(
         name=name,
         size_bytes=prod(shape) * item if size_bytes is None else size_bytes,

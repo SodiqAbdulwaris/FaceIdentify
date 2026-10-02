@@ -47,12 +47,14 @@ def hello(worker_instance_id: str, capabilities: list[str]) -> dict[str, Any]:
 
 def parse_frame(value: Any) -> tuple[ControlType, dict[str, Any]]:
     """Validate a frame and return its type and fields. The worker instance id is ephemeral
-    diagnostic identity, nothing more."""
+    diagnostic identity, nothing more. The payload of EXECUTE and RESPONSE is not looked into
+    here: it is read with `MLRequest.from_wire` and `MLResponse.from_wire(wire, request)`."""
     data = as_mapping(value, "frame")
+    name = string(data.get("type"), "type")
     try:
-        kind = ControlType(string(data.get("type"), "type"))
+        kind = ControlType(name)
     except ValueError:
-        raise invalid(f"unknown frame type {data.get('type')!r}") from None
+        raise invalid(f"unknown frame type {name!r}") from None
     fields = _FIELDS[kind]
     exact_keys(data, f"{kind} frame", {"type"} | set(fields))
     body = {k: data[k] for k in fields}
