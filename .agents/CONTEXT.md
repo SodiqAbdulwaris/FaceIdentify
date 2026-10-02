@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-02 (the downgrade guard)_
+_Last updated: 2026-10-02 (library root and library lock)_
 
 ## Current state
 
@@ -201,7 +201,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     (first-run selection, persisted setting, default location), so `backend/alembic/env.py` still
     reads `FACEIDENTIFY_DATABASE_PATH` explicitly. Decide with the first-run/settings work.
     **2026-10-01 (owner):** deferred to the first-run/settings milestone.
-    **Decided 2026-10-01 (owner), to be built with the lifespan wiring (issue 33; not built yet):** the desktop shell owns
+    **Decided 2026-10-01 (owner); the backend side is built (`library_root.py`, `library_lock.py`, `alembic/env.py`; the shell's persisted setting and the lifecycle wiring, issue 33, are not):** the desktop shell owns
     library selection and persists the selected absolute library root in application-level settings *outside* the library;
     the backend receives exactly one resolved root at startup, immutable for the process lifetime, and every database,
     artifact, index, runtime, quarantine and lock path derives from it (repositories and Alembic never read
@@ -290,7 +290,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     on a file in the library (e.g. `<Library>/database/.lock`) for its whole lifetime and refuses to
     start without it, before migrations and recovery. Decide with the startup/lifespan work.
     **2026-10-01 (owner): agreed provisional direction** (the recommendation above), to be validated with the startup/lifespan work.
-    **2026-10-01 (owner): pre-approved for finalisation with item 3:** an exclusive library-lifetime lock at
+    **2026-10-01 (owner): finalised and built as `backend/infrastructure/storage/library_lock.py` (an OS-level non-blocking lock, released by a crash or kill; tested with real subprocesses); wiring it before migrations and recovery is issue 33:** an exclusive library-lifetime lock at
     `<LibraryRoot>/database/.lock`, taken after question 17's resolution and validation and before migrations, recovery,
     workers or any mutation; another live owner fails startup for that library; released on orderly shutdown; an OS-level
     lock so a crash never leaves the library locked.
