@@ -23,10 +23,14 @@ Date: 2026-10-02. Issue: 37 (CONTEXT open question 20). Owner direction 2026-10-
   spawning belongs after `write` returns, or must be idempotent. This is in the module docstring.
 - A reader takes no lock, so reads stay deferred.
 - Nothing is changed in the schema.
+- The existing services are **not** moved onto it yet (issue 66); `work` must not commit itself.
+- Review (Explore subagent), no blocker. Fixed: the commit-time retry now has a test; the no-commit rule is documented; the
+  "built" wording no longer overstates. Noted, not changed: `SQLITE_LOCKED` is retried like busy (as agreed); `read` discards
+  writes by design; the pooled-connection isolation reset after AUTOCOMMIT use is pre-existing (issue 67).
 
 ## Verification
 
-`tests/integration/test_unit_of_work.py` (25): the statement sent (`BEGIN IMMEDIATE` vs `BEGIN`), commit and rollback, two
+`tests/integration/test_unit_of_work.py` (26): the statement sent (`BEGIN IMMEDIATE` vs `BEGIN`), commit and rollback, two
 threads contending (the second queues behind the first and sees its write, no sleep), the retry sequence and back-off,
 exhaustion, an I/O error not retried, a really locked database with `busy_timeout = 0`, and `is_busy` for each code, a plain
 `RuntimeError` carrying a busy code, and an `IntegrityError`. Mutation-checked (15 mutants killed), 5 repeated runs. The

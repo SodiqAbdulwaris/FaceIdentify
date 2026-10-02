@@ -238,7 +238,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     migration bookkeeping), with an explicit development-only override (`FACEIDENTIFY_ALLOW_DESTRUCTIVE_DOWNGRADE=1`) that
     the application never sets; an empty library downgrades normally; a refused downgrade leaves the database unchanged;
     production recovery moves forward with corrective migrations, never by schema rollback. Built as `backend/infrastructure/db/downgrade_guard.py`: every revision's `downgrade()` starts with the guard (a test enforces it), 'populated' excludes the internal and re-creatable metadata tables listed there (the agent's reading of the owner's definition; a table not listed counts as data; an `artifacts` row is internal only if a catalog row references it and no source or observation does; `ann_key_sequences` is data), an offline `--sql` run is let through, and the override is exactly `=1`.
-20. **Final and built (issue 37, `backend/infrastructure/db/unit_of_work.py`): `BEGIN IMMEDIATE` write units of work, whole-transaction bounded retry, `DatabaseBusyError` on exhaustion.** Original question follows. Persistence §25 requires the application
+20. **Final; the unit of work is built, the services are not yet moved onto it (issue 37, 66; `backend/infrastructure/db/unit_of_work.py`): `BEGIN IMMEDIATE` write units of work, whole-transaction bounded retry, `DatabaseBusyError` on exhaustion.** Original question follows. Persistence §25 requires the application
     to "retry a small bounded number of times for known transient write conflicts, and return a
     diagnostic/retryable error rather than spin forever". Nothing does. What
     `test_sqlite_wal_behaviour.py` and `test_optimistic_concurrency.py` show: a second writer waits
@@ -261,7 +261,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     work use `BEGIN IMMEDIATE`; retry is bounded and at the whole-transaction boundary, never per statement and never for
     non-idempotent work outside the transaction; exhaustion becomes a retryable application/API error. If implementation
     contradicts an existing spec, isolate that part and open an issue.
-    **Built 2026-10-02:** `UnitOfWork.write` begins with `BEGIN IMMEDIATE` (engine execution option `sqlite_begin_immediate`), retries the whole transaction on SQLITE_BUSY/LOCKED (decided by result code, not text) with the caller's attempts and back-off (no defaults), and raises `DatabaseBusyError`. `work` must be a function of the session only. `open_library` exposes it as `OpenLibrary.unit_of_work`. Use cases are not yet routed through it (no API layer exists).
+    **Built 2026-10-02:** `UnitOfWork.write` begins with `BEGIN IMMEDIATE` (engine execution option `sqlite_begin_immediate`), retries the whole transaction on SQLITE_BUSY/LOCKED (decided by result code, not text) with the caller's attempts and back-off (no defaults), and raises `DatabaseBusyError`. `work` must be a function of the session only. `open_library` exposes it as `OpenLibrary.unit_of_work`. The existing services (`IndexCoordinator`, `RepresentationEraser`, recovery) still use the plain session factory, so they still begin deferred; moving them onto `UnitOfWork` is issue 66.
 21. **Open: when `ann_key` is allocated, and whether a rolled-back key may be reused.** Two spec
     passages pull apart. Persistence §6.3 allocates "in the same short transaction that creates
     representations... keys are never reused", and the run-local pending index (§23, "Recognition

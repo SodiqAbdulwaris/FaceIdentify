@@ -15,7 +15,9 @@ can fix that. So:
   maps to a retryable error. The retry is never per statement.
 * a **read** unit of work is an ordinary deferred transaction: a reader does not take the lock.
 
-Because the function is run again from the start, it must be **a function of the session only**: no
+Because the function is run again from the start, it must be **a function of the session only**: it
+must not commit or open transactions of its own (a retry would repeat what was already committed),
+and no
 non-idempotent work outside the transaction (sending, writing a file, spawning) belongs inside it,
 since a retry would repeat that as though it were part of the transaction. Do such work after the
 unit of work returns, or make it idempotent. The attempts and the back-off are the caller's: neither
