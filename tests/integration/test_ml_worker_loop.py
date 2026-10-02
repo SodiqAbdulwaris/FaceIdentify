@@ -7,7 +7,7 @@ supervisor.)
 """
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from multiprocessing import Pipe
 from typing import Any
 
@@ -41,6 +41,7 @@ from backend.ml.worker.loop import Handler, serve
 from tests.fixtures.deterministic import SeededUUIDs
 from tests.fixtures.ml_handlers import (
     EMBEDDING_DIMENSION,
+    LEAKED_VIEWS,
     build_detector_only,
     build_handlers,
 )
@@ -59,16 +60,30 @@ def gone(descriptor: SharedMemoryDescriptor) -> bool:
 class Worker:
     """A worker loop on a thread, and the parent's end of its pipe."""
 
-    def __init__(self, handlers: dict[MLOperation, Handler], new_id: SeededUUIDs) -> None:
+    def __init__(
+        self, handlers: dict[MLOperation, Handler], new_id: SeededUUIDs, child: Any = None
+    ) -> None:
         self.pings = 0
-        self.parent, child = Pipe()
-        self.thread = threading.Thread(
-            target=serve,
-            args=(child, handlers),
-            kwargs={"instance_id": "worker-1", "new_id": new_id},
-            daemon=True,
-        )
+        self.error: BaseException | None = None  # what escaped serve(), if anything did
+        self.log: list[str] = []
+        self.parent, own_end = Pipe()
+        self._child: Any = child(own_end) if child else own_end
+        self._handlers = handlers
+        self._new_id = new_id
+        self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
+
+    def _run(self) -> None:
+        try:
+            serve(
+                self._child,
+                self._handlers,
+                instance_id="worker-1",
+                new_id=self._new_id,
+                log=self.log.append,
+            )
+        except BaseException as error:  # a crashed worker must fail the test, not hide in a thread
+            self.error = error
 
     def receive(self) -> Any:
         assert self.parent.poll(WAIT), "the worker did not answer"
@@ -114,16 +129,31 @@ class Worker:
         return sent
 
     def left(self) -> bool:
+        """The worker ended, and ended cleanly (nothing escaped serve())."""
         self.thread.join(WAIT)
+        assert self.error is None, f"the worker crashed: {self.error!r}"
         return not self.thread.is_alive()
 
 
 @pytest.fixture
-def worker(new_id: SeededUUIDs) -> Iterator[Worker]:
-    started = Worker(build_handlers(), new_id)
-    yield started
-    started.parent.close()
-    started.thread.join(WAIT)
+def make_worker(new_id: SeededUUIDs) -> Iterator[Callable[..., Worker]]:
+    """Workers that are all closed and joined afterwards, whatever the test did."""
+    started: list[Worker] = []
+
+    def make(handlers: dict[MLOperation, Handler] | None = None, child: Any = None) -> Worker:
+        started.append(Worker(handlers or build_handlers(), new_id, child))
+        return started[-1]
+
+    yield make
+    for each in started:
+        each.parent.close()
+        each.thread.join(WAIT)
+        assert each.error is None, f"the worker crashed: {each.error!r}"
+
+
+@pytest.fixture
+def worker(make_worker: Callable[..., Worker]) -> Worker:
+    return make_worker()
 
 
 @pytest.fixture
@@ -178,11 +208,12 @@ def test_the_worker_introduces_itself_and_becomes_ready_when_initialized(worker:
     worker.ping()  # and it serves
 
 
-def test_a_worker_with_one_handler_says_so_in_its_capabilities(new_id: SeededUUIDs) -> None:
-    detector_only = Worker(build_detector_only(), new_id)
+def test_a_worker_with_one_handler_says_so_in_its_capabilities(
+    make_worker: Callable[..., Worker],
+) -> None:
+    detector_only = make_worker(build_detector_only())
 
     assert detector_only.handshake()["capabilities"] == ["DETECT_FACES"]
-    detector_only.parent.close()
 
 
 @pytest.mark.parametrize(
@@ -300,7 +331,7 @@ def test_a_request_that_fails_does_not_release_the_outputs_of_other_requests(
 
 @pytest.mark.parametrize("how", ["shutdown", "parent-gone", "garbage"])
 def test_the_worker_always_releases_everything_it_owns_when_it_leaves(
-    new_id: SeededUUIDs,
+    make_worker: Callable[..., Worker],
     images: tuple[OwnedSegment, OwnedSegment],
     monkeypatch: pytest.MonkeyPatch,
     how: str,
@@ -313,7 +344,7 @@ def test_the_worker_always_releases_everything_it_owns_when_it_leaves(
         return real(self)
 
     monkeypatch.setattr(SegmentLedger, "release_all", spy)
-    worker = Worker(build_handlers(), new_id)
+    worker = make_worker()
     worker.handshake()
     _, lit = images
     response = worker.ask(represent_request(lit))
@@ -358,6 +389,16 @@ def test_the_same_request_id_used_twice_releases_both_outputs_together(
             "the provider would not start",
         ),
         ("coded-blank", MLErrorCode.INTERNAL_WORKER_ERROR, "INTERNAL_WORKER_ERROR"),
+        (
+            "coded-invalid",
+            MLErrorCode.INFERENCE_FAILED,
+            "ValueError: 'BOOM' is not a valid MLErrorCode",
+        ),
+        (
+            "unprintable",
+            MLErrorCode.INTERNAL_WORKER_ERROR,
+            "the failure could not be described",
+        ),
     ],
 )
 def test_a_handler_that_fails_is_answered_with_its_code_and_the_worker_carries_on(
@@ -378,6 +419,52 @@ def test_a_handler_that_fails_is_answered_with_its_code_and_the_worker_carries_o
     assert response.error.message == message
     ready.ping()
     assert ready.ask(detect_request(blank)).status is MLStatus.SUCCESS  # and still works
+
+
+def test_a_failure_message_is_cut_to_a_length_that_is_safe_to_send(
+    ready: Worker, images: tuple[OwnedSegment, OwnedSegment]
+) -> None:
+    blank, _ = images
+
+    response = ready.ask(detect_request(blank, mode="long"))
+
+    assert response.error is not None
+    assert response.error.message == ("RuntimeError: " + "x" * 5000)[:500]
+
+
+def test_a_handler_whose_answer_is_not_about_the_request_is_an_error_not_a_bad_response(
+    ready: Worker, images: tuple[OwnedSegment, OwnedSegment]
+) -> None:
+    blank, _ = images
+
+    response = ready.ask(detect_request(blank, mode="wrong-answer"))
+
+    assert response.error is not None
+    assert response.error.code is MLErrorCode.INTERNAL_WORKER_ERROR
+    assert "does not answer the request" in response.error.message
+    ready.ping()
+
+
+def test_a_handler_that_leaves_a_view_open_costs_one_request_not_the_worker(
+    ready: Worker, images: tuple[OwnedSegment, OwnedSegment]
+) -> None:
+    _, lit = images
+    LEAKED_VIEWS.clear()
+
+    failed = ready.ask(represent_request(lit, mode="view-leak"))
+
+    assert failed.error is not None
+    assert failed.error.code is MLErrorCode.INFERENCE_FAILED
+    ready.ping()
+    assert ready.ask(detect_request(lit)).status is MLStatus.SUCCESS
+    ready.parent.send(frame(ControlType.SHUTDOWN))
+    parse_frame(ready.receive())
+    assert ready.left()  # and it still leaves cleanly, with the segment it cannot release
+    assert len(LEAKED_VIEWS) == 1  # (the view really was left open)
+    for view, segment in LEAKED_VIEWS:  # clean up what the handler left, so no other test sees it
+        view.__exit__(None, None, None)
+        segment.release()
+    LEAKED_VIEWS.clear()
 
 
 def test_a_request_that_fails_after_making_an_output_leaves_no_segment_behind(
@@ -412,17 +499,16 @@ def test_a_missing_input_segment_is_reported_as_such(ready: Worker, new_id: Seed
 
 
 def test_an_operation_without_a_handler_is_not_available(
-    new_id: SeededUUIDs, images: tuple[OwnedSegment, OwnedSegment]
+    make_worker: Callable[..., Worker], images: tuple[OwnedSegment, OwnedSegment]
 ) -> None:
     _, lit = images
-    detector_only = Worker(build_detector_only(), new_id)
+    detector_only = make_worker(build_detector_only())
     detector_only.handshake()
 
     response = detector_only.ask(represent_request(lit))
 
     assert response.error is not None
     assert response.error.code is MLErrorCode.COMPONENT_NOT_AVAILABLE
-    detector_only.parent.close()
 
 
 # --- requests that cannot be read ----------------------------------------------------------------
@@ -444,6 +530,12 @@ def test_a_request_that_cannot_be_read_is_answered_under_its_own_id_with_the_rig
         (broken(good, operation="RECOGNIZE_PERSON"), MLErrorCode.INVALID_REQUEST),
         (broken(good, version=PROTOCOL_VERSION + 1), MLErrorCode.UNSUPPORTED_PROTOCOL_VERSION),
         (broken(good, surprise=1), MLErrorCode.INVALID_REQUEST),
+        (
+            broken(
+                good, input={"images": [{**good.to_wire()["input"]["images"][0], "dtype": "x"}]}
+            ),
+            MLErrorCode.SHARED_MEMORY_INVALID,
+        ),
     ]
     for wire, code in cases:
         answer = ready.execute(wire)
@@ -501,6 +593,7 @@ def test_a_vanished_parent_ends_the_worker_and_frees_its_outputs(
     "message",
     [
         frame(ControlType.READY),  # something a worker sends, not receives
+        frame(ControlType.INITIALIZE, protocol_version=PROTOCOL_VERSION),  # (a second time)
         frame(ControlType.PONG, nonce="n"),
         {"type": "NOPE"},
         "garbage",
@@ -518,3 +611,112 @@ def test_a_stream_the_worker_cannot_follow_ends_it_and_frees_its_outputs(
 
     assert ready.left()
     assert all(gone(d) for d in outputs)
+
+
+# --- a connection that fails, and what the worker says when it leaves -------------------------
+
+
+class BrokenOnWrite:
+    """The worker's end of a pipe whose writes fail after `allowed` sends (the parent just went)."""
+
+    def __init__(self, connection: Any, allowed: int) -> None:
+        self._connection = connection
+        self._allowed = allowed
+
+    def recv(self) -> Any:
+        return self._connection.recv()
+
+    def send(self, message: Any) -> None:
+        if self._allowed == 0:
+            raise BrokenPipeError("the parent went away")
+        self._allowed -= 1
+        self._connection.send(message)
+
+
+@pytest.mark.parametrize(
+    ("allowed", "then_send"),
+    [
+        (2, frame(ControlType.PING, nonce="n")),  # HELLO and READY got through; the PONG did not
+        (2, frame(ControlType.SHUTDOWN)),  # ...and neither did the SHUTDOWN_ACK
+    ],
+)
+def test_a_write_to_a_parent_that_has_gone_ends_the_worker_quietly(
+    make_worker: Callable[..., Worker], allowed: int, then_send: Any
+) -> None:
+    worker = make_worker(child=lambda end: BrokenOnWrite(end, allowed))
+    worker.handshake()
+
+    worker.parent.send(then_send)
+
+    assert worker.left()  # no crash: left() fails the test if anything escaped
+    assert worker.log == ["leaving: the connection to the parent failed (BrokenPipeError)"]
+
+
+def test_a_response_that_cannot_be_written_ends_the_worker_quietly_and_frees_its_outputs(
+    make_worker: Callable[..., Worker], images: tuple[OwnedSegment, OwnedSegment]
+) -> None:
+    _, lit = images
+    worker = make_worker(child=lambda end: BrokenOnWrite(end, 2))
+    worker.handshake()
+
+    worker.parent.send(frame(ControlType.EXECUTE, request=represent_request(lit).to_wire()))
+
+    assert worker.left()
+    assert worker.log == ["leaving: the connection to the parent failed (BrokenPipeError)"]
+
+
+def test_the_worker_says_why_it_leaves(
+    make_worker: Callable[..., Worker],
+) -> None:
+    cases = {
+        "garbage": ("leaving: a frame it cannot follow",),
+        "ready": ("leaving: a READY frame, which a parent does not send",),
+        "gone": ("leaving: the connection to the parent failed (EOFError)",),
+    }
+    for how, (expected,) in cases.items():
+        worker = make_worker()
+        worker.handshake()
+        if how == "garbage":
+            worker.parent.send("garbage")
+        elif how == "ready":
+            worker.parent.send(frame(ControlType.READY))
+        else:
+            worker.parent.close()
+
+        assert worker.left()
+        assert len(worker.log) == 1
+        assert worker.log[0].startswith(expected)
+
+
+def test_by_default_the_worker_says_why_it_leaves_on_its_standard_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parent, child = Pipe()
+    parent.close()  # the parent is gone before the worker starts
+
+    serve(child, build_handlers(), instance_id="worker-1", new_id=SeededUUIDs(1))
+
+    assert capsys.readouterr().err.startswith("ml-worker: leaving: the parent went away")
+
+
+def test_a_worker_that_is_asked_to_shut_down_leaves_without_complaint(worker: Worker) -> None:
+    worker.handshake()
+    worker.parent.send(frame(ControlType.SHUTDOWN))
+    worker.receive()
+
+    assert worker.left()
+    assert worker.log == []
+
+
+def test_the_worker_says_why_a_handshake_failed(make_worker: Callable[..., Worker]) -> None:
+    refused = make_worker()
+    refused.receive()
+    refused.parent.send(frame(ControlType.PING, nonce="n"))
+    gone = make_worker()
+    gone.receive()
+    gone.parent.close()
+
+    assert refused.left()
+    assert gone.left()
+    assert refused.log == ["leaving: the handshake was refused (expected INITIALIZE, got PING)"]
+    assert gone.log[0].startswith("leaving: the parent went away during the handshake")
