@@ -145,11 +145,16 @@ def test_bytes_are_accepted_as_well_as_text() -> None:
     [
         (["schema_version"], 2, "not supported"),
         (["schema_version"], True, "not supported"),
+        (["schema_version"], 1.0, "not supported"),
         (["schema_version"], "1", "not supported"),
         (["surprise"], 1, "unexpected"),
         (["key"], _DELETE, "missing"),
         (["key"], "", "non-empty"),
         (["key"], " padded ", "non-empty"),
+        (["key"], "a\x00b", "control or invisible"),
+        (["version"], "1.0\n", "non-empty"),
+        (["requirements", "os"], ["\u200bwindows"], "control or invisible"),
+        (["components", 0, "kind"], "FACE\u202eDETECTOR", "control or invisible"),
         (["key"], 5, "non-empty"),
         (["version"], None, "non-empty"),
         (["requirements"], [], "must be an object"),
@@ -191,6 +196,8 @@ def test_a_malformed_manifest_is_refused_and_says_why(
 @pytest.mark.parametrize(
     ("text", "message"),
     [
+        (b'{"key": "\xc3("}', "UTF-8"),
+        pytest.param("[" * 200_000, "nested too deeply", id="deeply-nested"),
         ("{", "not valid JSON"),
         ("[]", "must be an object"),
         ('{"schema_version": 1, "schema_version": 1}', "duplicate key"),
@@ -250,6 +257,25 @@ def test_a_path_must_be_a_string() -> None:
         safe_relative_path(5)
 
 
+def test_a_variant_finds_an_export_spelled_with_capitals_and_takes_the_exports_spelling() -> None:
+    data = manifest_dict()
+    data["exports"][0]["file"] = "Models/Detector.onnx"
+    data["variants"][0]["export_file"] = "models/detector.ONNX"
+
+    manifest = parse(data)
+
+    assert manifest.variants[0].export_file == "Models/Detector.onnx"
+
+
+def test_a_variant_finds_its_export_whatever_the_case_and_takes_the_exports_spelling() -> None:
+    data = manifest_dict()
+    data["variants"][0]["export_file"] = "MODELS/Detector.ONNX"
+
+    manifest = parse(data)
+
+    assert manifest.variants[0].export_file == "models/detector.onnx"
+
+
 # --- compatibility -------------------------------------------------------------------------------
 
 
@@ -277,6 +303,27 @@ def test_a_fact_that_is_not_known_is_a_mismatch_not_an_assumption() -> None:
     problems = incompatibilities(manifest, {"os": "windows"})
 
     assert problems == ["architecture is not known on this machine (package needs x86_64, amd64)"]
+
+
+def test_fact_names_are_matched_without_regard_to_case() -> None:
+    manifest = parse(manifest_dict())
+
+    assert incompatibilities(manifest, {"OS": "windows", "Architecture": "x86_64"}) == []
+
+
+def test_a_requirement_named_with_capitals_is_met_by_a_fact_named_without() -> None:
+    data = manifest_dict()
+    data["requirements"] = {"OS": ["Windows"]}
+
+    assert incompatibilities(parse(data), {"os": "windows"}) == []
+
+
+def test_a_fact_that_is_not_text_is_compared_as_text_not_a_crash() -> None:
+    data = manifest_dict()
+    data["requirements"] = {"cores": ["8"]}
+
+    assert incompatibilities(parse(data), {"cores": 8}) == []  # type: ignore[dict-item]
+    assert incompatibilities(parse(data), {"cores": 4})  # type: ignore[dict-item]
 
 
 def test_a_package_with_no_requirements_fits_anywhere() -> None:
@@ -336,6 +383,22 @@ def test_changed_bytes_of_the_same_size_are_caught_by_the_hash(tmp_path: Path) -
     assert file_problems(tmp_path, manifest) == [
         "models/detector.onnx: hash does not match the manifest"
     ]
+
+
+def test_a_declared_path_that_cannot_be_resolved_is_reported_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = write_package(tmp_path)
+    real = Path.resolve
+
+    def resolve(self: Path, strict: bool = False) -> Path:
+        if self.name == "embedder.onnx":
+            raise RuntimeError("Symlink loop")
+        return real(self, strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+
+    assert file_problems(tmp_path, manifest) == ["models/embedder.onnx: cannot be resolved"]
 
 
 def link_directory(link: Path, target: Path) -> None:
