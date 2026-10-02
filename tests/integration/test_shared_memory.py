@@ -72,7 +72,9 @@ def test_releasing_and_closing_close_the_handle_explicitly_not_by_garbage_collec
     real = shared_memory.SharedMemory.close
 
     def spy(self: shared_memory.SharedMemory) -> None:
-        closed.append(self.name)
+        # (only this test's segment: a garbage-collected one elsewhere also closes through here)
+        if self.name == owned.name:
+            closed.append(self.name)
         real(self)
 
     monkeypatch.setattr(shared_memory.SharedMemory, "close", spy)
@@ -230,6 +232,9 @@ def test_a_close_that_fails_leaves_the_segment_open_to_be_tried_again(
     attempts: list[int] = []
 
     def flaky(self: shared_memory.SharedMemory) -> None:
+        if self.name != owned.name:  # (a garbage-collected segment elsewhere closes through here)
+            real(self)
+            return
         attempts.append(1)
         if len(attempts) == 1:
             raise OSError("handle busy")
