@@ -8,9 +8,7 @@ nothing about two backends.
 
 import errno
 import subprocess
-import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -22,6 +20,7 @@ from backend.infrastructure.storage.library_lock import (
     LibraryLockedError,
 )
 from backend.infrastructure.storage.library_root import InvalidLibraryRootError
+from tests.fixtures.processes import close_streams, kill_tree, start_until
 
 HOLDER = """
 import sys
@@ -38,42 +37,9 @@ def is_held(lock: LibraryLock) -> bool:
     return lock.held  # (a function, so a type checker does not carry an earlier answer over)
 
 
-def kill_tree(process: subprocess.Popen[str]) -> None:
-    """Kill the holder and everything it started. On Windows the venv's `python.exe` is a launcher
-    that starts the real interpreter as a child, and that child is the one holding the lock."""
-    if sys.platform == "win32":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
-    else:  # pragma: no cover - the suite runs on Windows
-        process.kill()
-    process.wait(timeout=30)
-
-
-def close_streams(process: subprocess.Popen[str]) -> None:
-    for stream in (process.stdin, process.stdout, process.stderr):
-        if stream is not None:
-            stream.close()
-
-
 def start_holder(root: Path) -> subprocess.Popen[str]:
-    """A second process that holds the library until it is told to stop, or killed. Whatever goes
-    wrong while starting it, the process does not outlive the test."""
-    process = subprocess.Popen(
-        [sys.executable, "-c", HOLDER, str(root)],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        cwd=Path(__file__).parents[2],
-    )  # fmt: skip
-    assert process.stdout is not None
-    pool = ThreadPoolExecutor(max_workers=1)
-    try:
-        line = pool.submit(process.stdout.readline).result(timeout=60)
-        assert line.strip() == "HELD"
-    except BaseException:
-        kill_tree(process)  # first: the reader thread is waiting on this process's output
-        pool.shutdown(wait=False)
-        close_streams(process)
-        raise
-    pool.shutdown(wait=False)
-    return process
+    """A second process that holds the library until it is told to stop, or killed."""
+    return start_until(HOLDER, str(root), ready="HELD")
 
 
 def acquire_soon(root: Path, seconds: float = 10) -> None:
