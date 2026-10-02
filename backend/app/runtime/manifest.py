@@ -9,8 +9,9 @@ no duplicate keys, no unsafe file paths) because a manifest comes from outside t
 
 import json
 import re
+import unicodedata
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -100,11 +101,11 @@ def _refuse_constant(name: str) -> Any:
     raise ManifestError(f"{name} is not valid JSON")
 
 
-def _obj(value: Any, what: str, required: set[str], optional: frozenset[str] = frozenset()) -> Any:
+def _obj(value: Any, what: str, required: set[str]) -> Any:
     if not isinstance(value, dict):
         raise ManifestError(f"{what} must be an object")
     missing = required - value.keys()
-    extra = value.keys() - required - optional
+    extra = value.keys() - required
     if missing or extra:
         raise ManifestError(f"{what}: missing {sorted(missing)}, unexpected {sorted(extra)}")
     return value
@@ -113,6 +114,8 @@ def _obj(value: Any, what: str, required: set[str], optional: frozenset[str] = f
 def _str(value: Any, what: str) -> str:
     if not isinstance(value, str) or not value.strip() or value != value.strip():
         raise ManifestError(f"{what} must be a non-empty string without surrounding spaces")
+    if any(unicodedata.category(c).startswith("C") for c in value):
+        raise ManifestError(f"{what} contains a control or invisible character")
     return value
 
 
@@ -133,7 +136,7 @@ def safe_relative_path(value: Any, what: str = "file") -> str:
     no empty, `.` or `..` segment, no drive, backslash or control character, nothing Windows
     would rewrite (trailing dot or space, reserved device names)."""
     path = _str(value, what)
-    if "\\" in path or ":" in path or any(ord(c) < 32 for c in path):
+    if "\\" in path or ":" in path:
         raise ManifestError(f"{what} {path!r} is not a safe relative path")
     for segment in path.split("/"):
         stem = segment.split(".")[0].lower()
@@ -156,13 +159,17 @@ def parse_manifest(text: str | bytes) -> PackageManifest:
         raw = json.loads(text, object_pairs_hook=_no_duplicates, parse_constant=_refuse_constant)
     except json.JSONDecodeError as error:
         raise ManifestError(f"not valid JSON: {error.msg}") from error
+    except UnicodeDecodeError as error:
+        raise ManifestError("not valid UTF-8 text") from error
+    except RecursionError:
+        raise ManifestError("nested too deeply") from None
     data = _obj(
         raw,
         "manifest",
         {"schema_version", "key", "version", "requirements", "components", "exports", "variants"},
     )
     version = data["schema_version"]
-    if isinstance(version, bool) or version != SCHEMA_VERSION:
+    if isinstance(version, bool) or not isinstance(version, int) or version != SCHEMA_VERSION:
         raise ManifestError(f"manifest schema version {version!r} is not supported")
 
     requirements: dict[str, tuple[str, ...]] = {}
@@ -186,10 +193,14 @@ def parse_manifest(text: str | bytes) -> PackageManifest:
             )
     variants = tuple(_variant(v) for v in _list(data["variants"], "variants", non_empty=True))
     _unique([v.variant_key for v in variants], "variant key")
-    files = {e.file for e in exports}
+    spelling = {e.file.lower(): e.file for e in exports}
+    resolved: list[VariantSpec] = []
     for variant in variants:
-        if variant.export_file not in files:
+        file = spelling.get(variant.export_file.lower())
+        if file is None:
             raise ManifestError(f"variant {variant.variant_key!r} names unknown export file")
+        resolved.append(replace(variant, export_file=file))
+    variants = tuple(resolved)
     return PackageManifest(
         key=_str(data["key"], "key"),
         version=_str(data["version"], "version"),
@@ -276,16 +287,17 @@ def _variant(value: Any) -> VariantSpec:
 
 def incompatibilities(manifest: PackageManifest, facts: Mapping[str, str]) -> list[str]:
     """Why this package is not for this machine; empty means compatible. Every requirement the
-    package makes must be matched by a known fact (case-insensitively): an unknown fact is a
-    mismatch, never assumed to be fine."""
+    package makes must be matched by a known fact (names and values compared case-insensitively):
+    an unknown fact is a mismatch, never assumed to be fine."""
+    known = {name.lower(): value for name, value in facts.items()}
     problems: list[str] = []
     for name, allowed in manifest.requirements.items():
-        actual = facts.get(name)
+        actual = known.get(name.lower())
         if actual is None:
             problems.append(
                 f"{name} is not known on this machine (package needs {', '.join(allowed)})"
             )
-        elif actual.lower() not in {a.lower() for a in allowed}:
+        elif str(actual).lower() not in {a.lower() for a in allowed}:
             problems.append(f"{name} is {actual!r}, package needs {', '.join(allowed)}")
     return problems
 
@@ -293,12 +305,17 @@ def incompatibilities(manifest: PackageManifest, facts: Mapping[str, str]) -> li
 def file_problems(root: Path, manifest: PackageManifest) -> list[str]:
     """Check every declared file in the package directory `root`: present, a regular file inside
     `root` (a symlink out of it is refused), the declared size, the declared hash. Files that are
-    not declared are not part of the package and are ignored."""
+    not declared are not part of the package and are ignored. An empty result does not bind the
+    check to a later copy: whatever copies these files must verify what it copied."""
     problems: list[str] = []
     base = root.resolve()
     for export in manifest.exports:
         path = root / export.file
-        resolved = path.resolve()
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError):  # a link loop, or a path the system cannot resolve
+            problems.append(f"{export.file}: cannot be resolved")
+            continue
         if base != resolved and base not in resolved.parents:
             problems.append(f"{export.file}: resolves outside the package")
         elif not path.is_file():
