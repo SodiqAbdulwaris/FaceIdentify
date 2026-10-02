@@ -186,6 +186,7 @@ started.
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
+| (step 4a) | `IN_PROGRESS` | Runtime package manifest (Architecture 25.14, first part): `tests/unit/test_runtime_manifest.py` (82): strict parsing, safe paths, compatibility, file integrity; 30 mutations caught. The installer, staged install, activation and interrupted-install recovery (step 4b) remain |
 | TST-033 | `PASSING` | `tests/contracts/test_ml_ipc_contract.py` (148): every request, response, descriptor and control frame round-trips as plain JSON-compatible dicts; malformed ones are refused with the spec's error code (INVALID_REQUEST, UNSUPPORTED_PROTOCOL_VERSION, SHARED_MEMORY_INVALID, INVALID_INPUT); zero faces is a SUCCESS; a response is exactly one of output and error; a descriptor whose shape does not fit its segment or is not contiguous is refused before anything is read; the embedding dimension is not assumed. 55 mutations, all caught. Built in `backend/ml/contracts/` with the standard library only (no pydantic) |
 
 ---
