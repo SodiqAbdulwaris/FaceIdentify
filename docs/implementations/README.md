@@ -100,4 +100,5 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [M3: ONNX Runtime detection and representation in the worker](2026-10-02-m3-onnx-handlers.md) | partial; step 7, second part |
 | 2026-10-02 | [M3: registering an installed runtime package in the catalog](2026-10-02-m3-catalog-registration.md) | partial; step 7, third part; issue 80 first half |
 | 2026-10-02 | [M3: the worker's configuration from the catalog and this machine's packages](2026-10-02-m3-worker-config.md) | partial; step 7, fourth part |
-| 2026-10-02 | [Decisions: a representation space's persisted state and its component version](2026-10-02-space-state-and-provenance-decisions.md) | done; the manifest contract keys await confirmation |
+| 2026-10-02 | [Decisions: a representation space's persisted state and its component version](2026-10-02-space-state-and-provenance-decisions.md) | done |
+| 2026-10-02 | [The model family leaves the representation-space identity](2026-10-02-space-identity-without-family.md) | done; provenance gap is issue 88 |

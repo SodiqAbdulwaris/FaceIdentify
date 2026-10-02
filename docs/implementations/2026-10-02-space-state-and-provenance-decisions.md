@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-02
 - **Milestone / tracker IDs:** M3 (step 7); documentation only
-- **Status:** done for decisions 1 and 3; decision 2 (the manifest `contract` keys) awaits the owner's confirmation
+- **Status:** done; decision 2 (the manifest `contract` keys) was decided afterwards, see `2026-10-02-space-identity-without-family.md`
 - **Commits:** PR (this branch): `docs: record the space-state and provenance decisions in the specs`, `docs: record the decisions in CONTEXT and the implementation log`, `docs: annotate the activation wording and scope the state note`
 
 ## What changed
