@@ -28,7 +28,7 @@ from backend.ml.contracts.messages import Point
 from backend.ml.contracts.protocol import ContractError, MLErrorCode
 
 VERSION = "arcface-112-similarity-v1"
-NORMALIZATION = "L2"  # the value a representation's `normalization` carries
+NORMALIZATION = "L2_NORMALIZED"  # the value a representation's `normalization` carries
 TEMPLATE: NDArray[np.float64] = np.array(
     [
         [38.2946, 51.6963],
