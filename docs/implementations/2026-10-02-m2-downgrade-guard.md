@@ -15,7 +15,7 @@
   that revision and, each revision being its own transaction, leaves the database exactly as it was.
 - `tests/fixtures/migrations.py` `downgrade()` opts in to the override by default (`allow_destructive=False` for the guard's
   own tests); the existing downgrade tests are otherwise unchanged.
-- `tests/integration/test_downgrade_guard.py` (24), spec note on persistence section 27, `backend/alembic/README`, CONTEXT.
+- `tests/integration/test_downgrade_guard.py` (27), spec note on persistence section 27, `backend/alembic/README`, CONTEXT.
 
 ## Why
 
@@ -31,7 +31,9 @@ development-only override that the application never sets; recovery goes forward
 - **An offline run is let through.** `alembic downgrade ... --sql` only prints a script, and its connection is a mock with
   no database to inspect (the first version of the guard crashed there; a review caught it and a test now pins it).
 - **Artifacts:** installed models and packages keep their bytes as `artifacts` rows, so a fresh library has some; an artifact
-  counts as data only if no catalog table references it. `ann_key_sequences` is *not* internal (the never-reused allocator).
+  is internal only if a catalog table references it and no source (original or thumbnail) or observation (face crop) does
+  (a re-review found that a shared artifact could hide a user's data; each of the three references is tested alone; `NOT EXISTS`
+  rather than `NOT IN`, which a NULL would silently defeat). `ann_key_sequences` is *not* internal (the never-reused allocator).
 - **A guard in each revision, not in `env.py`:** `env.py` runs after a step (`on_version_apply`) or cannot tell the direction
   reliably, while the revision's own first statement runs before anything changes. The risk, a future revision forgetting it,
   is closed by an AST test over every revision file.
@@ -41,8 +43,8 @@ development-only override that the application never sets; recovery goes forward
 
 ## Verification
 
-- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1081 passed, backend coverage 100%.
-  15 mutations (the exact override, the override ignored, the refusal removed, two internal tables removed from the list, an
+- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1084 passed, backend coverage 100%.
+  19 mutations (the exact override, the override ignored, the refusal removed, two internal tables removed from the list, an
   unknown table, the guard missing from one revision, the guard not first in another): each broken, shown to fail a test and
   restored byte-identical.
 - **Review** (Explore subagent; Codex over its limit until 2026-10-03), posted on PR 62: one major, fixed (the offline crash).
