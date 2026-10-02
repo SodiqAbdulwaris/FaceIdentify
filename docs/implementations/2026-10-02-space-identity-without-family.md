@@ -12,6 +12,11 @@ Owner decision 2026-10-02 (CONTEXT open question 31, part 2): the manifest compo
 - Dated notes: Architecture 12.2 (the keys and the identity, in the owner's wording) and ML 18.1 (the two earlier decisions listed the family; the amendment follows them). CONTEXT question 31 is fully decided; the registration entry, the tracker and CONTEXT's step-7 text no longer say the family is part of the identity.
 - The fingerprint scheme stays `rs1`. Nothing outside the tests has stored an `rs1` key (no released library exists), so this is a correction before first use, not a migration; the pinned test key changed accordingly.
 
+## Decisions
+- The owner approved the manifest `contract` keys of PR 85 with one change: `family` leaves the space identity and stays a required descriptive key; `compatibility_version` stays a separate identity field (not folded into the preprocessing contract) with the rule that bumping it needs a documented reason.
+- Rejected: keeping `family` in the identity (spelling would split spaces and it adds no compatibility information beyond the digest and the contracts); folding `compatibility_version` into `preprocessing_contract` (it would claim the preprocessing algorithm changed when only an interpretation boundary did); making `family` optional (kept for provenance and debugging).
+- Agent's: keep the scheme name `rs1`, because no library has stored a key (the review confirmed that `rs1` appears only in `registration.py` and the pinned test, migrations define only the column, test factories write `space-<uuid>`, index manifests store the space id); a bump would only matter once a key had been stored.
+
 ## Why
 `family` is a human-controlled label (`arcface`, `ArcFace`, `arc-face`, `insightface-arcface`): equivalent exports would have been split into several spaces by spelling alone, and it adds no compatibility information once the exact weights digest and the explicit contracts are in the identity.
 
