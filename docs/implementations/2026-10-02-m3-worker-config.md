@@ -1,0 +1,29 @@
+# M3: the worker's configuration from the catalog and this machine's packages (step 7, fourth part; issue 80)
+
+- **Date:** 2026-10-02
+- **Milestone / tracker IDs:** M3 · TST-038, TST-039 (in progress); issue 80 ("a missing required package is reported, never substituted")
+- **Status:** partial: planning is done. The backend client that runs the plan against the supervisor (with the backend-decided provider fallback) and the writer of PENDING output are the rest of step 7.
+- **Commits:** PR (this branch): `feat(runtime): plan the ML worker's variants from the catalog`
+
+## What changed
+- `backend/app/runtime/worker_config.py`: `plan_perception(session, store, *, detector_component_version_id, representation_space_id, providers)` returns a `PerceptionPlan`: the detector variants and the embedder variants that **can run on this machine now**, in the caller's provider order of preference (the backend, not the worker, decides CUDA-to-CPU fallback), the space's dimension, and `worker_config()`, the JSON text the worker is started with (`perception_handlers.parse_config` reads it). If a required component has no such variant it raises `RuntimeUnavailableError(what, reasons)`; nothing else is substituted: not another component version, another space, or a model that merely loads. The detector and the embedder are required separately.
+- A variant is offered only if: its export has an `InstalledModelExport` in state `INSTALLED` whose referenced artifact is `AVAILABLE` and whose path is **inside this machine's runtime-package directory** (a library opened elsewhere, or a record pointing anywhere else, never becomes a model path the worker would open; this is the confinement the PR 84 review asked for); that path is a file the **installed package's manifest declares**, with the recorded export's digest; the package's files still match their manifest (`RuntimePackageStore.verify`, once per package per plan); and the variant's provider is one the caller allows. For the embedder, the variants are those the library validated for the space (`RuntimeVariantRepresentationSpace` in `DECLARED` or `VALIDATED`), and each variant keeps **its own export's component version** in the plan, so weights announced under two component versions are each reported under the right one.
+- `RuntimePackageStore.root`: the published-packages directory, public.
+- `tests/fixtures/catalog_packages.py`: the manifest and package builders of the registration tests, now shared (`package_files` writes the directory; `installed` builds an `InstalledPackage` without the installer).
+
+## Why
+Issue 80 and the owner's decisions: runtime packages are machine-local and libraries only reference them; a missing required package is reported, never substituted; the execution provider is not part of the space identity (so a CPU variant of the same weights serves the same space) but its choice is the backend's decision. Planning from the catalog at the moment a package is needed reports a missing or changed package exactly where it matters, which is more useful than a startup sweep.
+
+## Decisions (the agent's)
+- The plan is a pure read of the catalog and the package store; it changes no state. Marking installation records `MISSING`, or a startup sweep that does so, is not built (issue 80 stays open for it; nothing needs it yet).
+- Reasons are plain text collected per candidate (`not installed on this machine`, `damaged: ...`, `not in this machine's runtime-package directory`, `not the recorded export`, `recorded as MISSING`, `needs <provider>`, `no installation ... recorded`, `no variant is validated for the space`), so a user-facing message can say what to repair.
+- Unusable compatibility states are simply not offered (`DECLARED` and `VALIDATED` count; the vocabulary is still open question 11).
+
+## Verification
+- `tests/integration/test_runtime_worker_config.py` (27 tests, real SQLite and a real package store, 100% coverage of the module): the installed package is offered with verified paths, contracts, dimension and a config the worker's parser accepts; provider order is the caller's and a provider not allowed is not offered; a package that was removed, damaged (also when only the embedder is damaged), recorded elsewhere, recorded as a path that is not a declared file or not the recorded export, whose artifact is `MISSING`, or with no installation, is reported with its reason and not replaced; the space asked for is never replaced by another (two precisions, each planned on its own file); a library from another machine uses the installation made here; a variant not validated for the space is not offered (nor only some of them); an unresolvable path is reported, not raised; a package is verified once however many of its files are used; unknown space or detector, a component of the wrong kind, a detector with no export; a file at the top of a package; the same weights under two component versions.
+- Mutation pass: 41 mutations (every guard and filter, the ordering, the config fields); six survivors on the first run led to tests and to two simplifications (the embedder's exports are now derived from the validated variants, which made two redundant filters unnecessary; an impossible `None` path became an assertion); none survive.
+- Full gate: see the PR.
+
+## Open issues / follow-ups
+- The backend client: run the plan against the supervisor (a worker started with `plan.worker_config()`), fall back across variants only on the provider-unavailable errors, decode and send images, read vectors, and write PENDING observations and representations.
+- Issue 80, remainder: marking installation records `MISSING`/damaged and a startup reconciliation, if wanted; library-level provenance on Observations is the client's (it records the component versions that actually ran).
