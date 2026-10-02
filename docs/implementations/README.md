@@ -93,3 +93,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [M3: the runtime package store](2026-10-02-m3-runtime-package-store.md) | done; step 4b, issue 34 in part |
 | 2026-10-02 | [M3: shared-memory ownership](2026-10-02-m3-shared-memory.md) | done; TST-034 passing |
 | 2026-10-02 | [M3: the ML worker loop](2026-10-02-m3-ml-worker-loop.md) | done; step 5b, first half |
+| 2026-10-02 | [M3: the ML supervisor](2026-10-02-m3-ml-supervisor.md) | done; TST-035 passing |

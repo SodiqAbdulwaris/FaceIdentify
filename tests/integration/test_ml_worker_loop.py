@@ -38,6 +38,7 @@ from backend.ml.contracts.protocol import (
 )
 from backend.ml.contracts.shared_memory import SharedMemoryDescriptor
 from backend.ml.worker.loop import Handler, serve
+from backend.ml.worker.main import load_handlers
 from tests.fixtures.deterministic import SeededUUIDs
 from tests.fixtures.ml_handlers import (
     EMBEDDING_DIMENSION,
@@ -720,3 +721,22 @@ def test_the_worker_says_why_a_handshake_failed(make_worker: Callable[..., Worke
     assert gone.left()
     assert refused.log == ["leaving: the handshake was refused (expected INITIALIZE, got PING)"]
     assert gone.log[0].startswith("leaving: the parent went away during the handshake")
+
+
+def test_the_handlers_a_worker_serves_are_loaded_from_a_dotted_path() -> None:
+    handlers = load_handlers("tests.fixtures.ml_handlers:build_handlers")
+
+    assert set(handlers) == {MLOperation.DETECT_FACES, MLOperation.GENERATE_REPRESENTATIONS}
+
+
+@pytest.mark.parametrize(
+    ("path", "error"),
+    [
+        ("tests.fixtures.no_such_module:build", ModuleNotFoundError),
+        ("tests.fixtures.ml_handlers:no_such_function", AttributeError),
+        ("tests.fixtures.ml_handlers:build_broken", RuntimeError),
+    ],
+)
+def test_handlers_that_cannot_be_loaded_fail_loudly(path: str, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        load_handlers(path)

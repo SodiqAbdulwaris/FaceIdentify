@@ -1634,6 +1634,8 @@ The supervisor may perform bounded automatic restart.
 
 Crash loops transition ML capability to FAILED/UNAVAILABLE rather than restarting forever.
 
+> **Decision 2026-10-02 (agent, M3 step 5; the spec leaves the policy open): the supervisor.** `backend/ml/supervisor/supervisor.py` owns one worker process (started with the `spawn` method, killed with its whole process tree on Windows). A request that the worker answers, even with an ERROR, is returned and changes nothing; a worker that dies, does not answer within the request timeout, or breaks the protocol is **killed** and the call raises `WorkerFailedError` (state `UNAVAILABLE`). The next call starts a new worker, unless there have been more than `max_restarts` such failures inside `restart_window` seconds: that is a crash loop, the state is `FAILED`, every call raises `MLUnavailableError` without starting anything, and only an explicit `reset()` allows another try (stopping does not forgive it). A request that was in flight when the worker failed is not retried by the supervisor, and a request is only ever sent to a worker just seen to be alive. A failed handshake counts as a failure like any other. One request runs at a time; the state is `BUSY` while it does. `stop()` asks for SHUTDOWN, waits for the acknowledgement for at most the shutdown timeout, and kills the worker if there is none. The timeouts, the restart limit and the window have no defaults: they are the caller's measured choices. A worker whose parent is killed notices the closed pipe and ends itself, freeing the segments it made.
+
 ---
 
 # 51. StorageManager
