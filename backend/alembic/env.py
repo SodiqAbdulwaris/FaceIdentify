@@ -22,7 +22,7 @@ from sqlalchemy import Connection
 from backend.app.models import Base
 from backend.infrastructure.db.engine import create_sqlite_engine
 from backend.infrastructure.storage.layout import database_path_for
-from backend.infrastructure.storage.library_root import LIBRARY_ROOT_ENV
+from backend.infrastructure.storage.library_root import LIBRARY_ROOT_ENV, validate_library_root
 
 config = context.config
 
@@ -86,11 +86,11 @@ def _database_path() -> Path:
     deprecated bare path. Nothing is guessed."""
     explicit = config.attributes.get("database_path")
     if explicit:
-        return Path(explicit)
+        return Path(explicit)  # the caller resolved and validated it; nothing is created
     root = os.environ.get(LIBRARY_ROOT_ENV)
-    if root:
-        path = database_path_for(Path(root))
-        path.parent.mkdir(parents=True, exist_ok=True)  # a new library: the folder SQLite needs
+    if root and root.strip():
+        path = database_path_for(validate_library_root(Path(root)))  # as the application does
+        path.parent.mkdir(parents=True, exist_ok=True)  # at most the root and `database`: validated
         return path
     legacy = os.environ.get("FACEIDENTIFY_DATABASE_PATH")  # deprecated
     if legacy:

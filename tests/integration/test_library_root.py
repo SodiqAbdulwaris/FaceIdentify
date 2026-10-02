@@ -2,10 +2,13 @@
 
 An explicit value wins, then the development and test override, then the persisted setting the
 shell passes in; with none of them the library has not been chosen (first run) and nothing is
-guessed. A root must be absolute and usable: an existing directory, or a new one inside an existing
-folder. The machine-local state root has its own override and defaults under `%LOCALAPPDATA%`.
+guessed. A value that is given but unusable is refused and never replaced by a lower one. A root
+must be absolute and usable: an existing directory, or a new one inside an existing folder. The
+machine-local state root has its own override, defaults under `%LOCALAPPDATA%`, and may not be the
+library or nested with it.
 """
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,8 +21,10 @@ from backend.infrastructure.storage.library_root import (
     LibraryRootError,
     resolve_library_root,
     resolve_local_state_root,
+    validate_distinct_roots,
     validate_library_root,
 )
+from tests.fixtures.links import link_directory
 
 
 def test_the_order_is_explicit_then_the_environment_then_the_persisted_setting(
@@ -33,14 +38,27 @@ def test_the_order_is_explicit_then_the_environment_then_the_persisted_setting(
     assert resolve_library_root(environ={}, persisted=persisted) == persisted
 
 
-def test_a_blank_value_counts_as_not_given(tmp_path: Path) -> None:
+@pytest.mark.parametrize("blank", ["", " ", "   "])
+def test_an_environment_value_that_is_blank_counts_as_not_given(blank: str, tmp_path: Path) -> None:
     persisted = tmp_path / "persisted"
 
-    resolved = resolve_library_root(
-        explicit=Path(" "), environ={LIBRARY_ROOT_ENV: "  "}, persisted=persisted
-    )
+    assert resolve_library_root(environ={LIBRARY_ROOT_ENV: blank}, persisted=persisted) == persisted
+    with pytest.raises(LibraryNotSelectedError):
+        resolve_library_root(environ={LIBRARY_ROOT_ENV: blank})
 
-    assert resolved == persisted
+
+def test_an_unusable_value_is_refused_and_never_replaced_by_a_lower_one(tmp_path: Path) -> None:
+    good = tmp_path / "good"
+    good.mkdir()
+    file = tmp_path / "file"
+    file.write_text("x")
+    environ = {LIBRARY_ROOT_ENV: str(good)}
+
+    for bad in (Path(""), Path(" "), Path("relative"), file, tmp_path / "typo" / "deep"):
+        with pytest.raises(InvalidLibraryRootError):
+            resolve_library_root(explicit=bad, environ=environ, persisted=good)
+    with pytest.raises(InvalidLibraryRootError):  # a bad environment value is not skipped either
+        resolve_library_root(environ={LIBRARY_ROOT_ENV: str(file)}, persisted=good)
 
 
 def test_the_process_environment_is_used_by_default(
@@ -76,11 +94,11 @@ def test_a_new_folder_in_an_existing_one_is_allowed_but_not_several_levels_deep(
     assert not (tmp_path / "typo").exists()  # and nothing was created
 
 
-def test_an_existing_directory_is_normalised_and_accepted(tmp_path: Path) -> None:
-    (tmp_path / "a").mkdir()
-    (tmp_path / "b").mkdir()
+def test_a_root_reached_through_a_link_is_returned_as_the_real_folder(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    link_directory(tmp_path / "link", tmp_path / "real")
 
-    assert validate_library_root(tmp_path / "a" / ".." / "b") == tmp_path / "b"
+    assert validate_library_root(tmp_path / "link") == (tmp_path / "real").resolve()
 
 
 def test_the_local_state_root_order_and_default(tmp_path: Path) -> None:
@@ -105,3 +123,40 @@ def test_the_local_state_root_needs_somewhere_to_live_and_must_be_absolute(
     monkeypatch.delenv(LOCAL_STATE_ROOT_ENV, raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert resolve_local_state_root() == tmp_path / "FaceIdentify"  # the process environment
+
+
+def test_the_library_and_the_local_state_must_be_separate_folders(tmp_path: Path) -> None:
+    library, local = tmp_path / "library", tmp_path / "local"
+    library.mkdir()
+    local.mkdir()
+
+    validate_distinct_roots(library, local)  # siblings are fine
+    validate_distinct_roots(tmp_path / "library", tmp_path / "library2")  # a shared name prefix too
+
+
+@pytest.mark.parametrize(
+    ("library", "local"),
+    [
+        ("same", "same"),
+        ("outer", "outer/inner"),  # the state inside the library
+        ("outer/inner", "outer"),  # the library inside the state folder
+        ("Same", "same"),  # an existing folder has one real spelling
+        pytest.param(
+            "Zed", "zed", marks=pytest.mark.skipif(sys.platform != "win32", reason="case matters")
+        ),  # neither exists yet, so only the comparison can tell: Windows ignores case
+    ],
+)
+def test_equal_or_nested_roots_are_refused(tmp_path: Path, library: str, local: str) -> None:
+    (tmp_path / "same").mkdir()
+    (tmp_path / "outer" / "inner").mkdir(parents=True)
+
+    with pytest.raises(InvalidLibraryRootError, match="separate folders"):
+        validate_distinct_roots(tmp_path / library, tmp_path / local)
+
+
+def test_a_link_to_the_other_root_does_not_hide_the_nesting(tmp_path: Path) -> None:
+    (tmp_path / "library" / "inner").mkdir(parents=True)
+    link_directory(tmp_path / "alias", tmp_path / "library" / "inner")
+
+    with pytest.raises(InvalidLibraryRootError, match="separate folders"):
+        validate_distinct_roots(tmp_path / "library", tmp_path / "alias")

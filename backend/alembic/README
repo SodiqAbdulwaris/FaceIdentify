@@ -3,10 +3,13 @@ FaceIdentify schema migrations (PERSISTENCE_IMPLEMENTATION.md §27).
 Alembic is the only way the production schema is created or changed: never call
 `Base.metadata.create_all()` outside a test that is comparing against it.
 
-The library database's path comes from the FACEIDENTIFY_DATABASE_PATH environment variable
-(no Storage Manager exists yet to resolve it). Run from the repository root:
+The library database is `<library root>/database/library.db`. The application passes the resolved
+path to Alembic; on the command line set the library root (it is validated like the application's:
+absolute, an existing folder or a new one inside an existing folder). The older bare
+FACEIDENTIFY_DATABASE_PATH still works but is deprecated. The command line does not take the library
+lock, so do not migrate a library a running backend holds. Run from the repository root:
 
-    $env:FACEIDENTIFY_DATABASE_PATH = "C:\path\to\library.db"
+    $env:FACEIDENTIFY_LIBRARY_ROOT = "C:\path\to\library"
     uv run alembic upgrade head                 # create/upgrade the schema
     uv run alembic upgrade head --sql           # print the SQL to review (it has no BEGIN/COMMIT:
                                                 # do not pipe it into a database)
