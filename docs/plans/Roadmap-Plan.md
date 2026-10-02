@@ -1583,7 +1583,7 @@ IdentityReasoner
 run-local candidate memory
 ```
 
-Only two IdentityReasoner decisions initially:
+Only two IdentityReasoner decisions were planned initially (superseded by the decision below):
 
 ```text
 MATCH_EXISTING_IDENTITY
