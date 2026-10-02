@@ -75,6 +75,18 @@ def test_the_library_root_wins_over_the_deprecated_path(
     assert not (tmp_path / "legacy.db").exists()
 
 
+def test_a_blank_deprecated_path_is_not_a_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(DATABASE_PATH_ENV, "  ")
+
+    with pytest.raises(RuntimeError, match=LIBRARY_ROOT_ENV):
+        command.upgrade(alembic_config(), "0001")
+
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_the_deprecated_path_still_works_when_nothing_else_is_given(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

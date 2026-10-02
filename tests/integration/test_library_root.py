@@ -140,7 +140,9 @@ def test_the_library_and_the_local_state_must_be_separate_folders(tmp_path: Path
         ("same", "same"),
         ("outer", "outer/inner"),  # the state inside the library
         ("outer/inner", "outer"),  # the library inside the state folder
-        ("Same", "same"),  # an existing folder has one real spelling
+        pytest.param(
+            "Same", "same", marks=pytest.mark.skipif(sys.platform != "win32", reason="case matters")
+        ),  # an existing folder has one real spelling on Windows
         pytest.param(
             "Zed", "zed", marks=pytest.mark.skipif(sys.platform != "win32", reason="case matters")
         ),  # neither exists yet, so only the comparison can tell: Windows ignores case

@@ -63,16 +63,16 @@ def start_holder(root: Path) -> subprocess.Popen[str]:
         cwd=Path(__file__).parents[2],
     )  # fmt: skip
     assert process.stdout is not None
+    pool = ThreadPoolExecutor(max_workers=1)
     try:
-        with ThreadPoolExecutor(
-            max_workers=1
-        ) as pool:  # a hung start must fail, not hang the suite
-            line = pool.submit(process.stdout.readline).result(timeout=60)
+        line = pool.submit(process.stdout.readline).result(timeout=60)
         assert line.strip() == "HELD"
     except BaseException:
-        kill_tree(process)
+        kill_tree(process)  # first: the reader thread is waiting on this process's output
+        pool.shutdown(wait=False)
         close_streams(process)
         raise
+    pool.shutdown(wait=False)
     return process
 
 
@@ -182,19 +182,26 @@ def test_a_failure_that_is_not_a_held_lock_is_not_reported_as_one_and_leaves_not
         pass
 
 
-def test_an_interruption_while_locking_leaves_the_file_closed(
+def test_an_interruption_while_locking_unlocks_and_closes_the_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real_lock = library_lock._lock
+    real_lock, real_unlock = library_lock._lock, library_lock._unlock
+    unlocked: list[bool] = []
 
     def locks_then_is_interrupted(handle: object) -> None:
         real_lock(handle)  # type: ignore[arg-type]
         raise KeyboardInterrupt
 
+    def spy(handle: object) -> None:
+        unlocked.append(not getattr(handle, "closed", True))  # unlocked while still open
+        real_unlock(handle)  # type: ignore[arg-type]
+
     monkeypatch.setattr(library_lock, "_lock", locks_then_is_interrupted)
+    monkeypatch.setattr(library_lock, "_unlock", spy)
     with pytest.raises(KeyboardInterrupt):
         LibraryLock(tmp_path).acquire()
 
+    assert unlocked == [True]
     monkeypatch.undo()
     with LibraryLock(tmp_path):  # the lock it had just taken was not leaked
         pass

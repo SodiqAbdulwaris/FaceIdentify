@@ -45,8 +45,8 @@ library-lifetime lock is taken after that and before migrations and recovery.
 
 ## Verification
 
-- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1126 passed, backend coverage 100%.
-  31 mutations (the blocking lock variant is caught by a prompt-refusal assertion; the order of the sources, each
+- `ruff format --check`, `ruff check`, `mypy`, `mypy --platform linux` clean; `HYPOTHESIS_PROFILE=ci pytest --cov -q`: 1127 passed, backend coverage 100%.
+  33 mutations (the blocking lock variant is caught by a prompt-refusal assertion; the order of the sources, each
   validation, the blank rule, the default, the environment precedence in Alembic, the folder creation...), each shown to fail
   a test and restored byte-identical. The cross-process tests ran several times without a failure.
 - **Review** (Explore subagent; Codex over its limit until 2026-10-03), posted on PR 63: no blocker, three major. Fixed:
