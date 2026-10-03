@@ -767,3 +767,52 @@ def test_a_remove_for_a_key_already_absent_still_waits_for_the_old_generation_to
         assert load_op(factory, absent.id).state == "PENDING"
     build.clock.advance(minutes=5)
     assert run(coordinator, build).applied == [absent.id]
+
+
+# --- an accepted ABSTAIN representation: ACTIVE, no identity (decision 2026-10-02) -------------
+
+
+def abstained(build: ModelFactory, space: RepresentationSpace, key: int) -> Representation:
+    return build.representation(
+        representation_space_id=space.id, state="ACTIVE", ann_key=key,
+        vector=float32_vector([float(key), 1.0, 0.0, 0.0]),
+    )  # fmt: skip
+
+
+def test_an_accepted_abstention_is_indexed_by_an_add(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    queue(build, active(build, space, 9), "ADD")
+    run(coordinator, build)  # (an index exists now: the next pass applies the ADD, not a rebuild)
+    queue(build, abstained(build, space, 1), "ADD")
+
+    run(coordinator, build)
+
+    assert open_index(coordinator, space).contains(1)
+
+
+def test_a_rebuild_includes_accepted_abstentions_and_does_not_see_them_as_stale(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    abstained(build, space, 1)
+    active(build, space, 2)
+    build.session.commit()
+
+    assert coordinator.validate_indexes() == [space.id]  # no index yet: built from SQLite
+    index = open_index(coordinator, space)
+    assert (index.contains(1), index.contains(2)) == (True, True)
+    assert coordinator.validate_indexes() == []  # sound: the identity-less key is expected
+
+
+def test_a_representation_that_lost_its_identity_row_state_is_still_not_indexed_but_none_is_fine(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    forgotten = active(build, space, 1)
+    forgotten.identity_id = build.identity(state="FORGOTTEN").id
+    queue(build, forgotten, "ADD")
+    queue(build, abstained(build, space, 2), "ADD")
+
+    run(coordinator, build)
+
+    index = open_index(coordinator, space)
+    assert (index.contains(1), index.contains(2)) == (False, True)

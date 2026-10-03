@@ -46,7 +46,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.identities.models import Identity, IdentityState
@@ -238,11 +238,13 @@ class IndexCoordinator:
         with self._sessions() as session:
             rows = session.execute(
                 select(Representation.ann_key)
-                .join(Identity, Identity.id == Representation.identity_id)
+                .outerjoin(Identity, Identity.id == Representation.identity_id)
                 .where(
                     Representation.representation_space_id == space_id,
                     Representation.state == RepresentationState.ACTIVE,
-                    Identity.state == IdentityState.ACTIVE,
+                    or_(
+                        Representation.identity_id.is_(None), Identity.state == IdentityState.ACTIVE
+                    ),
                 )
                 .execution_options(yield_per=1000)
             )
@@ -381,16 +383,20 @@ class IndexCoordinator:
         self, space_id: uuid.UUID, ndim: int, unindexable: list[uuid.UUID]
     ) -> Iterator[tuple[int, NDArray[np.float32]]]:
         """The space's eligible representations, streamed: what a rebuild is made of (§23). Eligible
-        means ACTIVE with an ACTIVE identity. One whose stored vector is not `ndim` finite float32
+        means ACTIVE with an ACTIVE identity, or with no identity at all (an accepted `ABSTAIN`
+        representation is unresolved candidate evidence, Persistence 6.2). One whose stored vector
+        is not `ndim` finite float32
         values is left out and recorded in `unindexable`."""
         with self._sessions() as session:
             rows = session.execute(
                 select(Representation.id, Representation.ann_key, Representation.vector)
-                .join(Identity, Identity.id == Representation.identity_id)
+                .outerjoin(Identity, Identity.id == Representation.identity_id)
                 .where(
                     Representation.representation_space_id == space_id,
                     Representation.state == RepresentationState.ACTIVE,
-                    Identity.state == IdentityState.ACTIVE,
+                    or_(
+                        Representation.identity_id.is_(None), Identity.state == IdentityState.ACTIVE
+                    ),
                 )
                 .order_by(Representation.ann_key)
                 .execution_options(yield_per=1000)
@@ -412,12 +418,13 @@ class IndexCoordinator:
                     Representation.ann_key,
                     Representation.vector,
                     Representation.representation_space_id,
+                    Representation.identity_id,
                     Identity.state,
                 )
                 .outerjoin(Identity, Identity.id == Representation.identity_id)
                 .where(Representation.id == operation.representation_id)
             ).one()  # RESTRICT foreign key: an operation's representation cannot vanish
-        state, ann_key, blob, space_id, identity_state = row
+        state, ann_key, blob, space_id, identity_id, identity_state = row
         if space_id != operation.space_id:
             raise ValueError("the operation and its representation name different spaces")
         if operation.kind == IndexOperationKind.REMOVE:
@@ -426,7 +433,9 @@ class IndexCoordinator:
                 # in place would leave the vector's bytes in the saved file.
                 return _Effect.PURGE
             return _Effect.CHANGED if index.remove(ann_key) else _Effect.NONE
-        if state != RepresentationState.ACTIVE or identity_state != IdentityState.ACTIVE:
+        if state != RepresentationState.ACTIVE or (
+            identity_id is not None and identity_state != IdentityState.ACTIVE
+        ):
             return _Effect.NONE  # no longer eligible; its REMOVE deals with it
         # The schema requires both for an ACTIVE representation (`active_eligible`, `erasure`).
         assert ann_key is not None

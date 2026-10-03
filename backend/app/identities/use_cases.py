@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import exists, select, update
+from sqlalchemy import exists, or_, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import (
@@ -539,7 +539,9 @@ class RecognitionCandidate:
 
     ann_key: int
     representation_id: uuid.UUID
-    identity_id: uuid.UUID
+    # None for an accepted ABSTAIN representation (decision 2026-10-02): evidence that something
+    # looks like the query, never a target to match.
+    identity_id: uuid.UUID | None
 
 
 # Keys per SELECT: well under SQLite's bound-variable limit (999 before 3.32), so a long candidate
@@ -553,9 +555,10 @@ def resolve_ann_candidates(
     """Revalidate the `ann_key`s an index returned against SQLite (persistence §23: "ANN output is
     only candidate `ann_key` values; SQLite revalidates space, state, identity, and current
     eligibility"). Each key is resolved to its `representations` row and kept only if that row is
-    in `representation_space_id`, is `ACTIVE`, and belongs to an `ACTIVE` identity; every other key
-    is dropped: unknown, another space's, `PENDING`, `SUPERSEDED`, `ERASING`, `ERASED` or `DELETED`,
-    or held by an identity that was merged away, split, forgotten or deleted.
+    in `representation_space_id`, is `ACTIVE`, and either has no identity (an accepted `ABSTAIN`
+    representation, returned with `identity_id` None) or belongs to an `ACTIVE` identity; every
+    other key is dropped: unknown, another space's, `PENDING`, `SUPERSEDED`, `ERASING`, `ERASED` or
+    `DELETED`, or held by an identity that was merged away, split, forgotten or deleted.
 
     That is what keeps a representation being erased out of retrieval from the moment its erasure is
     queued, whatever the index file still holds (§6.2, decision 2026-10-01): a stale index may
@@ -574,13 +577,13 @@ def resolve_ann_candidates(
     found: dict[int, RecognitionCandidate] = {}
     for start in range(0, len(unique), _KEYS_PER_QUERY):
         rows = session.execute(
-            select(Representation.ann_key, Representation.id, Identity.id)
-            .join(Identity, Identity.id == Representation.identity_id)
+            select(Representation.ann_key, Representation.id, Representation.identity_id)
+            .outerjoin(Identity, Identity.id == Representation.identity_id)
             .where(
                 Representation.representation_space_id == representation_space_id,
                 Representation.ann_key.in_(unique[start : start + _KEYS_PER_QUERY]),
                 Representation.state == RepresentationState.ACTIVE,
-                Identity.state == IdentityState.ACTIVE,
+                or_(Representation.identity_id.is_(None), Identity.state == IdentityState.ACTIVE),
             )
         ).all()
         for ann_key, representation_id, identity_id in rows:
