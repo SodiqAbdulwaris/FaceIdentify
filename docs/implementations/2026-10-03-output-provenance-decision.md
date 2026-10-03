@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-03
 - **Milestone / tracker IDs:** M3 (step 7, step 11); TST-038/039
-- **Status:** decided and recorded; built with migration 0005
+- **Status:** decided and recorded; to be built with migration 0005 (not yet built)
 - **Commits:** PR (this branch): `docs: record the output provenance decision`
 
 ## Decision (owner, 2026-10-03)
