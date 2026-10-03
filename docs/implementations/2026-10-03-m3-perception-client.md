@@ -12,6 +12,7 @@
 - **`ran` is the variant that actually executed** (the `PlannedVariant`, with its `runtime_variant_id` and component version), and it is checked against the worker's own provenance: an answer naming another variant or component is refused and its outputs released, never recorded under the variant that was asked for. This is the value the writer stores in `runtime_variant_id` (issue 88).
 - Pixels travel in a segment the client creates and releases around the call (`SegmentLedger`, either way); vectors are copied out of the worker's segments (canonical little-endian float32) and the outputs are released with `release_output`, also when reading them fails. The answer must be for exactly the faces asked about, each once, with the plan's dimension and `float32`.
 - No faces is a result (empty `detections`, `ran` says which detector looked); with nothing to represent no worker call is made (`ran` is `None`).
+- The ruled-out record is per stage (a variant ruled out for the detector is still asked for the embedder), `represent` refuses a repeated detection index before any call, and a client belongs to one thread (one processing run): its record is not locked and releasing an output is a separate call from the request.
 - A failing worker (dead, timed out) is the supervisor's `WorkerFailedError`, unchanged: nothing is retried here; the caller decides.
 
 ## Decisions (the agent's)
@@ -21,7 +22,7 @@
 - Not built: a way to forgive a ruled-out variant within one client (a new client or a new run decides again); retry of a request after a worker failure.
 
 ## Verification
-- `tests/integration/test_runtime_perception_client.py` (31 tests, 100% coverage of the module): see the tracker row. Three tests use a real worker process with generated ONNX models; the rest script the supervisor to reach answers a real worker cannot be made to give (an initialisation failure, an answer for the wrong variant or faces).
+- `tests/integration/test_runtime_perception_client.py` (33 tests, 100% coverage of the module): see the tracker row. Four tests use a real worker process with generated ONNX models; the rest script the supervisor to reach answers a real worker cannot be made to give (an initialisation failure, an answer for the wrong variant or faces).
 - Mutation pass: 22 mutations (every guard, the provider-code set both ways, the ruled-out record, the provenance check, the answer checks, the release of outputs, the context); one survivor on the first run (the execution context was never observed) led to a test; none survive.
 - Full gate: see the PR.
 

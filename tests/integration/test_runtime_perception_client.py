@@ -38,7 +38,7 @@ from backend.ml.contracts.messages import (
     MLResponse,
     RepresentationResult,
 )
-from backend.ml.contracts.protocol import ContractError, MLErrorCode, MLStatus
+from backend.ml.contracts.protocol import ContractError, MLErrorCode, MLOperation, MLStatus
 from backend.ml.perception import alignment, detection
 from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy, WorkerFailedError
 from backend.ml.worker.perception_handlers import DETECTOR, EMBEDDER
@@ -444,7 +444,7 @@ class Embedder:
             MLStatus.SUCCESS,
             request.operation,
             execution=ran(request),
-            output=GenerateRepresentationsOutput(tuple(results)),
+            output=GenerateRepresentationsOutput(tuple(reversed(results))),  # (not our order)
         )
 
 
@@ -504,6 +504,7 @@ def test_a_vector_that_is_not_float32_is_refused(new_id: SeededUUIDs) -> None:
     with side.ledger, pytest.raises(PerceptionError) as raised:
         client_of(script, plan, new_id).represent(picture(64, 64), three_faces())
     assert "float64" in raised.value.message
+    assert script.released == [script.requests[0].request_id]
 
 
 def test_a_detection_without_landmarks_is_the_workers_to_refuse(new_id: SeededUUIDs) -> None:
@@ -537,3 +538,40 @@ def test_the_execution_context_travels_with_the_request_for_diagnostics(
         client.represent(picture(64, 64), three_faces(), context=context)
         client.detect(picture(64, 64))
     assert [r.execution_context for r in script.requests] == [context, context, ExecutionContext()]
+
+
+def test_a_detection_can_only_be_represented_once(new_id: SeededUUIDs) -> None:
+    plan = plan_of((), (variant(CPU, EMBEDDER),))
+    script = Scripted(lambda r: error_response(r, MLErrorCode.INFERENCE_FAILED))
+    twice = (*three_faces(), three_faces()[0])
+    with pytest.raises(ValueError, match="once"):
+        client_of(script, plan, new_id).represent(picture(64, 64), twice)
+    assert script.requests == []
+
+
+def test_a_variant_ruled_out_for_one_stage_is_still_asked_in_the_other(
+    new_id: SeededUUIDs,
+) -> None:
+    shared = uuid.uuid4()
+    component = uuid.uuid4()
+    detector = planned(
+        Path("m.onnx"), b"x", DETECTOR, MISSING, component=component, runtime_variant=shared
+    )
+    embedder = planned(
+        Path("m.onnx"), b"x", EMBEDDER, MISSING, component=component, runtime_variant=shared
+    )
+    plan = plan_of((detector,), (embedder,))
+    side = Embedder(new_id)
+
+    def answer(request: MLRequest) -> MLResponse:
+        if request.operation is MLOperation.DETECT_FACES:
+            return error_response(request, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE)
+        return side.answer(request)
+
+    script = Scripted(answer)
+    client = client_of(script, plan, new_id)
+    with side.ledger, pytest.raises(RuntimeUnavailableError):
+        client.detect(picture(64, 64))
+    with side.ledger:
+        out = client.represent(picture(64, 64), three_faces())
+    assert out.ran is embedder
