@@ -18,7 +18,7 @@
 
 ## Verification
 - `tests/integration/test_pending_output.py` (33, real SQLite and a real registered catalog), including catalog-kind spoofing, source/run/segment mismatches and terminal states, noncanonical vectors, and a mismatched detection index. The focused migration/writer suite passed: `uv run pytest tests/integration/test_migration_0005.py tests/integration/test_pending_output.py -q -p no:cacheprovider` — 46 passed (2026-10-03). The writer has 100% coverage in that run.
-- Mutation checks: the earlier 22 mutations remain caught. Eleven review-fix guard mutations (catalog kind; array type, dtype and contiguity; absent run/segment; source/run and segment/run mismatch; run/segment writability; detection-index match) each failed their focused regression test, and `pending_output.py` was restored byte-identically after every mutation.
+- Mutation checks: the earlier 22 mutations remain caught. I first inverted the catalog-kind comparison, but that was a poor mutant: the later role check rejected the normal embedder too, so its regression still passed. I restored it byte-identically and used a deletion mutant instead. Eleven meaningful review-fix guard mutations (catalog kind; array type, dtype and contiguity; absent run/segment; source/run and segment/run mismatch; run/segment writability; detection-index match) each failed their focused regression test, and `pending_output.py` was restored byte-identically after every mutation.
 - Full backend suite: `HYPOTHESIS_PROFILE=ci uv run pytest --cov -q -p no:cacheprovider` — 2098 passed, 100% coverage (2026-10-03).
 
 ## Open issues / follow-ups
