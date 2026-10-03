@@ -106,12 +106,19 @@ def test_global_candidates_carry_their_identity_and_come_nearest_first(world: Wo
     assert found.representation_space_id == world.space.id
 
 
-def test_run_local_candidates_have_no_identity_and_are_marked_as_such(world: World) -> None:
-    earlier = world.pending(unit(1, 0, 0, 0))
-    (candidate,) = world.ask(unit(1, 0.01, 0, 0)).candidates
-    assert candidate.pool is Pool.RUN_LOCAL
-    assert candidate.representation_id == earlier.id
-    assert candidate.identity_id is None
+def test_a_run_local_candidate_carries_the_pending_identity_the_run_gave_it_or_none(
+    world: World,
+) -> None:
+    pending_identity = world.build.identity(
+        state="PENDING", created_by_processing_run_id=world.run.id
+    )
+    named = world.pending(unit(1, 0, 0, 0), identity_id=pending_identity.id)
+    left_alone = world.pending(unit(0, 1, 0, 0))  # (an abstention: no identity)
+    found = {c.representation_id: c for c in world.ask(unit(1, 0.01, 0, 0)).candidates}
+    assert found[named.id].pool is Pool.RUN_LOCAL
+    assert found[named.id].identity_id == pending_identity.id
+    assert found[left_alone.id].pool is Pool.RUN_LOCAL
+    assert found[left_alone.id].identity_id is None
 
 
 def test_both_pools_are_merged_nearest_first_and_cut_to_k(world: World) -> None:
@@ -323,3 +330,32 @@ def test_a_vector_that_cannot_be_decoded_is_an_error_and_not_skipped(world: Worl
     )  # fmt: skip
     with pytest.raises(ValueError, match="finite"):
         rebuild(world)
+
+
+def test_stale_candidates_of_both_pools_are_all_counted(world: World) -> None:
+    world.active(1, unit(1, 0.2, 0, 0))
+    world.active(2, unit(1, 0.1, 0, 0), state="ERASING")
+    world.active(3, unit(1, 0.15, 0, 0), state="DELETED")
+    world.pending(unit(1, 0.3, 0, 0))
+    gone = world.pending(unit(1, 0.05, 0, 0))
+    world.build.session.execute(
+        update(Representation).where(Representation.id == gone.id).values(state="DELETED")
+    )
+    world.build.session.expire_all()
+    found = world.ask(unit(1, 0, 0, 0))
+    assert len(found.candidates) == 2
+    assert found.dropped == 3
+
+
+@pytest.mark.parametrize("metric", ["ip", "l2sq"])
+def test_an_index_of_a_metric_other_than_cosine_is_refused_in_either_pool(
+    world: World, tmp_path: Path, metric: str
+) -> None:
+    other = RepresentationIndex.empty(
+        tmp_path / metric, representation_space_id=world.space.id, ndim=NDIM, metric=metric
+    )
+    with pytest.raises(IncompatibleSpaceError, match="cosine"):
+        world.ask(unit(1, 0, 0, 0), global_index=other)
+    foreign = RunLocalIndex(representation_space_id=world.space.id, ndim=NDIM, metric=metric)
+    with pytest.raises(IncompatibleSpaceError, match="cosine"):
+        world.ask(unit(1, 0, 0, 0), run_local=foreign)
