@@ -17,6 +17,7 @@ from backend.app.recognition.assessment import (
     INTERPRETATION,
     ObservationQuality,
     RecognitionAssessment,
+    RecognitionService,
     assess,
 )
 from backend.app.recognition.reasoner import (
@@ -49,9 +50,11 @@ def candidate(
     )
 
 
-def retrieval(*candidates: RetrievedCandidate, k: int = 5, dropped: int = 0) -> Retrieval:
+def retrieval(
+    *candidates: RetrievedCandidate, k: int = 5, dropped: int = 0, converged: bool = True
+) -> Retrieval:
     ordered = sorted(candidates, key=lambda c: c.distance)
-    return Retrieval(SPACE, k, tuple(ordered), dropped)
+    return Retrieval(SPACE, k, tuple(ordered), dropped, converged)
 
 
 def decide(*candidates: RetrievedCandidate, quality: ObservationQuality = GOOD, **kw: Any) -> Any:
@@ -73,8 +76,14 @@ def test_candidates_of_one_identity_are_one_group_scored_by_its_best_similarity(
     first, second = made.groups
     assert first.identity_id == uuid.UUID(int=7)
     assert first.best_similarity == pytest.approx(0.9)
-    assert first.representation_ids == (uuid.UUID(int=101), uuid.UUID(int=103))  # nearest first
-    assert first.pools == (Pool.GLOBAL, Pool.RUN_LOCAL)
+    assert [m.representation_id for m in first.members] == [
+        uuid.UUID(int=101),
+        uuid.UUID(int=103),
+    ]  # nearest first
+    assert [(m.pool, round(m.similarity, 6)) for m in first.members] == [
+        (Pool.GLOBAL, 0.9),
+        (Pool.RUN_LOCAL, 0.8),
+    ]  # each member keeps its own similarity and pool
     assert second.identity_id == uuid.UUID(int=8)
     assert made.margin == pytest.approx(0.4)
 
@@ -89,12 +98,12 @@ def test_an_identity_with_many_representations_is_not_favoured_by_their_number()
 def test_a_candidate_without_an_identity_is_its_own_group_each_time() -> None:
     made = assess(retrieval(candidate(1, 0.9), candidate(2, 0.8)), GOOD)
     assert [g.identity_id for g in made.groups] == [None, None]
-    assert [len(g.representation_ids) for g in made.groups] == [1, 1]
+    assert [len(g.members) for g in made.groups] == [1, 1]
 
 
 def test_groups_with_equal_similarity_are_ordered_by_their_first_representation() -> None:
     made = assess(retrieval(candidate(2, 0.7, identity=8), candidate(1, 0.7, identity=7)), GOOD)
-    assert [g.representation_ids[0] for g in made.groups] == [
+    assert [g.members[0].representation_id for g in made.groups] == [
         uuid.UUID(int=101),
         uuid.UUID(int=102),
     ]
@@ -183,6 +192,7 @@ def test_similar_but_not_similar_enough_abstains_it_is_never_a_low_confidence_ne
 def test_an_unresolved_neighbour_in_the_grey_band_prevents_a_new_identity() -> None:
     decision = decide(candidate(1, 0.45), candidate(2, 0.1, identity=8))
     assert decision.outcome is RecognitionOutcome.ABSTAIN
+    assert decision.reason is Reason.UNCERTAIN_SIMILARITY
 
 
 def test_a_face_below_the_quality_gate_decides_nothing_whatever_the_candidates() -> None:
@@ -218,6 +228,7 @@ def test_the_quality_gate_is_decided_before_the_retrieval_check() -> None:
         {"new_identity_ceiling": 0.7},  # above the match threshold
         {"new_identity_ceiling": -1.1},
         {"match_threshold": 1.1, "new_identity_ceiling": 0.3},
+        {"margin": 0.0},  # (a match needs a lead)
         {"margin": -0.01},
         {"margin": 2.01},
         {"min_detection_score": -0.1},
@@ -235,7 +246,7 @@ def test_a_policy_that_is_not_coherent_is_refused(override: dict[str, Any]) -> N
 
 
 def test_a_policy_at_its_limits_is_accepted() -> None:
-    DecisionPolicy("v", 0.0, 1.0, 0.0, -1.0)
+    DecisionPolicy("v", 0.0, 1.0, 0.001, -1.0)
     DecisionPolicy("v", 1.0, -1.0, 2.0, -1.0)
     DecisionPolicy("v", 0.5, 0.5, 0.1, 0.5)  # (no grey band: the two thresholds may meet)
 
@@ -257,7 +268,12 @@ def test_the_evidence_payload_keeps_candidates_scores_versions_and_thresholds() 
     assert payload["interpretation"] == INTERPRETATION
     assert payload["representation_space_id"] == str(SPACE)
     assert payload["quality"] == {"detection_score": 0.9}
-    assert payload["retrieval"] == {"requested_k": 8, "returned": 2, "dropped": 0}
+    assert payload["retrieval"] == {
+        "requested_k": 8,
+        "returned": 2,
+        "dropped": 0,
+        "converged": True,
+    }
     assert payload["margin"] == pytest.approx(0.4)
     assert payload["policy"] == {
         "version": "policy-test-1",
@@ -269,10 +285,12 @@ def test_the_evidence_payload_keeps_candidates_scores_versions_and_thresholds() 
     first, second = payload["candidates"]
     assert first["rank"] == 1 and second["rank"] == 2  # noqa: PT018
     assert first["identity_id"] == str(uuid.UUID(int=7))
-    assert first["representation_ids"] == [str(uuid.UUID(int=101))]
-    assert first["pools"] == ["GLOBAL"]
     assert first["similarity"] == pytest.approx(0.9)
-    assert second["pools"] == ["RUN_LOCAL"]
+    (member,) = first["members"]
+    assert member["representation_id"] == str(uuid.UUID(int=101))
+    assert member["pool"] == "GLOBAL"
+    assert member["similarity"] == pytest.approx(0.9)
+    assert second["members"][0]["pool"] == "RUN_LOCAL"
 
 
 def test_the_payload_of_an_abstention_names_no_identity_and_keeps_the_unresolved_candidate() -> (
@@ -299,12 +317,16 @@ def build(entries: list[tuple[float, int | None, Pool]], dropped: int) -> Recogn
     return assess(retrieval(*made, dropped=dropped), GOOD)
 
 
-@given(shortlists, st.integers(0, 2), st.floats(0.0, 1.0))
+@given(shortlists, st.integers(0, 2), st.floats(0.0, 1.0), st.booleans())
 def test_no_input_produces_a_match_or_a_new_identity_the_rules_forbid(
-    entries: list[tuple[float, int | None, Pool]], dropped: int, score: float
+    entries: list[tuple[float, int | None, Pool]], dropped: int, score: float, converged: bool
 ) -> None:
     assessment = assess(
-        retrieval(*[candidate(n, s, i, p) for n, (s, i, p) in enumerate(entries)], dropped=dropped),
+        retrieval(
+            *[candidate(n, s, i, p) for n, (s, i, p) in enumerate(entries)],
+            dropped=dropped,
+            converged=converged,
+        ),
         ObservationQuality(score),
     )
     decision = IdentityReasoner(POLICY).decide(assessment)
@@ -334,7 +356,7 @@ def test_assessing_is_deterministic_and_ranks_groups_best_first(
     assert first == second
     scores = [g.best_similarity for g in first.groups]
     assert scores == sorted(scores, reverse=True)
-    members = [r for g in first.groups for r in g.representation_ids]
+    members = [m.representation_id for g in first.groups for m in g.members]
     assert len(members) == len(set(members)) == len(entries)
 
 
@@ -370,3 +392,25 @@ def test_the_evidence_keeps_how_many_candidates_were_dropped() -> None:
     payload = decide(candidate(1, 0.9, identity=7), dropped=2).evidence_payload()
     assert payload["retrieval"]["dropped"] == 2
     assert payload["reason"] == "RETRIEVAL_INCOMPLETE"
+
+
+def test_an_index_that_had_not_caught_up_is_not_trusted_to_create_or_match() -> None:
+    for candidates in ((), (candidate(1, 0.99, identity=7),), (candidate(1, 0.0, identity=7),)):
+        decision = decide(*candidates, converged=False)
+        assert decision.outcome is RecognitionOutcome.ABSTAIN
+        assert decision.reason is Reason.RETRIEVAL_INCOMPLETE
+        assert decision.assessment.converged is False
+        assert decision.evidence_payload()["retrieval"]["converged"] is False
+
+
+def test_the_shortlist_must_be_able_to_show_a_margin() -> None:
+    for k in (-1, 0, 1):
+        with pytest.raises(ValueError, match="two candidates"):
+            RecognitionService(k=k)
+    assert RecognitionService(k=2).k == 2
+
+
+def test_a_candidate_distance_that_is_not_a_number_is_refused() -> None:
+    for distance in (float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="finite"):
+            RetrievedCandidate(Pool.GLOBAL, uuid.UUID(int=1), None, distance)

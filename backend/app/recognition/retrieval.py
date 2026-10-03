@@ -26,7 +26,9 @@ index of any other metric is refused, so two pools' distances are never ranked a
 under different metrics and a similarity is never a mislabelled distance.
 """
 
+import math
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -35,7 +37,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.identities.use_cases import resolve_ann_candidates
 from backend.app.memory.index_coordinator import decode_vector
-from backend.app.memory.models import Representation, RepresentationState
+from backend.app.memory.models import (
+    IndexOperation,
+    IndexOperationState,
+    Representation,
+    RepresentationState,
+)
 from backend.infrastructure.indexing.representation_index import RepresentationIndex, Vector
 from backend.infrastructure.indexing.run_local_index import RunLocalIndex
 
@@ -65,6 +72,10 @@ class RetrievedCandidate:
     identity_id: uuid.UUID | None
     distance: float
 
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.distance):
+            raise ValueError("a candidate's distance is a finite number")
+
     @property
     def similarity(self) -> float:
         """The cosine similarity (the metric is `cos`, so the distance is 1 minus it)."""
@@ -77,6 +88,10 @@ class Retrieval:
     requested_k: int
     candidates: tuple[RetrievedCandidate, ...]  # nearest first, at most `requested_k`, both pools
     dropped: int  # candidates an index returned that SQLite refused (stale: erased, merged, ...)
+    # Whether the space's index has caught up with SQLite: no `ADD` or `REMOVE` is waiting or has
+    # failed. An index that is behind returns fewer candidates and drops none, which looks exactly
+    # like a person the library has never seen.
+    converged: bool
 
 
 def retrieve(
@@ -89,7 +104,13 @@ def retrieve(
     global_index: RepresentationIndex,
     processing_run_id: uuid.UUID,
     run_local: RunLocalIndex | None = None,
+    exclude: Collection[uuid.UUID] = (),
 ) -> Retrieval:
+    """`exclude` holds the representations that must never be their own or each other's
+    candidates: the query's own representation (it exists, `PENDING`, before it is recognised, and
+    would be its own nearest neighbour) and, for an image, the other faces of that image. They are
+    left out of the shortlist and are not counted as dropped; each pool is asked for that many more
+    candidates, so excluding them does not shorten the shortlist."""
     if (
         global_index.representation_space_id != representation_space_id
         or global_index.ndim != dimension
@@ -107,29 +128,56 @@ def retrieve(
             "the run-local index is not this representation space's cosine index"
         )
     found: list[RetrievedCandidate] = []
+    left_out = frozenset(exclude)
+    fetch = k + len(left_out)
 
-    hits = global_index.search(vector, k)
+    hits = global_index.search(vector, fetch)
     distance_of = {hit.key: hit.distance for hit in hits}
-    for kept in resolve_ann_candidates(session, representation_space_id, list(distance_of)):
-        found.append(
-            RetrievedCandidate(
-                Pool.GLOBAL, kept.representation_id, kept.identity_id, distance_of[kept.ann_key]
-            )
+    kept_global = resolve_ann_candidates(session, representation_space_id, list(distance_of))
+    dropped = len(hits) - len(kept_global)
+    found.extend(
+        RetrievedCandidate(
+            Pool.GLOBAL, kept.representation_id, kept.identity_id, distance_of[kept.ann_key]
         )
-    dropped = len(hits) - len(found)
+        for kept in kept_global
+        if kept.representation_id not in left_out
+    )
 
     if run_local is not None:
-        near = run_local.search(vector, k)
+        near = run_local.search(vector, fetch)
         distances = {hit.representation_id: hit.distance for hit in near}
         alive = _still_pending(session, processing_run_id, representation_space_id, list(distances))
         found.extend(
             RetrievedCandidate(Pool.RUN_LOCAL, identifier, identity, distances[identifier])
             for identifier, identity in alive.items()
+            if identifier not in left_out
         )
         dropped += len(near) - len(alive)
 
     found.sort(key=lambda c: (c.distance, c.pool, str(c.representation_id)))
-    return Retrieval(representation_space_id, k, tuple(found[:k]), dropped)
+    return Retrieval(
+        representation_space_id,
+        k,
+        tuple(found[:k]),
+        dropped,
+        index_converged(session, representation_space_id),
+    )
+
+
+def index_converged(session: Session, representation_space_id: uuid.UUID) -> bool:
+    """No index operation of this space is waiting or has failed: what SQLite holds, the index
+    holds (up to what `retrieve` revalidates)."""
+    return (
+        session.scalar(
+            select(IndexOperation.id)
+            .where(
+                IndexOperation.representation_space_id == representation_space_id,
+                IndexOperation.state.in_([IndexOperationState.PENDING, IndexOperationState.FAILED]),
+            )
+            .limit(1)
+        )
+        is None
+    )
 
 
 def _still_pending(

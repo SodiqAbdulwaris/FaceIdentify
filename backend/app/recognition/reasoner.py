@@ -8,14 +8,22 @@ outcome. The proposal commits nothing: the Identity Manager revalidates it befor
 The rules are transparent and conservative (ML spec 12.2, Identity Decision Engine Plan 6):
 
 1. A face below the quality gate decides nothing (`LOW_QUALITY`): it must neither match nor create.
-2. A shortlist that lost candidates to revalidation is not trusted to hold the nearest ones
-   (`RETRIEVAL_INCOMPLETE`): no automatic match or new identity on a possibly missing neighbour.
+2. A shortlist that lost candidates to revalidation, or whose index had not caught up with
+   SQLite, is not trusted to hold the nearest ones (`RETRIEVAL_INCOMPLETE`): no automatic match or
+   new identity on a possibly missing neighbour (an unconverged index looks exactly like a person
+   never seen, which would create a duplicate identity).
 3. Nothing retrieved is a valid unknown: `CREATE_NEW` (`NO_CANDIDATE`).
 4. The best group at or above `match_threshold` needs the margin to the next group, or the
    shortlist is `AMBIGUOUS_CANDIDATES`; a group without an identity can never be matched
    (`UNRESOLVED_NEIGHBOUR`); otherwise `MATCH_EXISTING` that group's identity.
 5. Below `new_identity_ceiling` the nearest group is clearly not this face: `CREATE_NEW`.
 6. Between the two (similar, not similar enough) is `UNCERTAIN_SIMILARITY`: an abstention.
+
+A match needs a strictly positive margin: with none, two identities at the same similarity would
+be separated by nothing but the order they were listed in. The proposal knows nothing of prior
+corrections or rejections (not modelled in M3's first slice, see `assessment.py`): a previously
+rejected identity is matchable on similarity alone until a later assessment version adds them. The
+caller must have excluded the query's own representation from the shortlist.
 
 The thresholds are configuration, not constants: policy thresholds "must be supported by recorded
 evaluation evidence" (Identity Decision Engine Plan 3), and the reference models are not
@@ -65,8 +73,11 @@ class DecisionPolicy:
             raise ValueError(
                 "the thresholds must satisfy -1 <= new_identity_ceiling <= match_threshold <= 1"
             )
-        if not 0.0 <= self.margin <= 2.0:
-            raise ValueError("the margin is a difference of cosine similarities, 0 to 2")
+        if not 0.0 < self.margin <= 2.0:
+            raise ValueError(
+                "the margin is a difference of cosine similarities, above 0 (a match needs a lead) "
+                "and at most 2"
+            )
         if not 0.0 <= self.min_detection_score <= 1.0:
             raise ValueError("the quality gate is a detection score, 0 to 1")
 
@@ -96,14 +107,21 @@ class RecognitionDecision:
                 "requested_k": assessment.requested_k,
                 "returned": assessment.returned,
                 "dropped": assessment.dropped,
+                "converged": assessment.converged,
             },
             "candidates": [
                 {
                     "rank": rank,
                     "identity_id": None if group.identity_id is None else str(group.identity_id),
-                    "representation_ids": [str(r) for r in group.representation_ids],
-                    "pools": [pool.value for pool in group.pools],
                     "similarity": group.best_similarity,
+                    "members": [
+                        {
+                            "representation_id": str(member.representation_id),
+                            "pool": member.pool.value,
+                            "similarity": member.similarity,
+                        }
+                        for member in group.members
+                    ],
                 }
                 for rank, group in enumerate(assessment.groups, start=1)
             ],
