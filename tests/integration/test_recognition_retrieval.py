@@ -20,6 +20,7 @@ from backend.app.recognition.retrieval import (
     IncompatibleSpaceError,
     Pool,
     Retrieval,
+    index_converged,
     rebuild_run_local_index,
     retrieve,
 )
@@ -359,3 +360,51 @@ def test_an_index_of_a_metric_other_than_cosine_is_refused_in_either_pool(
     foreign = RunLocalIndex(representation_space_id=world.space.id, ndim=NDIM, metric=metric)
     with pytest.raises(IncompatibleSpaceError, match="cosine"):
         world.ask(unit(1, 0, 0, 0), run_local=foreign)
+
+
+# --- representations that must never be candidates, and an index that is behind -------
+
+
+def test_excluded_representations_are_left_out_of_both_pools_without_shortening_the_list(
+    world: World,
+) -> None:
+    own = world.pending(unit(1, 0.0, 0, 0))
+    sibling = world.active(1, unit(1, 0.01, 0, 0))
+    kept = [world.active(n + 2, unit(1, 0.05 * (n + 1), 0, 0)) for n in range(3)]
+    found = world.ask(unit(1, 0, 0, 0), k=3, exclude=[own.id, sibling.id])
+    assert [c.representation_id for c in found.candidates] == [r.id for r in kept]
+    assert found.dropped == 0  # (leaving them out is not SQLite refusing them)
+
+
+def test_without_an_exclusion_the_query_s_own_pending_representation_is_found(
+    world: World,
+) -> None:
+    own = world.pending(unit(1, 0.0, 0, 0))
+    (found,) = world.ask(unit(1, 0, 0, 0)).candidates
+    assert found.representation_id == own.id
+    assert found.similarity == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("state", "converged"),
+    [("PENDING", False), ("FAILED", False), ("APPLIED", True)],
+)
+def test_the_index_has_caught_up_only_when_no_operation_of_the_space_waits_or_failed(
+    world: World, state: str, converged: bool
+) -> None:
+    applied = {"applied_at": world.build.clock()} if state == "APPLIED" else {}
+    world.build.index_operation(
+        world.build.representation(representation_space_id=world.space.id),
+        state=state, **applied,
+    )  # fmt: skip
+    assert index_converged(world.build.session, world.space.id) is converged
+    assert world.ask(unit(1, 0, 0, 0)).converged is converged
+
+
+def test_another_spaces_waiting_operation_does_not_make_this_space_unconverged(
+    world: World,
+) -> None:
+    other = world.build.representation_space(dimension=NDIM)
+    world.build.index_operation(world.build.representation(representation_space_id=other.id))
+    assert index_converged(world.build.session, world.space.id) is True
+    assert index_converged(world.build.session, other.id) is False

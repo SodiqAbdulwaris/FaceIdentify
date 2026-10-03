@@ -6,11 +6,26 @@ association: it only describes, for one observation's vector, what the memory lo
 What to do about it is the `IdentityReasoner`'s proposal (`reasoner.py`), and what is committed is
 the Identity Manager's.
 
+Preconditions the caller owns, because this module cannot know them:
+
+* **The query's own representation, and the other faces of its image, must be excluded**
+  (`exclude`). The representation being recognised exists, `PENDING`, before it is recognised, and
+  an identity-less pending neighbour at similarity 1.0 would make every face abstain.
+* **The index must have caught up.** `Retrieval.converged` says whether an `ADD` or `REMOVE` is
+  still waiting or failed; an index that is behind returns fewer candidates and drops none, which
+  looks exactly like a person never seen, so an assessment of an unconverged index is not complete.
+
 Grouping: candidates of one identity are one group, scored by its **best** (highest) similarity, so
 an identity with many representations is not favoured by their number (no history-count feature
-before representation-count bias is measured, ML spec 12.2). A candidate with no identity (an
-accepted `ABSTAIN` representation, or a pending one the run left unresolved) is its own group: it
+before representation-count bias is measured, ML spec 12.2); every member keeps its own similarity
+and pool, so the evidence says which representation was how near. A candidate with no identity (an
+accepted `ABSTAIN` representation, or a pending one that has no identity yet) is its own group: it
 is evidence that something looks like this face, never a target to match (Persistence 6.2).
+
+Not modelled yet: *correction constraints* (a prior rejection or manual override that similarity
+alone must not overwhelm, ML spec 12.2). No correction history exists in M3's first slice, so the
+assessment has no field for it and a previously rejected identity is matchable on similarity alone;
+a later assessment version adds it.
 
 Interpretation: the similarity is the cosine similarity, used as it is. No calibration profile
 exists for the reference models (M3 does not benchmark them), so nothing here claims a calibrated
@@ -18,6 +33,7 @@ probability; `interpretation` says so, and a later calibration is a new interpre
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Final
 
@@ -27,7 +43,7 @@ from backend.app.recognition.retrieval import Pool, Retrieval, retrieve
 from backend.infrastructure.indexing.representation_index import RepresentationIndex, Vector
 from backend.infrastructure.indexing.run_local_index import RunLocalIndex
 
-ASSESSMENT_VERSION: Final = "recognition-assessment-v1"
+ASSESSMENT_VERSION: Final = "recognition-assessment-v2"
 INTERPRETATION: Final = "COSINE_UNCALIBRATED"
 
 
@@ -39,11 +55,20 @@ class ObservationQuality:
 
 
 @dataclass(frozen=True, slots=True)
+class GroupMember:
+    representation_id: uuid.UUID
+    pool: Pool
+    similarity: float
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateGroup:
     identity_id: uuid.UUID | None  # None: unresolved evidence, never a match target
-    representation_ids: tuple[uuid.UUID, ...]  # nearest first
-    pools: tuple[Pool, ...]  # the pools its representations came from
-    best_similarity: float
+    members: tuple[GroupMember, ...]  # nearest first
+
+    @property
+    def best_similarity(self) -> float:
+        return max(member.similarity for member in self.members)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,13 +80,15 @@ class RecognitionAssessment:
     requested_k: int
     returned: int  # revalidated candidates in the shortlist
     dropped: int  # candidates an index returned that SQLite refused
+    converged: bool  # the index had caught up with SQLite
     groups: tuple[CandidateGroup, ...]  # best first
 
     @property
     def complete(self) -> bool:
         """Whether the shortlist can be trusted to hold the nearest candidates: nothing stale was
-        dropped (a dropped candidate may have hidden one beyond the cut)."""
-        return self.dropped == 0
+        dropped (a dropped candidate may have hidden one beyond the cut) and the index had caught
+        up (one that is behind returns fewer candidates and drops none)."""
+        return self.dropped == 0 and self.converged
 
     @property
     def margin(self) -> float | None:
@@ -73,23 +100,23 @@ class RecognitionAssessment:
 
 def assess(retrieval: Retrieval, quality: ObservationQuality) -> RecognitionAssessment:
     """Group a retrieval's candidates and rank the groups."""
-    groups: dict[uuid.UUID | tuple[uuid.UUID], list[tuple[float, Pool, uuid.UUID]]] = {}
-    for candidate in retrieval.candidates:  # (nearest first)
+    members: dict[uuid.UUID | tuple[uuid.UUID], list[GroupMember]] = {}
+    for candidate in retrieval.candidates:
         key = candidate.identity_id or (candidate.representation_id,)
-        groups.setdefault(key, []).append(
-            (candidate.similarity, candidate.pool, candidate.representation_id)
+        members.setdefault(key, []).append(
+            GroupMember(candidate.representation_id, candidate.pool, candidate.similarity)
         )
     ranked = sorted(
         (
             CandidateGroup(
                 identity_id=key if isinstance(key, uuid.UUID) else None,
-                representation_ids=tuple(item[2] for item in members),
-                pools=tuple(sorted({item[1] for item in members})),
-                best_similarity=members[0][0],
+                members=tuple(
+                    sorted(group, key=lambda m: (-m.similarity, m.pool, str(m.representation_id)))
+                ),
             )
-            for key, members in groups.items()
+            for key, group in members.items()
         ),
-        key=lambda g: (-g.best_similarity, str(g.representation_ids[0])),
+        key=lambda g: (-g.best_similarity, str(g.members[0].representation_id)),
     )
     return RecognitionAssessment(
         version=ASSESSMENT_VERSION,
@@ -99,13 +126,20 @@ def assess(retrieval: Retrieval, quality: ObservationQuality) -> RecognitionAsse
         requested_k=retrieval.requested_k,
         returned=len(retrieval.candidates),
         dropped=retrieval.dropped,
+        converged=retrieval.converged,
         groups=tuple(ranked),
     )
 
 
 @dataclass(frozen=True, slots=True)
 class RecognitionService:
-    k: int  # the shortlist size: the caller's measured choice, no default
+    # The shortlist size: the caller's measured choice, no default. At least 2: with one candidate
+    # there is never a second group, so the separation a match needs could never be measured.
+    k: int
+
+    def __post_init__(self) -> None:
+        if self.k < 2:
+            raise ValueError("the shortlist needs at least two candidates to measure a margin")
 
     def assess(
         self,
@@ -118,6 +152,7 @@ class RecognitionService:
         global_index: RepresentationIndex,
         processing_run_id: uuid.UUID,
         run_local: RunLocalIndex | None = None,
+        exclude: Collection[uuid.UUID] = (),
     ) -> RecognitionAssessment:
         return assess(
             retrieve(
@@ -129,6 +164,7 @@ class RecognitionService:
                 global_index=global_index,
                 processing_run_id=processing_run_id,
                 run_local=run_local,
+                exclude=exclude,
             ),
             quality,
         )

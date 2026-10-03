@@ -82,6 +82,7 @@ def test_a_known_face_is_matched_through_the_whole_path(memory: Memory) -> None:
     memory.known(unit(0, 1, 0, 0))
     assessment = memory.assess(unit(1, 0, 0, 0))
     assert [g.identity_id for g in assessment.groups][0] == alice
+    assert assessment.groups[0].members[0].similarity > assessment.groups[1].members[0].similarity
     assert assessment.requested_k == 5
     assert assessment.returned == 2
     decision = IdentityReasoner(POLICY).decide(assessment)
@@ -102,7 +103,7 @@ def test_the_same_new_person_twice_in_one_run_is_recognised_through_the_run_loca
     memory.local.add(first.id, unit(1, 0, 0, 0))
     assessment = memory.assess(unit(1, 0.03, 0, 0))
     (group,) = assessment.groups
-    assert group.pools == (Pool.RUN_LOCAL,)
+    assert [m.pool for m in group.members] == [Pool.RUN_LOCAL]
     decision = IdentityReasoner(POLICY).decide(assessment)
     assert decision.outcome is RecognitionOutcome.MATCH_EXISTING
     assert decision.identity_id == pending_identity.id
@@ -120,10 +121,46 @@ def test_a_stale_neighbour_makes_the_assessment_incomplete_and_the_reasoner_abst
     assessment = memory.assess(unit(1, 0, 0, 0))
     assert assessment.dropped == 1
     assert not assessment.complete
-    assert stale.id not in {r for g in assessment.groups for r in g.representation_ids}
+    assert stale.id not in {m.representation_id for g in assessment.groups for m in g.members}
     decision = IdentityReasoner(POLICY).decide(assessment)
     assert decision.reason is Reason.RETRIEVAL_INCOMPLETE
     assert decision.outcome is RecognitionOutcome.ABSTAIN
+
+
+def test_the_query_s_own_pending_representation_is_never_its_own_neighbour(
+    memory: Memory,
+) -> None:
+    """The representation being recognised exists, PENDING, before it is recognised: without
+    `exclude` it would be its own nearest candidate and every face would abstain."""
+    own = memory.build.representation(
+        memory.build.observation(memory.run), representation_space_id=memory.space.id,
+        vector=float32_vector([1.0, 0.0, 0.0, 0.0]),
+    )  # fmt: skip
+    memory.local.add(own.id, unit(1, 0, 0, 0))
+    including = memory.assess(unit(1, 0, 0, 0))
+    assert [g.identity_id for g in including.groups] == [None]  # (the self-hit)
+    assert IdentityReasoner(POLICY).decide(including).reason is Reason.UNRESOLVED_NEIGHBOUR
+    excluding = memory.assess(unit(1, 0, 0, 0), exclude=[own.id])
+    assert excluding.groups == ()
+    decision = IdentityReasoner(POLICY).decide(excluding)
+    assert decision.outcome is RecognitionOutcome.CREATE_NEW
+
+
+def test_an_index_that_is_behind_sqlite_is_not_complete_even_though_nothing_was_dropped(
+    memory: Memory,
+) -> None:
+    behind = memory.build.representation(
+        representation_space_id=memory.space.id, state="ACTIVE", ann_key=50,
+        identity_id=memory.build.identity().id, vector=float32_vector([1.0, 0.0, 0.0, 0.0]),
+    )  # fmt: skip
+    memory.build.index_operation(behind, operation="ADD")  # accepted, but not yet in the index
+    assessment = memory.assess(unit(1, 0, 0, 0))
+    assert assessment.groups == ()
+    assert assessment.dropped == 0
+    assert not assessment.converged
+    assert not assessment.complete
+    decision = IdentityReasoner(POLICY).decide(assessment)
+    assert decision.reason is Reason.RETRIEVAL_INCOMPLETE  # not a "valid unknown": no duplicate
 
 
 def test_the_service_never_mixes_spaces(memory: Memory, tmp_path: Path) -> None:
