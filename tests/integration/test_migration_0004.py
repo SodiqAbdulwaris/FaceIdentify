@@ -17,7 +17,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.settings.app_state import WAL_TRUNCATION_OWED, AppStateRepository
-from backend.infrastructure.db.engine import create_sqlite_engine
 from tests.factories.models import ModelFactory
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 from tests.fixtures.migrations import (
@@ -27,6 +26,7 @@ from tests.fixtures.migrations import (
     foreign_key_violations,
     migrate,
     patch_revision,
+    populate_legacy,
     version,
 )
 
@@ -38,15 +38,13 @@ def populated_0003(
 ) -> Path:
     path = tmp_path / "library.db"
     migrate(monkeypatch, path, "0003")
-    engine = create_sqlite_engine(path)
-    try:
-        with Session(engine) as session:
-            build = ModelFactory(session, clock, new_id)
-            build.representation()
-            build.identity()
-            session.commit()
-    finally:
-        engine.dispose()
+
+    def fill(session: Session) -> None:
+        build = ModelFactory(session, clock, new_id)
+        build.representation()
+        build.identity()
+
+    populate_legacy(tmp_path / "scratch.db", monkeypatch, path, fill)
     return path
 
 

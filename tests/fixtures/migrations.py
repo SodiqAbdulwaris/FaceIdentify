@@ -12,8 +12,10 @@ from typing import Any
 
 import pytest
 from alembic import command, util
+from sqlalchemy.orm import Session
 
 from backend.infrastructure.db.downgrade_guard import ALLOW_DESTRUCTIVE_DOWNGRADE_ENV
+from backend.infrastructure.db.engine import create_sqlite_engine
 from tests.fixtures.persistence import alembic_config
 
 DATABASE_PATH_ENV = "FACEIDENTIFY_DATABASE_PATH"
@@ -27,6 +29,44 @@ DANGLING_UPDATE = (
 def migrate(monkeypatch: pytest.MonkeyPatch, path: Path, revision: str) -> None:
     monkeypatch.setenv(DATABASE_PATH_ENV, str(path))
     command.upgrade(alembic_config(), revision)
+
+
+def populate_legacy(
+    scratch: Path, monkeypatch: pytest.MonkeyPatch, path: Path, fill: Callable[[Session], None]
+) -> None:
+    """Rows in a database at an older revision, built with the *current* models.
+
+    The factories know only the current models, which have columns an older revision lacks, so they
+    cannot write to an older database directly. `fill` builds the rows in a scratch database at the
+    head revision, and the rows are copied into `path` column by column, for the columns both have
+    (a column only the head has is left to its default, NULL). Tables the older revision lacks are
+    skipped, and a row the older database already holds (a settings singleton) is left alone.
+    """
+    migrate(monkeypatch, scratch, "head")
+    engine = create_sqlite_engine(scratch)
+    try:
+        with Session(engine) as session:
+            fill(session)
+            session.commit()
+    finally:
+        engine.dispose()
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = OFF")  # (the copy is not in dependency order)
+        connection.execute("ATTACH DATABASE ? AS scratch", (str(scratch),))
+        for (table,) in connection.execute(
+            "SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+            " AND name != 'alembic_version'"
+        ).fetchall():
+            there = [row[1] for row in connection.execute(f'PRAGMA main.table_info("{table}")')]
+            here = {row[1] for row in connection.execute(f'PRAGMA scratch.table_info("{table}")')}
+            shared = ", ".join(f'"{column}"' for column in there if column in here)
+            if shared:
+                connection.execute(
+                    f'INSERT OR IGNORE INTO main."{table}" ({shared})'  # noqa: S608
+                    f' SELECT {shared} FROM scratch."{table}"'
+                )
+        connection.commit()
+        connection.execute("DETACH DATABASE scratch")
 
 
 def downgrade(

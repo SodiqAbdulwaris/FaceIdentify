@@ -32,6 +32,7 @@ from tests.fixtures.migrations import (
     foreign_key_violations,
     migrate,
     patch_revision,
+    populate_legacy,
     record_enforcement,
     table_sql,
     trigger_names,
@@ -53,25 +54,23 @@ def populated_0002(
     does."""
     path = tmp_path / "library.db"
     migrate(monkeypatch, path, "0002")
-    engine = create_sqlite_engine(path)
-    try:
-        with Session(engine) as session:
-            build = ModelFactory(session, clock, new_id)
-            first = build.representation_space(dimension=4)
-            second = build.representation_space(dimension=4)
-            identity = build.identity()
-            for space, key in ((first, 1), (first, 2), (second, 3)):
-                rep = build.representation(
-                    representation_space_id=space.id, state="ACTIVE", identity_id=identity.id,
-                    ann_key=key, vector=float32_vector([float(key), 0.0, 0.0, 0.0]),
-                )  # fmt: skip
-                build.index_operation(rep, operation="ADD")
-            build.representation(representation_space_id=first.id)  # a PENDING one: no key
-            build.run()  # a snapshot and a run that uses it
-            build.snapshot()  # and one that no run uses
-            session.commit()
-    finally:
-        engine.dispose()
+
+    def fill(session: Session) -> None:
+        build = ModelFactory(session, clock, new_id)
+        first = build.representation_space(dimension=4)
+        second = build.representation_space(dimension=4)
+        identity = build.identity()
+        for space, key in ((first, 1), (first, 2), (second, 3)):
+            rep = build.representation(
+                representation_space_id=space.id, state="ACTIVE", identity_id=identity.id,
+                ann_key=key, vector=float32_vector([float(key), 0.0, 0.0, 0.0]),
+            )  # fmt: skip
+            build.index_operation(rep, operation="ADD")
+        build.representation(representation_space_id=first.id)  # a PENDING one: no key
+        build.run()  # a snapshot and a run that uses it
+        build.snapshot()  # and one that no run uses
+
+    populate_legacy(tmp_path / "scratch.db", monkeypatch, path, fill)
     return path
 
 
@@ -131,7 +130,7 @@ def test_the_same_key_may_be_used_in_two_spaces_but_not_twice_in_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "0003")
+    migrate(monkeypatch, path, "head")  # (the constraint is still there; the factories need head)
     first, second = spaces(path)[:2]
     engine = create_sqlite_engine(path)
     try:
@@ -226,7 +225,8 @@ def test_known_limit_insert_or_replace_rewrites_a_snapshot_no_run_uses(
 ) -> None:
     """SQLite fires no delete trigger for the deletion REPLACE performs, so the triggers do not
     stop it on a snapshot no run references; one a run uses is still protected by the foreign
-    key (GitHub issue 55). Pinned so that closing the gap shows up as a deliberate change."""
+    key (GitHub issue 55). Pinned so that closing the gap shows up as a deliberate change: revision
+    0005 closed it (`test_migration_0005.py`), and this test runs at revision 0003 only."""
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
     migrate(monkeypatch, path, "0003")
     used, free = snapshot_ids(path)
@@ -364,7 +364,7 @@ def test_downgrade_is_refused_atomically_while_two_spaces_hold_the_same_key(
     older schema cannot hold the same key in two spaces, so the database refuses and nothing
     changes."""
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "0003")
+    migrate(monkeypatch, path, "head")  # (the factories need the head's columns)
     first, second = spaces(path)[:2]
     engine = create_sqlite_engine(path)
     try:
@@ -377,6 +377,7 @@ def test_downgrade_is_refused_atomically_while_two_spaces_hold_the_same_key(
             session.commit()
     finally:
         engine.dispose()
+    downgrade(monkeypatch, path, "0003", allow_destructive=True)  # (back to this revision)
     before = dump(path)
 
     with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
