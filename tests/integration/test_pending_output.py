@@ -1,14 +1,14 @@
 """The writer of a run's PENDING output (M3 step 7; Persistence 5, 6.2; GitHub issue 88).
 
 Real SQLite and a real catalog (a fixture package registered the way an installed one is). Proved
-here: an observation and its representation are recorded `PENDING` with the geometry, the vector's
-exact bytes and the variants that actually produced them, the provenance chain resolves to the
-component versions, and anything that does not stand up (a vector that does not fit its space, a
-variant that is not what the output says, an embedder the library never declared for the space) is
-refused with nothing written.
+here: detection first writes a `PENDING` observation with its geometry and actual detector variant;
+embedding later writes its `PENDING` representation with exact vector bytes and its actual embedder
+variant. An embedding failure keeps the observation and writes no representation. Invalid detector
+output writes neither. The provenance chain resolves to the component versions that ran.
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,10 @@ from backend.app.processing.pending_output import (
     SCHEMA_VERSION,
     UNIT_LENGTH_TOLERANCE,
     PendingOutputError,
-    write_face,
+    WrittenObservation,
+    WrittenRepresentation,
+    write_observation,
+    write_representation,
 )
 from backend.app.runtime.models import (
     ModelExport,
@@ -47,6 +50,12 @@ from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 
 DIMENSION = 512
 LANDMARKS = ((0.3, 0.3), (0.7, 0.3), (0.5, 0.5), (0.3, 0.7), (0.7, 0.7))
+
+
+@dataclass(frozen=True, slots=True)
+class WrittenFace:
+    observation_id: uuid.UUID
+    representation_id: uuid.UUID
 
 
 def planned(export: RegisteredExport, provider: str = "CPUExecutionProvider") -> PlannedVariant:
@@ -101,15 +110,59 @@ class World:
         )
         return FaceVector(**(fields | kw))
 
-    def write(self, sequence: int = 0, **kw: Any) -> Any:
-        detection = Detection(0, 0, (0.2, 0.25, 0.6, 0.85), 0.93, LANDMARKS)
+    def detection(self) -> Detection:
+        return Detection(0, 0, (0.2, 0.25, 0.6, 0.85), 0.93, LANDMARKS)
+
+    def write_observation(self, sequence: int = 0, **kw: Any) -> WrittenObservation:
         arguments: dict[str, Any] = dict(
-            source_id=self.run.source_id, processing_run_id=self.run.id,
-            execution_segment_id=self.segment.id, sequence_in_run=sequence, detection=detection,
-            detector=self.detector, vector=self.vector(), embedder=self.embedder,
-            representation_space_id=self.space_id, new_id=self.new_id, now=self.clock(),
+            source_id=self.run.source_id,
+            processing_run_id=self.run.id,
+            execution_segment_id=self.segment.id,
+            sequence_in_run=sequence,
+            detection=self.detection(),
+            detector=self.detector, new_id=self.new_id, now=self.clock(),
         )  # fmt: skip
-        return write_face(self.session, **(arguments | kw))
+        return write_observation(self.session, **(arguments | kw))
+
+    def write_representation(
+        self, observation_id: uuid.UUID, detection_index: int = 0, **kw: Any
+    ) -> WrittenRepresentation:
+        arguments: dict[str, Any] = dict(
+            observation_id=observation_id, detection_index=detection_index, vector=self.vector(),
+            embedder=self.embedder, representation_space_id=self.space_id,
+            new_id=self.new_id, now=self.clock(),
+        )  # fmt: skip
+        return write_representation(self.session, **(arguments | kw))
+
+    def write(self, sequence: int = 0, **kw: Any) -> WrittenFace:
+        detection = kw.get("detection", self.detection())
+        observation = self.write_observation(
+            sequence,
+            **{
+                key: value
+                for key, value in kw.items()
+                if key
+                in {
+                    "source_id",
+                    "processing_run_id",
+                    "execution_segment_id",
+                    "detection",
+                    "detector",
+                    "new_id",
+                    "now",
+                }
+            },
+        )
+        representation = self.write_representation(
+            observation.observation_id,
+            detection.detection_index,
+            **{
+                key: value
+                for key, value in kw.items()
+                if key in {"vector", "embedder", "representation_space_id", "new_id", "now"}
+            },
+        )
+        return WrittenFace(observation.observation_id, representation.representation_id)
 
     def counts(self) -> tuple[int, int]:
         observations = self.session.scalar(select(func.count()).select_from(Observation))
@@ -219,29 +272,53 @@ def test_faces_of_one_run_take_their_sequence_numbers_and_a_replayed_one_is_refu
         world.write(1)  # (the schema makes a replayed write refuse, not duplicate)
 
 
-# --- what is refused, and nothing is written ----------------------------------------------------
+# --- what is refused -----------------------------------------------------------------------------
 
 
-def refused(world: World, match: str, **kw: Any) -> None:
+def refused_detection(world: World, match: str, **kw: Any) -> None:
     before = world.counts()
     with pytest.raises(PendingOutputError, match=match):
-        world.write(**kw)
+        world.write_observation(**kw)
     assert world.counts() == before
 
 
+def refused_embedding(world: World, match: str, **kw: Any) -> uuid.UUID:
+    observation = world.write_observation()
+    before = world.counts()
+    with pytest.raises(PendingOutputError, match=match):
+        world.write_representation(observation.observation_id, **kw)
+    assert world.counts() == before
+    return observation.observation_id
+
+
+def test_an_embedding_failure_keeps_its_pending_observation(world: World) -> None:
+    observation_id = refused_embedding(
+        world,
+        "shape",
+        vector=world.vector(vector=np.ones(DIMENSION - 1, np.float32)),
+    )
+
+    observation = world.session.get(Observation, observation_id)
+    assert observation is not None
+    assert observation.state == ObservationState.PENDING
+    assert world.counts() == (1, 0)
+
+
 def test_a_vector_of_the_wrong_length_is_refused(world: World) -> None:
-    refused(world, "shape", vector=world.vector(vector=np.ones(DIMENSION - 1, np.float32)))
+    refused_embedding(
+        world, "shape", vector=world.vector(vector=np.ones(DIMENSION - 1, np.float32))
+    )
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
 def test_a_vector_that_is_not_finite_is_refused(world: World, bad: float) -> None:
     values = np.ones(DIMENSION, np.float32)
     values[3] = bad
-    refused(world, "finite", vector=world.vector(vector=values))
+    refused_embedding(world, "finite", vector=world.vector(vector=values))
 
 
 def test_a_vector_of_another_normalisation_than_the_spaces_is_refused(world: World) -> None:
-    refused(world, "L2_NORMALIZED", vector=world.vector(normalization="UNIT_BALL"))
+    refused_embedding(world, "L2_NORMALIZED", vector=world.vector(normalization="UNIT_BALL"))
 
 
 @pytest.mark.parametrize(
@@ -256,7 +333,7 @@ def test_a_vector_of_another_normalisation_than_the_spaces_is_refused(world: Wor
 def test_a_vector_that_is_not_canonical_little_endian_float32_is_refused(
     world: World, values: np.ndarray, message: str
 ) -> None:
-    refused(world, message, vector=world.vector(vector=values))
+    refused_embedding(world, message, vector=world.vector(vector=values))
 
 
 @pytest.mark.parametrize("scale", [0.5, 0.998, 1.002, 2.0])
@@ -264,7 +341,7 @@ def test_an_l2_normalised_vector_that_is_not_unit_length_is_refused(
     world: World, scale: float
 ) -> None:
     values = world.vector().vector * np.float32(scale)
-    refused(world, "length", vector=world.vector(vector=values))
+    refused_embedding(world, "length", vector=world.vector(vector=values))
 
 
 def test_a_vector_just_inside_the_tolerance_is_accepted_and_its_length_is_kept(
@@ -280,18 +357,18 @@ def test_a_vector_just_inside_the_tolerance_is_accepted_and_its_length_is_kept(
 
 
 def test_an_unknown_representation_space_is_refused(world: World) -> None:
-    refused(world, "no representation space", representation_space_id=uuid.uuid4())
+    refused_embedding(world, "no representation space", representation_space_id=uuid.uuid4())
 
 
 def test_a_variant_of_the_wrong_kind_is_refused_in_either_role(world: World) -> None:
-    refused(world, "not a FACE_DETECTOR", detector=world.embedder)
-    refused(world, "not a FACE_REPRESENTATION", embedder=world.detector)
+    refused_detection(world, "not a FACE_DETECTOR", detector=world.embedder)
+    refused_embedding(world, "not a FACE_REPRESENTATION", embedder=world.detector)
 
 
 def test_a_variant_that_is_not_in_the_catalog_is_refused(world: World) -> None:
     ghost = PlannedVariant(**{**vars_of(world.detector), "runtime_variant_id": uuid.uuid4()})
-    refused(world, "not in the catalog", detector=ghost)
-    refused(world, "not in the catalog", embedder=PlannedVariant(
+    refused_detection(world, "not in the catalog", detector=ghost)
+    refused_embedding(world, "not in the catalog", embedder=PlannedVariant(
         **{**vars_of(world.embedder), "runtime_variant_id": uuid.uuid4()}
     ))  # fmt: skip
 
@@ -300,11 +377,11 @@ def test_an_output_naming_another_component_version_than_the_variants_is_refused
     world: World,
 ) -> None:
     other = uuid.uuid4()
-    refused(
+    refused_detection(
         world, "belongs to component version",
         detector=PlannedVariant(**{**vars_of(world.detector), "component_version_id": other}),
     )  # fmt: skip
-    refused(
+    refused_embedding(
         world, "belongs to component version",
         embedder=PlannedVariant(**{**vars_of(world.embedder), "component_version_id": other}),
     )  # fmt: skip
@@ -313,7 +390,7 @@ def test_an_output_naming_another_component_version_than_the_variants_is_refused
 def test_a_variant_cannot_claim_a_catalog_kind_other_than_its_actual_component(
     world: World,
 ) -> None:
-    refused(
+    refused_detection(
         world,
         "catalog component",
         detector=PlannedVariant(**{**vars_of(world.embedder), "kind": "FACE_DETECTOR"}),
@@ -322,7 +399,7 @@ def test_a_variant_cannot_claim_a_catalog_kind_other_than_its_actual_component(
 
 def test_an_embedder_the_library_never_declared_for_the_space_is_refused(world: World) -> None:
     world.session.execute(update(RuntimeVariantRepresentationSpace).values(state="RETIRED"))
-    refused(world, "not declared")
+    refused_embedding(world, "not declared")
 
 
 def test_a_validated_embedder_is_accepted_like_a_declared_one(world: World) -> None:
@@ -332,11 +409,49 @@ def test_a_validated_embedder_is_accepted_like_a_declared_one(world: World) -> N
 
 
 def test_a_vector_for_another_detection_is_refused(world: World) -> None:
-    refused(world, "does not belong", vector=world.vector(detection_index=1))
+    refused_embedding(world, "does not belong", vector=world.vector(detection_index=1))
+
+
+@pytest.mark.parametrize(
+    ("row", "state", "message"),
+    [
+        ("run", ProcessingRunState.COMPLETED, "processing run is"),
+        ("segment", ExecutionSegmentState.COMPLETED, "execution segment is"),
+    ],
+)
+def test_embedding_refuses_a_run_or_segment_that_stops_after_detection(
+    world: World, row: str, state: str, message: str
+) -> None:
+    observation = world.write_observation()
+    (world.run if row == "run" else world.segment).state = state
+    world.session.flush()
+    before = world.counts()
+
+    with pytest.raises(PendingOutputError, match=message):
+        world.write_representation(observation.observation_id)
+
+    assert world.counts() == before
+
+
+def test_embedding_refuses_an_unknown_or_nonpending_observation(world: World) -> None:
+    before = world.counts()
+    with pytest.raises(PendingOutputError, match="no observation"):
+        world.write_representation(uuid.uuid4())
+    assert world.counts() == before
+
+    observation = world.write_observation()
+    observation_row = world.session.get(Observation, observation.observation_id)
+    assert observation_row is not None
+    observation_row.state = ObservationState.ACTIVE
+    world.session.flush()
+
+    with pytest.raises(PendingOutputError, match="not writable"):
+        world.write_representation(observation.observation_id)
+    assert world.counts() == (1, 0)
 
 
 def test_a_source_from_another_run_is_refused(world: World) -> None:
-    refused(world, "source does not belong", source_id=world.build.source().id)
+    refused_detection(world, "source does not belong", source_id=world.build.source().id)
 
 
 @pytest.mark.parametrize(
@@ -347,12 +462,12 @@ def test_a_source_from_another_run_is_refused(world: World) -> None:
     ],
 )
 def test_an_unknown_processing_context_is_refused(world: World, field: str, message: str) -> None:
-    refused(world, message, **{field: uuid.uuid4()})
+    refused_detection(world, message, **{field: uuid.uuid4()})
 
 
 def test_a_segment_from_another_run_is_refused(world: World) -> None:
     other_run = world.build.run()
-    refused(
+    refused_detection(
         world, "segment does not belong", execution_segment_id=world.build.segment(other_run).id
     )
 
@@ -369,7 +484,7 @@ def test_a_writer_refuses_a_run_or_segment_that_is_no_longer_writable(
 ) -> None:
     (world.run if row == "run" else world.segment).state = state
     world.session.flush()
-    refused(world, message)
+    refused_detection(world, message)
 
 
 def vars_of(variant: PlannedVariant) -> dict[str, Any]:
