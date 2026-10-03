@@ -12,6 +12,7 @@ exactly as it was.
 
 import io
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from tests.fixtures.migrations import (
     foreign_key_violations,
     migrate,
     patch_revision,
+    populate_legacy,
     record_enforcement,
     table_sql,
     version,
@@ -46,22 +48,20 @@ def populated_0001(
     """A database at revision 0001 holding rows that reference `representations`."""
     path = tmp_path / "library.db"
     migrate(monkeypatch, path, "0001")
-    engine = create_sqlite_engine(path)
-    try:
-        with Session(engine) as session:
-            build = ModelFactory(session, clock, new_id)
-            space = build.representation_space(dimension=4)
-            identity = build.identity()
-            for key in (1, 2):
-                rep = build.representation(
-                    representation_space_id=space.id, state="ACTIVE", identity_id=identity.id,
-                    ann_key=key, vector=float32_vector([float(key), 0.0, 0.0, 0.0]),
-                )  # fmt: skip
-                build.index_operation(rep, operation="ADD")
-            build.representation(representation_space_id=space.id)  # a PENDING one as well
-            session.commit()
-    finally:
-        engine.dispose()
+
+    def fill(session: Session) -> None:
+        build = ModelFactory(session, clock, new_id)
+        space = build.representation_space(dimension=4)
+        identity = build.identity()
+        for key in (1, 2):
+            rep = build.representation(
+                representation_space_id=space.id, state="ACTIVE", identity_id=identity.id,
+                ann_key=key, vector=float32_vector([float(key), 0.0, 0.0, 0.0]),
+            )  # fmt: skip
+            build.index_operation(rep, operation="ADD")
+        build.representation(representation_space_id=space.id)  # a PENDING one as well
+
+    populate_legacy(tmp_path / "scratch.db", monkeypatch, path, fill)
     return path
 
 
@@ -104,10 +104,15 @@ def test_the_recreated_table_accepts_erasing_and_still_enforces_the_other_rules(
     engine = create_sqlite_engine(path)
     try:
         with Session(engine) as session:
-            active = session.query(Representation).filter_by(state="ACTIVE").first()
-            assert active is not None
+            with sqlite3.connect(
+                path
+            ) as connection:  # (the ORM selects columns this revision lacks)
+                (active_id,) = connection.execute(
+                    "SELECT id FROM representations WHERE state = 'ACTIVE' LIMIT 1"
+                ).fetchone()
+            active = uuid.UUID(active_id)
             session.execute(
-                update(Representation).where(Representation.id == active.id).values(state="ERASING")
+                update(Representation).where(Representation.id == active).values(state="ERASING")
             )
             session.commit()  # ERASING keeps its vector and key: the other CHECKs are unchanged
             with sqlite3.connect(path) as connection:
@@ -118,7 +123,7 @@ def test_the_recreated_table_accepts_erasing_and_still_enforces_the_other_rules(
             # a state that is not listed, and ERASED with a vector, are still refused
             for state in ("BOGUS", "ERASED"):
                 with pytest.raises(Exception, match="CHECK constraint failed"):
-                    refuse(session, active.id, state)
+                    refuse(session, active, state)
                 session.rollback()
     finally:
         engine.dispose()

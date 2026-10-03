@@ -60,7 +60,21 @@ SNAPSHOT_NO_DELETE_WHILE_USED_TRIGGER = (
     "BEGIN SELECT RAISE(ABORT, 'a processing configuration snapshot that a run uses cannot be "
     "deleted'); END"
 )
-for _trigger in (SNAPSHOT_NO_UPDATE_TRIGGER, SNAPSHOT_NO_DELETE_WHILE_USED_TRIGGER):
+# SQLite's INSERT OR REPLACE deletes the conflicting row without firing a delete trigger, so a
+# snapshot no run uses could be rewritten that way (GitHub issue 55, revision 0005). This fires
+# before the conflict is resolved, so it blocks REPLACE and a plain duplicate id alike.
+SNAPSHOT_NO_REPLACE_TRIGGER = (
+    "CREATE TRIGGER trg_processing_configuration_snapshots_no_replace "
+    "BEFORE INSERT ON processing_configuration_snapshots "
+    "WHEN EXISTS (SELECT 1 FROM processing_configuration_snapshots WHERE id = NEW.id) "
+    "BEGIN SELECT RAISE(ABORT, 'a processing configuration snapshot is immutable and cannot be "
+    "replaced'); END"
+)
+for _trigger in (
+    SNAPSHOT_NO_UPDATE_TRIGGER,
+    SNAPSHOT_NO_DELETE_WHILE_USED_TRIGGER,
+    SNAPSHOT_NO_REPLACE_TRIGGER,
+):
     event.listen(
         ProcessingConfigurationSnapshot.__table__,
         "after_create",

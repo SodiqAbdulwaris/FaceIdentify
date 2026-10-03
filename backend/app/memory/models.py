@@ -144,6 +144,12 @@ class Observation(Base):
     superseded_by_run_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("processing_runs.id", ondelete="RESTRICT")
     )
+    # The detector variant that actually executed (decision 2026-10-03, issue 88): variant ->
+    # export -> component version is the provenance chain. Nullable for rows that predate it and
+    # for non-ML fixtures; the writer of newly produced ML output requires it.
+    runtime_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("runtime_variants.id", ondelete="RESTRICT")
+    )
 
     # §22: bounded to-one navigation only.
     source: Mapped["Source"] = relationship()
@@ -183,12 +189,12 @@ class Representation(Base):
         CheckConstraint(
             "vector IS NULL OR length(vector) = 4 * vector_dimension", name="vector_length"
         ),
-        # An active representation is ANN-eligible: identity and key are required. That the
-        # identity itself is ACTIVE is a cross-row rule enforced by the use case (§20).
-        CheckConstraint(
-            "state != 'ACTIVE' OR (identity_id IS NOT NULL AND ann_key IS NOT NULL)",
-            name="active_eligible",
-        ),
+        # An active representation is ANN-eligible: its key is required. Its identity is required
+        # too, except for an accepted ABSTAIN representation, which has none (decision 2026-10-02,
+        # revision 0005); whether an identity-less row is a legitimate abstention is a use-case
+        # rule, and that an identity is itself ACTIVE is a cross-row rule enforced by the use case
+        # (§20).
+        CheckConstraint("state != 'ACTIVE' OR ann_key IS NOT NULL", name="active_eligible"),
         UniqueConstraint("observation_id", "representation_space_id"),
         UniqueConstraint("representation_space_id", "ann_key"),
         Index(None, "representation_space_id", "state", "ann_key"),
@@ -222,6 +228,10 @@ class Representation(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     erased_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # The embedder variant that actually executed (decision 2026-10-03, issue 88); see Observation.
+    runtime_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("runtime_variants.id", ondelete="RESTRICT")
+    )
 
     # §22: bounded to-one navigation only.
     observation: Mapped["Observation"] = relationship()

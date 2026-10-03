@@ -102,12 +102,23 @@ def test_observation_sequence_is_unique_within_a_run(build: ModelFactory) -> Non
 # --- representations ---------------------------------------------------------------------------
 
 
-def test_active_representation_needs_identity_and_ann_key(build: ModelFactory) -> None:
+def test_active_representation_needs_an_ann_key_and_an_identity_only_unless_it_abstained(
+    build: ModelFactory,
+) -> None:
     active = build.representation(state="ACTIVE", identity_id=build.identity().id, ann_key=1)
     assert active.ann_key == 1
+    # An accepted ABSTAIN representation is ACTIVE with no identity (decision 2026-10-02): the
+    # identity half of the CHECK is gone, the key half is not.
+    abstained = build.representation(state="ACTIVE", ann_key=2)
+    assert abstained.identity_id is None
     rejected(
         build.session,
-        lambda: build.representation(state="ACTIVE", ann_key=2),
+        lambda: build.representation(state="ACTIVE", ann_key=None),
+        check("ck_representations_active_eligible"),
+    )
+    rejected(
+        build.session,
+        lambda: build.representation(state="ACTIVE", identity_id=build.identity().id),
         check("ck_representations_active_eligible"),
     )
     rejected(
