@@ -76,6 +76,13 @@ def populated_0004(
         build.snapshot()  # one that no run uses
 
     populate_legacy(tmp_path / "scratch.db", monkeypatch, path, fill)
+    rows = dump(path)  # (a fixture that quietly held less than intended would prove nothing)
+    assert len(rows["representations"]) == 3
+    assert len(rows["observations"]) == 3
+    assert len(rows["index_operations"]) == 2
+    # (the factory gives every observation its own run, and every run its own snapshot)
+    assert len(rows["processing_runs"]) == 4
+    assert len(rows["processing_configuration_snapshots"]) == 5
     return path
 
 
@@ -363,3 +370,21 @@ def test_the_revision_can_be_printed_as_sql_without_a_database() -> None:
     assert "fk_representations_runtime_variant_id_runtime_variants" in sql
     assert "fk_observations_runtime_variant_id_runtime_variants" in sql
     assert f"CREATE TRIGGER {NEW_TRIGGER}" in sql
+
+
+def test_the_replace_trigger_covers_every_unique_constraint_of_the_snapshot_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The trigger looks only at `id`. If the table ever gets another unique constraint (the spec
+    allows the fingerprint), INSERT OR REPLACE could rewrite a snapshot through it: this fails
+    until the trigger is widened."""
+    path = tmp_path / "library.db"
+    migrate(monkeypatch, path, "0005")
+    with sqlite3.connect(path) as connection:
+        unique = [
+            row
+            for row in connection.execute('PRAGMA index_list("processing_configuration_snapshots")')
+            if row[2]  # unique
+        ]
+    assert len(unique) == 1  # the primary key's index
+    assert unique[0][3] == "pk"
