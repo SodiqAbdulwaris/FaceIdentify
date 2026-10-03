@@ -3,9 +3,11 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-03 (M3 step 7: worker config built; space-state, provenance and space-identity decisions recorded; issue 88 decided, option C; steps 7 (client, writer), 8 and 9 and revision 0005 built; writer tracker corrected after review)_
+_Last updated: 2026-10-03 (M3 step 7: worker config built; space-state, provenance and space-identity decisions recorded; issue 88 decided, option C; steps 7 (client, writer), 8 and 9 and revision 0005 built; writer corrected after review to persist detection before embedding)_
 
 > **Decision 2026-10-03:** the owner approved the version-1 payload contracts for new ML output: `landmarks_json` has `schema_version` and normalised `points`; observation `quality_json` has `schema_version` and `detection_score`; representation `quality_json` has `schema_version` and `l2_norm`.
+
+> **Correction 2026-10-03 (review finding, Persistence 5 and 30):** the earlier progress narrative below called the PENDING-output writer `write_face` and said it wrote an observation with its representation together. That was wrong: `write_observation` persists each PENDING detector output before embedding; `write_representation` later attaches a settled embedding to that observation. An embedding failure leaves the observation PENDING and writes no representation. `tests/integration/test_pending_output.py` proves the boundary.
 
 ## Current state
 

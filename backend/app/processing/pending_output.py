@@ -1,13 +1,16 @@
-"""Writing a run's private output: a PENDING observation and its PENDING representation.
+"""Writing a run's private output in the detector-then-embedder order.
 
 A processing run's detections and vectors are private and discardable until the run is accepted
 (Persistence 5, 6.2, 30): they are `PENDING` rows of exactly one run, absent from the global index.
-This is the only writer of them. It records what a client produced (`PerceptionClient`) and
-**what actually produced it** (decision 2026-10-03, issue 88): the observation carries the detector
-variant that executed and the representation the embedder variant that executed, each a foreign key
-to the catalog (variant, then export, then component version), never the configured or preferred
-one. A variant that was not what the plan named is the client's refusal (`PerceptionClient` checks
-the worker's own provenance); the writer checks the catalog agrees with it.
+`write_observation` is called as soon as detection settles; `write_representation` is called only
+after embedding settles. This preserves a PENDING observation when embedding fails or is interrupted
+(Persistence 5 and 30). Together they are the only writers of this output. Each records what the
+client produced (`PerceptionClient`) and **what actually produced it** (decision 2026-10-03, issue
+88): the observation carries the detector variant that executed and the representation the embedder
+variant that executed, each a foreign key to the catalog (variant, then export, then component
+version), never the configured or preferred one. A variant that was not what the plan named is the
+client's refusal (`PerceptionClient` checks the worker's own provenance); the writer checks the
+catalog agrees with it.
 
 Checked before anything is stored (Persistence 6.2: "validate the exact dimension, finite values,
 and normalization required by the RepresentationSpace contract"):
@@ -15,8 +18,8 @@ and normalization required by the RepresentationSpace contract"):
 * the vector is the space's dimension, finite, and of the space's normalization (an
   `L2_NORMALIZED` vector has unit length to within `UNIT_LENGTH_TOLERANCE`);
 * the detector variant is a face detector and the embedder variant a face representation component,
-  and each variant's export belongs to the component version the output names (so
-  `observations.detector_component_version_id` and the variant cannot disagree);
+  and each variant's export belongs to the component version the output names (so an observation's
+  `detector_component_version_id` and variant cannot disagree);
 * the embedder variant is declared or validated for the space (a vector from a variant the library
   never said could produce this space does not enter it).
 
@@ -75,8 +78,12 @@ class PendingOutputError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
-class WrittenFace:
+class WrittenObservation:
     observation_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
+class WrittenRepresentation:
     representation_id: uuid.UUID
 
 
@@ -160,7 +167,7 @@ def _check_context(
         raise PendingOutputError(f"the execution segment is {segment.state}, not writable")
 
 
-def write_face(
+def write_observation(
     session: Session,
     *,
     source_id: uuid.UUID,
@@ -169,17 +176,10 @@ def write_face(
     sequence_in_run: int,
     detection: Detection,
     detector: PlannedVariant,
-    vector: FaceVector,
-    embedder: PlannedVariant,
-    representation_space_id: uuid.UUID,
     new_id: Callable[[], uuid.UUID],
     now: datetime,
-) -> WrittenFace:
-    """One detected face and its vector, both `PENDING`. Raises `PendingOutputError` (and writes
-    nothing) if the output or its provenance does not stand up."""
-    space = session.get(RepresentationSpace, representation_space_id)
-    if space is None:
-        raise PendingOutputError(f"no representation space {representation_space_id}")
+) -> WrittenObservation:
+    """Persist one detector result as a PENDING observation before embedding begins."""
     _check_context(
         session,
         source_id=source_id,
@@ -187,21 +187,6 @@ def write_face(
         execution_segment_id=execution_segment_id,
     )
     detector_variant = _check_provenance(session, detector, DETECTOR, "detector")
-    embedder_variant = _check_provenance(session, embedder, EMBEDDER, "embedder")
-    compatible = session.scalar(
-        select(RuntimeVariantRepresentationSpace.state).where(
-            RuntimeVariantRepresentationSpace.runtime_variant_id == embedder_variant,
-            RuntimeVariantRepresentationSpace.representation_space_id == space.id,
-        )
-    )
-    if compatible not in (DECLARED, VALIDATED):
-        raise PendingOutputError(
-            f"the embedder variant is not declared for representation space {space.id}"
-        )
-    norm = _check_vector(vector, space)
-    if vector.detection_index != detection.detection_index:
-        raise PendingOutputError("the vector does not belong to this detection")
-
     x0, y0, x1, y1 = detection.box
     observation = Observation(
         id=new_id(),
@@ -222,11 +207,59 @@ def write_face(
     )
     session.add(observation)
     session.flush()
+    return WrittenObservation(observation.id)
+
+
+def write_representation(
+    session: Session,
+    *,
+    observation_id: uuid.UUID,
+    detection_index: int,
+    vector: FaceVector,
+    embedder: PlannedVariant,
+    representation_space_id: uuid.UUID,
+    new_id: Callable[[], uuid.UUID],
+    now: datetime,
+) -> WrittenRepresentation:
+    """Persist one settled embedding for a PENDING observation.
+
+    The caller's transient mapping from detector index to observation id is retained until this
+    function verifies the returned vector's index. The durable row deliberately does not treat a
+    per-request detector index as provenance; `sequence_in_run` is an idempotent run sequence.
+    """
+    observation = session.get(Observation, observation_id)
+    if observation is None:
+        raise PendingOutputError(f"no observation {observation_id}")
+    if observation.state != ObservationState.PENDING:
+        raise PendingOutputError(f"the observation is {observation.state}, not writable")
+    _check_context(
+        session,
+        source_id=observation.source_id,
+        processing_run_id=observation.processing_run_id,
+        execution_segment_id=observation.execution_segment_id,
+    )
+    space = session.get(RepresentationSpace, representation_space_id)
+    if space is None:
+        raise PendingOutputError(f"no representation space {representation_space_id}")
+    embedder_variant = _check_provenance(session, embedder, EMBEDDER, "embedder")
+    compatible = session.scalar(
+        select(RuntimeVariantRepresentationSpace.state).where(
+            RuntimeVariantRepresentationSpace.runtime_variant_id == embedder_variant,
+            RuntimeVariantRepresentationSpace.representation_space_id == space.id,
+        )
+    )
+    if compatible not in (DECLARED, VALIDATED):
+        raise PendingOutputError(
+            f"the embedder variant is not declared for representation space {space.id}"
+        )
+    norm = _check_vector(vector, space)
+    if vector.detection_index != detection_index:
+        raise PendingOutputError("the vector does not belong to this observation")
     representation = Representation(
         id=new_id(),
         observation_id=observation.id,
-        processing_run_id=processing_run_id,
-        execution_segment_id=execution_segment_id,
+        processing_run_id=observation.processing_run_id,
+        execution_segment_id=observation.execution_segment_id,
         representation_space_id=space.id,
         state=RepresentationState.PENDING,
         vector=vector.vector.tobytes(),
@@ -237,7 +270,7 @@ def write_face(
     )
     session.add(representation)
     session.flush()
-    return WrittenFace(observation.id, representation.id)
+    return WrittenRepresentation(representation.id)
 
 
 def _landmarks(detection: Detection) -> dict[str, Any] | None:
