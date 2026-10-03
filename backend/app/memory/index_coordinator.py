@@ -107,7 +107,7 @@ class _Effect(StrEnum):
     PURGE = "PURGE"  # the representation is erased: only a rebuild can guarantee it is gone
 
 
-def _vector(blob: bytes, ndim: int) -> NDArray[np.float32]:
+def decode_vector(blob: bytes, ndim: int) -> NDArray[np.float32]:
     """Canonical storage is contiguous little-endian float32 (§23): exactly `ndim` finite values."""
     if len(blob) != 4 * ndim:
         raise ValueError(f"a vector of {len(blob)} bytes is not {ndim} float32 values")
@@ -397,7 +397,7 @@ class IndexCoordinator:
             )
             for representation_id, ann_key, blob in rows:
                 try:
-                    vector = _vector(blob, ndim)
+                    vector = decode_vector(blob, ndim)
                 except ValueError:
                     unindexable.append(representation_id)
                     continue
@@ -431,7 +431,7 @@ class IndexCoordinator:
         # The schema requires both for an ACTIVE representation (`active_eligible`, `erasure`).
         assert ann_key is not None
         assert blob is not None
-        return _Effect.CHANGED if index.add(ann_key, _vector(blob, ndim)) else _Effect.NONE
+        return _Effect.CHANGED if index.add(ann_key, decode_vector(blob, ndim)) else _Effect.NONE
 
     # --- settling -------------------------------------------------------------------------
 
