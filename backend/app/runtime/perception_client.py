@@ -17,6 +17,9 @@ restarts it on the next call, and whether to retry the request is the caller's d
 What comes back says which variant **actually ran** (`ran`): that is what the writer records as the
 output's provenance (Persistence 5 and 6.2), not the variant that was preferred.
 
+A client belongs to one thread (one processing run): the record of ruled-out variants is not
+locked, and releasing a worker's output is a separate call from the request that made it.
+
 Pixels travel to the worker in a shared-memory segment this client creates and releases around the
 call; vectors come back in segments the worker made, which are copied out and then released.
 """
@@ -103,7 +106,8 @@ class PerceptionClient:
         self._supervisor = supervisor
         self._plan = plan
         self._new_id = new_id
-        self._ruled_out: dict[uuid.UUID, str] = {}  # variant -> why (this provider cannot run)
+        # (stage, variant) -> why this provider cannot run; a stage never inherits another's
+        self._ruled_out: dict[tuple[str, uuid.UUID], str] = {}
 
     def detect(
         self, pixels: NDArray[np.uint8], *, context: ExecutionContext | None = None
@@ -118,6 +122,7 @@ class PerceptionClient:
                 ),
             )
         assert isinstance(response.output, DetectFacesOutput)  # (the operation's own output)
+        # (a detection makes no worker segments, so there is nothing to release_output here)
         return Detected(response.output.detections, ran)
 
     def represent(
@@ -129,6 +134,8 @@ class PerceptionClient:
     ) -> Represented:
         if not detections:
             return Represented((), None)
+        if len({d.detection_index for d in detections}) != len(detections):
+            raise ValueError("each detection is represented once")
         asked = tuple(FaceGeometry(0, d.detection_index, d.box, d.landmarks) for d in detections)
         with SegmentLedger(new_id=self._new_id) as ledger:
             image = _put(ledger, pixels)
@@ -173,7 +180,7 @@ class PerceptionClient:
     ) -> tuple[MLRequest, MLResponse, PlannedVariant]:
         """Ask each variant that is not ruled out, in order, until one runs."""
         for variant in variants:
-            if variant.runtime_variant_id in self._ruled_out:
+            if _key(variant) in self._ruled_out:
                 continue
             request = build(variant)
             response = self._supervisor.execute(request)
@@ -183,12 +190,12 @@ class PerceptionClient:
             assert response.error is not None  # (an ERROR response always has its error)
             if response.error.code not in PROVIDER_UNAVAILABLE:
                 raise PerceptionError(response.error.code, response.error.message)
-            self._ruled_out[variant.runtime_variant_id] = (
+            self._ruled_out[_key(variant)] = (
                 f"{variant.provider} ({variant.package_key}): {response.error.message}"
             )
         raise RuntimeUnavailableError(
             what,
-            [self._ruled_out[v.runtime_variant_id] for v in variants],  # (every one is, by now)
+            [self._ruled_out[_key(v)] for v in variants],  # (every one is, by now)
         )
 
     def _check_it_was_that_variant(
@@ -198,6 +205,8 @@ class PerceptionClient:
         was asked for: an answer from another variant is refused, not recorded under this one."""
         execution = response.execution
         assert execution is not None  # (a SUCCESS response always has its execution)
+        # (the worker's provenance is one configured entry chosen by exactly these two ids, so its
+        # provider and device follow from them)
         if execution.runtime_variant_id != str(
             variant.runtime_variant_id
         ) or execution.component_version_id != str(variant.component_version_id):
@@ -234,6 +243,10 @@ class PerceptionClient:
                 vector = segment.copy().astype("<f4", copy=False)
             vectors.append(FaceVector(face.face_index, vector, result.normalization))
         return tuple(vectors)
+
+
+def _key(variant: PlannedVariant) -> tuple[str, uuid.UUID]:
+    return variant.kind, variant.runtime_variant_id
 
 
 def _put(ledger: SegmentLedger, pixels: NDArray[np.uint8]) -> Any:
