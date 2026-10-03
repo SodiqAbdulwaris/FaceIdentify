@@ -5,6 +5,8 @@ task (see [`rules/documentation.md`](rules/documentation.md)).
 
 _Last updated: 2026-10-03 (M3 step 7: worker config built; space-state, provenance and space-identity decisions recorded; issue 88 decided, option C; steps 7 (client, writer), 8 and 9 and revision 0005 built)_
 
+> **Decision 2026-10-03:** the owner approved the version-1 payload contracts for new ML output: `landmarks_json` has `schema_version` and normalised `points`; observation `quality_json` has `schema_version` and `detection_score`; representation `quality_json` has `schema_version` and `l2_norm`.
+
 ## Current state
 
 - **Milestone:** M0 and M1 (domain integrity) are complete and merged. **M3 (single-image ML integration) started 2026-10-02 (item 7 below).** M2 (persistence) is complete except issue 34; it had

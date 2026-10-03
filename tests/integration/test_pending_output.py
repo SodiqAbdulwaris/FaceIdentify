@@ -25,6 +25,7 @@ from backend.app.memory.models import (
     Representation,
     RepresentationState,
 )
+from backend.app.processing.models import ExecutionSegmentState, ProcessingRunState
 from backend.app.processing.pending_output import (
     SCHEMA_VERSION,
     UNIT_LENGTH_TOLERANCE,
@@ -65,11 +66,17 @@ def planned(export: RegisteredExport, provider: str = "CPUExecutionProvider") ->
 
 class World:
     def __init__(
-        self, session: Session, tmp_path: Path, new_id: SeededUUIDs, clock: FrozenClock
+        self,
+        session: Session,
+        tmp_path: Path,
+        new_id: SeededUUIDs,
+        clock: FrozenClock,
+        np_rng: np.random.Generator,
     ) -> None:
         self.session = session
         self.new_id = new_id
         self.clock = clock
+        self.np_rng = np_rng
         self.build = ModelFactory(session, clock, new_id)
         package = register_package(
             session,
@@ -87,7 +94,7 @@ class World:
         session.flush()
 
     def vector(self, **kw: Any) -> FaceVector:
-        values = np.random.default_rng(5).standard_normal(DIMENSION).astype(np.float32)
+        values = self.np_rng.standard_normal(DIMENSION).astype(np.float32)
         values /= np.linalg.norm(values)
         fields: dict[str, Any] = dict(
             detection_index=0, vector=values, normalization="L2_NORMALIZED"
@@ -113,8 +120,14 @@ class World:
 
 
 @pytest.fixture
-def world(db_session: Session, tmp_path: Path, new_id: SeededUUIDs, clock: FrozenClock) -> World:
-    return World(db_session, tmp_path, new_id, clock)
+def world(
+    db_session: Session,
+    tmp_path: Path,
+    new_id: SeededUUIDs,
+    clock: FrozenClock,
+    np_rng: np.random.Generator,
+) -> World:
+    return World(db_session, tmp_path, new_id, clock, np_rng)
 
 
 # --- what is written ---------------------------------------------------------------------------
@@ -231,6 +244,21 @@ def test_a_vector_of_another_normalisation_than_the_spaces_is_refused(world: Wor
     refused(world, "L2_NORMALIZED", vector=world.vector(normalization="UNIT_BALL"))
 
 
+@pytest.mark.parametrize(
+    ("values", "message"),
+    [
+        ([1.0] * DIMENSION, "NumPy array"),
+        (np.ones(DIMENSION, dtype=np.float64), "little-endian float32"),
+        (np.ones(DIMENSION, dtype=">f4"), "little-endian float32"),
+        (np.ones((DIMENSION, 2), dtype="<f4")[:, 0], "contiguous"),
+    ],
+)
+def test_a_vector_that_is_not_canonical_little_endian_float32_is_refused(
+    world: World, values: np.ndarray, message: str
+) -> None:
+    refused(world, message, vector=world.vector(vector=values))
+
+
 @pytest.mark.parametrize("scale", [0.5, 0.998, 1.002, 2.0])
 def test_an_l2_normalised_vector_that_is_not_unit_length_is_refused(
     world: World, scale: float
@@ -282,6 +310,16 @@ def test_an_output_naming_another_component_version_than_the_variants_is_refused
     )  # fmt: skip
 
 
+def test_a_variant_cannot_claim_a_catalog_kind_other_than_its_actual_component(
+    world: World,
+) -> None:
+    refused(
+        world,
+        "catalog component",
+        detector=PlannedVariant(**{**vars_of(world.embedder), "kind": "FACE_DETECTOR"}),
+    )
+
+
 def test_an_embedder_the_library_never_declared_for_the_space_is_refused(world: World) -> None:
     world.session.execute(update(RuntimeVariantRepresentationSpace).values(state="RETIRED"))
     refused(world, "not declared")
@@ -291,6 +329,47 @@ def test_a_validated_embedder_is_accepted_like_a_declared_one(world: World) -> N
     world.session.execute(update(RuntimeVariantRepresentationSpace).values(state="VALIDATED"))
     world.write()
     assert world.counts() == (1, 1)
+
+
+def test_a_vector_for_another_detection_is_refused(world: World) -> None:
+    refused(world, "does not belong", vector=world.vector(detection_index=1))
+
+
+def test_a_source_from_another_run_is_refused(world: World) -> None:
+    refused(world, "source does not belong", source_id=world.build.source().id)
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("processing_run_id", "no processing run"),
+        ("execution_segment_id", "no execution segment"),
+    ],
+)
+def test_an_unknown_processing_context_is_refused(world: World, field: str, message: str) -> None:
+    refused(world, message, **{field: uuid.uuid4()})
+
+
+def test_a_segment_from_another_run_is_refused(world: World) -> None:
+    other_run = world.build.run()
+    refused(
+        world, "segment does not belong", execution_segment_id=world.build.segment(other_run).id
+    )
+
+
+@pytest.mark.parametrize(
+    ("row", "state", "message"),
+    [
+        ("run", ProcessingRunState.COMPLETED, "processing run is"),
+        ("segment", ExecutionSegmentState.COMPLETED, "execution segment is"),
+    ],
+)
+def test_a_writer_refuses_a_run_or_segment_that_is_no_longer_writable(
+    world: World, row: str, state: str, message: str
+) -> None:
+    (world.run if row == "run" else world.segment).state = state
+    world.session.flush()
+    refused(world, message)
 
 
 def vars_of(variant: PlannedVariant) -> dict[str, Any]:

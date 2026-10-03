@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-03
 - **Milestone / tracker IDs:** M3 · TST-038, TST-039 (in progress)
-- **Status:** partial: the client is done. The writer of PENDING observations and representations is the rest of step 7; it waits for migration 0005 (the provenance columns decided on issue 88).
+- **Status:** done as the client part of step 7. The PENDING-output writer subsequently landed in PR #96 after revision `0005`.
 - **Commits:** PR (this branch): `feat(runtime): run a perception plan against the ML worker`
 
 ## What changed
@@ -27,5 +27,5 @@
 - Full gate: see the PR.
 
 ## Open issues / follow-ups
-- The PENDING-output writer (after migration 0005; issue 88).
+- The PENDING-output writer (after migration 0005; issue 88) is in PR #96.
 - Steps 8 and 9 (the run-local index, retrieval, recognition) need no output rows and come next.

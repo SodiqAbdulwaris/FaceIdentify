@@ -48,7 +48,15 @@ from backend.app.memory.models import (
     RepresentationSpace,
     RepresentationState,
 )
+from backend.app.processing.models import (
+    ExecutionSegment,
+    ExecutionSegmentState,
+    ProcessingRun,
+    ProcessingRunState,
+)
 from backend.app.runtime.models import (
+    Component,
+    ComponentVersion,
     ModelExport,
     RuntimeVariant,
     RuntimeVariantRepresentationSpace,
@@ -77,18 +85,25 @@ def _check_provenance(session: Session, variant: PlannedVariant, kind: str, what
     output names. Returns the variant id."""
     if variant.kind != kind:
         raise PendingOutputError(f"the {what} is a {variant.kind} variant, not a {kind}")
-    component = session.scalar(
-        select(ModelExport.component_version_id)
+    catalog = session.execute(
+        select(ModelExport.component_version_id, Component.kind)
         .join(RuntimeVariant, RuntimeVariant.model_export_id == ModelExport.id)
+        .join(ComponentVersion, ComponentVersion.id == ModelExport.component_version_id)
+        .join(Component, Component.id == ComponentVersion.component_id)
         .where(RuntimeVariant.id == variant.runtime_variant_id)
-    )
-    if component is None:
+    ).one_or_none()
+    if catalog is None:
         raise PendingOutputError(
             f"the {what} variant {variant.runtime_variant_id} is not in the catalog"
         )
-    if component != variant.component_version_id:
+    component_version_id, catalog_kind = catalog
+    if catalog_kind != kind:
         raise PendingOutputError(
-            f"the {what} variant belongs to component version {component}, not "
+            f"the {what} variant's catalog component is {catalog_kind}, not {kind}"
+        )
+    if component_version_id != variant.component_version_id:
+        raise PendingOutputError(
+            f"the {what} variant belongs to component version {component_version_id}, not "
             f"{variant.component_version_id}"
         )
     return variant.runtime_variant_id
@@ -96,7 +111,13 @@ def _check_provenance(session: Session, variant: PlannedVariant, kind: str, what
 
 def _check_vector(vector: FaceVector, space: RepresentationSpace) -> float:
     """The vector's length, finiteness and normalisation against the space; returns its L2 norm."""
-    values = np.asarray(vector.vector, dtype=np.float32)
+    values = vector.vector
+    if not isinstance(values, np.ndarray):
+        raise PendingOutputError("a vector must be a NumPy array")
+    if values.dtype != np.dtype("<f4"):
+        raise PendingOutputError("a vector must be little-endian float32")
+    if not values.flags.c_contiguous:
+        raise PendingOutputError("a vector must be contiguous")
     if values.shape != (space.dimension,):
         raise PendingOutputError(
             f"a vector of shape {values.shape}, the space has dimension {space.dimension}"
@@ -113,6 +134,30 @@ def _check_vector(vector: FaceVector, space: RepresentationSpace) -> float:
     ):
         raise PendingOutputError(f"an L2_NORMALIZED vector of length {norm}")
     return norm
+
+
+def _check_context(
+    session: Session,
+    *,
+    source_id: uuid.UUID,
+    processing_run_id: uuid.UUID,
+    execution_segment_id: uuid.UUID,
+) -> None:
+    """The output belongs to one source, running run and running segment before it is written."""
+    run = session.get(ProcessingRun, processing_run_id)
+    if run is None:
+        raise PendingOutputError(f"no processing run {processing_run_id}")
+    if run.source_id != source_id:
+        raise PendingOutputError("the source does not belong to the processing run")
+    if run.state != ProcessingRunState.RUNNING:
+        raise PendingOutputError(f"the processing run is {run.state}, not writable")
+    segment = session.get(ExecutionSegment, execution_segment_id)
+    if segment is None:
+        raise PendingOutputError(f"no execution segment {execution_segment_id}")
+    if segment.processing_run_id != run.id:
+        raise PendingOutputError("the execution segment does not belong to the processing run")
+    if segment.state != ExecutionSegmentState.RUNNING:
+        raise PendingOutputError(f"the execution segment is {segment.state}, not writable")
 
 
 def write_face(
@@ -135,6 +180,12 @@ def write_face(
     space = session.get(RepresentationSpace, representation_space_id)
     if space is None:
         raise PendingOutputError(f"no representation space {representation_space_id}")
+    _check_context(
+        session,
+        source_id=source_id,
+        processing_run_id=processing_run_id,
+        execution_segment_id=execution_segment_id,
+    )
     detector_variant = _check_provenance(session, detector, DETECTOR, "detector")
     embedder_variant = _check_provenance(session, embedder, EMBEDDER, "embedder")
     compatible = session.scalar(
@@ -148,6 +199,8 @@ def write_face(
             f"the embedder variant is not declared for representation space {space.id}"
         )
     norm = _check_vector(vector, space)
+    if vector.detection_index != detection.detection_index:
+        raise PendingOutputError("the vector does not belong to this detection")
 
     x0, y0, x1, y1 = detection.box
     observation = Observation(
@@ -176,7 +229,7 @@ def write_face(
         execution_segment_id=execution_segment_id,
         representation_space_id=space.id,
         state=RepresentationState.PENDING,
-        vector=np.asarray(vector.vector, dtype="<f4").tobytes(),
+        vector=vector.vector.tobytes(),
         vector_dimension=space.dimension,
         quality_json={"schema_version": SCHEMA_VERSION, "l2_norm": norm},
         runtime_variant_id=embedder_variant,

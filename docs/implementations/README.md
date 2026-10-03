@@ -102,7 +102,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [M3: the worker's configuration from the catalog and this machine's packages](2026-10-02-m3-worker-config.md) | partial; step 7, fourth part |
 | 2026-10-02 | [Decisions: a representation space's persisted state and its component version](2026-10-02-space-state-and-provenance-decisions.md) | done |
 | 2026-10-02 | [The model family leaves the representation-space identity](2026-10-02-space-identity-without-family.md) | done; provenance gap is issue 88 |
-| 2026-10-03 | [Decision: output-level execution provenance (issue 88)](2026-10-03-output-provenance-decision.md) | decided; to be built with migration 0005 |
+| 2026-10-03 | [Decision: output-level execution provenance (issue 88)](2026-10-03-output-provenance-decision.md) | implemented by revision `0005` and PR #96 |
 | 2026-10-03 | [M3: the backend client for perception](2026-10-03-m3-perception-client.md) | partial; step 7, fifth part |
 | 2026-10-03 | [M3: candidate retrieval over the global and run-local pools](2026-10-03-m3-candidate-retrieval.md) | partial; step 8; TST-040 |
 | 2026-10-03 | [M3: the recognition assessment and the identity reasoner](2026-10-03-m3-recognition-assessment.md) | partial; step 9; TST-041, TST-042 |
