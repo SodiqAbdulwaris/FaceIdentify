@@ -19,10 +19,9 @@ import uuid
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
 from usearch.index import Index
 
-Vector = NDArray[np.float32]
+from backend.infrastructure.indexing.representation_index import Vector
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +34,7 @@ class RunLocalIndex:
     def __init__(self, *, representation_space_id: uuid.UUID, ndim: int, metric: str) -> None:
         self.representation_space_id = representation_space_id
         self.ndim = ndim
+        self.metric = metric
         self._index = Index(ndim=ndim, metric=metric, dtype="f32")
         self._labels: list[uuid.UUID] = []  # label = position
         self._known: set[uuid.UUID] = set()

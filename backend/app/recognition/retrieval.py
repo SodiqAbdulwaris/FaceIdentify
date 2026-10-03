@@ -21,7 +21,9 @@ The run-local pool is rebuilt from SQLite after a crash (`rebuild_run_local_inde
 ever a copy of the run's pending representations.
 
 Distances are the index's (`cos`: 1 minus the cosine similarity); `similarity` is derived from them
-for the cosine metric, the only one a space may have today.
+for the cosine metric, the only one a space may have today, and the only one retrieval accepts: an
+index of any other metric is refused, so two pools' distances are never ranked against each other
+under different metrics and a similarity is never a mislabelled distance.
 """
 
 import uuid
@@ -41,6 +43,9 @@ from backend.infrastructure.indexing.run_local_index import RunLocalIndex
 _IDS_PER_QUERY = 500
 
 
+COSINE = "cos"  # the USearch name of the only metric a representation space may have
+
+
 class IncompatibleSpaceError(ValueError):
     """The query, the global index and the run-local index are not all one space's."""
 
@@ -54,7 +59,10 @@ class Pool(StrEnum):
 class RetrievedCandidate:
     pool: Pool
     representation_id: uuid.UUID
-    identity_id: uuid.UUID | None  # None for a run-local candidate: it has no identity yet
+    # Global: the candidate's ACTIVE identity. Run-local: the PENDING identity this run gave it (so
+    # the same new person is recognised again within the run), or None when it carries no settled
+    # identity (an abstention).
+    identity_id: uuid.UUID | None
     distance: float
 
     @property
@@ -82,16 +90,23 @@ def retrieve(
     processing_run_id: uuid.UUID,
     run_local: RunLocalIndex | None = None,
 ) -> Retrieval:
-    if global_index.representation_space_id != representation_space_id or (
-        global_index.ndim != dimension
+    if (
+        global_index.representation_space_id != representation_space_id
+        or global_index.ndim != dimension
+        or global_index.metric != COSINE
     ):
-        raise IncompatibleSpaceError("the global index is not this representation space's")
+        raise IncompatibleSpaceError(
+            "the global index is not this representation space's cosine index"
+        )
     if run_local is not None and (
-        run_local.representation_space_id != representation_space_id or run_local.ndim != dimension
+        run_local.representation_space_id != representation_space_id
+        or run_local.ndim != dimension
+        or run_local.metric != COSINE
     ):
-        raise IncompatibleSpaceError("the run-local index is not this representation space's")
+        raise IncompatibleSpaceError(
+            "the run-local index is not this representation space's cosine index"
+        )
     found: list[RetrievedCandidate] = []
-    dropped = 0
 
     hits = global_index.search(vector, k)
     distance_of = {hit.key: hit.distance for hit in hits}
@@ -101,15 +116,15 @@ def retrieve(
                 Pool.GLOBAL, kept.representation_id, kept.identity_id, distance_of[kept.ann_key]
             )
         )
-    dropped += len(hits) - len(found)
+    dropped = len(hits) - len(found)
 
     if run_local is not None:
         near = run_local.search(vector, k)
         distances = {hit.representation_id: hit.distance for hit in near}
         alive = _still_pending(session, processing_run_id, representation_space_id, list(distances))
         found.extend(
-            RetrievedCandidate(Pool.RUN_LOCAL, identifier, None, distances[identifier])
-            for identifier in alive
+            RetrievedCandidate(Pool.RUN_LOCAL, identifier, identity, distances[identifier])
+            for identifier, identity in alive.items()
         )
         dropped += len(near) - len(alive)
 
@@ -122,21 +137,21 @@ def _still_pending(
     processing_run_id: uuid.UUID,
     representation_space_id: uuid.UUID,
     representation_ids: list[uuid.UUID],
-) -> list[uuid.UUID]:
-    """The ids that are still `PENDING` representations of this run in this space (plain columns,
-    no ORM objects: the answer is the database's, not a cached row's)."""
-    alive: list[uuid.UUID] = []
+) -> dict[uuid.UUID, uuid.UUID | None]:
+    """The ids that are still `PENDING` representations of this run in this space, each with the
+    identity the run gave it, if any (plain columns, no ORM objects: the answer is the database's,
+    not a cached row's)."""
+    alive: dict[uuid.UUID, uuid.UUID | None] = {}
     for start in range(0, len(representation_ids), _IDS_PER_QUERY):
-        alive.extend(
-            session.scalars(
-                select(Representation.id).where(
-                    Representation.id.in_(representation_ids[start : start + _IDS_PER_QUERY]),
-                    Representation.processing_run_id == processing_run_id,
-                    Representation.representation_space_id == representation_space_id,
-                    Representation.state == RepresentationState.PENDING,
-                )
+        rows = session.execute(
+            select(Representation.id, Representation.identity_id).where(
+                Representation.id.in_(representation_ids[start : start + _IDS_PER_QUERY]),
+                Representation.processing_run_id == processing_run_id,
+                Representation.representation_space_id == representation_space_id,
+                Representation.state == RepresentationState.PENDING,
             )
         )
+        alive.update({identifier: identity for identifier, identity in rows})
     return alive
 
 
