@@ -243,7 +243,8 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
 
     @invariant()
     def active_representations_are_ann_eligible(self) -> None:
-        """§20: an ACTIVE representation always has an identity and an ann_key."""
+        """§20: an ACTIVE representation always has an ann_key (and an identity, except an
+        accepted ABSTAIN representation, which this model never creates)."""
         ineligible = self.session.scalars(
             select(Representation).where(
                 Representation.state == RepresentationState.ACTIVE,

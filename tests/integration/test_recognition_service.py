@@ -177,3 +177,20 @@ def test_the_assessment_is_read_only(memory: Memory) -> None:
     before = memory.build.session.new, memory.build.session.dirty
     memory.assess(unit(1, 0, 0, 0))
     assert (memory.build.session.new, memory.build.session.dirty) == before
+
+
+def test_a_face_that_looks_like_an_accepted_abstention_is_not_matched_and_not_created(
+    memory: Memory,
+) -> None:
+    """An identity-less ACTIVE neighbour is evidence only (Persistence 6.2): it can never be a
+    `MATCH_EXISTING` target, and a new identity beside it would be a duplicate."""
+    memory.build.representation(
+        representation_space_id=memory.space.id, state="ACTIVE", ann_key=40,
+        vector=float32_vector([1.0, 0.0, 0.0, 0.0]),
+    )  # fmt: skip
+    memory.index.add(40, unit(1, 0, 0, 0))
+    assessment = memory.assess(unit(1, 0.01, 0, 0))
+    assert [g.identity_id for g in assessment.groups] == [None]
+    decision = IdentityReasoner(POLICY).decide(assessment)
+    assert decision.outcome is RecognitionOutcome.ABSTAIN
+    assert decision.reason is Reason.UNRESOLVED_NEIGHBOUR
