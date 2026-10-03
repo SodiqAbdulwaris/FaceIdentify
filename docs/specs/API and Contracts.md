@@ -232,6 +232,13 @@ The command:
 6. commits them atomically
 7. wakes the scheduler after commit
 
+> **Decision 2026-10-04 (owner; issue 98):** M3 accepts no mutable default or arbitrary
+> ``resolved_configuration`` object. Its caller supplies a strict, versioned
+> `ProcessingRequestV1`; the backend validates every selected catalog object and its compatibility
+> in the request transaction, resolves it to the canonical immutable snapshot, then creates the
+> run and Job. M4 may later turn mutable user/application defaults into this same request, but
+> defaults never become a second processing-configuration model.
+
 Response:
 
 ```http
@@ -2458,6 +2465,15 @@ ProcessingConfigurationSnapshot
 ```
 
 The snapshot is immutable.
+
+> **Decision 2026-10-04 (owner; issue 98):** `ProcessingRequestV1` explicitly selects detector
+> and embedder component versions/exports, intended representation space, calibration or
+> interpretation, runtime/fallback policy, crop and quality policy, decision policy, and
+> command-specific options. Unsupported request or nested-policy schema versions fail closed.
+> The resulting snapshot preserves immutable catalog facts as well as IDs; actual execution stays
+> on execution segments and output `runtime_variant_id` records.
+> M3 implements only `UNCALIBRATED` / `COSINE_UNCALIBRATED`; a profile selection is rejected
+> until its interpretation can be executed end-to-end, rather than freezing a misleading intent.
 
 Settings changed after Job creation affect future runs, not the queued or active run.
 
