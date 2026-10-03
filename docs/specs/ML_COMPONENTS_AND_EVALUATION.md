@@ -369,6 +369,8 @@ The worker loads only validated model/export/provider combinations. FastAPI sele
 
 Processing provenance is explicit: `ProcessingRun` identifies logical work, `Job` schedules work, and `ExecutionSegment` records what actually executed. A run can have more than one segment when a documented fallback occurs. Each segment records runtime variant, provider, artifact, component versions, resource observations, and reason for transition.
 
+> **Decision 2026-10-03 (owner; GitHub issue 88):** a segment names one nullable runtime variant, while a run executes a detector and an embedder, so the component versions and the variant that actually produced a given observation or representation are recorded on that output (`runtime_variant_id`, Persistence 5, 6.2 and 14), not on the segment.
+
 ---
 
 # 14. Performance, resource budgets, and processing throughput
