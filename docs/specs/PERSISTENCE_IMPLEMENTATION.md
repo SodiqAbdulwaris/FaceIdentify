@@ -270,6 +270,15 @@ There may be many historical runs per source but only one source pointer, `curre
 
 `processing_configuration_snapshots` records resolved semantic intent at command acceptance, never today's mutable settings. It contains `id`, `schema_version`, `canonical_json`, `fingerprint_sha256`, `created_at`, and nullable `created_by_user_action`. `canonical_json` includes source-processing choices, selected component/version/export contracts, intended representation spaces, calibration profile, allowed fallback policy, crop/quality policy, and all other semantic settings necessary to explain the run.
 
+> **Decision 2026-10-04 (owner; issue 98):** the M3 input is `ProcessingRequestV1`, a strict
+> versioned semantic request, not an unvalidated JSON bag or an implicit lookup of mutable
+> defaults. Its resolver validates catalog references and mutual compatibility in the transaction,
+> then snapshots both selections and immutable catalog facts needed to reconstruct their meaning.
+> Unknown request/policy schema versions fail closed. M4 defaults are only an upstream producer of
+> this request contract; runtime/output provenance remains distinct.
+> M3 accepts only the implemented uncalibrated interpretation; it rejects a calibration profile
+> request until processing can execute that profile's semantics end-to-end.
+
 Use `UNIQUE(fingerprint_sha256)` only if identical snapshots are safely shareable; otherwise retain an immutable row per run. This design chooses one snapshot per run for unambiguous provenance. It must never be updated. The fingerprint helps diagnostics and is not an authorization token.
 
 > **Decision 2026-10-01 (owner; GitHub issue 51): both invariants are enforced by the database.** *One snapshot per run* is `UNIQUE(processing_runs.configuration_snapshot_id)` (already in revision `0001`; the snapshot has no run column, the run holds the foreign key, so the constraint sits on the run). *Immutability* is two triggers on `processing_configuration_snapshots` (revision `0003`, built; they are defined once in the model and copied into the revision, and a test compares their text; **one known limit:** SQLite's `INSERT OR REPLACE` deletes and re-inserts without firing delete triggers, so it can rewrite a snapshot that no run references, GitHub issue 55): `BEFORE UPDATE` always aborts, so a committed snapshot's captured configuration can never change; `BEFORE DELETE` aborts while a run references the snapshot (the foreign key says so too; the trigger gives a clear message) and allows deleting one no run references. Creation is an ordinary `INSERT` in the caller's transaction. A snapshot must carry every value needed to reproduce the run inside `canonical_json` (component versions, export contracts, spaces, calibration, policies), never a reference to a mutable row.
