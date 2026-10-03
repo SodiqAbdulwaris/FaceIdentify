@@ -301,3 +301,47 @@ def test_repeats_are_removed_before_the_query_so_they_cannot_overflow_it(
     assert keys_of(resolved) == [5]
     ((_, parameters),) = statements  # one statement, not ten
     assert len(parameters) <= 5  # type: ignore[arg-type]  # the key once, plus the space and states
+
+
+# --- an accepted ABSTAIN representation: ACTIVE, no identity (decision 2026-10-02) -------------
+
+
+def abstained(build: ModelFactory, space_id: uuid.UUID, key: int, **kw: object) -> Representation:
+    fields: dict[str, object] = dict(
+        representation_space_id=space_id, state="ACTIVE", ann_key=key,
+        vector=float32_vector([float(key), 1.0, 0.0, 0.0]),
+    )  # fmt: skip
+    return build.representation(**(fields | kw))
+
+
+def test_an_accepted_abstention_is_kept_as_a_candidate_with_no_identity(
+    build: ModelFactory,
+) -> None:
+    space = build.representation_space(dimension=NDIM)
+    rep = abstained(build, space.id, 7)
+    known = keyed(build, space.id, 8)
+
+    resolved = resolve_ann_candidates(build.session, space.id, [8, 7])
+
+    assert keys_of(resolved) == [8, 7]
+    assert resolved[1].representation_id == rep.id
+    assert resolved[1].identity_id is None  # evidence only: never a target to match
+    assert resolved[0].identity_id == known.identity_id
+
+
+@pytest.mark.parametrize("state", ["PENDING", "SUPERSEDED", "ERASING", "DELETED"])
+def test_an_identity_less_representation_that_is_not_active_is_still_dropped(
+    build: ModelFactory, state: str
+) -> None:
+    space = build.representation_space(dimension=NDIM)
+    abstained(build, space.id, 5, state=state)
+
+    assert resolve_ann_candidates(build.session, space.id, [5]) == []
+
+
+def test_an_identity_less_representation_of_another_space_is_dropped(build: ModelFactory) -> None:
+    mine = build.representation_space(dimension=NDIM)
+    other = build.representation_space(dimension=NDIM)
+    abstained(build, other.id, 5)
+
+    assert resolve_ann_candidates(build.session, mine.id, [5]) == []

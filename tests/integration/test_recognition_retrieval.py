@@ -408,3 +408,12 @@ def test_another_spaces_waiting_operation_does_not_make_this_space_unconverged(
     world.build.index_operation(world.build.representation(representation_space_id=other.id))
     assert index_converged(world.build.session, world.space.id) is True
     assert index_converged(world.build.session, other.id) is False
+
+
+def test_an_accepted_abstention_is_a_global_candidate_with_no_identity(world: World) -> None:
+    """ACTIVE, no identity, in the index: evidence that something looks like the query."""
+    rep = world.active(1, unit(1, 0.01, 0, 0), identity_id=None)
+    (found,) = world.ask(unit(1, 0, 0, 0)).candidates
+    assert found.pool is Pool.GLOBAL
+    assert found.representation_id == rep.id
+    assert found.identity_id is None
