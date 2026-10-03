@@ -62,7 +62,9 @@ SNAPSHOT_NO_DELETE_WHILE_USED_TRIGGER = (
 )
 # SQLite's INSERT OR REPLACE deletes the conflicting row without firing a delete trigger, so a
 # snapshot no run uses could be rewritten that way (GitHub issue 55, revision 0005). This fires
-# before the conflict is resolved, so it blocks REPLACE and a plain duplicate id alike.
+# before the conflict is resolved, so it blocks REPLACE and a plain duplicate id alike. It covers
+# only `id`, the table's one unique constraint: a later UNIQUE on another column (Persistence 13
+# allows the fingerprint) needs the trigger widened, and a test fails until it is.
 SNAPSHOT_NO_REPLACE_TRIGGER = (
     "CREATE TRIGGER trg_processing_configuration_snapshots_no_replace "
     "BEFORE INSERT ON processing_configuration_snapshots "

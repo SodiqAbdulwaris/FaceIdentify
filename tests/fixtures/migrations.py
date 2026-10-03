@@ -40,7 +40,8 @@ def populate_legacy(
     cannot write to an older database directly. `fill` builds the rows in a scratch database at the
     head revision, and the rows are copied into `path` column by column, for the columns both have
     (a column only the head has is left to its default, NULL). Tables the older revision lacks are
-    skipped, and a row the older database already holds (a settings singleton) is left alone.
+    skipped, and a row the older database already holds (a uniqueness conflict, such as a
+    settings singleton) is left alone; any other refusal by the older schema raises.
     """
     migrate(monkeypatch, scratch, "head")
     engine = create_sqlite_engine(scratch)
@@ -61,9 +62,10 @@ def populate_legacy(
             here = {row[1] for row in connection.execute(f'PRAGMA scratch.table_info("{table}")')}
             shared = ", ".join(f'"{column}"' for column in there if column in here)
             if shared:
+                # (a uniqueness conflict is skipped; a CHECK or NOT NULL refusal is not)
                 connection.execute(
-                    f'INSERT OR IGNORE INTO main."{table}" ({shared})'  # noqa: S608
-                    f' SELECT {shared} FROM scratch."{table}"'
+                    f'INSERT INTO main."{table}" ({shared})'  # noqa: S608
+                    f' SELECT {shared} FROM scratch."{table}" WHERE true ON CONFLICT DO NOTHING'
                 )
         connection.commit()
         connection.execute("DETACH DATABASE scratch")
