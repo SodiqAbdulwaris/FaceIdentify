@@ -107,3 +107,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-03 | [M3: candidate retrieval over the global and run-local pools](2026-10-03-m3-candidate-retrieval.md) | partial; step 8; TST-040 |
 | 2026-10-03 | [M3: the recognition assessment and the identity reasoner](2026-10-03-m3-recognition-assessment.md) | partial; step 9; TST-041, TST-042 |
 | 2026-10-03 | [M3: revision 0005 (abstentions, output provenance, snapshot replace)](2026-10-03-m3-revision-0005.md) | partial; step 11, first part; issue 55 built |
+| 2026-10-03 | [M3: the writer of a run's PENDING output](2026-10-03-m3-pending-output-writer.md) | done; step 7 complete; issue 88 |

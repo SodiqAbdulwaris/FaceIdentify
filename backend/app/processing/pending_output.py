@@ -1,0 +1,196 @@
+"""Writing a run's private output: a PENDING observation and its PENDING representation.
+
+A processing run's detections and vectors are private and discardable until the run is accepted
+(Persistence 5, 6.2, 30): they are `PENDING` rows of exactly one run, absent from the global index.
+This is the only writer of them. It records what a client produced (`PerceptionClient`) and
+**what actually produced it** (decision 2026-10-03, issue 88): the observation carries the detector
+variant that executed and the representation the embedder variant that executed, each a foreign key
+to the catalog (variant, then export, then component version), never the configured or preferred
+one. A variant that was not what the plan named is the client's refusal (`PerceptionClient` checks
+the worker's own provenance); the writer checks the catalog agrees with it.
+
+Checked before anything is stored (Persistence 6.2: "validate the exact dimension, finite values,
+and normalization required by the RepresentationSpace contract"):
+
+* the vector is the space's dimension, finite, and of the space's normalization (an
+  `L2_NORMALIZED` vector has unit length to within `UNIT_LENGTH_TOLERANCE`);
+* the detector variant is a face detector and the embedder variant a face representation component,
+  and each variant's export belongs to the component version the output names (so
+  `observations.detector_component_version_id` and the variant cannot disagree);
+* the embedder variant is declared or validated for the space (a vector from a variant the library
+  never said could produce this space does not enter it).
+
+The JSON columns the spec left undefined (Persistence 5, decision 2026-09-23) get a small versioned
+shape here: `landmarks_json` is `{"schema_version": 1, "points": [[x, y], ...]}` in the normalised
+coordinates the worker returned; an observation's `quality_json` is `{"schema_version": 1,
+"detection_score": s}`; a representation's is `{"schema_version": 1, "l2_norm": n}`.
+
+Like the other repositories it joins the caller's transaction and never commits. `sequence_in_run`
+is the caller's (the schema makes it unique within a run, which is what makes a replayed write
+refuse instead of duplicate).
+"""
+
+import math
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+import numpy as np
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from backend.app.memory.models import (
+    Observation,
+    ObservationState,
+    Representation,
+    RepresentationSpace,
+    RepresentationState,
+)
+from backend.app.runtime.models import (
+    ModelExport,
+    RuntimeVariant,
+    RuntimeVariantRepresentationSpace,
+)
+from backend.app.runtime.perception_client import FaceVector
+from backend.app.runtime.registration import DECLARED, DETECTOR, EMBEDDER, VALIDATED
+from backend.app.runtime.worker_config import PlannedVariant
+from backend.ml.contracts.messages import Detection
+
+SCHEMA_VERSION = 1
+UNIT_LENGTH_TOLERANCE = 1e-3  # float32 round trips and the worker's own normalisation
+
+
+class PendingOutputError(ValueError):
+    """The output cannot be recorded as it is: nothing was written."""
+
+
+@dataclass(frozen=True, slots=True)
+class WrittenFace:
+    observation_id: uuid.UUID
+    representation_id: uuid.UUID
+
+
+def _check_provenance(session: Session, variant: PlannedVariant, kind: str, what: str) -> uuid.UUID:
+    """The variant's catalog row, checked: of the right kind and of the component version the
+    output names. Returns the variant id."""
+    if variant.kind != kind:
+        raise PendingOutputError(f"the {what} is a {variant.kind} variant, not a {kind}")
+    component = session.scalar(
+        select(ModelExport.component_version_id)
+        .join(RuntimeVariant, RuntimeVariant.model_export_id == ModelExport.id)
+        .where(RuntimeVariant.id == variant.runtime_variant_id)
+    )
+    if component is None:
+        raise PendingOutputError(
+            f"the {what} variant {variant.runtime_variant_id} is not in the catalog"
+        )
+    if component != variant.component_version_id:
+        raise PendingOutputError(
+            f"the {what} variant belongs to component version {component}, not "
+            f"{variant.component_version_id}"
+        )
+    return variant.runtime_variant_id
+
+
+def _check_vector(vector: FaceVector, space: RepresentationSpace) -> float:
+    """The vector's length, finiteness and normalisation against the space; returns its L2 norm."""
+    values = np.asarray(vector.vector, dtype=np.float32)
+    if values.shape != (space.dimension,):
+        raise PendingOutputError(
+            f"a vector of shape {values.shape}, the space has dimension {space.dimension}"
+        )
+    if not np.isfinite(values).all():
+        raise PendingOutputError("a vector must be finite (no NaN or infinity)")
+    if vector.normalization != space.normalization:
+        raise PendingOutputError(
+            f"a {vector.normalization} vector, the space is {space.normalization}"
+        )
+    norm = float(np.linalg.norm(values))
+    if space.normalization == "L2_NORMALIZED" and not math.isclose(
+        norm, 1.0, abs_tol=UNIT_LENGTH_TOLERANCE
+    ):
+        raise PendingOutputError(f"an L2_NORMALIZED vector of length {norm}")
+    return norm
+
+
+def write_face(
+    session: Session,
+    *,
+    source_id: uuid.UUID,
+    processing_run_id: uuid.UUID,
+    execution_segment_id: uuid.UUID,
+    sequence_in_run: int,
+    detection: Detection,
+    detector: PlannedVariant,
+    vector: FaceVector,
+    embedder: PlannedVariant,
+    representation_space_id: uuid.UUID,
+    new_id: Callable[[], uuid.UUID],
+    now: datetime,
+) -> WrittenFace:
+    """One detected face and its vector, both `PENDING`. Raises `PendingOutputError` (and writes
+    nothing) if the output or its provenance does not stand up."""
+    space = session.get(RepresentationSpace, representation_space_id)
+    if space is None:
+        raise PendingOutputError(f"no representation space {representation_space_id}")
+    detector_variant = _check_provenance(session, detector, DETECTOR, "detector")
+    embedder_variant = _check_provenance(session, embedder, EMBEDDER, "embedder")
+    compatible = session.scalar(
+        select(RuntimeVariantRepresentationSpace.state).where(
+            RuntimeVariantRepresentationSpace.runtime_variant_id == embedder_variant,
+            RuntimeVariantRepresentationSpace.representation_space_id == space.id,
+        )
+    )
+    if compatible not in (DECLARED, VALIDATED):
+        raise PendingOutputError(
+            f"the embedder variant is not declared for representation space {space.id}"
+        )
+    norm = _check_vector(vector, space)
+
+    x0, y0, x1, y1 = detection.box
+    observation = Observation(
+        id=new_id(),
+        source_id=source_id,
+        processing_run_id=processing_run_id,
+        execution_segment_id=execution_segment_id,
+        state=ObservationState.PENDING,
+        sequence_in_run=sequence_in_run,
+        bbox_x=x0,
+        bbox_y=y0,
+        bbox_width=x1 - x0,  # (the worker's box is inside the image, so x + width <= 1 holds)
+        bbox_height=y1 - y0,
+        landmarks_json=_landmarks(detection),
+        quality_json={"schema_version": SCHEMA_VERSION, "detection_score": detection.score},
+        detector_component_version_id=detector.component_version_id,
+        runtime_variant_id=detector_variant,
+        created_at=now,
+    )
+    session.add(observation)
+    session.flush()
+    representation = Representation(
+        id=new_id(),
+        observation_id=observation.id,
+        processing_run_id=processing_run_id,
+        execution_segment_id=execution_segment_id,
+        representation_space_id=space.id,
+        state=RepresentationState.PENDING,
+        vector=np.asarray(vector.vector, dtype="<f4").tobytes(),
+        vector_dimension=space.dimension,
+        quality_json={"schema_version": SCHEMA_VERSION, "l2_norm": norm},
+        runtime_variant_id=embedder_variant,
+        created_at=now,
+    )
+    session.add(representation)
+    session.flush()
+    return WrittenFace(observation.id, representation.id)
+
+
+def _landmarks(detection: Detection) -> dict[str, Any] | None:
+    if detection.landmarks is None:
+        return None
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "points": [[x, y] for x, y in detection.landmarks],
+    }
