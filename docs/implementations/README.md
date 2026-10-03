@@ -103,3 +103,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-02 | [Decisions: a representation space's persisted state and its component version](2026-10-02-space-state-and-provenance-decisions.md) | done |
 | 2026-10-02 | [The model family leaves the representation-space identity](2026-10-02-space-identity-without-family.md) | done; provenance gap is issue 88 |
 | 2026-10-03 | [Decision: output-level execution provenance (issue 88)](2026-10-03-output-provenance-decision.md) | decided; to be built with migration 0005 |
+| 2026-10-03 | [M3: the backend client for perception](2026-10-03-m3-perception-client.md) | partial; step 7, fifth part |
