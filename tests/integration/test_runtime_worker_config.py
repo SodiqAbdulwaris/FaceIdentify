@@ -480,6 +480,36 @@ def test_the_same_weights_under_two_component_versions_each_keep_their_own_versi
     assert {v.package_key for v in plan.embedder} == {"pkg-one", "pkg-two"}
 
 
+def test_an_explicitly_selected_export_is_the_only_export_the_plan_can_use(
+    library: Library,
+) -> None:
+    first = library.register(library.install(manifest_dict("pkg-one")))
+    second_manifest = manifest_dict("pkg-two")
+    for component in second_manifest["components"]:
+        component["version"] = "1.1.0"
+    second = library.register(library.install(second_manifest))
+    detector = next(export for export in first.exports if export.component_key == "detector")
+    embedder = next(export for export in first.exports if export.component_key == "embedder")
+    other_detector = next(export for export in second.exports if export.component_key == "detector")
+
+    exact = library.plan(
+        first,
+        detector_model_export_id=detector.model_export_id,
+        embedder_model_export_id=embedder.model_export_id,
+    )
+
+    assert {variant.runtime_variant_id for variant in exact.detector} == set(
+        detector.variant_ids.values()
+    )
+    assert {variant.runtime_variant_id for variant in exact.embedder} == set(
+        embedder.variant_ids.values()
+    )
+    with pytest.raises(RuntimeUnavailableError, match="does not belong to the detector"):
+        library.plan(first, detector_model_export_id=other_detector.model_export_id)
+    with pytest.raises(RuntimeUnavailableError, match="not declared for the representation space"):
+        library.plan(first, embedder_model_export_id=other_detector.model_export_id)
+
+
 # --- from the PR 86 review -----------------------------------------------------------------------
 
 
