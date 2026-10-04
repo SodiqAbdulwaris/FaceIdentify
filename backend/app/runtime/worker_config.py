@@ -214,9 +214,13 @@ def plan_perception(
     detector_component_version_id: uuid.UUID,
     representation_space_id: uuid.UUID,
     providers: Sequence[str],
+    detector_model_export_id: uuid.UUID | None = None,
+    embedder_model_export_id: uuid.UUID | None = None,
 ) -> PerceptionPlan:
     """The variants that can detect faces and produce `representation_space_id`'s vectors on
-    this machine, preferred providers first. `RuntimeUnavailableError` if either is impossible."""
+    this machine, preferred providers first. When an export id is supplied it is the exact frozen
+    command selection, not a hint: another export is never substituted. `RuntimeUnavailableError`
+    describes either unavailable required stage."""
     machine = _Machine(store)
     space = session.get(RepresentationSpace, representation_space_id)
     if space is None:
@@ -229,13 +233,27 @@ def plan_perception(
     if component.kind != DETECTOR:
         raise RuntimeUnavailableError("the detector", [f"that component is a {component.kind}"])
 
+    if detector_model_export_id is None:
+        detector_exports = session.scalars(
+            select(ModelExport).where(ModelExport.component_version_id == detector_version.id)
+        ).all()
+    else:
+        selected_detector = session.get(ModelExport, detector_model_export_id)
+        if (
+            selected_detector is None
+            or selected_detector.component_version_id != detector_version.id
+        ):
+            raise RuntimeUnavailableError(
+                "the detector",
+                ["the selected export does not belong to the detector component version"],
+            )
+        detector_exports = [selected_detector]
+
     detector_reasons: list[str] = []
     detector = _variants_of(
         session,
         machine,
-        session.scalars(
-            select(ModelExport).where(ModelExport.component_version_id == detector_version.id)
-        ).all(),
+        detector_exports,
         DETECTOR,
         providers,
         None,
@@ -257,13 +275,25 @@ def plan_perception(
             RuntimeVariantRepresentationSpace.state.in_(USABLE_COMPATIBILITY),
         )
     ).all()
+    compatible_export_ids = {variant.model_export_id for variant in compatible}
+    if embedder_model_export_id is None:
+        embedder_exports = session.scalars(
+            select(ModelExport).where(ModelExport.id.in_(compatible_export_ids))
+        ).all()
+    else:
+        selected_embedder = session.get(ModelExport, embedder_model_export_id)
+        if selected_embedder is None or selected_embedder.id not in compatible_export_ids:
+            raise RuntimeUnavailableError(
+                "the representation model",
+                ["the selected export is not declared for the representation space"],
+            )
+        embedder_exports = [selected_embedder]
+
     embedder_reasons: list[str] = []
     embedder = _variants_of(
         session,
         machine,
-        session.scalars(
-            select(ModelExport).where(ModelExport.id.in_({v.model_export_id for v in compatible}))
-        ).all(),
+        embedder_exports,
         EMBEDDER,
         providers,
         {v.id for v in compatible},
