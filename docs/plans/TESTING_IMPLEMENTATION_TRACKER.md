@@ -220,6 +220,13 @@ started.
 
 **Dependencies:** M3, frontend and desktop implementation.
 
+**Current evidence:** `tests/contracts/test_api_launch_capability.py` (9) establishes the M4
+FastAPI bootstrap's per-launch capability boundary: canonical 256-bit token validation, protected
+health/readiness, a changed-token rejection, and WebSocket authentication via an offered
+credential protocol while selecting only stable `faceidentify.v1`. TST-045, TST-048, and TST-051
+remain `IN_PROGRESS`: application routes, lifecycle-backed readiness, and event delivery/reconnect
+are not built yet.
+
 **Milestone gate:** The first complete desktop workflow passes.
 
 ---

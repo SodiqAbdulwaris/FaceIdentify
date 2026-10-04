@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-04 (M3 step 10 request and scheduler claim/start boundaries merged in PRs #97 and #99; exact frozen-export planning is in progress; M4 per-launch loopback capability-token decision approved)_
+_Last updated: 2026-10-04 (M3 step 10 request and scheduler claim/start boundaries merged in PRs #97 and #99; exact frozen-export planning is in progress; M4's FastAPI bootstrap now requires the approved per-launch capability token for HTTP and WebSocket handshakes, with loopback hosting/lifespan still pending)_
 
 > **Decision 2026-10-03:** the owner approved the version-1 payload contracts for new ML output: `landmarks_json` has `schema_version` and normalised `points`; observation `quality_json` has `schema_version` and `detection_score`; representation `quality_json` has `schema_version` and `l2_norm`.
 
@@ -29,7 +29,11 @@ _Last updated: 2026-10-04 (M3 step 10 request and scheduler claim/start boundari
   Reviewers for agent-opened PRs (`rules/branches.md`): Codex CLI and a read-only subagent are
   approved. Probed 2026-09-30 and **not** approved: `agy`, OpenCode (see the implementation entry
   for why); the Cursor `agent` CLI is not installed.
-- **Backend:** the SQLite engine/session factory, models for all 33 `0001_initial_schema`
+- **Backend:** FastAPI is now a locked dependency and `backend/api/app.py` provides the first
+  in-memory authenticated application factory: canonical 256-bit per-launch Bearer capability for
+  all HTTP routes and a WebSocket credential offered through `Sec-WebSocket-Protocol` but never
+  echoed as the selected protocol. It has no production server binding, lifespan, library, worker,
+  scheduler, or domain routes yet. The SQLite engine/session factory, models for all 33 `0001_initial_schema`
   tables (registry `backend/app/models.py`), the Identity Manager core use cases
   (`backend/app/identities/use_cases.py`: create/activate an identity, assign a representation
   with Evidence and an index intent, merge one identity into another, split selected
