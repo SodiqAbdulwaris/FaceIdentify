@@ -70,16 +70,28 @@ class JobRepository:
         """The row as the database has it now, not as this session last saw it."""
         return self._session.get(Job, job_id, populate_existing=True)
 
-    def claim_next(self, *, owner: str, now: datetime, lease_for: timedelta) -> ClaimedJob | None:
+    def claim_next(
+        self,
+        *,
+        owner: str,
+        now: datetime,
+        lease_for: timedelta,
+        types: Collection[str] | None = None,
+    ) -> ClaimedJob | None:
         """Claim the most urgent, oldest `QUEUED` job for `owner`, or None if there is none.
 
         Ties on priority and creation time break by id, so the order is total. The job becomes
         `RUNNING` with a lease until `now + lease_for`, a first heartbeat and `started_at`.
         """
         expires = now + lease_for
+        eligible = [Job.state == JobState.QUEUED]
+        if types is not None:
+            if not types:
+                return None
+            eligible.append(Job.type.in_(types))
         chosen = (
             select(Job.id)
-            .where(Job.state == JobState.QUEUED)
+            .where(*eligible)
             .order_by(_PRIORITY_RANK, Job.created_at, Job.id)
             .limit(1)
             .scalar_subquery()

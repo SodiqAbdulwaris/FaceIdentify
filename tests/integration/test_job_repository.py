@@ -79,6 +79,24 @@ def test_a_claim_that_is_never_committed_leaves_the_job_queued(
     assert state_of(factory, job.id) == "QUEUED"
 
 
+def test_claim_with_an_empty_type_filter_claims_nothing(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    job = build.job()
+    build.session.commit()
+
+    with factory() as session:
+        assert (
+            JobRepository(session).claim_next(
+                owner="worker-1", now=build.clock(), lease_for=LEASE, types=()
+            )
+            is None
+        )
+        session.commit()
+
+    assert state_of(factory, job.id) == "QUEUED"
+
+
 def test_get_returns_the_row_as_the_database_has_it_now(
     sqlite_engine: Engine, factory: sessionmaker[Session], build: ModelFactory
 ) -> None:
