@@ -364,7 +364,9 @@ def test_cancellation_settlement_tolerates_a_stale_claim(
     executor._cancel(build.session, started)
 
 
-def test_cancellation_does_not_close_a_foreign_segment(build: ModelFactory) -> None:
+def test_cancellation_with_a_foreign_segment_leaves_claimed_work_running(
+    build: ModelFactory,
+) -> None:
     executor, source, started = _finalizer(build)
     other = build.run()
     foreign_segment = build.segment(other)
@@ -373,9 +375,15 @@ def test_cancellation_does_not_close_a_foreign_segment(build: ModelFactory) -> N
 
     build.session.expire_all()
     run = build.session.get(ProcessingRun, source.run_id)
+    claimed = build.session.get(ExecutionSegment, started.execution_segment_id)
+    job = build.session.get(Job, started.job.id)
     foreign = build.session.get(ExecutionSegment, foreign_segment.id)
     assert run is not None
-    assert run.state == "CANCELLED"
+    assert run.state == "RUNNING"
+    assert claimed is not None
+    assert claimed.state == "RUNNING"
+    assert job is not None
+    assert job.state == "RUNNING"
     assert foreign is not None
     assert foreign.state == "RUNNING"
 
@@ -802,7 +810,7 @@ def test_failure_settlement_handles_missing_or_already_stopped_runs(
         )
 
 
-def test_failure_settlement_does_not_close_a_foreign_segment(
+def test_failure_with_a_foreign_segment_leaves_claimed_work_running(
     sqlite_engine: Engine, build: ModelFactory
 ) -> None:
     executor, source, started = _finalizer(build)
@@ -817,14 +825,20 @@ def test_failure_settlement_does_not_close_a_foreign_segment(
 
     with Session(sqlite_engine) as session:
         failed_run = session.get(ProcessingRun, source.run_id)
+        claimed = session.get(ExecutionSegment, started.execution_segment_id)
+        job = session.get(Job, started.job.id)
         foreign = session.get(ExecutionSegment, foreign_segment.id)
         assert failed_run is not None
-        assert failed_run.state == "FAILED"
+        assert failed_run.state == "RUNNING"
+        assert claimed is not None
+        assert claimed.state == "RUNNING"
+        assert job is not None
+        assert job.state == "RUNNING"
         assert foreign is not None
         assert foreign.state == "RUNNING"
 
 
-def test_failure_settlement_tolerates_a_claimed_run_that_disappeared(
+def test_failure_settlement_leaves_an_unsettled_claim_running(
     sqlite_engine: Engine, build: ModelFactory
 ) -> None:
     job = build.job(processing_run_id=None, state="RUNNING")
@@ -845,7 +859,39 @@ def test_failure_settlement_tolerates_a_claimed_run_that_disappeared(
     with Session(sqlite_engine) as session:
         failed_job = session.get(Job, job.id)
         assert failed_job is not None
-        assert failed_job.state == "FAILED"
+        assert failed_job.state == "RUNNING"
+
+
+@pytest.mark.parametrize("operation", ["cancel", "fail"])
+def test_unsuccessful_segment_close_leaves_claimed_work_running(
+    sqlite_engine: Engine, build: ModelFactory, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    executor, source, started = _finalizer(build)
+    monkeypatch.setattr(SegmentRepository, "close", lambda *_args, **_kwargs: False)
+    if operation == "fail":
+        build.session.commit()
+        executor._uow = UnitOfWork(
+            sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None
+        )
+        executor._fail(started, "TEST_FAILURE")
+    else:
+        executor._cancel(build.session, started)
+        build.session.expire_all()
+
+    session = build.session if operation == "cancel" else Session(sqlite_engine)
+    try:
+        run = session.get(ProcessingRun, source.run_id)
+        job = session.get(Job, started.job.id)
+        segment = session.get(ExecutionSegment, started.execution_segment_id)
+        assert run is not None
+        assert run.state == "RUNNING"
+        assert job is not None
+        assert job.state == "RUNNING"
+        assert segment is not None
+        assert segment.state == "RUNNING"
+    finally:
+        if operation == "fail":
+            session.close()
 
 
 def _planned(export: RegisteredExport) -> PlannedVariant:

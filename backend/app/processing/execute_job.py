@@ -244,39 +244,50 @@ class ExecuteProcessingJob:
     def _cancel(self, session: Session, started: StartedProcessingJob) -> None:
         """Close the current interval and retain all private output for later inspection."""
         now = self._clock()
+        settled = False
         if started.job.processing_run_id is not None:
             run = ProcessingRunRepository(session).lock(started.job.processing_run_id)
             if run is not None:
                 segment = SegmentRepository(session).get(started.execution_segment_id)
-                if segment is not None and segment.processing_run_id == run.id:
-                    SegmentRepository(session).close(
+                closed = (
+                    segment is not None
+                    and segment.processing_run_id == run.id
+                    and SegmentRepository(session).close(
                         segment.id,
                         ExecutionSegmentState.COMPLETED,
                         reason="CANCELLED",
                         now=now,
                     )
-                if run.state in (ProcessingRunState.RUNNING, ProcessingRunState.CANCELLING):
-                    optimistic_locked_update(
-                        session,
-                        ProcessingRun,
-                        run.id,
-                        expected_revision=run.revision,
-                        values={
-                            "state": ProcessingRunState.CANCELLED,
-                            "updated_at": now,
-                        },
-                        extra_where=(
-                            ProcessingRun.state.in_(
-                                (ProcessingRunState.RUNNING, ProcessingRunState.CANCELLING)
+                )
+                if closed and run.state in (
+                    ProcessingRunState.RUNNING,
+                    ProcessingRunState.CANCELLING,
+                ):
+                    settled = (
+                        optimistic_locked_update(
+                            session,
+                            ProcessingRun,
+                            run.id,
+                            expected_revision=run.revision,
+                            values={
+                                "state": ProcessingRunState.CANCELLED,
+                                "updated_at": now,
+                            },
+                            extra_where=(
+                                ProcessingRun.state.in_(
+                                    (ProcessingRunState.RUNNING, ProcessingRunState.CANCELLING)
+                                ),
                             ),
-                        ),
+                        )
+                        == 1
                     )
-        JobRepository(session).transition(
-            started.job.id,
-            (JobState.RUNNING, JobState.CANCELLING),
-            JobState.CANCELLED,
-            now=now,
-        )
+        if settled:
+            JobRepository(session).transition(
+                started.job.id,
+                (JobState.RUNNING, JobState.CANCELLING),
+                JobState.CANCELLED,
+                now=now,
+            )
 
     def _input(self, session: Session, started: StartedProcessingJob) -> _Input:
         if started.job.processing_run_id is None:
@@ -622,35 +633,45 @@ class ExecuteProcessingJob:
 
         def settle(session: Session) -> None:
             now = self._clock()
+            settled = False
             if started.job.processing_run_id is not None:
                 run = ProcessingRunRepository(session).lock(started.job.processing_run_id)
                 if run is not None:
                     segment = SegmentRepository(session).get(started.execution_segment_id)
-                    if segment is not None and segment.processing_run_id == run.id:
-                        SegmentRepository(session).close(segment.id, "FAILED", reason=None, now=now)
-                    if run.state == ProcessingRunState.RUNNING:
-                        optimistic_locked_update(
-                            session,
-                            ProcessingRun,
-                            run.id,
-                            expected_revision=run.revision,
-                            values={
-                                "state": ProcessingRunState.FAILED,
-                                "failed_at": now,
-                                "updated_at": now,
-                                "failure_code": code,
-                                "failure_detail": "source processing failed",
-                            },
-                            extra_where=(ProcessingRun.state == ProcessingRunState.RUNNING,),
+                    closed = (
+                        segment is not None
+                        and segment.processing_run_id == run.id
+                        and SegmentRepository(session).close(
+                            segment.id, "FAILED", reason=None, now=now
                         )
-            JobRepository(session).transition(
-                started.job.id,
-                (JobState.RUNNING,),
-                JobState.FAILED,
-                now=now,
-                failure_code=code,
-                failure_detail="source processing failed",
-            )
+                    )
+                    if closed and run.state == ProcessingRunState.RUNNING:
+                        settled = (
+                            optimistic_locked_update(
+                                session,
+                                ProcessingRun,
+                                run.id,
+                                expected_revision=run.revision,
+                                values={
+                                    "state": ProcessingRunState.FAILED,
+                                    "failed_at": now,
+                                    "updated_at": now,
+                                    "failure_code": code,
+                                    "failure_detail": "source processing failed",
+                                },
+                                extra_where=(ProcessingRun.state == ProcessingRunState.RUNNING,),
+                            )
+                            == 1
+                        )
+            if settled:
+                JobRepository(session).transition(
+                    started.job.id,
+                    (JobState.RUNNING,),
+                    JobState.FAILED,
+                    now=now,
+                    failure_code=code,
+                    failure_detail="source processing failed",
+                )
 
         self._uow.write(settle)
 
