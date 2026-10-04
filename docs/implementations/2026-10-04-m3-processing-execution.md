@@ -22,8 +22,10 @@ Job deliberately remains RUNNING for the separate acceptance transaction. Cooper
 cancellation is observed before loading the run and between external work units, closes the
 segment with `CANCELLED`, and retains already-settled PENDING output. Checkpointing and FINAL also
 verify that the running segment belongs to the claimed run. Cancellation or known-failure
-settlement terminalizes the run and Job only after it has verified and closed that claimed run's
-segment; a stale or unsuccessfully closed segment leaves the whole claim RUNNING for recovery.
+settlement terminalizes the run and Job only after it has verified the claimed Job's linkage and
+state, then closed that claimed run's segment; a stale, ineligible, or unsuccessfully closed
+claim leaves the whole lifecycle RUNNING for recovery. The unexpected final Job-transition failure
+also rolls the short settlement back rather than committing a partial terminal lifecycle.
 
 ## Why
 
@@ -43,6 +45,10 @@ rather than treating the frozen request or compatibility space as execution prov
 - A terminal Job may never be written while its claimed run remains RUNNING because a segment was
   stale or could not close. The executor therefore leaves an unsettled claim intact for startup
   recovery rather than creating a terminal lifecycle mismatch.
+- The run write-lock serializes the short terminal settlement. The executor re-reads and validates
+  the Job's run linkage and permitted state under that lock before it closes the segment. A final
+  guarded Job transition that unexpectedly loses still aborts the UnitOfWork, so it cannot leave a
+  terminal run/segment behind.
 - No fallback segment history was invented. Persistence implementation section 14 says a provider,
   export, or variant change closes/starts a segment, whereas the owner decision of 2026-10-03 says
   segments are not split by detector versus embedder stage. `PerceptionClient` currently exposes
@@ -52,11 +58,11 @@ rather than treating the frozen request or compatibility space as execution prov
 
 ## Verification
 
-- `uv run pytest tests/integration/test_execute_processing_job.py -q -p no:cacheprovider --cov=backend.app.processing.execute_job --cov-branch --cov-report=term-missing` -- 56 passed; executor 100% line and branch coverage.
+- `uv run pytest tests/integration/test_execute_processing_job.py -q -p no:cacheprovider --cov=backend.app.processing.execute_job --cov-branch --cov-report=term-missing` -- 62 passed; executor 100% line and branch coverage.
 - `uv run ruff format --check .` -- 200 files already formatted.
 - `uv run ruff check .` -- passed.
 - `uv run mypy` and `uv run mypy --platform linux` -- passed.
-- `$env:HYPOTHESIS_PROFILE='ci'; uv run pytest --cov -q -p no:cacheprovider` -- 2,203 passed in 191.44 seconds after the final lifecycle hardening; total line and branch coverage 100%.
+- `$env:HYPOTHESIS_PROFILE='ci'; uv run pytest --cov -q -p no:cacheprovider` -- 2,209 passed in 181.62 seconds after coherent Job/run/segment settlement hardening; total line and branch coverage 100%.
 - After that clean baseline, mutating the active-image guard from `or` to `and` caused the
   recycled-source parameter of `test_input_revalidates_durable_run_source_and_original` to fail.
   The file SHA-256 before and after restoration was
@@ -64,19 +70,21 @@ rather than treating the frozen request or compatibility space as execution prov
 - After the second clean baseline, changing each new segment-owner comparison from `!=` to `==`
   made its checkpoint/finalization foreign-segment test fail. The source SHA-256 before and after
   both restorations was `5FCC78B0FF8CE7753513FAF30C90CC81A10538C3E978DDC23E2FEA57A3FFF084`.
-- After the final corrected baseline (2,203 passed in 191.44 seconds, 100% coverage), mutating
-  either `closed` guard to terminalize after a failed close, or either `settled` guard to write a
-  Job at the wrong lifecycle point, made the relevant cancellation/failure tests fail. The source
-  was restored byte-identically after all four probes; SHA-256:
-  `31FB43644EFDDC98C66C45EF70A11FBC42D5A359FCE7EE5CF20D2E0F99A2ED39`.
+- After the final corrected baseline (2,209 passed in 181.62 seconds, 100% coverage), mutating
+  either Job/run-link guard, either permitted Job-state guard, or either final Job-transition
+  rollback guard made its relevant cancellation/failure test fail. The source was restored
+  byte-identically after all six probes; SHA-256:
+  `955B31B5B53CCF17FD4D445B079EB8F4F23848C1BAD1B46CCBC33DA9E928CFC2`.
 
 ## Open issues / follow-ups
 
 - Independent review of PR #101 found and this branch fixed the pre-load cancellation ordering,
   segment ownership checks, and a second lifecycle finding: the initial hardening still allowed a
   foreign or unclosable segment to leave its claimed segment RUNNING while terminalizing the
-  run/Job. Its fallback finding is the specification conflict below, not a dismissed review
-  comment.
+  run/Job. A final independent pass found an additional interleaving where the Job transition
+  could be ineligible after a run/segment terminalization; the settlement now validates the Job
+  first and rolls back if its guarded write unexpectedly loses. Its fallback finding is the
+  specification conflict below, not a dismissed review comment.
 - Resolve the fallback-segment conflict above; then exercise actual fallback history through the
   executor.
 - Step 11 remains the only acceptance/ANN authority boundary. It must validate FINAL idempotently,

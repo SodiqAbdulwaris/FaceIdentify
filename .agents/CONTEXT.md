@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-05 (M3 identity-less candidate readers merged in PR #95; the step-11 IndexCoordinator write-transaction slice merged in PR #105; private processing execution is rebased in PR #101, including atomic terminal lifecycle settlement, but awaits the unresolved fallback-segment decision; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
+_Last updated: 2026-10-05 (M3 identity-less candidate readers merged in PR #95; the step-11 IndexCoordinator write-transaction slice merged in PR #105; private processing execution is rebased in PR #101, including atomic Job/run/segment terminal settlement, but awaits the unresolved fallback-segment decision; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
 
 > **Decision 2026-10-03:** the owner approved the version-1 payload contracts for new ML output: `landmarks_json` has `schema_version` and normalised `points`; observation `quality_json` has `schema_version` and `detection_score`; representation `quality_json` has `schema_version` and `l2_norm`.
 

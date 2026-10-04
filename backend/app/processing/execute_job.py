@@ -247,7 +247,13 @@ class ExecuteProcessingJob:
         settled = False
         if started.job.processing_run_id is not None:
             run = ProcessingRunRepository(session).lock(started.job.processing_run_id)
-            if run is not None:
+            job = JobRepository(session).get(started.job.id)
+            if (
+                run is not None
+                and job is not None
+                and job.processing_run_id == run.id
+                and job.state in (JobState.RUNNING, JobState.CANCELLING)
+            ):
                 segment = SegmentRepository(session).get(started.execution_segment_id)
                 closed = (
                     segment is not None
@@ -282,12 +288,13 @@ class ExecuteProcessingJob:
                         == 1
                     )
         if settled:
-            JobRepository(session).transition(
+            if not JobRepository(session).transition(
                 started.job.id,
                 (JobState.RUNNING, JobState.CANCELLING),
                 JobState.CANCELLED,
                 now=now,
-            )
+            ):
+                raise ProcessingExecutionError("the processing job changed while cancelling")
 
     def _input(self, session: Session, started: StartedProcessingJob) -> _Input:
         if started.job.processing_run_id is None:
@@ -636,7 +643,13 @@ class ExecuteProcessingJob:
             settled = False
             if started.job.processing_run_id is not None:
                 run = ProcessingRunRepository(session).lock(started.job.processing_run_id)
-                if run is not None:
+                job = JobRepository(session).get(started.job.id)
+                if (
+                    run is not None
+                    and job is not None
+                    and job.processing_run_id == run.id
+                    and job.state == JobState.RUNNING
+                ):
                     segment = SegmentRepository(session).get(started.execution_segment_id)
                     closed = (
                         segment is not None
@@ -664,16 +677,22 @@ class ExecuteProcessingJob:
                             == 1
                         )
             if settled:
-                JobRepository(session).transition(
+                if not JobRepository(session).transition(
                     started.job.id,
                     (JobState.RUNNING,),
                     JobState.FAILED,
                     now=now,
                     failure_code=code,
                     failure_detail="source processing failed",
-                )
+                ):
+                    raise ProcessingExecutionError("the processing job changed while failing")
 
-        self._uow.write(settle)
+        try:
+            self._uow.write(settle)
+        except ProcessingExecutionError:
+            # A failed post-lock transition rolls back the entire short settlement. The original
+            # external error remains the caller's failure; startup recovery owns this live claim.
+            return
 
 
 def _frozen(value: object) -> _FrozenConfiguration:
