@@ -3,7 +3,7 @@
 - **Date:** 2026-10-04
 - **Milestone / tracker IDs:** M3 step 10
 - **Status:** partial
-- **Commits:** pending PR
+- **Commits:** PR #99: `feat(processing): claim and start source jobs`
 
 ## What changed
 
