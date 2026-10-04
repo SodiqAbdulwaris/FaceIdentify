@@ -19,8 +19,9 @@ The executor appends an INTERMEDIATE checkpoint after observations and represent
 durably private, advances `current_checkpoint_id`, and only appends FINAL after all private
 decisions are settled. FINAL closes the lifecycle segment and moves the run to FINALIZING; the
 Job deliberately remains RUNNING for the separate acceptance transaction. Cooperative
-cancellation is observed between external work units, closes the segment with `CANCELLED`, and
-retains already-settled PENDING output.
+cancellation is observed before loading the run and between external work units, closes the
+segment with `CANCELLED`, and retains already-settled PENDING output. Checkpointing and FINAL also
+verify that the running segment belongs to the claimed run.
 
 ## Why
 
@@ -46,18 +47,24 @@ rather than treating the frozen request or compatibility space as execution prov
 
 ## Verification
 
-- `uv run pytest tests/integration/test_execute_processing_job.py -q -p no:cacheprovider --cov=backend.app.processing.execute_job --cov-branch --cov-report=term-missing` -- 47 passed; executor 100% line and branch coverage.
+- `uv run pytest tests/integration/test_execute_processing_job.py -q -p no:cacheprovider --cov=backend.app.processing.execute_job --cov-branch --cov-report=term-missing` -- 50 passed; executor 100% line and branch coverage.
 - `uv run ruff format --check .` -- 200 files already formatted.
 - `uv run ruff check .` -- passed.
 - `uv run mypy` and `uv run mypy --platform linux` -- passed.
-- `$env:HYPOTHESIS_PROFILE='ci'; uv run pytest --cov -q -p no:cacheprovider` -- 2,194 passed in 409.45 seconds; total line and branch coverage 100%.
+- `$env:HYPOTHESIS_PROFILE='ci'; uv run pytest --cov -q -p no:cacheprovider` -- 2,194 passed in 409.45 seconds before review, then 2,197 passed in 231.53 seconds after the review fixes; total line and branch coverage 100% in both runs.
 - After that clean baseline, mutating the active-image guard from `or` to `and` caused the
   recycled-source parameter of `test_input_revalidates_durable_run_source_and_original` to fail.
   The file SHA-256 before and after restoration was
   `A812CADA6E4CF0F12D3DA7073527966C827CAF6AA2B12839FA79BBAFD3022FA1`.
+- After the second clean baseline, changing each new segment-owner comparison from `!=` to `==`
+  made its checkpoint/finalization foreign-segment test fail. The source SHA-256 before and after
+  both restorations was `5FCC78B0FF8CE7753513FAF30C90CC81A10538C3E978DDC23E2FEA57A3FFF084`.
 
 ## Open issues / follow-ups
 
+- Independent review of PR #101 found and this branch fixed the pre-load cancellation ordering and
+  segment ownership checks. Its fallback finding is the specification conflict below, not a
+  dismissed review comment.
 - Resolve the fallback-segment conflict above; then exercise actual fallback history through the
   executor.
 - Step 11 remains the only acceptance/ANN authority boundary. It must validate FINAL idempotently,
