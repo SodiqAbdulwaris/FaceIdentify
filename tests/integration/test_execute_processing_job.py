@@ -322,6 +322,34 @@ def test_an_unlinked_claim_cannot_look_cancelled(build: ModelFactory) -> None:
     assert not ExecuteProcessingJob._cancellation_requested(build.session, started)
 
 
+def test_execute_settles_cancellation_before_loading_the_run(
+    sqlite_engine: Engine, build: ModelFactory
+) -> None:
+    executor, source, started = _finalizer(build)
+    executor._uow = UnitOfWork(
+        sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None
+    )
+    run = build.session.get(ProcessingRun, source.run_id)
+    assert run is not None
+    run.state = "CANCELLING"
+    build.session.commit()
+    executor._input = lambda *_: (_ for _ in ()).throw(AssertionError("must not load"))
+
+    with pytest.raises(ProcessingCancelledError, match="cancelled"):
+        executor.execute(started)
+
+    with Session(sqlite_engine) as session:
+        cancelled_run = session.get(ProcessingRun, source.run_id)
+        cancelled_job = session.get(Job, started.job.id)
+        cancelled_segment = session.get(ExecutionSegment, started.execution_segment_id)
+        assert cancelled_run is not None
+        assert cancelled_run.state == "CANCELLED"
+        assert cancelled_job is not None
+        assert cancelled_job.state == "CANCELLED"
+        assert cancelled_segment is not None
+        assert cancelled_segment.ended_reason == "CANCELLED"
+
+
 @pytest.mark.parametrize("run_id", [None, uuid.uuid4()])
 def test_cancellation_settlement_tolerates_a_stale_claim(
     build: ModelFactory, run_id: uuid.UUID | None
@@ -519,6 +547,7 @@ def test_execute_records_known_failure_then_reraises() -> None:
     executor._input = lambda _session, _started: (_ for _ in ()).throw(
         ProcessingExecutionError("bad")
     )
+    executor._cancel_if_requested = lambda _started: None
     recorded: list[str] = []
     executor._fail = lambda _started, code: recorded.append(code)
     started = StartedProcessingJob(
@@ -628,6 +657,24 @@ def test_private_output_checkpoint_refuses_an_optimistic_race(
 
     with pytest.raises(ProcessingExecutionError, match="changed while checkpointing"):
         executor._append_private_output_checkpoint(build.session, source, started, [], [])
+
+
+@pytest.mark.parametrize("operation", ["checkpoint", "finalize"])
+def test_checkpoint_and_finalization_refuse_a_segment_of_another_run(
+    build: ModelFactory, operation: str
+) -> None:
+    executor, source, started = _finalizer(build)
+    other = build.run()
+    foreign_segment = build.segment(other)
+    wrong_started = StartedProcessingJob(started.job, foreign_segment.id)
+    action = (
+        executor._append_private_output_checkpoint
+        if operation == "checkpoint"
+        else executor._finalize
+    )
+
+    with pytest.raises(ProcessingExecutionError, match="segment"):
+        action(build.session, source, wrong_started, [], [])
 
 
 def test_planning_uses_only_frozen_component_and_export_selections(

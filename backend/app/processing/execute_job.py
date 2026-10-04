@@ -169,6 +169,7 @@ class ExecuteProcessingJob:
         owned by :class:`PerceptionClient`.
         """
         try:
+            self._cancel_if_requested(started)
             source = self._uow.read(lambda session: self._input(session, started))
             self._cancel_if_requested(started)
             frozen = _frozen(source.snapshot)
@@ -415,7 +416,11 @@ class ExecuteProcessingJob:
         if run is None or run.state != ProcessingRunState.RUNNING:
             raise ProcessingExecutionError("the processing run is no longer checkpointable")
         segment = SegmentRepository(session).get(started.execution_segment_id)
-        if segment is None or segment.state != ExecutionSegmentState.RUNNING:
+        if (
+            segment is None
+            or segment.processing_run_id != run.id
+            or segment.state != ExecutionSegmentState.RUNNING
+        ):
             raise ProcessingExecutionError("the execution segment is no longer running")
         job = JobRepository(session).get(started.job.id)
         if job is None or job.state != JobState.RUNNING or job.processing_run_id != run.id:
@@ -559,7 +564,11 @@ class ExecuteProcessingJob:
         if run is None or run.state != ProcessingRunState.RUNNING:
             raise ProcessingExecutionError("the processing run is no longer finalizable")
         segment = SegmentRepository(session).get(started.execution_segment_id)
-        if segment is None or segment.state != ExecutionSegmentState.RUNNING:
+        if (
+            segment is None
+            or segment.processing_run_id != run.id
+            or segment.state != ExecutionSegmentState.RUNNING
+        ):
             raise ProcessingExecutionError("the execution segment is no longer running")
         job = JobRepository(session).get(started.job.id)
         if job is None or job.state != JobState.RUNNING or job.processing_run_id != run.id:
