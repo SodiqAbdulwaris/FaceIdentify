@@ -47,7 +47,7 @@ rather than treating the frozen request or compatibility space as execution prov
 
 ## Verification
 
-- `uv run pytest tests/integration/test_execute_processing_job.py -q -p no:cacheprovider --cov=backend.app.processing.execute_job --cov-branch --cov-report=term-missing` -- 50 passed; executor 100% line and branch coverage.
+- `uv run pytest tests/integration/test_execute_processing_job.py -q -p no:cacheprovider --cov=backend.app.processing.execute_job --cov-branch --cov-report=term-missing` -- 54 passed; executor 100% line and branch coverage.
 - `uv run ruff format --check .` -- 200 files already formatted.
 - `uv run ruff check .` -- passed.
 - `uv run mypy` and `uv run mypy --platform linux` -- passed.
@@ -59,6 +59,9 @@ rather than treating the frozen request or compatibility space as execution prov
 - After the second clean baseline, changing each new segment-owner comparison from `!=` to `==`
   made its checkpoint/finalization foreign-segment test fail. The source SHA-256 before and after
   both restorations was `5FCC78B0FF8CE7753513FAF30C90CC81A10538C3E978DDC23E2FEA57A3FFF084`.
+- After the final corrected baseline (2,201 passed in 231.47 seconds, 100% coverage), reversing
+  each cancellation/failure ownership equality made its foreign-segment test fail. The restored
+  source SHA-256 was `6C2AEC1F5BC5A0103051F2F8084DECB7AE0E1C3F80889B70E0F62EAC00C5824E`.
 
 ## Open issues / follow-ups
 

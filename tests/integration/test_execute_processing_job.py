@@ -364,6 +364,34 @@ def test_cancellation_settlement_tolerates_a_stale_claim(
     executor._cancel(build.session, started)
 
 
+def test_cancellation_does_not_close_a_foreign_segment(build: ModelFactory) -> None:
+    executor, source, started = _finalizer(build)
+    other = build.run()
+    foreign_segment = build.segment(other)
+
+    executor._cancel(build.session, StartedProcessingJob(started.job, foreign_segment.id))
+
+    build.session.expire_all()
+    run = build.session.get(ProcessingRun, source.run_id)
+    foreign = build.session.get(ExecutionSegment, foreign_segment.id)
+    assert run is not None
+    assert run.state == "CANCELLED"
+    assert foreign is not None
+    assert foreign.state == "RUNNING"
+
+
+def test_cancellation_leaves_a_nonrunning_run_unchanged(build: ModelFactory) -> None:
+    executor, source, started = _finalizer(build)
+    run = build.session.get(ProcessingRun, source.run_id)
+    assert run is not None
+    run.state = "PENDING"
+    build.session.flush()
+
+    executor._cancel(build.session, started)
+
+    assert run.state == "PENDING"
+
+
 def _not_running(_: ModelFactory, run: ProcessingRun) -> None:
     run.state = "PENDING"
 
@@ -772,6 +800,52 @@ def test_failure_settlement_handles_missing_or_already_stopped_runs(
             ),
             "TEST",
         )
+
+
+def test_failure_settlement_does_not_close_a_foreign_segment(
+    sqlite_engine: Engine, build: ModelFactory
+) -> None:
+    executor, source, started = _finalizer(build)
+    other = build.run()
+    foreign_segment = build.segment(other)
+    build.session.commit()
+    executor._uow = UnitOfWork(
+        sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None
+    )
+
+    executor._fail(StartedProcessingJob(started.job, foreign_segment.id), "TEST_FAILURE")
+
+    with Session(sqlite_engine) as session:
+        failed_run = session.get(ProcessingRun, source.run_id)
+        foreign = session.get(ExecutionSegment, foreign_segment.id)
+        assert failed_run is not None
+        assert failed_run.state == "FAILED"
+        assert foreign is not None
+        assert foreign.state == "RUNNING"
+
+
+def test_failure_settlement_tolerates_a_claimed_run_that_disappeared(
+    sqlite_engine: Engine, build: ModelFactory
+) -> None:
+    job = build.job(processing_run_id=None, state="RUNNING")
+    build.session.commit()
+    executor: Any = object.__new__(ExecuteProcessingJob)
+    executor._uow = UnitOfWork(
+        sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None
+    )
+    executor._clock = build.clock
+    missing_run_id = build.new_id()
+    started = StartedProcessingJob(
+        ClaimedJob(job.id, job.type, missing_run_id, 1, None, 1, "worker", build.clock()),
+        build.new_id(),
+    )
+
+    executor._fail(started, "TEST_FAILURE")
+
+    with Session(sqlite_engine) as session:
+        failed_job = session.get(Job, job.id)
+        assert failed_job is not None
+        assert failed_job.state == "FAILED"
 
 
 def _planned(export: RegisteredExport) -> PlannedVariant:
