@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.identities.models import Identity
 from backend.app.jobs.models import Job
-from backend.app.jobs.repository import ClaimedJob
+from backend.app.jobs.repository import ClaimedJob, JobRepository
 from backend.app.memory.models import Observation, Representation
 from backend.app.processing import execute_job
 from backend.app.processing.execute_job import (
@@ -386,6 +386,92 @@ def test_cancellation_with_a_foreign_segment_leaves_claimed_work_running(
     assert job.state == "RUNNING"
     assert foreign is not None
     assert foreign.state == "RUNNING"
+
+
+@pytest.mark.parametrize(
+    ("operation", "run_state", "job_state"),
+    [
+        ("cancel", "CANCELLING", "PAUSING"),
+        ("fail", "RUNNING", "CANCELLING"),
+    ],
+)
+def test_terminal_settlement_refuses_an_ineligible_claimed_job(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    run_state: str,
+    job_state: str,
+) -> None:
+    executor, source, started = _finalizer(build)
+    run = build.session.get(ProcessingRun, source.run_id)
+    job = build.session.get(Job, started.job.id)
+    assert run is not None
+    assert job is not None
+    run.state = run_state
+    job.state = job_state
+    build.session.commit()
+    executor._uow = UnitOfWork(
+        sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None
+    )
+
+    if operation == "cancel":
+        with pytest.raises(ProcessingCancelledError, match="cancelled"):
+            executor._cancel_if_requested(started)
+    else:
+        monkeypatch.setattr(
+            SegmentRepository,
+            "close",
+            lambda *_args, **_kwargs: pytest.fail("an ineligible Job must not close its segment"),
+        )
+        executor._fail(started, "TEST_FAILURE")
+
+    with Session(sqlite_engine) as session:
+        unchanged_run = session.get(ProcessingRun, source.run_id)
+        unchanged_job = session.get(Job, started.job.id)
+        unchanged_segment = session.get(ExecutionSegment, started.execution_segment_id)
+        assert unchanged_run is not None
+        assert unchanged_run.state == run_state
+        assert unchanged_job is not None
+        assert unchanged_job.state == job_state
+        assert unchanged_segment is not None
+        assert unchanged_segment.state == "RUNNING"
+
+
+@pytest.mark.parametrize("operation", ["cancel", "fail"])
+def test_terminal_settlement_refuses_a_job_linked_to_another_run(
+    sqlite_engine: Engine, build: ModelFactory, operation: str
+) -> None:
+    executor, source, started = _finalizer(build)
+    run = build.session.get(ProcessingRun, source.run_id)
+    job = build.session.get(Job, started.job.id)
+    assert run is not None
+    assert job is not None
+    other = build.run()
+    run.state = "CANCELLING" if operation == "cancel" else "RUNNING"
+    job.processing_run_id = other.id
+    build.session.commit()
+    executor._uow = UnitOfWork(
+        sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None
+    )
+
+    if operation == "cancel":
+        with pytest.raises(ProcessingCancelledError, match="cancelled"):
+            executor._cancel_if_requested(started)
+    else:
+        executor._fail(started, "TEST_FAILURE")
+
+    with Session(sqlite_engine) as session:
+        unchanged_run = session.get(ProcessingRun, source.run_id)
+        unchanged_job = session.get(Job, started.job.id)
+        unchanged_segment = session.get(ExecutionSegment, started.execution_segment_id)
+        assert unchanged_run is not None
+        assert unchanged_run.state == ("CANCELLING" if operation == "cancel" else "RUNNING")
+        assert unchanged_job is not None
+        assert unchanged_job.processing_run_id == other.id
+        assert unchanged_job.state == "RUNNING"
+        assert unchanged_segment is not None
+        assert unchanged_segment.state == "RUNNING"
 
 
 def test_cancellation_leaves_a_nonrunning_run_unchanged(build: ModelFactory) -> None:
@@ -892,6 +978,41 @@ def test_unsuccessful_segment_close_leaves_claimed_work_running(
     finally:
         if operation == "fail":
             session.close()
+
+
+@pytest.mark.parametrize("operation", ["cancel", "fail"])
+def test_terminal_settlement_rolls_back_if_the_job_cannot_transition(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    executor, source, started = _finalizer(build)
+    monkeypatch.setattr(JobRepository, "transition", lambda *_args, **_kwargs: False)
+    executor._uow = UnitOfWork(
+        sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None
+    )
+    if operation == "cancel":
+        run = build.session.get(ProcessingRun, source.run_id)
+        assert run is not None
+        run.state = "CANCELLING"
+        build.session.commit()
+        with pytest.raises(ProcessingExecutionError, match="job changed"):
+            executor._cancel_if_requested(started)
+    else:
+        build.session.commit()
+        executor._fail(started, "TEST_FAILURE")
+
+    with Session(sqlite_engine) as session:
+        unchanged_run = session.get(ProcessingRun, source.run_id)
+        unchanged_job = session.get(Job, started.job.id)
+        unchanged_segment = session.get(ExecutionSegment, started.execution_segment_id)
+        assert unchanged_run is not None
+        assert unchanged_run.state == ("CANCELLING" if operation == "cancel" else "RUNNING")
+        assert unchanged_job is not None
+        assert unchanged_job.state == "RUNNING"
+        assert unchanged_segment is not None
+        assert unchanged_segment.state == "RUNNING"
 
 
 def _planned(export: RegisteredExport) -> PlannedVariant:
