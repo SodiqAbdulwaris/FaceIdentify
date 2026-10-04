@@ -66,6 +66,64 @@ async def _websocket_messages(app: Any, protocols: list[str] | None) -> list[dic
     return sent
 
 
+async def _raw_http_messages(app: Any, authorization: bytes) -> list[dict[str, Any]]:
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/health",
+            "raw_path": b"/health",
+            "query_string": b"",
+            "headers": [(b"authorization", authorization)],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 2),
+        },
+        receive,
+        send,
+    )
+    return sent
+
+
+async def _raw_websocket_messages(app: Any, protocol_header: bytes) -> list[dict[str, Any]]:
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "websocket.connect"}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    await app(
+        {
+            "type": "websocket",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1",
+            "scheme": "ws",
+            "path": "/api/v1/events",
+            "raw_path": b"/api/v1/events",
+            "query_string": b"",
+            "headers": [(b"sec-websocket-protocol", protocol_header)],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 2),
+            "subprotocols": [],
+        },
+        receive,
+        send,
+    )
+    return sent
+
+
 async def test_every_http_route_requires_the_current_bearer_capability() -> None:
     token = _token()
     app = create_app(token)
@@ -107,4 +165,14 @@ async def test_websocket_requires_the_same_capability_without_echoing_it() -> No
     accepted = await _websocket_messages(app, [f"fi.{token}", WEBSOCKET_PROTOCOL])
     assert accepted == [
         {"type": "websocket.accept", "subprotocol": WEBSOCKET_PROTOCOL, "headers": []}
+    ]
+
+
+async def test_hostile_non_ascii_credentials_are_ordinary_authentication_failures() -> None:
+    app = create_app(_token())
+
+    http_messages = await _raw_http_messages(app, b"Bearer \xe9")
+    assert http_messages[0]["status"] == 401
+    assert await _raw_websocket_messages(app, b"fi.\xe9, faceidentify.v1") == [
+        {"type": "websocket.close", "code": 1008, "reason": ""}
     ]

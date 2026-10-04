@@ -104,7 +104,11 @@ def _http_authorized(value: str | None, expected: str) -> bool:
     if value is None:
         return False
     scheme, separator, candidate = value.partition(" ")
-    return separator == " " and scheme == _AUTH_SCHEME and hmac.compare_digest(candidate, expected)
+    return (
+        separator == " "
+        and scheme == _AUTH_SCHEME
+        and _constant_time_capability_matches(candidate, expected)
+    )
 
 
 def _websocket_authorized(value: str | None, expected: str) -> bool:
@@ -112,10 +116,18 @@ def _websocket_authorized(value: str | None, expected: str) -> bool:
         return False
     offered = {part.strip() for part in value.split(",")}
     return WEBSOCKET_PROTOCOL in offered and any(
-        hmac.compare_digest(protocol.removeprefix(_WEBSOCKET_TOKEN_PREFIX), expected)
+        _constant_time_capability_matches(protocol.removeprefix(_WEBSOCKET_TOKEN_PREFIX), expected)
         for protocol in offered
         if protocol.startswith(_WEBSOCKET_TOKEN_PREFIX)
     )
+
+
+def _constant_time_capability_matches(candidate: str, expected: str) -> bool:
+    """Reject hostile header text before calling the byte-oriented constant-time primitive."""
+    try:
+        return hmac.compare_digest(candidate.encode("ascii"), expected.encode("ascii"))
+    except UnicodeEncodeError:
+        return False
 
 
 def _unauthorized() -> JSONResponse:
