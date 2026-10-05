@@ -63,6 +63,10 @@ rather than treating the frozen request or compatibility space as execution prov
 - `uv run ruff check .` -- passed.
 - `uv run mypy` and `uv run mypy --platform linux` -- passed.
 - `$env:HYPOTHESIS_PROFILE='ci'; uv run pytest --cov -q -p no:cacheprovider` -- 2,209 passed in 181.62 seconds after coherent Job/run/segment settlement hardening; total line and branch coverage 100%.
+- After rebasing PR #101 onto the current `main` (including the identity-less-candidate readers and
+  IndexCoordinator UnitOfWork slice), the exact full gate passed: 2,231 tests in 408.05 seconds,
+  100% coverage. Ruff and both mypy targets also passed; a fresh independent read-only review and
+  exact-head CI remain required before merge.
 - After that clean baseline, mutating the active-image guard from `or` to `and` caused the
   recycled-source parameter of `test_input_revalidates_durable_run_source_and_original` to fail.
   The file SHA-256 before and after restoration was
