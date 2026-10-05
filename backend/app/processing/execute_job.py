@@ -301,7 +301,9 @@ class ExecuteProcessingJob:
             ):
                 raise ProcessingExecutionError("the processing job changed while cancelling")
 
-    def _input(self, session: Session, started: StartedProcessingJob) -> _Input:
+    def _input(
+        self, session: Session, started: StartedProcessingJob, *, allow_cancelling: bool = False
+    ) -> _Input:
         if started.job.processing_run_id is None:
             raise ProcessingExecutionError("the claimed job has no processing run")
         actual = session.execute(
@@ -317,7 +319,11 @@ class ExecuteProcessingJob:
         if actual is None:
             raise ProcessingExecutionError("the processing run/source/original is missing")
         run, snapshot, source, artifact = actual
-        if run.state != ProcessingRunState.RUNNING:
+        if run.state not in (
+            (ProcessingRunState.RUNNING, ProcessingRunState.CANCELLING)
+            if allow_cancelling
+            else (ProcessingRunState.RUNNING,)
+        ):
             raise ProcessingExecutionError(f"the processing run is {run.state}, not RUNNING")
         if source.kind != SourceKind.IMAGE or source.state != SourceState.ACTIVE:
             raise ProcessingExecutionError("the source is no longer an active image")
@@ -333,7 +339,12 @@ class ExecuteProcessingJob:
         )
 
     def _revalidate_settlement_context(
-        self, session: Session, source: _Input, started: StartedProcessingJob
+        self,
+        session: Session,
+        source: _Input,
+        started: StartedProcessingJob,
+        *,
+        allow_cancelling: bool = False,
     ) -> tuple[ProcessingRun, ExecutionSegment, Job]:
         """Reload every mutable owner immediately before a private-output mutation.
 
@@ -342,7 +353,7 @@ class ExecuteProcessingJob:
         write UnitOfWork already owns SQLite's writer lock; the fresh reads below are therefore the
         state that the following settlement mutation protects, not cached pre-compute state.
         """
-        current = self._input(session, started)
+        current = self._input(session, started, allow_cancelling=allow_cancelling)
         run = ProcessingRunRepository(session).lock(current.run_id)
         assert run is not None  # _input just reloaded the same run in this write transaction
         segment = SegmentRepository(session).get(started.execution_segment_id)
@@ -353,7 +364,14 @@ class ExecuteProcessingJob:
         ):
             raise ProcessingExecutionError("the execution segment is no longer running")
         job = JobRepository(session).get(started.job.id)
-        if job is None or job.processing_run_id != current.run_id or job.state != JobState.RUNNING:
+        if (
+            job is None
+            or job.processing_run_id != current.run_id
+            or job.state
+            not in (
+                (JobState.RUNNING, JobState.CANCELLING) if allow_cancelling else (JobState.RUNNING,)
+            )
+        ):
             raise ProcessingExecutionError("the processing job is no longer running")
         return run, segment, job
 
@@ -407,7 +425,9 @@ class ExecuteProcessingJob:
         started: StartedProcessingJob,
         fallbacks: tuple[ProviderFallback, ...],
     ) -> uuid.UUID:
-        run, segment, _job = self._revalidate_settlement_context(session, source, started)
+        run, segment, _job = self._revalidate_settlement_context(
+            session, source, started, allow_cancelling=True
+        )
         repository = SegmentRepository(session)
         current = segment
         for fallback in fallbacks:

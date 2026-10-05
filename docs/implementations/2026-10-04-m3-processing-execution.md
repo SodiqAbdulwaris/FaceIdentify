@@ -93,10 +93,11 @@ rather than treating the frozen request or compatibility space as execution prov
   rollback guard made its relevant cancellation/failure test fail. The source was restored
   byte-identically after all six probes; SHA-256:
   `955B31B5B53CCF17FD4D445B079EB8F4F23848C1BAD1B46CCBC33DA9E928CFC2`.
-- Focused fallback/writer suites after the approved decision: 141 passed in 12.85 seconds. They
-  cover the exact client fallback event, detector and embedder fallback segment histories, no
-  stage-only split, a failed segment closure preserving private output, and a representation that
-  follows a later running fallback segment.
+- Focused fallback/writer suites after the approved decision cover the exact client fallback event,
+  every unavailable provider before the selected variant, detector and embedder fallback segment
+  histories, no stage-only split, a failed segment closure preserving private output, and a
+  representation that follows a later running fallback segment. The executor suite had 74 passing
+  tests after the cancellation hardening below.
 - Clean full baseline after the fallback implementation: 2,241 passed in 362.25 seconds with
   100% line and branch coverage; Ruff and both mypy targets passed. Mutation proof then removed
   the emitted fallback event (the two provider-code parameters plus the multiple-attempt test
@@ -106,6 +107,19 @@ rather than treating the frozen request or compatibility space as execution prov
   `execute_job.py` `4C1DC02B827B4F113D80D25A9ADF1C811DBAA11792A0F1E267B12BEC0ECE1A18`.
 - The real-worker client suite was repeated three times after restoration (34 passed in 6.56,
   6.86, and 6.99 seconds), covering the process-sensitive provider fallback path.
+- Independent read-only review found a real cancellation race: an arriving cancellation previously
+  met fallback settlement before the cancellation boundary, where the fallback revalidation
+  correctly refused a `CANCELLING` claim but failure settlement could not terminalize it. The
+  fallback recorder therefore permits a `CANCELLING` claim: it atomically closes the predecessor
+  as `FALLBACK` and appends the selected-variant interval, then the ordinary cancellation boundary
+  closes that successor as `CANCELLED`. Four deterministic tests cover both stages and both Job-
+  and ProcessingRun-originated cancellation; they preserve the complete fallback provenance, keep
+  only already-settled private observations, and write no representation after the embedder
+  boundary.
+- The corrected full gate passed: 2,245 tests in 239.91 seconds, 100% line and branch coverage.
+  Mutation proof changed the fallback recorder to reject `CANCELLING`; all four cancellation
+  parameters failed, and `execute_job.py` was restored byte-identically (SHA-256
+  `B07835B9F5E732A90ADDC36E3926E34C4C43BB0955DEF44F6A04664108D22DFB`).
 
 ## Open issues / follow-ups
 
