@@ -47,13 +47,20 @@ from backend.app.recognition.reasoner import (
     RecognitionOutcome,
 )
 from backend.app.runtime.package_store import RuntimePackageStore
-from backend.app.runtime.perception_client import Detected, FaceVector, Represented
+from backend.app.runtime.perception_client import (
+    Detected,
+    FaceVector,
+    ProviderFallback,
+    ProviderUnavailable,
+    Represented,
+)
 from backend.app.runtime.registration import RegisteredExport, register_package
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.app.sources.models import Artifact, Source
 from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
 from backend.ml.contracts.messages import Detection
+from backend.ml.contracts.protocol import MLErrorCode
 from tests.factories.models import ModelFactory
 from tests.fixtures.catalog_packages import installed, manifest_dict
 
@@ -82,14 +89,22 @@ class OneFaceClient(NoFaceClient):
         embedder: PlannedVariant,
         *,
         after_detect: Callable[[], None] | None = None,
+        detector_fallbacks: tuple[ProviderFallback, ...] = (),
+        embedder_fallbacks: tuple[ProviderFallback, ...] = (),
     ) -> None:
         super().__init__(detector)
         self._embedder = embedder
         self._after_detect = after_detect
+        self._detector_fallbacks = detector_fallbacks
+        self._embedder_fallbacks = embedder_fallbacks
 
     def detect(self, pixels: Any) -> Detected:
         self.detect_calls += 1
-        result = Detected((Detection(0, 0, (0.2, 0.2, 0.8, 0.8), 0.9, None),), self._detector)
+        result = Detected(
+            (Detection(0, 0, (0.2, 0.2, 0.8, 0.8), 0.9, None),),
+            self._detector,
+            self._detector_fallbacks,
+        )
         if self._after_detect is not None:
             self._after_detect()
         return result
@@ -98,7 +113,11 @@ class OneFaceClient(NoFaceClient):
         self.represent_calls += 1
         assert len(detections) == 1
         vector = np.full(512, 1 / np.sqrt(512), dtype="<f4")
-        return Represented((FaceVector(0, vector, "L2_NORMALIZED"),), self._embedder)
+        return Represented(
+            (FaceVector(0, vector, "L2_NORMALIZED"),),
+            self._embedder,
+            self._embedder_fallbacks,
+        )
 
 
 def _snapshot(build: ModelFactory) -> ProcessingConfigurationSnapshot:
@@ -1257,6 +1276,168 @@ def test_face_output_stays_pending_and_its_new_identity_stays_private(
         checkpoint = session.get(ProcessingCheckpoint, result.final_checkpoint_id)
         assert checkpoint is not None
         assert checkpoint.payload_json["decisions"][0]["outcome"] == "CREATE_NEW"
+        segments = list(
+            session.scalars(
+                select(ExecutionSegment)
+                .where(ExecutionSegment.processing_run_id == started.job.processing_run_id)
+                .order_by(ExecutionSegment.ordinal)
+            )
+        )
+        assert len(segments) == 1
+        assert (
+            observation.execution_segment_id
+            == representation.execution_segment_id
+            == segments[0].id
+        )
+
+
+def _provider_fallback(
+    selected: PlannedVariant, *, message: str = "CUDA is unavailable"
+) -> ProviderFallback:
+    return ProviderFallback(
+        (
+            ProviderUnavailable(
+                PlannedVariant(
+                    component_version_id=selected.component_version_id,
+                    runtime_variant_id=uuid.uuid4(),
+                    kind=selected.kind,
+                    contract=selected.contract,
+                    provider="CUDAExecutionProvider",
+                    device="cuda",
+                    package_key=selected.package_key,
+                    model_path=selected.model_path,
+                    sha256=selected.sha256,
+                ),
+                MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE,
+                message,
+            ),
+        ),
+        selected,
+    )
+
+
+def test_detector_provider_fallback_starts_a_cpu_execution_segment(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    file_store: Any,
+    storage_roots: Any,
+    tmp_path: Path,
+) -> None:
+    executor, client, started, _source_id, run_id, _job_id = _one_face_execution(
+        sqlite_engine, build, file_store, storage_roots, tmp_path
+    )
+    fallback = _provider_fallback(client._detector)
+    client._detector_fallbacks = (fallback,)
+
+    result = executor.execute(started)
+
+    with Session(sqlite_engine) as session:
+        segments = list(
+            session.scalars(
+                select(ExecutionSegment)
+                .where(ExecutionSegment.processing_run_id == run_id)
+                .order_by(ExecutionSegment.ordinal)
+            )
+        )
+        observation = session.get(Observation, result.observation_ids[0])
+        representation = session.get(Representation, result.representation_ids[0])
+        assert len(segments) == 2
+        assert segments[0].runtime_variant_id is None
+        assert segments[0].state == "COMPLETED"
+        assert segments[0].ended_reason == "FALLBACK"
+        assert segments[1].runtime_variant_id == client._detector.runtime_variant_id
+        assert segments[1].state == "COMPLETED"
+        assert segments[1].ended_reason == "NORMAL"
+        assert segments[1].runtime_details_json == {
+            "schema_version": 1,
+            "transition": "PROVIDER_FALLBACK",
+            "failed_attempts": [
+                {
+                    "variant_id": str(fallback.failed[0].variant.runtime_variant_id),
+                    "provider": "CUDAExecutionProvider",
+                    "error_code": "RUNTIME_VARIANT_NOT_AVAILABLE",
+                    "error_message": "CUDA is unavailable",
+                }
+            ],
+            "selected_variant_id": str(client._detector.runtime_variant_id),
+            "selected_provider": client._detector.provider,
+        }
+        assert observation is not None
+        assert representation is not None
+        assert observation.execution_segment_id == segments[1].id
+        assert representation.execution_segment_id == segments[1].id
+
+
+def test_embedder_provider_fallback_keeps_detection_in_its_original_segment(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    file_store: Any,
+    storage_roots: Any,
+    tmp_path: Path,
+) -> None:
+    executor, client, started, _source_id, run_id, _job_id = _one_face_execution(
+        sqlite_engine, build, file_store, storage_roots, tmp_path
+    )
+    client._embedder_fallbacks = (_provider_fallback(client._embedder),)
+
+    result = executor.execute(started)
+
+    with Session(sqlite_engine) as session:
+        segments = list(
+            session.scalars(
+                select(ExecutionSegment)
+                .where(ExecutionSegment.processing_run_id == run_id)
+                .order_by(ExecutionSegment.ordinal)
+            )
+        )
+        observation = session.get(Observation, result.observation_ids[0])
+        representation = session.get(Representation, result.representation_ids[0])
+        assert len(segments) == 2
+        assert segments[0].ended_reason == "FALLBACK"
+        assert segments[1].runtime_variant_id == client._embedder.runtime_variant_id
+        assert observation is not None
+        assert representation is not None
+        assert observation.execution_segment_id == segments[0].id
+        assert representation.execution_segment_id == segments[1].id
+
+
+def test_failed_provider_transition_does_not_persist_private_output(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    file_store: Any,
+    storage_roots: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor, client, started, _source_id, run_id, _job_id = _one_face_execution(
+        sqlite_engine, build, file_store, storage_roots, tmp_path
+    )
+    client._detector_fallbacks = (_provider_fallback(client._detector),)
+    close = SegmentRepository.close
+    calls = 0
+
+    def refuse_first_close(self: SegmentRepository, *args: Any, **kwargs: Any) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return False
+        return close(self, *args, **kwargs)
+
+    monkeypatch.setattr(SegmentRepository, "close", refuse_first_close)
+
+    with pytest.raises(ProcessingExecutionError, match="could not close for fallback"):
+        executor.execute(started)
+
+    with Session(sqlite_engine) as session:
+        assert not list(
+            session.scalars(select(Observation).where(Observation.processing_run_id == run_id))
+        )
+        run = session.get(ProcessingRun, run_id)
+        job = session.get(Job, started.job.id)
+        assert run is not None
+        assert run.state == "FAILED"
+        assert job is not None
+        assert job.state == "FAILED"
 
 
 def test_cancellation_after_detection_settlement_does_not_start_embedding(

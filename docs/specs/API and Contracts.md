@@ -514,6 +514,7 @@ Evidence may include types such as:
 
 ```text
 RECOGNITION
+RECOGNITION_ABSTAINED
 HUMAN_CORRECTION
 ```
 
@@ -524,6 +525,8 @@ raw similarity
 calibrated confidence
 decision
 ```
+
+> **Decision 2026-10-05 (owner; issue 104):** `RECOGNITION_ABSTAINED` records the immutable historical reason that a recognition event did not assign an Identity. A later resolution appends separate evidence rather than editing this record.
 
 These concepts must never be conflated.
 
