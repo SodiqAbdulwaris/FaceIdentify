@@ -1,0 +1,474 @@
+"""The one authoritative boundary for a processed source (persistence §30).
+
+Perception leaves only private PENDING rows and a FINAL checkpoint.  This use case validates that
+handoff and atomically makes the result visible; the derived ANN work is merely queued here and is
+woken only after the transaction commits.
+"""
+
+import uuid
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from backend.app.identities.models import (
+    Evidence,
+    EvidenceCandidate,
+    EvidenceKind,
+    EvidenceRepresentationRole,
+    Identity,
+    IdentityState,
+)
+from backend.app.identities.repository import EvidenceLink, EvidenceRepository, OccurrenceRepository
+from backend.app.identities.use_cases import activate_identity, assign_representation_to_identity
+from backend.app.jobs.models import Job, JobState, JobType
+from backend.app.jobs.repository import JobRepository
+from backend.app.memory.index_operation_repository import IndexOperationRepository, NewOperation
+from backend.app.memory.models import (
+    Observation,
+    ObservationState,
+    Occurrence,
+    OccurrenceKind,
+    OccurrenceState,
+    Representation,
+    RepresentationState,
+)
+from backend.app.memory.repository import ObservationRepository, RepresentationRepository
+from backend.app.processing.models import (
+    CheckpointKind,
+    CheckpointState,
+    ProcessingCheckpoint,
+    ProcessingRun,
+    ProcessingRunState,
+)
+from backend.app.processing.repository import CheckpointRepository
+from backend.app.processing.run_repository import ProcessingRunRepository
+from backend.app.recognition.reasoner import RecognitionOutcome
+from backend.app.sources.models import Artifact, ArtifactState, Source, SourceKind, SourceState
+from backend.app.sources.repository import SourceRepository
+from backend.infrastructure.db.optimistic import optimistic_locked_update
+from backend.infrastructure.db.unit_of_work import UnitOfWork
+
+FINAL_SCHEMA_VERSION = 1
+
+
+class AcceptanceError(RuntimeError):
+    """A FINAL checkpoint is absent, stale, malformed, or contradicts private output."""
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedProcessingRun:
+    processing_run_id: uuid.UUID
+    already_accepted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _Decision:
+    observation_id: uuid.UUID
+    representation_id: uuid.UUID
+    outcome: RecognitionOutcome
+    identity_id: uuid.UUID | None
+    evidence: dict[str, Any]
+
+
+class AcceptProcessingRunUseCase:
+    """Accept one FINALIZING run, or validate its previously accepted result idempotently."""
+
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        *,
+        new_id: Callable[[], uuid.UUID],
+        clock: Callable[[], datetime],
+        wake_index: Callable[[], None] | None = None,
+    ) -> None:
+        self._uow = uow
+        self._new_id = new_id
+        self._clock = clock
+        self._wake_index = wake_index
+
+    def accept(self, processing_run_id: uuid.UUID) -> AcceptedProcessingRun:
+        result = self._uow.write(lambda session: self._accept(session, processing_run_id))
+        # This is intentionally after `write` returns: a crash or error here leaves SQLite
+        # authoritative and the durable ADD operations are replayable by the coordinator.
+        if self._wake_index is not None:
+            self._wake_index()
+        return result
+
+    def _accept(self, session: Session, run_id: uuid.UUID) -> AcceptedProcessingRun:
+        run = ProcessingRunRepository(session).lock(run_id)
+        if run is None:
+            raise AcceptanceError("processing run does not exist")
+        checkpoint, decisions = self._final(session, run)
+        source, job = self._context(session, run)
+        if run.state == ProcessingRunState.COMPLETED:
+            self._validate_completed(session, run, source, job, checkpoint, decisions)
+            return AcceptedProcessingRun(run.id, already_accepted=True)
+        if run.state != ProcessingRunState.FINALIZING:
+            raise AcceptanceError(f"processing run is {run.state}, not FINALIZING")
+        if job.state != JobState.RUNNING:
+            raise AcceptanceError(f"processing job is {job.state}, not RUNNING")
+        self._require_source_is_acceptable(session, source)
+        self._validate_private_output(session, run, decisions)
+        now = self._clock()
+        for decision in decisions:
+            self._accept_decision(session, run, source, decision, now)
+        for observation_id in self._observation_ids(decisions, checkpoint):
+            if not ObservationRepository(session).transition(
+                observation_id,
+                from_states=(ObservationState.PENDING,),
+                to_state=ObservationState.ACTIVE,
+            ):
+                raise AcceptanceError("an observation changed while accepting")
+        if not SourceRepository(session).set_current_run(
+            source.id, run.id, expected_revision=source.revision, now=now
+        ):
+            raise AcceptanceError("source changed while accepting")
+        changed = optimistic_locked_update(
+            session,
+            ProcessingRun,
+            run.id,
+            expected_revision=run.revision,
+            values={
+                "state": ProcessingRunState.COMPLETED,
+                "completed_at": now,
+                "updated_at": now,
+            },
+            extra_where=(ProcessingRun.state == ProcessingRunState.FINALIZING,),
+        )
+        if changed != 1:
+            raise AcceptanceError("processing run changed while accepting")
+        if not JobRepository(session).transition(
+            job.id, (JobState.RUNNING,), JobState.COMPLETED, now=now
+        ):
+            raise AcceptanceError("processing job changed while accepting")
+        return AcceptedProcessingRun(run.id, already_accepted=False)
+
+    def _final(
+        self, session: Session, run: ProcessingRun
+    ) -> tuple[ProcessingCheckpoint, tuple[_Decision, ...]]:
+        checkpoint = CheckpointRepository(session).final_valid(run.id)
+        if (
+            checkpoint is None
+            or checkpoint.id != run.current_checkpoint_id
+            or checkpoint.kind != CheckpointKind.FINAL
+            or checkpoint.state != CheckpointState.VALID
+            or checkpoint.payload_schema_version != FINAL_SCHEMA_VERSION
+        ):
+            raise AcceptanceError("processing run has no current supported FINAL checkpoint")
+        payload = checkpoint.payload_json
+        if set(payload) != {"schema_version", "observations", "decisions"}:
+            raise AcceptanceError("FINAL checkpoint has an unknown or missing field")
+        if payload["schema_version"] != FINAL_SCHEMA_VERSION:
+            raise AcceptanceError("FINAL checkpoint has an unsupported payload schema")
+        observations = payload["observations"]
+        entries = payload["decisions"]
+        if not isinstance(observations, list) or not isinstance(entries, list):
+            raise AcceptanceError("FINAL checkpoint observations and decisions must be lists")
+        decisions = tuple(self._decision(entry) for entry in entries)
+        observation_ids = tuple(self._uuid(value, "observations") for value in observations)
+        if len(set(observation_ids)) != len(observation_ids):
+            raise AcceptanceError("FINAL checkpoint repeats an observation")
+        if {decision.observation_id for decision in decisions} != set(observation_ids):
+            raise AcceptanceError("FINAL checkpoint decisions do not cover its observations")
+        if len({decision.representation_id for decision in decisions}) != len(decisions):
+            raise AcceptanceError("FINAL checkpoint repeats a representation")
+        return checkpoint, decisions
+
+    def _context(self, session: Session, run: ProcessingRun) -> tuple[Source, Job]:
+        source = SourceRepository(session).get(run.source_id)
+        jobs = list(
+            session.scalars(
+                select(Job).where(
+                    Job.processing_run_id == run.id, Job.type == JobType.PROCESS_SOURCE
+                )
+            )
+        )
+        if source is None or len(jobs) != 1:
+            raise AcceptanceError("processing source or job is no longer valid")
+        return source, jobs[0]
+
+    @staticmethod
+    def _require_source_is_acceptable(session: Session, source: Source) -> None:
+        artifact = session.get(Artifact, source.original_artifact_id)
+        if (
+            source.kind != SourceKind.IMAGE
+            or source.state != SourceState.ACTIVE
+            or artifact is None
+            or artifact.state != ArtifactState.AVAILABLE
+        ):
+            raise AcceptanceError("processing source or original is no longer valid")
+
+    def _validate_private_output(
+        self, session: Session, run: ProcessingRun, decisions: Sequence[_Decision]
+    ) -> None:
+        observation_ids = set(self._observation_ids(decisions, None))
+        pending_observations = set(
+            session.scalars(
+                select(Observation.id).where(
+                    Observation.processing_run_id == run.id,
+                    Observation.source_id == run.source_id,
+                    Observation.state == ObservationState.PENDING,
+                )
+            )
+        )
+        if pending_observations != observation_ids:
+            raise AcceptanceError("FINAL checkpoint does not name exactly the private observations")
+        representations = list(
+            session.scalars(
+                select(Representation).where(Representation.processing_run_id == run.id)
+            )
+        )
+        expected = {decision.representation_id for decision in decisions}
+        if {representation.id for representation in representations} != expected:
+            raise AcceptanceError(
+                "FINAL checkpoint does not name exactly the private representations"
+            )
+        by_id = {representation.id: representation for representation in representations}
+        for decision in decisions:
+            representation = by_id[decision.representation_id]
+            if (
+                representation.state != RepresentationState.PENDING
+                or representation.observation_id != decision.observation_id
+                or representation.vector is None
+            ):
+                raise AcceptanceError(
+                    "a representation is not the private output described by FINAL"
+                )
+            self._validate_decision_identity(session, run, decision, representation)
+
+    def _validate_decision_identity(
+        self,
+        session: Session,
+        run: ProcessingRun,
+        decision: _Decision,
+        representation: Representation,
+    ) -> None:
+        if decision.outcome is RecognitionOutcome.ABSTAIN:
+            if decision.identity_id is not None or representation.identity_id is not None:
+                raise AcceptanceError("ABSTAIN must not name an identity")
+            return
+        if decision.identity_id is None or representation.identity_id != decision.identity_id:
+            raise AcceptanceError("identity decision does not agree with its representation")
+        identity = session.get(Identity, decision.identity_id)
+        if identity is None:
+            raise AcceptanceError("decision identity does not exist")
+        if decision.outcome is RecognitionOutcome.CREATE_NEW:
+            if (
+                identity.state != IdentityState.PENDING
+                or identity.created_by_processing_run_id != run.id
+            ):
+                raise AcceptanceError("CREATE_NEW must name this run's pending identity")
+            return
+        if identity.state != IdentityState.ACTIVE:
+            raise AcceptanceError("MATCH_EXISTING must name an ACTIVE identity")
+
+    def _accept_decision(
+        self,
+        session: Session,
+        run: ProcessingRun,
+        source: Source,
+        decision: _Decision,
+        now: datetime,
+    ) -> None:
+        candidates = self._candidates(decision.evidence)
+        payload: dict[str, object] = {**decision.evidence}
+        if decision.outcome is RecognitionOutcome.CREATE_NEW:
+            assert decision.identity_id is not None
+            identity = session.get(Identity, decision.identity_id)
+            assert identity is not None
+            activate_identity(
+                session, identity.id, expected_revision=identity.revision, clock=self._clock
+            )
+            assign_representation_to_identity(
+                session,
+                decision.representation_id,
+                identity.id,
+                new_id=self._new_id,
+                clock=self._clock,
+                evidence_kind=EvidenceKind.IDENTITY_CREATED,
+                source_id=source.id,
+                payload=payload,
+                candidates=candidates,
+            )
+            self._occurrence(session, run, source, identity.id, decision.observation_id, now)
+            return
+        if decision.outcome is RecognitionOutcome.MATCH_EXISTING:
+            assert decision.identity_id is not None
+            assign_representation_to_identity(
+                session,
+                decision.representation_id,
+                decision.identity_id,
+                new_id=self._new_id,
+                clock=self._clock,
+                evidence_kind=EvidenceKind.IDENTITY_MATCHED,
+                source_id=source.id,
+                payload=payload,
+                candidates=candidates,
+            )
+            self._occurrence(
+                session, run, source, decision.identity_id, decision.observation_id, now
+            )
+            return
+        representation = session.get(Representation, decision.representation_id)
+        assert representation is not None
+        representation.state = RepresentationState.ACTIVE
+        representation.ann_key = RepresentationRepository(session).allocate_ann_key(
+            representation.representation_space_id
+        )
+        representation.activated_at = now
+        EvidenceRepository(session).append(
+            Evidence(
+                id=self._new_id(),
+                kind=EvidenceKind.RECOGNITION_ABSTAINED,
+                processing_run_id=run.id,
+                source_id=source.id,
+                payload_schema_version=FINAL_SCHEMA_VERSION,
+                payload_json={
+                    "representation_id": str(representation.id),
+                    "ann_key": representation.ann_key,
+                    **payload,
+                },
+                created_at=now,
+            ),
+            representations=(EvidenceLink(representation.id, EvidenceRepresentationRole.SUBJECT),),
+            candidates=candidates,
+        )
+        IndexOperationRepository(session).append_batch(
+            (NewOperation(representation.id, representation.representation_space_id, "ADD"),),
+            now=now,
+            new_id=self._new_id,
+        )
+
+    def _occurrence(
+        self,
+        session: Session,
+        run: ProcessingRun,
+        source: Source,
+        identity_id: uuid.UUID,
+        observation_id: uuid.UUID,
+        now: datetime,
+    ) -> None:
+        OccurrenceRepository(session).add(
+            Occurrence(
+                id=self._new_id(),
+                source_id=source.id,
+                identity_id=identity_id,
+                processing_run_id=run.id,
+                representative_observation_id=observation_id,
+                kind=OccurrenceKind.IMAGE,
+                state=OccurrenceState.ACTIVE,
+                created_at=now,
+                activated_at=now,
+            ),
+            (observation_id,),
+        )
+
+    def _validate_completed(
+        self,
+        session: Session,
+        run: ProcessingRun,
+        source: Source,
+        job: Job,
+        checkpoint: ProcessingCheckpoint,
+        decisions: Sequence[_Decision],
+    ) -> None:
+        if source.current_processing_run_id != run.id or job.state != JobState.COMPLETED:
+            raise AcceptanceError("completed processing run is missing its accepted owners")
+        for decision in decisions:
+            representation = session.get(Representation, decision.representation_id)
+            observation = session.get(Observation, decision.observation_id)
+            if (
+                representation is None
+                or observation is None
+                or representation.state != RepresentationState.ACTIVE
+                or observation.state != ObservationState.ACTIVE
+                or representation.ann_key is None
+            ):
+                raise AcceptanceError("completed processing run has inconsistent accepted output")
+            if decision.outcome is RecognitionOutcome.ABSTAIN:
+                if representation.identity_id is not None:
+                    raise AcceptanceError("accepted ABSTAIN acquired an identity")
+            elif representation.identity_id != decision.identity_id:
+                raise AcceptanceError("accepted representation changed identity")
+
+    @staticmethod
+    def _uuid(value: object, field: str) -> uuid.UUID:
+        if not isinstance(value, str):
+            raise AcceptanceError(f"FINAL checkpoint {field} id is not a string")
+        try:
+            return uuid.UUID(value)
+        except ValueError as error:
+            raise AcceptanceError(f"FINAL checkpoint {field} id is invalid") from error
+
+    def _decision(self, value: object) -> _Decision:
+        if not isinstance(value, Mapping) or set(value) != {
+            "observation_id",
+            "representation_id",
+            "outcome",
+            "reason",
+            "identity_id",
+            "evidence",
+        }:
+            raise AcceptanceError("FINAL checkpoint decision has an unknown or missing field")
+        try:
+            outcome = RecognitionOutcome(value["outcome"])
+        except (TypeError, ValueError) as error:
+            raise AcceptanceError("FINAL checkpoint decision has an invalid outcome") from error
+        identity_id = (
+            None if value["identity_id"] is None else self._uuid(value["identity_id"], "identity")
+        )
+        evidence = value["evidence"]
+        if not isinstance(evidence, dict):
+            raise AcceptanceError("FINAL checkpoint decision evidence is not an object")
+        return _Decision(
+            self._uuid(value["observation_id"], "observation"),
+            self._uuid(value["representation_id"], "representation"),
+            outcome,
+            identity_id,
+            evidence,
+        )
+
+    def _observation_ids(
+        self, decisions: Sequence[_Decision], checkpoint: ProcessingCheckpoint | None
+    ) -> tuple[uuid.UUID, ...]:
+        if checkpoint is None:
+            return tuple(decision.observation_id for decision in decisions)
+        return tuple(
+            self._uuid(value, "observation") for value in checkpoint.payload_json["observations"]
+        )
+
+    def _candidates(self, evidence: Mapping[str, Any]) -> list[EvidenceCandidate]:
+        raw = evidence.get("candidates", [])
+        if not isinstance(raw, list):
+            raise AcceptanceError("decision candidate evidence is not a list")
+        candidates: list[EvidenceCandidate] = []
+        for item in raw:
+            if not isinstance(item, Mapping) or not isinstance(item.get("rank"), int):
+                raise AcceptanceError("decision candidate evidence is malformed")
+            members = item.get("members")
+            representation_id = None
+            if isinstance(members, list) and members:
+                first = members[0]
+                if not isinstance(first, Mapping):
+                    raise AcceptanceError("decision candidate member is malformed")
+                representation_id = self._uuid(first.get("representation_id"), "candidate")
+            identity = item.get("identity_id")
+            candidates.append(
+                EvidenceCandidate(
+                    evidence_id=uuid.UUID(int=0),
+                    rank=item["rank"],
+                    representation_id=representation_id,
+                    identity_id=None
+                    if identity is None
+                    else self._uuid(identity, "candidate identity"),
+                    raw_similarity=float(item.get("similarity", 0.0)),
+                    calibrated_confidence=None,
+                    decision="CONSIDERED",
+                    details_json=dict(item),
+                )
+            )
+        return candidates

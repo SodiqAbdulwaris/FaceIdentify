@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.identities.models import (
     Evidence,
+    EvidenceCandidate,
     EvidenceKind,
     EvidenceRepresentation,
     EvidenceRepresentationRole,
@@ -157,11 +158,16 @@ def assign_representation_to_identity(
     clock: Callable[[], datetime],
     evidence_kind: EvidenceKind,
     payload_schema_version: int = 1,
+    source_id: uuid.UUID | None = None,
+    payload: dict[str, object] | None = None,
+    candidates: Sequence[EvidenceCandidate] = (),
 ) -> Representation:
     """Commit a PENDING representation to an ACTIVE identity, with Evidence and an index intent.
 
     This is the one place a representation becomes ANN-eligible; the same transaction creates
-    the durable ADD IndexOperation (PERSISTENCE_IMPLEMENTATION.md §1 rule 4). `evidence_kind`
+    the durable ADD IndexOperation (PERSISTENCE_IMPLEMENTATION.md §1 rule 4). Optional
+    `payload` and `candidates` retain the recognition assessment without duplicating this
+    lifecycle mutation at the acceptance boundary. `evidence_kind`
     must be `IDENTITY_CREATED` (the identity was just created for this representation) or
     `IDENTITY_MATCHED` (recognition matched an existing identity) — the caller states which,
     since only the caller (eventually the decision engine's caller) knows which happened.
@@ -212,9 +218,14 @@ def assign_representation_to_identity(
         id=new_id(),
         kind=evidence_kind,
         processing_run_id=representation.processing_run_id,
+        source_id=source_id,
         subject_identity_id=identity_id,
         payload_schema_version=payload_schema_version,
-        payload_json={"representation_id": str(representation_id), "ann_key": ann_key},
+        payload_json={
+            "representation_id": str(representation_id),
+            "ann_key": ann_key,
+            **({} if payload is None else payload),
+        },
         created_at=now,
     )
     session.add(evidence)
@@ -226,6 +237,9 @@ def assign_representation_to_identity(
             role=EvidenceRepresentationRole.SUBJECT,
         )
     )
+    for candidate in candidates:
+        candidate.evidence_id = evidence.id
+    session.add_all(candidates)
     session.add(
         IndexOperation(
             id=new_id(),

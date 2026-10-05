@@ -1,0 +1,692 @@
+"""The FINAL-to-authoritative boundary (M3 step 11, TST-042)."""
+
+import uuid
+from collections.abc import Callable
+
+import pytest
+from sqlalchemy import Engine, func, select
+from sqlalchemy.orm import Session
+
+from backend.app.identities.models import Evidence, EvidenceCandidate, Identity
+from backend.app.jobs.models import Job
+from backend.app.memory.models import IndexOperation, Observation, Occurrence, Representation
+from backend.app.processing.accept_run import (
+    AcceptanceError,
+    AcceptProcessingRunUseCase,
+    _Decision,
+)
+from backend.app.processing.models import ProcessingCheckpoint, ProcessingRun
+from backend.app.recognition.reasoner import RecognitionOutcome
+from backend.app.sources.models import Source
+from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
+from tests.factories.models import ModelFactory
+from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+
+
+def use_case(
+    engine: Engine, clock: FrozenClock, new_id: SeededUUIDs, wake: Callable[[], None] | None = None
+) -> AcceptProcessingRunUseCase:
+    return AcceptProcessingRunUseCase(
+        UnitOfWork(engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None),
+        new_id=new_id,
+        clock=clock,
+        wake_index=wake,
+    )
+
+
+def finalizing(
+    session: Session,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    outcome: str,
+) -> tuple[ProcessingRun, Observation | None, Representation | None, Identity | None, Job]:
+    build = ModelFactory(session, clock, new_id)
+    run = build.run(state="FINALIZING")
+    job = build.job(processing_run_id=run.id, type="PROCESS_SOURCE", state="RUNNING")
+    if outcome == "NO_FACE":
+        final = build.checkpoint(run, 0, "FINAL", "VALID")
+        final.payload_json = {"schema_version": 1, "observations": [], "decisions": []}
+        run.current_checkpoint_id = final.id
+        session.commit()
+        return run, None, None, None, job
+    observation = build.observation(run)
+    representation = build.representation(observation)
+    identity = None
+    identity_id: str | None = None
+    if outcome == "CREATE_NEW":
+        identity = build.identity(state="PENDING", created_by_processing_run_id=run.id)
+        representation.identity_id = identity.id
+        identity_id = str(identity.id)
+    elif outcome == "MATCH_EXISTING":
+        identity = build.identity()
+        representation.identity_id = identity.id
+        identity_id = str(identity.id)
+    final = build.checkpoint(run, 0, "FINAL", "VALID")
+    final.payload_json = {
+        "schema_version": 1,
+        "observations": [str(observation.id)],
+        "decisions": [
+            {
+                "observation_id": str(observation.id),
+                "representation_id": str(representation.id),
+                "outcome": outcome,
+                "reason": "TEST",
+                "identity_id": identity_id,
+                "evidence": {
+                    "schema_version": 1,
+                    "outcome": outcome,
+                    "reason": "TEST",
+                    "candidates": [],
+                },
+            }
+        ],
+    }
+    run.current_checkpoint_id = final.id
+    session.commit()
+    return run, observation, representation, identity, job
+
+
+@pytest.mark.parametrize("outcome", ["CREATE_NEW", "MATCH_EXISTING", "ABSTAIN"])
+def test_acceptance_activates_private_output_atomically(
+    sqlite_engine: Engine,
+    db_session: Session,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    outcome: str,
+) -> None:
+    run, observation, representation, identity, job = finalizing(db_session, clock, new_id, outcome)
+    wakes: list[str] = []
+
+    result = use_case(sqlite_engine, clock, new_id, lambda: wakes.append("wake")).accept(run.id)
+
+    assert result.already_accepted is False
+    assert wakes == ["wake"]
+    db_session.expire_all()
+    persisted_run = db_session.get(ProcessingRun, run.id)
+    persisted_job = db_session.get(Job, job.id)
+    assert persisted_run is not None
+    assert persisted_run.state == "COMPLETED"
+    assert persisted_job is not None
+    assert persisted_job.state == "COMPLETED"
+    if observation is None:
+        assert db_session.scalar(select(func.count()).select_from(Occurrence)) == 0
+        return
+    assert representation is not None
+    persisted_observation = db_session.get(Observation, observation.id)
+    persisted_representation = db_session.get(Representation, representation.id)
+    assert persisted_observation is not None
+    assert persisted_observation.state == "ACTIVE"
+    assert persisted_representation is not None
+    assert persisted_representation.state == "ACTIVE"
+    assert persisted_representation.ann_key == 1
+    assert db_session.scalar(select(func.count()).select_from(IndexOperation)) == 1
+    evidence = db_session.scalars(select(Evidence)).one()
+    if outcome == "ABSTAIN":
+        assert persisted_representation.identity_id is None
+        assert evidence.kind == "RECOGNITION_ABSTAINED"
+        assert db_session.scalar(select(func.count()).select_from(Occurrence)) == 0
+    else:
+        assert identity is not None
+        assert persisted_representation.identity_id == identity.id
+        assert db_session.scalar(select(func.count()).select_from(Occurrence)) == 1
+        assert evidence.kind == (
+            "IDENTITY_CREATED" if outcome == "CREATE_NEW" else "IDENTITY_MATCHED"
+        )
+
+
+def test_repeated_acceptance_validates_and_does_not_duplicate_rows(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    accept = use_case(sqlite_engine, clock, new_id)
+
+    assert accept.accept(run.id).already_accepted is False
+    assert accept.accept(run.id).already_accepted is True
+
+    db_session.expire_all()
+    assert db_session.scalar(select(func.count()).select_from(Evidence)) == 1
+    assert db_session.scalar(select(func.count()).select_from(IndexOperation)) == 1
+
+
+def test_acceptance_handles_each_private_face_in_a_final_checkpoint(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert observation is not None
+    build = ModelFactory(db_session, clock, new_id)
+    second_observation = build.observation(
+        run, execution_segment_id=observation.execution_segment_id, sequence_in_run=1
+    )
+    second_representation = build.representation(second_observation)
+    checkpoint = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert checkpoint is not None
+    first_decision = checkpoint.payload_json["decisions"][0]
+    checkpoint.payload_json = {
+        **checkpoint.payload_json,
+        "observations": [str(observation.id), str(second_observation.id)],
+        "decisions": [
+            first_decision,
+            {
+                **first_decision,
+                "observation_id": str(second_observation.id),
+                "representation_id": str(second_representation.id),
+            },
+        ],
+    }
+    db_session.commit()
+
+    use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+    assert db_session.scalar(select(func.count()).select_from(IndexOperation)) == 2
+
+
+def test_repeated_acceptance_remains_idempotent_after_a_source_lifecycle_change(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    accept = use_case(sqlite_engine, clock, new_id)
+    assert accept.accept(run.id).already_accepted is False
+    source = db_session.get(Source, run.source_id)
+    assert source is not None
+    source.state = "RECYCLED"
+    db_session.commit()
+
+    assert accept.accept(run.id).already_accepted is True
+    assert db_session.scalar(select(func.count()).select_from(Evidence)) == 1
+
+
+def test_bad_final_output_rolls_back_without_waking_or_exposing_anything(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert representation is not None
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {**final.payload_json["decisions"][0], "representation_id": str(uuid.uuid4())}
+        ],
+    }
+    db_session.commit()
+    wakes: list[str] = []
+
+    with pytest.raises(AcceptanceError, match="private representations"):
+        use_case(sqlite_engine, clock, new_id, lambda: wakes.append("wake")).accept(run.id)
+
+    assert wakes == []
+    db_session.expire_all()
+    assert db_session.get(ProcessingRun, run.id).state == "FINALIZING"  # type: ignore[union-attr]
+    assert db_session.get(Representation, representation.id).state == "PENDING"  # type: ignore[union-attr]
+    assert db_session.scalar(select(func.count()).select_from(Evidence)) == 0
+
+
+def test_an_abstention_that_secretly_names_an_identity_is_refused_atomically(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert representation is not None
+    representation.identity_id = ModelFactory(db_session, clock, new_id).identity().id
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="ABSTAIN must not name an identity"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+    db_session.expire_all()
+    persisted = db_session.get(Representation, representation.id)
+    assert persisted is not None
+    assert persisted.state == "PENDING"
+    assert db_session.scalar(select(func.count()).select_from(Evidence)) == 0
+
+
+def test_a_post_commit_wake_error_cannot_undo_the_authoritative_acceptance(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert representation is not None
+
+    with pytest.raises(RuntimeError, match="wake failed"):
+        use_case(
+            sqlite_engine, clock, new_id, lambda: (_ for _ in ()).throw(RuntimeError("wake failed"))
+        ).accept(run.id)
+
+    db_session.expire_all()
+    assert db_session.get(ProcessingRun, run.id).state == "COMPLETED"  # type: ignore[union-attr]
+    assert db_session.get(Representation, representation.id).state == "ACTIVE"  # type: ignore[union-attr]
+    assert db_session.scalar(select(func.count()).select_from(IndexOperation)) == 1
+
+
+def test_abstention_candidates_are_historical_evidence(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert representation is not None
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **final.payload_json["decisions"][0],
+                "evidence": {
+                    **final.payload_json["decisions"][0]["evidence"],
+                    "candidates": [
+                        {"rank": 1, "identity_id": None, "similarity": 0.4, "members": []}
+                    ],
+                },
+            }
+        ],
+    }
+    db_session.commit()
+
+    use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+    candidate = db_session.scalars(select(EvidenceCandidate)).one()
+    evidence = db_session.get(Evidence, candidate.evidence_id)
+    assert evidence is not None
+    assert evidence.kind == "RECOGNITION_ABSTAINED"
+    assert candidate.decision == "CONSIDERED"
+
+
+def test_matched_identity_evidence_keeps_its_candidate_snapshot(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "MATCH_EXISTING"
+    )
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **final.payload_json["decisions"][0],
+                "evidence": {
+                    **final.payload_json["decisions"][0]["evidence"],
+                    "candidates": [
+                        {"rank": 1, "identity_id": None, "similarity": 0.9, "members": []}
+                    ],
+                },
+            }
+        ],
+    }
+    db_session.commit()
+
+    use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+    assert db_session.scalars(select(EvidenceCandidate)).one().evidence_id is not None
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"unexpected": True}, "unknown or missing field"),
+        ({"schema_version": 2, "observations": [], "decisions": []}, "unsupported"),
+        ({"schema_version": 1, "observations": "wrong", "decisions": []}, "must be lists"),
+        (
+            {"schema_version": 1, "observations": [str(uuid.uuid4())] * 2, "decisions": []},
+            "repeats an observation",
+        ),
+        (
+            {"schema_version": 1, "observations": [str(uuid.uuid4())], "decisions": []},
+            "do not cover",
+        ),
+    ],
+)
+def test_final_checkpoint_schema_fails_closed(
+    sqlite_engine: Engine,
+    db_session: Session,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    payload: dict[str, object],
+    message: str,
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "NO_FACE"
+    )
+    checkpoint = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert checkpoint is not None
+    checkpoint.payload_json = payload
+    db_session.flush()
+
+    with pytest.raises(AcceptanceError, match=message):
+        use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+
+
+def test_final_checkpoint_requires_the_current_supported_final(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "NO_FACE"
+    )
+    run.current_checkpoint_id = None
+    db_session.flush()
+
+    with pytest.raises(AcceptanceError, match="no current supported FINAL"):
+        use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+
+
+def test_final_checkpoint_refuses_a_repeated_representation(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    checkpoint = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert checkpoint is not None
+    checkpoint.payload_json = {
+        **checkpoint.payload_json,
+        "decisions": checkpoint.payload_json["decisions"] * 2,
+    }
+    db_session.flush()
+
+    with pytest.raises(AcceptanceError, match="repeats a representation"):
+        use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (None, "not a string"),
+        ("not-a-uuid", "invalid"),
+        ({}, "unknown or missing field"),
+        (
+            {
+                "observation_id": str(uuid.uuid4()),
+                "representation_id": str(uuid.uuid4()),
+                "outcome": "NOT_REAL",
+                "reason": "TEST",
+                "identity_id": None,
+                "evidence": {},
+            },
+            "invalid outcome",
+        ),
+        (
+            {
+                "observation_id": str(uuid.uuid4()),
+                "representation_id": str(uuid.uuid4()),
+                "outcome": "ABSTAIN",
+                "reason": "TEST",
+                "identity_id": None,
+                "evidence": [],
+            },
+            "not an object",
+        ),
+    ],
+)
+def test_final_scalar_decoders_fail_closed(
+    sqlite_engine: Engine,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    value: object,
+    message: str,
+) -> None:
+    accept = use_case(sqlite_engine, clock, new_id)
+    if value is None or isinstance(value, str):
+        with pytest.raises(AcceptanceError, match=message):
+            accept._uuid(value, "test")
+    else:
+        with pytest.raises(AcceptanceError, match=message):
+            accept._decision(value)
+
+
+@pytest.mark.parametrize(
+    ("evidence", "message"),
+    [
+        ({"candidates": {}}, "not a list"),
+        ({"candidates": [{}]}, "malformed"),
+        ({"candidates": [{"rank": 0, "members": [{}]}]}, "candidate id is not a string"),
+        ({"candidates": [{"rank": 0, "members": ["not-an-object"]}]}, "member is malformed"),
+    ],
+)
+def test_candidate_decoder_fails_closed(
+    sqlite_engine: Engine,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    evidence: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(AcceptanceError, match=message):
+        use_case(sqlite_engine, clock, new_id)._candidates(evidence)
+
+
+def test_missing_run_and_wrong_lifecycle_states_are_refused(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    accept = use_case(sqlite_engine, clock, new_id)
+    with pytest.raises(AcceptanceError, match="does not exist"):
+        accept.accept(uuid.uuid4())
+    run, _observation, _representation, _identity, job = finalizing(
+        db_session, clock, new_id, "NO_FACE"
+    )
+    run.state = "RUNNING"
+    db_session.commit()
+    with pytest.raises(AcceptanceError, match="not FINALIZING"):
+        accept.accept(run.id)
+    run.state = "FINALIZING"
+    job.state = "QUEUED"
+    db_session.commit()
+    with pytest.raises(AcceptanceError, match="job is QUEUED"):
+        accept.accept(run.id)
+
+
+def test_first_acceptance_requires_an_active_source_and_available_original(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "NO_FACE"
+    )
+    source = db_session.get(Source, run.source_id)
+    assert source is not None
+    source.state = "RECYCLED"
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="source or original"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+
+def test_private_output_must_be_exactly_pending_and_owned_by_its_final_checkpoint(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert observation is not None
+    ModelFactory(db_session, clock, new_id).observation(
+        run, execution_segment_id=observation.execution_segment_id, sequence_in_run=1
+    )
+    db_session.flush()
+    _checkpoint, decisions = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+
+    with pytest.raises(AcceptanceError, match="exactly the private observations"):
+        use_case(sqlite_engine, clock, new_id)._validate_private_output(db_session, run, decisions)
+
+
+def test_identity_decision_validation_rejects_unknown_and_wrong_lifecycle(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert observation is not None
+    assert representation is not None
+    accept = use_case(sqlite_engine, clock, new_id)
+    unknown = _Decision(
+        observation.id, representation.id, RecognitionOutcome.MATCH_EXISTING, uuid.uuid4(), {}
+    )
+    representation.identity_id = unknown.identity_id
+    with pytest.raises(AcceptanceError, match="does not exist"):
+        accept._validate_decision_identity(db_session, run, unknown, representation)
+    representation.identity_id = None
+    with pytest.raises(AcceptanceError, match="does not agree"):
+        accept._validate_decision_identity(db_session, run, unknown, representation)
+    representation.identity_id = None
+    pending = ModelFactory(db_session, clock, new_id).identity(state="PENDING")
+    decision = _Decision(
+        observation.id, representation.id, RecognitionOutcome.MATCH_EXISTING, pending.id, {}
+    )
+    representation.identity_id = pending.id
+    with pytest.raises(AcceptanceError, match="must name an ACTIVE"):
+        accept._validate_decision_identity(db_session, run, decision, representation)
+
+
+def test_create_decision_must_name_an_identity_owned_by_its_run(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert observation is not None
+    assert representation is not None
+    identity = ModelFactory(db_session, clock, new_id).identity(state="PENDING")
+    representation.identity_id = identity.id
+    decision = _Decision(
+        observation.id, representation.id, RecognitionOutcome.CREATE_NEW, identity.id, {}
+    )
+
+    with pytest.raises(AcceptanceError, match="this run's pending identity"):
+        use_case(sqlite_engine, clock, new_id)._validate_decision_identity(
+            db_session, run, decision, representation
+        )
+
+
+def test_context_requires_exactly_one_processing_job(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "NO_FACE"
+    )
+    ModelFactory(db_session, clock, new_id).job(
+        processing_run_id=run.id, type="PROCESS_SOURCE", state="RUNNING"
+    )
+    db_session.flush()
+
+    with pytest.raises(AcceptanceError, match="source or job"):
+        use_case(sqlite_engine, clock, new_id)._context(db_session, run)
+
+
+def test_private_representation_must_be_pending_and_match_its_observation(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert representation is not None
+    representation.state = "SUPERSEDED"
+    _checkpoint, decisions = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+
+    with pytest.raises(AcceptanceError, match="not the private output"):
+        use_case(sqlite_engine, clock, new_id)._validate_private_output(db_session, run, decisions)
+
+
+@pytest.mark.parametrize("failure", ["observation", "source", "run", "job"])
+def test_acceptance_rolls_back_when_a_compare_and_set_loses(
+    sqlite_engine: Engine,
+    db_session: Session,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert representation is not None
+    if failure == "observation":
+        monkeypatch.setattr(
+            "backend.app.processing.accept_run.ObservationRepository.transition",
+            lambda *_args, **_kwargs: False,
+        )
+        message = "observation changed"
+    elif failure == "source":
+        monkeypatch.setattr(
+            "backend.app.processing.accept_run.SourceRepository.set_current_run",
+            lambda *_args, **_kwargs: False,
+        )
+        message = "source changed"
+    elif failure == "run":
+        monkeypatch.setattr(
+            "backend.app.processing.accept_run.optimistic_locked_update",
+            lambda *_args, **_kwargs: 0,
+        )
+        message = "run changed"
+    else:
+        monkeypatch.setattr(
+            "backend.app.processing.accept_run.JobRepository.transition",
+            lambda *_args, **_kwargs: False,
+        )
+        message = "job changed"
+
+    with pytest.raises(AcceptanceError, match=message):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+    db_session.expire_all()
+    assert db_session.get(ProcessingRun, run.id).state == "FINALIZING"  # type: ignore[union-attr]
+    assert db_session.get(Representation, representation.id).state == "PENDING"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("outcome", ["ABSTAIN", "MATCH_EXISTING"])
+def test_completed_runs_revalidate_their_identity_assignment(
+    sqlite_engine: Engine,
+    db_session: Session,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    outcome: str,
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, outcome
+    )
+    assert representation is not None
+    accept = use_case(sqlite_engine, clock, new_id)
+    accept.accept(run.id)
+    assert accept.accept(run.id).already_accepted is True
+    representation = db_session.get(Representation, representation.id)
+    assert representation is not None
+    representation.identity_id = ModelFactory(db_session, clock, new_id).identity().id
+    db_session.commit()
+
+    expected = "acquired an identity" if outcome == "ABSTAIN" else "changed identity"
+    with pytest.raises(AcceptanceError, match=expected):
+        accept.accept(run.id)
+
+
+def test_completed_run_requires_active_output_and_accepted_owners(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert representation is not None
+    accept = use_case(sqlite_engine, clock, new_id)
+    accept.accept(run.id)
+    source = db_session.get(Source, run.source_id)
+    assert source is not None
+    source.current_processing_run_id = None
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="missing its accepted owners"):
+        accept.accept(run.id)
+
+    source.current_processing_run_id = run.id
+    db_session.flush()
+    representation = db_session.get(Representation, representation.id, populate_existing=True)
+    assert representation is not None
+    representation.state = "PENDING"
+    representation.ann_key = None
+    db_session.commit()
+    with pytest.raises(AcceptanceError, match="inconsistent accepted output"):
+        accept.accept(run.id)
