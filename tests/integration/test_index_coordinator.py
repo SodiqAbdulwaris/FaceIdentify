@@ -6,8 +6,10 @@ Each crash window between the two is reproduced.
 """
 
 import uuid
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -22,6 +24,7 @@ from backend.app.memory.index_coordinator import (
 )
 from backend.app.memory.models import IndexOperation, Representation, RepresentationSpace
 from backend.infrastructure.db.engine import create_session_factory
+from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
 from tests.factories.models import ModelFactory, float32_vector
 from tests.fixtures.persistence import AppDirs
@@ -41,10 +44,13 @@ def factory(sqlite_engine: Engine) -> sessionmaker[Session]:
 
 @pytest.fixture
 def coordinator(
-    factory: sessionmaker[Session], app_dirs: AppDirs, build: ModelFactory
+    factory: sessionmaker[Session], sqlite_engine: Engine, app_dirs: AppDirs, build: ModelFactory
 ) -> IndexCoordinator:
     return IndexCoordinator(
-        factory, app_dirs.indexes, clock=build.clock, new_id=build.new_id,
+        factory,
+        UnitOfWork(sqlite_engine, retry=TransactionRetry(1, lambda _: 0)),
+        app_dirs.indexes,
+        clock=build.clock, new_id=build.new_id,
         retry=RetryPolicy(max_attempts=MAX_ATTEMPTS, backoff=lambda n: timedelta(minutes=n)),
     )  # fmt: skip
 
@@ -502,6 +508,33 @@ def test_an_operation_settled_by_someone_else_meanwhile_is_not_counted(
 
     assert report.applied == []
     assert load_op(factory, operation.id).attempt_count == 0  # untouched by this pass
+
+
+def test_settlement_report_contains_only_the_committed_unit_of_work_attempt(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """A UnitOfWork retry must not append outcome report entries from its rolled-back attempt."""
+    operation = queue(build, active(build, space, 1), "ADD")
+    real_write = coordinator._uow.write
+    attempts = 0
+
+    def retry_once(work: Callable[[Session], Any]) -> Any:
+        nonlocal attempts
+        attempts += 1
+        with factory() as rolled_back:
+            work(rolled_back)
+            rolled_back.rollback()
+        return real_write(work)
+
+    monkeypatch.setattr(coordinator._uow, "write", retry_once)
+
+    report = run(coordinator, build)
+
+    assert attempts == 1
+    assert report.applied == [operation.id]
+    stored = load_op(factory, operation.id)
+    assert (stored.state, stored.attempt_count) == ("APPLIED", 1)
 
 
 def test_a_rebuild_leaves_out_a_vector_that_is_not_finite_and_says_so(

@@ -163,10 +163,11 @@ def open_library(
         engine = create_sqlite_engine(roots.database_path)
         cleanup.callback(engine.dispose)  # the file and its log are released before the lock is
         session_factory = create_session_factory(engine)
+        unit_of_work = UnitOfWork(engine, retry=transaction_retry)
         store = ManagedFileStore(roots)
         workspaces = WorkspaceManager(roots)
         coordinator = IndexCoordinator(
-            session_factory, roots.indexes, clock=clock, new_id=new_id, retry=retry
+            session_factory, unit_of_work, roots.indexes, clock=clock, new_id=new_id, retry=retry
         )
         eraser = RepresentationEraser(
             session_factory, engine, coordinator, clock=clock, new_id=new_id
@@ -178,5 +179,5 @@ def open_library(
         )  # fmt: skip
         yield OpenLibrary(
             roots, engine, session_factory, store, workspaces, coordinator, eraser,
-            UnitOfWork(engine, retry=transaction_retry), packages, startup,
+            unit_of_work, packages, startup,
         )  # fmt: skip

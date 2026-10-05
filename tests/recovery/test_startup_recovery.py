@@ -51,6 +51,7 @@ from backend.app.sources.referenced_artifacts import (
     mark_missing_referenced_originals,
 )
 from backend.infrastructure.db.engine import create_session_factory
+from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
 from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.layout import StorageRoots
@@ -79,10 +80,13 @@ def workspaces(storage_roots: StorageRoots) -> WorkspaceManager:
 
 @pytest.fixture
 def coordinator(
-    factory: sessionmaker[Session], app_dirs: AppDirs, build: ModelFactory
+    factory: sessionmaker[Session], sqlite_engine: Engine, app_dirs: AppDirs, build: ModelFactory
 ) -> IndexCoordinator:
     return IndexCoordinator(
-        factory, app_dirs.indexes, clock=build.clock, new_id=build.new_id,
+        factory,
+        UnitOfWork(sqlite_engine, retry=TransactionRetry(1, lambda _: 0)),
+        app_dirs.indexes,
+        clock=build.clock, new_id=build.new_id,
         retry=RetryPolicy(max_attempts=3, backoff=lambda n: timedelta(minutes=n)),
     )  # fmt: skip
 
@@ -850,21 +854,22 @@ def test_an_operation_settled_while_requeueing_is_not_resurrected(
     space = build.representation_space(dimension=NDIM)
     operation = build.index_operation(active(build, space, 1), operation="ADD", state="FAILED")
     build.session.commit()
-    real = coordinator._sessions
-    opened: list[int] = []
+    real_write = coordinator._uow.write
+    settled = False
 
-    def sessions() -> Session:
-        opened.append(1)
-        if len(opened) == 2:  # between choosing the failed operations and writing: it is settled
-            with real() as other:
+    def write(work: Callable[[Session], Any]) -> Any:
+        nonlocal settled
+        if not settled:  # just before the coordinator's BEGIN IMMEDIATE transaction
+            settled = True
+            with factory() as other:
                 other.execute(
                     update(IndexOperation).where(IndexOperation.id == operation.id)
                     .values(state="APPLIED", applied_at=build.clock())
                 )  # fmt: skip
                 other.commit()
-        return real()
+        return real_write(work)
 
-    monkeypatch.setattr(coordinator, "_sessions", sessions)
+    monkeypatch.setattr(coordinator._uow, "write", write)
 
     assert coordinator.requeue_failed_operations() == []
     assert reload(factory, IndexOperation, operation.id).state == "APPLIED"
