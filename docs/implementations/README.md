@@ -115,3 +115,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-03 | [M3: readers accept an identity-less ACTIVE candidate](2026-10-03-m3-identityless-candidates.md) | done; step 11, second part |
 | 2026-10-03 | [M3: the writer of a run's PENDING output](2026-10-03-m3-pending-output-writer.md) | done; step 7 complete; issue 88 |
 | 2026-10-03 | [M3: durable source-processing request](2026-10-03-m3-process-source-request.md) | partial; step 10 first slice |
+| 2026-10-04 | [M3: private single-image processing execution](2026-10-04-m3-processing-execution.md) | partial; step 10, review-hardened; issue 102 decision pending |

@@ -14,6 +14,9 @@ result in short UnitOfWork transactions as private PENDING output. It then rebui
 pool, reads the injected global derived index, assesses/reasons each face, and records private
 CREATE_NEW, MATCH_EXISTING, or ABSTAIN decisions. CREATE_NEW creates only a PENDING identity;
 nothing here activates SQLite rows, creates occurrences, allocates ANN keys, or wakes the index.
+Every private-output settlement reloads the live run, source, original artifact, execution segment,
+and claimed Job after compute and before mutation. A cancellation observed after detector output
+settles therefore stops before embedding begins.
 
 The executor appends an INTERMEDIATE checkpoint after observations and representations are
 durably private, advances `current_checkpoint_id`, and only appends FINAL after all private
@@ -58,7 +61,7 @@ rather than treating the frozen request or compatibility space as execution prov
 
 ## Verification
 
-- `uv run pytest tests/integration/test_execute_processing_job.py -q -p no:cacheprovider --cov=backend.app.processing.execute_job --cov-branch --cov-report=term-missing` -- 62 passed; executor 100% line and branch coverage.
+- `uv run pytest tests/integration/test_execute_processing_job.py -q -p no:cacheprovider` -- 67 passed.
 - `uv run ruff format --check .` -- 200 files already formatted.
 - `uv run ruff check .` -- passed.
 - `uv run mypy` and `uv run mypy --platform linux` -- passed.
@@ -67,6 +70,15 @@ rather than treating the frozen request or compatibility space as execution prov
   IndexCoordinator UnitOfWork slice), the exact full gate passed: 2,231 tests in 408.05 seconds,
   100% coverage. Ruff and both mypy targets also passed; a fresh independent read-only review and
   exact-head CI remain required before merge.
+- After the independent rebased review fixed cancellation-after-detection and live settlement
+  revalidation, the full unmutated gate passed: 2,236 tests in 208.95 seconds, 100% line and
+  branch coverage. The focused executor suite then passed 67 tests.
+- Mutation proof after that clean baseline: deleting the post-detection cancellation check made
+  `test_cancellation_after_detection_settlement_does_not_start_embedding` fail because embedding
+  started; deleting detection-settlement revalidation made
+  `test_recycled_source_before_settlement_cannot_persist_detection` fail because embedding
+  started. `backend/app/processing/execute_job.py` was restored byte-identically after both
+  probes; SHA-256 before and after: `47E60DEAE4436FF9C437A1F2C0C8DD7578B592FCE5B190EF7630134625D7C97B`.
 - After that clean baseline, mutating the active-image guard from `or` to `and` caused the
   recycled-source parameter of `test_input_revalidates_durable_run_source_and_original` to fail.
   The file SHA-256 before and after restoration was
@@ -82,13 +94,12 @@ rather than treating the frozen request or compatibility space as execution prov
 
 ## Open issues / follow-ups
 
-- Independent review of PR #101 found and this branch fixed the pre-load cancellation ordering,
-  segment ownership checks, and a second lifecycle finding: the initial hardening still allowed a
-  foreign or unclosable segment to leave its claimed segment RUNNING while terminalizing the
-  run/Job. A final independent pass found an additional interleaving where the Job transition
-  could be ineligible after a run/segment terminalization; the settlement now validates the Job
-  first and rolls back if its guarded write unexpectedly loses. Its fallback finding is the
-  specification conflict below, not a dismissed review comment.
+- The independent rebased review found and this branch fixed two additional interleavings:
+  cancellation after detector settlement now stops before embedding, and every private-output
+  mutation revalidates the live source/original and claimed lifecycle under the write lock. The
+  later duplicate lifecycle checks were removed because the validated objects are returned by the
+  single guard and cannot change in the same write transaction. A fresh independent review remains
+  required after this correction.
 - Resolve the fallback-segment conflict above; then exercise actual fallback history through the
   executor.
 - Step 11 remains the only acceptance/ANN authority boundary. It must validate FINAL idempotently,
