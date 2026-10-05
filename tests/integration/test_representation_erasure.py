@@ -37,6 +37,7 @@ from backend.app.memory.models import (
 from backend.app.settings.app_state import WAL_TRUNCATION_OWED, AppStateRepository
 from backend.infrastructure.db import engine as db_engine
 from backend.infrastructure.db.engine import create_session_factory
+from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.indexing import representation_index
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
 from tests.factories.models import ModelFactory, float32_vector
@@ -55,10 +56,13 @@ def factory(sqlite_engine: Engine) -> sessionmaker[Session]:
 
 
 def make_coordinator(
-    factory: sessionmaker[Session], app_dirs: AppDirs, build: ModelFactory
+    factory: sessionmaker[Session], sqlite_engine: Engine, app_dirs: AppDirs, build: ModelFactory
 ) -> IndexCoordinator:
     return IndexCoordinator(
-        factory, app_dirs.indexes, clock=build.clock, new_id=build.new_id,
+        factory,
+        UnitOfWork(sqlite_engine, retry=TransactionRetry(1, lambda _: 0)),
+        app_dirs.indexes,
+        clock=build.clock, new_id=build.new_id,
         retry=RetryPolicy(max_attempts=3, backoff=lambda n: timedelta(minutes=n)),
     )  # fmt: skip
 
@@ -75,9 +79,9 @@ def make_eraser(
 
 @pytest.fixture
 def coordinator(
-    factory: sessionmaker[Session], app_dirs: AppDirs, build: ModelFactory
+    factory: sessionmaker[Session], sqlite_engine: Engine, app_dirs: AppDirs, build: ModelFactory
 ) -> IndexCoordinator:
-    return make_coordinator(factory, app_dirs, build)
+    return make_coordinator(factory, sqlite_engine, app_dirs, build)
 
 
 @pytest.fixture
@@ -523,7 +527,7 @@ def test_stopping_after_any_step_and_rerunning_recovery_completes_the_erasure_on
     build.clock.advance(minutes=10)  # past any backoff the interrupted pass recorded
 
     restarted = make_eraser(
-        factory, sqlite_engine, make_coordinator(factory, app_dirs, build), build
+        factory, sqlite_engine, make_coordinator(factory, sqlite_engine, app_dirs, build), build
     )
     report = restarted.resume()
 

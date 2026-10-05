@@ -63,6 +63,7 @@ from backend.app.memory.models import (
     RepresentationSpaceState,
     RepresentationState,
 )
+from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.indexing.representation_index import (
     RepresentationIndex,
     open_or_rebuild,
@@ -122,6 +123,7 @@ class IndexCoordinator:
     def __init__(
         self,
         session_factory: sessionmaker[Session],
+        unit_of_work: UnitOfWork,
         index_root: Path,
         *,
         clock: Callable[[], datetime],
@@ -129,6 +131,7 @@ class IndexCoordinator:
         retry: RetryPolicy,
     ) -> None:
         self._sessions = session_factory
+        self._uow = unit_of_work
         self._root = index_root
         self._clock = clock
         self._new_id = new_id
@@ -265,15 +268,25 @@ class IndexCoordinator:
         operations requeued.
         """
         now = self._clock()
-        requeued: list[uuid.UUID] = []
         with self._lock:
-            with self._sessions() as session:
-                failed = IndexOperationRepository(session).failed_ids()
-            with self._sessions() as session:
-                repository = IndexOperationRepository(session)
-                requeued = [op for op in failed if repository.requeue(op, now=now)]
-                session.commit()
-        return requeued
+            return self._uow.write(
+                lambda session: self._requeue_failed_in_transaction(session, now)
+            )
+
+    @staticmethod
+    def _requeue_failed_in_transaction(session: Session, now: datetime) -> list[uuid.UUID]:
+        """Re-read and requeue in one retriable write transaction.
+
+        The UnitOfWork can invoke this more than once after a SQLite busy/locked rollback.  The
+        list therefore comes wholly from the successful attempt, never from a stale read before
+        the retry boundary.
+        """
+        repository = IndexOperationRepository(session)
+        return [
+            operation_id
+            for operation_id in repository.failed_ids()
+            if repository.requeue(operation_id, now=now)
+        ]
 
     def _claim(self, limit: int) -> list[DueOperation]:
         with self._sessions() as session:
@@ -454,42 +467,61 @@ class IndexCoordinator:
         20). Each UPDATE is guarded by the operation still being `PENDING`.
         """
         now = self._clock()
-        with self._sessions() as session:
-            seen = IndexOperationRepository(session).attempt_counts(list(outcomes))
-        with self._sessions() as session:
-            repository = IndexOperationRepository(session)
-            for operation_id, error in outcomes.items():
-                if operation_id not in seen:
-                    continue  # deleted meanwhile: superseded by an opposite operation (question 27)
-                attempts = seen[operation_id]
-                if error is None:
-                    values: dict[str, object] = {
-                        "state": IndexOperationState.APPLIED,
-                        "applied_at": now,
-                        "failure_code": None,
-                        "failure_detail": None,
-                    }
-                elif attempts + 1 >= self._retry.max_attempts:
-                    values = {
-                        "state": IndexOperationState.FAILED,
-                        "failure_code": APPLY_ERROR,
-                        "failure_detail": error[:500],
-                    }
-                else:
-                    values = {
-                        "not_before_at": now + self._retry.backoff(attempts + 1),
-                        "failure_code": APPLY_ERROR,
-                        "failure_detail": error[:500],
-                    }
-                settled = repository.settle(
-                    operation_id, attempts=attempts + 1, now=now, values=values
-                )
-                if not settled:
-                    continue  # settled by someone else meanwhile
-                if error is None:
-                    report.applied.append(operation_id)
-                elif values.get("state") == IndexOperationState.FAILED:
-                    report.failed.append((operation_id, error))
-                else:
-                    report.retrying.append((operation_id, error))
-            session.commit()
+        applied, failed, retrying = self._uow.write(
+            lambda session: self._settle_in_transaction(session, outcomes, now)
+        )
+        # Do not mutate the caller-visible report inside the retried UnitOfWork callback: a
+        # rolled-back attempt may be run again, while this outcome belongs to the committed one.
+        report.applied.extend(applied)
+        report.failed.extend(failed)
+        report.retrying.extend(retrying)
+
+    def _settle_in_transaction(
+        self,
+        session: Session,
+        outcomes: dict[uuid.UUID, str | None],
+        now: datetime,
+    ) -> tuple[list[uuid.UUID], list[tuple[uuid.UUID, str]], list[tuple[uuid.UUID, str]]]:
+        """Settle one coordinator pass in one retriable write transaction.
+
+        Attempt counts are read in this same transaction, after `BEGIN IMMEDIATE`, so every retry
+        starts from the current durable state instead of carrying a stale count across attempts.
+        """
+        repository = IndexOperationRepository(session)
+        seen = repository.attempt_counts(list(outcomes))
+        applied: list[uuid.UUID] = []
+        failed: list[tuple[uuid.UUID, str]] = []
+        retrying: list[tuple[uuid.UUID, str]] = []
+        for operation_id, error in outcomes.items():
+            if operation_id not in seen:
+                continue  # deleted meanwhile: superseded by an opposite operation (question 27)
+            attempts = seen[operation_id]
+            if error is None:
+                values: dict[str, object] = {
+                    "state": IndexOperationState.APPLIED,
+                    "applied_at": now,
+                    "failure_code": None,
+                    "failure_detail": None,
+                }
+            elif attempts + 1 >= self._retry.max_attempts:
+                values = {
+                    "state": IndexOperationState.FAILED,
+                    "failure_code": APPLY_ERROR,
+                    "failure_detail": error[:500],
+                }
+            else:
+                values = {
+                    "not_before_at": now + self._retry.backoff(attempts + 1),
+                    "failure_code": APPLY_ERROR,
+                    "failure_detail": error[:500],
+                }
+            settled = repository.settle(operation_id, attempts=attempts + 1, now=now, values=values)
+            if not settled:
+                continue  # settled by someone else meanwhile
+            if error is None:
+                applied.append(operation_id)
+            elif values.get("state") == IndexOperationState.FAILED:
+                failed.append((operation_id, error))
+            else:
+                retrying.append((operation_id, error))
+        return applied, failed, retrying

@@ -35,6 +35,7 @@ from backend.app.sources.artifact_storage import (
 )
 from backend.app.sources.models import Artifact
 from backend.infrastructure.db.engine import create_session_factory
+from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.indexing.representation_index import (
     IndexUnusableError,
     RepresentationIndex,
@@ -113,7 +114,10 @@ def library(
     return Library(
         build=build, factory=factory, store=file_store, workspaces=WorkspaceManager(storage_roots),
         coordinator=IndexCoordinator(
-            factory, app_dirs.indexes, clock=build.clock, new_id=build.new_id,
+            factory,
+            UnitOfWork(sqlite_engine, retry=TransactionRetry(1, lambda _: 0)),
+            app_dirs.indexes,
+            clock=build.clock, new_id=build.new_id,
             retry=RetryPolicy(max_attempts=3, backoff=lambda n: timedelta(minutes=n)),
         ),
         space=space, engine=sqlite_engine, roots=storage_roots, patch=monkeypatch,
