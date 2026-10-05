@@ -19,6 +19,8 @@ from backend.app.runtime.perception_client import (
     PROVIDER_UNAVAILABLE,
     PerceptionClient,
     PerceptionError,
+    ProviderFallback,
+    ProviderUnavailable,
     supervisor_for,
 )
 from backend.app.runtime.worker_config import (
@@ -277,10 +279,45 @@ def test_only_a_provider_that_cannot_run_moves_on_to_the_next_variant(
     )
     found = client_of(script, plan, new_id).detect(picture(64, 64))
     assert found.ran is second
+    assert found.fallbacks == (
+        ProviderFallback((ProviderUnavailable(first, code, "cannot"),), second),
+    )
     assert [r.options["runtime_variant_id"] for r in script.requests] == [
         str(first.runtime_variant_id),
         str(second.runtime_variant_id),
     ]
+
+
+def test_a_fallback_records_every_unavailable_provider_before_the_selected_variant(
+    new_id: SeededUUIDs,
+) -> None:
+    first, second, selected = variant(MISSING), variant("Other"), variant(CPU)
+    plan = plan_of((first, second, selected), ())
+    script = Scripted(
+        lambda request: (
+            detected(request)
+            if request.options["runtime_variant_id"] == str(selected.runtime_variant_id)
+            else error_response(
+                request, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE, "cannot execute"
+            )
+        )
+    )
+
+    found = client_of(script, plan, new_id).detect(picture(64, 64))
+
+    assert found.fallbacks == (
+        ProviderFallback(
+            (
+                ProviderUnavailable(
+                    first, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE, "cannot execute"
+                ),
+                ProviderUnavailable(
+                    second, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE, "cannot execute"
+                ),
+            ),
+            selected,
+        ),
+    )
 
 
 def test_the_two_provider_codes_are_exactly_these() -> None:

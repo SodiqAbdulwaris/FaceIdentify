@@ -41,7 +41,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 |---|---|---|
 | 2026-10-05 | [M3: IndexCoordinator write transactions use the UnitOfWork](2026-10-05-m3-index-coordinator-unit-of-work.md) | done; merged in PR #105; step 11 / issue 66 narrow slice |
 | 2026-10-04 | [M4 authenticated local API bootstrap](2026-10-04-m4-api-launch-capability.md) | partial; merged in PR #103 |
-| 2026-10-04 | [M3 private single-image processing execution](2026-10-04-m3-processing-execution.md) | partial; pending PR #101 / issue #102 |
+| 2026-10-04 | [M3 private single-image processing execution](2026-10-04-m3-processing-execution.md) | partial; PR #101 implements approved issue #102 fallback boundaries; final gate/review pending |
 | 2026-10-04 | [M3 exact frozen-export planning](2026-10-04-m3-frozen-export-planning.md) | done; pending PR |
 | 2026-10-04 | [M3 processing scheduler claim/start boundary](2026-10-04-m3-processing-scheduler.md) | partial; merged in PR #99 |
 | 2026-09-23 | [M0 testing foundation](2026-09-23-m0-testing-foundation.md) | done; merged in PR #1 |
@@ -115,4 +115,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-03 | [M3: readers accept an identity-less ACTIVE candidate](2026-10-03-m3-identityless-candidates.md) | done; step 11, second part |
 | 2026-10-03 | [M3: the writer of a run's PENDING output](2026-10-03-m3-pending-output-writer.md) | done; step 7 complete; issue 88 |
 | 2026-10-03 | [M3: durable source-processing request](2026-10-03-m3-process-source-request.md) | partial; step 10 first slice |
-| 2026-10-04 | [M3: private single-image processing execution](2026-10-04-m3-processing-execution.md) | partial; step 10, review-hardened; issue 102 decision pending |
+| 2026-10-04 | [M3: private single-image processing execution](2026-10-04-m3-processing-execution.md) | partial; step 10, review-hardened; approved issue 102 implementation awaiting final gate/review |

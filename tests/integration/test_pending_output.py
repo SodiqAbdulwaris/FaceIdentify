@@ -35,6 +35,7 @@ from backend.app.processing.pending_output import (
     write_observation,
     write_representation,
 )
+from backend.app.processing.repository import SegmentRepository
 from backend.app.runtime.models import (
     ModelExport,
     RuntimeVariant,
@@ -128,7 +129,8 @@ class World:
         self, observation_id: uuid.UUID, detection_index: int = 0, **kw: Any
     ) -> WrittenRepresentation:
         arguments: dict[str, Any] = dict(
-            observation_id=observation_id, detection_index=detection_index, vector=self.vector(),
+            observation_id=observation_id, execution_segment_id=self.segment.id,
+            detection_index=detection_index, vector=self.vector(),
             embedder=self.embedder, representation_space_id=self.space_id,
             new_id=self.new_id, now=self.clock(),
         )  # fmt: skip
@@ -159,7 +161,15 @@ class World:
             **{
                 key: value
                 for key, value in kw.items()
-                if key in {"vector", "embedder", "representation_space_id", "new_id", "now"}
+                if key
+                in {
+                    "execution_segment_id",
+                    "vector",
+                    "embedder",
+                    "representation_space_id",
+                    "new_id",
+                    "now",
+                }
             },
         )
         return WrittenFace(observation.observation_id, representation.representation_id)
@@ -431,6 +441,34 @@ def test_embedding_refuses_a_run_or_segment_that_stops_after_detection(
         world.write_representation(observation.observation_id)
 
     assert world.counts() == before
+
+
+def test_embedding_may_record_a_later_running_execution_segment(world: World) -> None:
+    """A provider fallback can separate detector and embedder execution intervals."""
+    observation = world.write_observation()
+    repository = SegmentRepository(world.session)
+    assert repository.close(
+        world.segment.id,
+        ExecutionSegmentState.COMPLETED,
+        reason="FALLBACK",
+        now=world.clock(),
+    )
+    next_segment = repository.append(
+        world.run.id,
+        segment_id=world.new_id(),
+        runtime_variant_id=world.embedder.runtime_variant_id,
+        runtime_details={"schema_version": 1, "transition": "PROVIDER_FALLBACK"},
+        now=world.clock(),
+    )
+
+    representation = world.write_representation(
+        observation.observation_id,
+        execution_segment_id=next_segment.id,
+    )
+
+    row = world.session.get(Representation, representation.representation_id)
+    assert row is not None
+    assert row.execution_segment_id == next_segment.id
 
 
 def test_embedding_refuses_an_unknown_or_nonpending_observation(world: World) -> None:

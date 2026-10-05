@@ -52,12 +52,14 @@ rather than treating the frozen request or compatibility space as execution prov
   the Job's run linkage and permitted state under that lock before it closes the segment. A final
   guarded Job transition that unexpectedly loses still aborts the UnitOfWork, so it cannot leave a
   terminal run/segment behind.
-- No fallback segment history was invented. Persistence implementation section 14 says a provider,
-  export, or variant change closes/starts a segment, whereas the owner decision of 2026-10-03 says
-  segments are not split by detector versus embedder stage. `PerceptionClient` currently exposes
-  the actual successful variants but not a fallback event stream. The output provenance is correct,
-  but the precise segment treatment of a mid-run provider fallback remains an open specification
-  conflict that must be resolved before claiming the fallback matrix complete.
+- **Decision 2026-10-05 (owner, issue 102):** `PerceptionClient` reports a fallback only after a
+  coded provider-unavailable error and a later planned variant succeeds. The executor settles that
+  event before output persistence: it closes the active interval as `FALLBACK`, appends the
+  selected variant's interval with the failed/selected variants and coded error in its versioned
+  details, then records subsequent output against the interval that actually produced it. Normal
+  detector-to-embedder movement creates no boundary. In particular, a representation may refer to
+  a later running segment than its observation after an embedder fallback; the PENDING writer
+  validates that supplied segment rather than silently inheriting the observation's old interval.
 
 ## Verification
 
@@ -91,6 +93,19 @@ rather than treating the frozen request or compatibility space as execution prov
   rollback guard made its relevant cancellation/failure test fail. The source was restored
   byte-identically after all six probes; SHA-256:
   `955B31B5B53CCF17FD4D445B079EB8F4F23848C1BAD1B46CCBC33DA9E928CFC2`.
+- Focused fallback/writer suites after the approved decision: 141 passed in 12.85 seconds. They
+  cover the exact client fallback event, detector and embedder fallback segment histories, no
+  stage-only split, a failed segment closure preserving private output, and a representation that
+  follows a later running fallback segment.
+- Clean full baseline after the fallback implementation: 2,241 passed in 362.25 seconds with
+  100% line and branch coverage; Ruff and both mypy targets passed. Mutation proof then removed
+  the emitted fallback event (the two provider-code parameters plus the multiple-attempt test
+  failed) and inverted the fallback-close guard (both detector and embedder transition tests
+  failed). The restored source hashes matched byte-for-byte: `perception_client.py`
+  `B020467B57425C66C96AD8B400B7F181D3ABF4F4E32F02B33152C3E2F1089919` and
+  `execute_job.py` `4C1DC02B827B4F113D80D25A9ADF1C811DBAA11792A0F1E267B12BEC0ECE1A18`.
+- The real-worker client suite was repeated three times after restoration (34 passed in 6.56,
+  6.86, and 6.99 seconds), covering the process-sensitive provider fallback path.
 
 ## Open issues / follow-ups
 
@@ -100,8 +115,6 @@ rather than treating the frozen request or compatibility space as execution prov
   later duplicate lifecycle checks were removed because the validated objects are returned by the
   single guard and cannot change in the same write transaction. A fresh independent review remains
   required after this correction.
-- Resolve the fallback-segment conflict above; then exercise actual fallback history through the
-  executor.
 - Step 11 remains the only acceptance/ANN authority boundary. It must validate FINAL idempotently,
   activate output atomically, create occurrences/index operations, and wake the coordinator only
   after commit.

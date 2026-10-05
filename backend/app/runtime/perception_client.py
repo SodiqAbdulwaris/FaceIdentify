@@ -71,9 +71,27 @@ class PerceptionError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderUnavailable:
+    """One provider-specific rejection while the backend selects a runtime variant."""
+
+    variant: PlannedVariant
+    code: MLErrorCode
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderFallback:
+    """One transition to the variant that succeeded, retaining every unavailable attempt."""
+
+    failed: tuple[ProviderUnavailable, ...]
+    selected: PlannedVariant
+
+
+@dataclass(frozen=True, slots=True)
 class Detected:
     detections: tuple[Detection, ...]  # empty is a successful "no face"
     ran: PlannedVariant
+    fallbacks: tuple[ProviderFallback, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +105,7 @@ class FaceVector:
 class Represented:
     vectors: tuple[FaceVector, ...]  # one per detection, in the order asked
     ran: PlannedVariant | None  # None when there was nothing to represent (no worker call)
+    fallbacks: tuple[ProviderFallback, ...] = ()
 
 
 def supervisor_for(plan: PerceptionPlan, policy: SupervisorPolicy) -> MLSupervisor:
@@ -114,7 +133,7 @@ class PerceptionClient:
     ) -> Detected:
         with SegmentLedger(new_id=self._new_id) as ledger:
             image = _put(ledger, pixels)
-            _, response, ran = self._attempt(
+            _, response, ran, fallbacks = self._attempt(
                 "the face detector",
                 self._plan.detector,
                 lambda variant: self._request(
@@ -123,7 +142,7 @@ class PerceptionClient:
             )
         assert isinstance(response.output, DetectFacesOutput)  # (the operation's own output)
         # (a detection makes no worker segments, so there is nothing to release_output here)
-        return Detected(response.output.detections, ran)
+        return Detected(response.output.detections, ran, fallbacks)
 
     def represent(
         self,
@@ -139,7 +158,7 @@ class PerceptionClient:
         asked = tuple(FaceGeometry(0, d.detection_index, d.box, d.landmarks) for d in detections)
         with SegmentLedger(new_id=self._new_id) as ledger:
             image = _put(ledger, pixels)
-            request, response, ran = self._attempt(
+            request, response, ran, fallbacks = self._attempt(
                 "the face embedder",
                 self._plan.embedder,
                 lambda variant: self._request(
@@ -150,7 +169,7 @@ class PerceptionClient:
                 ),
             )
             try:
-                return Represented(self._read(response, asked), ran)
+                return Represented(self._read(response, asked), ran, fallbacks)
             finally:
                 self._supervisor.release_output(request.request_id)
 
@@ -177,8 +196,9 @@ class PerceptionClient:
         what: str,
         variants: Sequence[PlannedVariant],
         build: Callable[[PlannedVariant], MLRequest],
-    ) -> tuple[MLRequest, MLResponse, PlannedVariant]:
+    ) -> tuple[MLRequest, MLResponse, PlannedVariant, tuple[ProviderFallback, ...]]:
         """Ask each variant that is not ruled out, in order, until one runs."""
+        failures: list[ProviderUnavailable] = []
         for variant in variants:
             if _key(variant) in self._ruled_out:
                 continue
@@ -186,12 +206,20 @@ class PerceptionClient:
             response = self._supervisor.execute(request)
             if response.status is MLStatus.SUCCESS:
                 self._check_it_was_that_variant(request, response, variant)
-                return request, response, variant
+                return (
+                    request,
+                    response,
+                    variant,
+                    (ProviderFallback(tuple(failures), variant),) if failures else (),
+                )
             assert response.error is not None  # (an ERROR response always has its error)
             if response.error.code not in PROVIDER_UNAVAILABLE:
                 raise PerceptionError(response.error.code, response.error.message)
             self._ruled_out[_key(variant)] = (
                 f"{variant.provider} ({variant.package_key}): {response.error.message}"
+            )
+            failures.append(
+                ProviderUnavailable(variant, response.error.code, response.error.message)
             )
         raise RuntimeUnavailableError(
             what,

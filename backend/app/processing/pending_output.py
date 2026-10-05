@@ -214,6 +214,7 @@ def write_representation(
     session: Session,
     *,
     observation_id: uuid.UUID,
+    execution_segment_id: uuid.UUID,
     detection_index: int,
     vector: FaceVector,
     embedder: PlannedVariant,
@@ -236,7 +237,7 @@ def write_representation(
         session,
         source_id=observation.source_id,
         processing_run_id=observation.processing_run_id,
-        execution_segment_id=observation.execution_segment_id,
+        execution_segment_id=execution_segment_id,
     )
     space = session.get(RepresentationSpace, representation_space_id)
     if space is None:
@@ -259,7 +260,7 @@ def write_representation(
         id=new_id(),
         observation_id=observation.id,
         processing_run_id=observation.processing_run_id,
-        execution_segment_id=observation.execution_segment_id,
+        execution_segment_id=execution_segment_id,
         representation_space_id=space.id,
         state=RepresentationState.PENDING,
         vector=vector.vector.tobytes(),

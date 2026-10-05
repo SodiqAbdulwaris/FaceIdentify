@@ -240,11 +240,13 @@ A Person may have many active identities. Assignment is an explicit use case: lo
 
 Evidence records a durable reason for an authoritative memory decision. It is immutable and append-only; it does not claim that the decision is still current.
 
-`evidence` columns: `id`; `kind` (`IDENTITY_CREATED`, `IDENTITY_MATCHED`, `IDENTITY_ASSIGNED_TO_PERSON`, `IDENTITY_REMOVED_FROM_PERSON`, `IDENTITY_MERGED`, `IDENTITY_SPLIT`, `IDENTITY_FORGOTTEN`, `USER_CORRECTION`); nullable `processing_run_id`; nullable `source_id`; nullable `subject_identity_id`; nullable `subject_person_id`; nullable `calibration_profile_id`; `payload_schema_version`; non-null `payload_json`; `created_at`; and nullable `superseded_at` only as an explanatory marker, not mutation of payload.
+`evidence` columns: `id`; `kind` (`IDENTITY_CREATED`, `IDENTITY_MATCHED`, `RECOGNITION_ABSTAINED`, `IDENTITY_ASSIGNED_TO_PERSON`, `IDENTITY_REMOVED_FROM_PERSON`, `IDENTITY_MERGED`, `IDENTITY_SPLIT`, `IDENTITY_FORGOTTEN`, `USER_CORRECTION`); nullable `processing_run_id`; nullable `source_id`; nullable `subject_identity_id`; nullable `subject_person_id`; nullable `calibration_profile_id`; `payload_schema_version`; non-null `payload_json`; `created_at`; and nullable `superseded_at` only as an explanatory marker, not mutation of payload.
 
 `evidence_representations` is a role-bearing association: `evidence_id`, `representation_id`, `role` (`SUBJECT`, `SELECTED_CANDIDATE`, `CANDIDATE`, `SUPPORTING`), primary key `(evidence_id, representation_id, role)`. `evidence_candidates` stores bounded recognition candidates in their original order: `evidence_id`, `rank`, nullable `representation_id`, nullable `identity_id`, `raw_similarity`, nullable `calibrated_confidence`, `decision`, and `details_json`, with primary key `(evidence_id, rank)`.
 
 > **Decision 2026-09-23:** `evidence_candidates.decision` has no defined value set yet, so it is an unconstrained string until the decision engine defines one. (Owner decision, M1 PR #5.)
+
+> **Decision 2026-10-05 (owner; GitHub issue 104):** acceptance of an `ABSTAIN` persists `RECOGNITION_ABSTAINED` evidence with the recognition decision payload and the bounded candidate evidence. Its subject identity is NULL: acceptance creates neither an Identity nor an Occurrence, while the representation becomes identity-less `ACTIVE` evidence as specified in section 6.2. This is a historical record of why identity assignment was declined at that event. A later `ResolveUnresolvedRepresentation` adds resolution evidence; it never rewrites or deletes the abstention evidence. The new EvidenceKind/check constraint and acceptance writer are delivered together in the acceptance slice.
 
 Recognition Evidence must preserve the representation-space and calibration provenance through typed FKs and the snapshot payload. It records a bounded candidate set, never an unbounded raw ANN dump. Transient assessments that do not affect durable memory do not create Evidence.
 
@@ -293,9 +295,11 @@ An `ExecutionSegment` records what actually ran during a bounded stretch of a Pr
 
 `execution_segments` columns: `id`; `processing_run_id`; nullable `runtime_variant_id`; `ordinal`; `state` (`RUNNING`, `COMPLETED`, `FAILED`, `INTERRUPTED`, `ABANDONED`); `started_at`, `ended_at`; nullable `ended_reason` (`NORMAL`, `FALLBACK`, `CUDA_OOM`, `WORKER_CRASH`, `CANCELLED`, `SHUTDOWN`); `runtime_details_json`; and `created_at`. Enforce `UNIQUE(processing_run_id, ordinal)` and one running segment per run with a partial unique index.
 
-Segments are closed, never reopened. Reducing a batch size within the same variant stays in the current segment. Changing provider, export, or runtime variant closes one segment and creates another. Historical segments remain resolvable even when their executable package is later uninstalled.
+Segments are closed, never reopened. Reducing a batch size within the same execution environment stays in the current segment. Historical segments remain resolvable even when their executable package is later uninstalled.
 
 > **Decision 2026-10-03 (owner; GitHub issue 88):** an `ExecutionSegment` is not split per ML stage and does not carry the producing component of each output: what produced an observation or a representation is its own `runtime_variant_id` (sections 5 and 6.2). The segment still answers when, and under which execution interval, the work happened; the two are complementary.
+
+> **Decision 2026-10-05 (owner; GitHub issue 102):** a segment boundary represents an actual execution-environment transition, not normal detector-to-embedder progress. When FastAPI receives an approved provider-unavailable error and selects a later variant, it closes the active attempt segment with `FALLBACK` and starts a segment for the variant that actually continues. Detector then embedder with no such transition stays in one segment, even if their output-level variants differ. The fallback record names the failed and selected variants, providers, and coded error; the output rows still record their own actual producing variants. The initial scheduler interval may have no variant before planning/attempt begins; its `FALLBACK` closure and successor details preserve that history honestly.
 
 ## 15. Job persistence
 

@@ -9,7 +9,7 @@ acceptance use case; it is *not* acceptance and creates neither ANN operations n
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -51,6 +51,7 @@ from backend.app.runtime.package_store import RuntimePackageStore
 from backend.app.runtime.perception_client import (
     Detected,
     PerceptionError,
+    ProviderFallback,
     Represented,
 )
 from backend.app.runtime.worker_config import (
@@ -178,12 +179,14 @@ class ExecuteProcessingJob:
             pixels = decode_image(self._read_original(source), max_pixels=self._max_pixels).pixels
             client = self._client_for(plan)
             detected = client.detect(pixels)
+            started = self._advance_after_fallbacks(source, started, detected.fallbacks)
             self._cancel_if_requested(started)
             observations = self._uow.write(
                 lambda session: self._settle_detections(session, source, started, detected)
             )
             self._cancel_if_requested(started)
             represented = client.represent(pixels, detected.detections)
+            started = self._advance_after_fallbacks(source, started, represented.fallbacks)
             self._cancel_if_requested(started)
             representations = self._uow.write(
                 lambda session: self._settle_representations(
@@ -377,6 +380,67 @@ class ExecuteProcessingJob:
             return Path(source.external_path).read_bytes()
         raise ProcessingExecutionError(f"unknown source storage mode {source.storage_mode!r}")
 
+    def _advance_after_fallbacks(
+        self,
+        source: _Input,
+        started: StartedProcessingJob,
+        fallbacks: tuple[ProviderFallback, ...],
+    ) -> StartedProcessingJob:
+        """Close an actual provider attempt and continue under the variant that ran.
+
+        A detector-to-embedder transition alone stays within an interval.  The client emits these
+        records only after its narrow provider-unavailable policy has moved to a later variant, so
+        every new segment describes a real execution-environment change rather than pipeline
+        progress.
+        """
+        if not fallbacks:
+            return started
+        segment_id = self._uow.write(
+            lambda session: self._record_provider_fallbacks(session, source, started, fallbacks)
+        )
+        return replace(started, execution_segment_id=segment_id)
+
+    def _record_provider_fallbacks(
+        self,
+        session: Session,
+        source: _Input,
+        started: StartedProcessingJob,
+        fallbacks: tuple[ProviderFallback, ...],
+    ) -> uuid.UUID:
+        run, segment, _job = self._revalidate_settlement_context(session, source, started)
+        repository = SegmentRepository(session)
+        current = segment
+        for fallback in fallbacks:
+            if not repository.close(
+                current.id,
+                ExecutionSegmentState.COMPLETED,
+                reason="FALLBACK",
+                now=self._clock(),
+            ):
+                raise ProcessingExecutionError("the execution segment could not close for fallback")
+            current = repository.append(
+                run.id,
+                segment_id=self._new_id(),
+                runtime_variant_id=fallback.selected.runtime_variant_id,
+                runtime_details={
+                    "schema_version": 1,
+                    "transition": "PROVIDER_FALLBACK",
+                    "failed_attempts": [
+                        {
+                            "variant_id": str(attempt.variant.runtime_variant_id),
+                            "provider": attempt.variant.provider,
+                            "error_code": attempt.code.value,
+                            "error_message": attempt.message,
+                        }
+                        for attempt in fallback.failed
+                    ],
+                    "selected_variant_id": str(fallback.selected.runtime_variant_id),
+                    "selected_provider": fallback.selected.provider,
+                },
+                now=self._clock(),
+            )
+        return current.id
+
     def _settle_detections(
         self,
         session: Session,
@@ -428,6 +492,7 @@ class ExecuteProcessingJob:
                 write_representation(
                     session,
                     observation_id=observation_id,
+                    execution_segment_id=started.execution_segment_id,
                     detection_index=detection.detection_index,
                     vector=vector,
                     embedder=represented.ran,

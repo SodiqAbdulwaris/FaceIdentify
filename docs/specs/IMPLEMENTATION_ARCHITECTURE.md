@@ -708,8 +708,9 @@ where appropriate.
 
 ## 14. Execution Provenance
 
-Runtime provenance is stored at `ProcessingRun + ExecutionSegment`
-granularity.
+Runtime lifecycle provenance is stored at `ProcessingRun + ExecutionSegment`
+granularity; producing-model provenance is stored on each Observation and
+Representation through its `runtime_variant_id`.
 
 ``` text
 ProcessingRun
@@ -729,12 +730,21 @@ ProcessingRun
     └── processing range
 ```
 
-Do not create a database row for every inference call merely for
-provenance.
+Do not create a database row for every inference call merely for lifecycle
+provenance. Output rows record the exact detector/embedder variant that
+produced them.
 
-An ExecutionSegment freezes the executable configuration used for that
-segment. Runtime/component updates affect future eligible work; they
+An ExecutionSegment records an actual execution-environment interval. A
+provider-unavailable fallback closes the attempt with `FALLBACK` and starts a
+successor interval; normal detector-to-embedder movement does not create a
+segment boundary. Runtime/component updates affect future eligible work; they
 never silently mutate historical provenance or an active segment.
+
+> **Decision 2026-10-05 (owner; issue 102):** the selected stable runtime
+> variant of a fallback is recorded on the new segment, while each produced
+> output independently records what actually ran. A scheduler's initial
+> pre-attempt segment may have no variant and remains an honest lifecycle
+> record rather than a false claim that CUDA executed.
 
 A model update does not automatically rewrite old memory.
 Re-representation is an explicit migration/job.
