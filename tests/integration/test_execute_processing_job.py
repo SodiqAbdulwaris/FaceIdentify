@@ -89,12 +89,14 @@ class OneFaceClient(NoFaceClient):
         embedder: PlannedVariant,
         *,
         after_detect: Callable[[], None] | None = None,
+        after_represent: Callable[[], None] | None = None,
         detector_fallbacks: tuple[ProviderFallback, ...] = (),
         embedder_fallbacks: tuple[ProviderFallback, ...] = (),
     ) -> None:
         super().__init__(detector)
         self._embedder = embedder
         self._after_detect = after_detect
+        self._after_represent = after_represent
         self._detector_fallbacks = detector_fallbacks
         self._embedder_fallbacks = embedder_fallbacks
 
@@ -113,11 +115,14 @@ class OneFaceClient(NoFaceClient):
         self.represent_calls += 1
         assert len(detections) == 1
         vector = np.full(512, 1 / np.sqrt(512), dtype="<f4")
-        return Represented(
+        result = Represented(
             (FaceVector(0, vector, "L2_NORMALIZED"),),
             self._embedder,
             self._embedder_fallbacks,
         )
+        if self._after_represent is not None:
+            self._after_represent()
+        return result
 
 
 def _snapshot(build: ModelFactory) -> ProcessingConfigurationSnapshot:
@@ -1438,6 +1443,73 @@ def test_failed_provider_transition_does_not_persist_private_output(
         assert run.state == "FAILED"
         assert job is not None
         assert job.state == "FAILED"
+
+
+@pytest.mark.parametrize("stage", ["detector", "embedder"])
+@pytest.mark.parametrize("requested_by", ["job", "run"])
+def test_cancellation_after_a_successful_fallback_wins_before_its_settlement(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    file_store: Any,
+    storage_roots: Any,
+    tmp_path: Path,
+    stage: str,
+    requested_by: str,
+) -> None:
+    executor, client, started, _source_id, run_id, job_id = _one_face_execution(
+        sqlite_engine, build, file_store, storage_roots, tmp_path
+    )
+
+    def request_cancellation() -> None:
+        with Session(sqlite_engine) as session:
+            if requested_by == "job":
+                job = session.get(Job, job_id)
+                assert job is not None
+                job.state = "CANCELLING"
+            else:
+                run = session.get(ProcessingRun, run_id)
+                assert run is not None
+                run.state = "CANCELLING"
+            session.commit()
+
+    if stage == "detector":
+        client._detector_fallbacks = (_provider_fallback(client._detector),)
+        client._after_detect = request_cancellation
+    else:
+        client._embedder_fallbacks = (_provider_fallback(client._embedder),)
+        client._after_represent = request_cancellation
+
+    with pytest.raises(ProcessingCancelledError, match="cancelled"):
+        executor.execute(started)
+
+    with Session(sqlite_engine) as session:
+        run = session.get(ProcessingRun, run_id)
+        job = session.get(Job, job_id)
+        segments = list(
+            session.scalars(
+                select(ExecutionSegment)
+                .where(ExecutionSegment.processing_run_id == run_id)
+                .order_by(ExecutionSegment.ordinal)
+            )
+        )
+        observations = list(
+            session.scalars(select(Observation).where(Observation.processing_run_id == run_id))
+        )
+        assert run is not None
+        assert run.state == "CANCELLED"
+        assert job is not None
+        assert job.state == "CANCELLED"
+        assert len(segments) == 2
+        assert segments[0].state == "COMPLETED"
+        assert segments[0].ended_reason == "FALLBACK"
+        assert segments[1].state == "COMPLETED"
+        assert segments[1].ended_reason == "CANCELLED"
+        assert len(observations) == (0 if stage == "detector" else 1)
+        assert not list(
+            session.scalars(
+                select(Representation).where(Representation.processing_run_id == run_id)
+            )
+        )
 
 
 def test_cancellation_after_detection_settlement_does_not_start_embedding(
