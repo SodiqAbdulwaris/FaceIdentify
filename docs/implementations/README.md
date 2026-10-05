@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-05 | [M3: IndexCoordinator write transactions use the UnitOfWork](2026-10-05-m3-index-coordinator-unit-of-work.md) | done; pending PR; step 11 / issue 66 narrow slice |
 | 2026-10-04 | [M4 authenticated local API bootstrap](2026-10-04-m4-api-launch-capability.md) | partial; pending PR |
 | 2026-10-04 | [M3 exact frozen-export planning](2026-10-04-m3-frozen-export-planning.md) | done; pending PR |
 | 2026-10-04 | [M3 processing scheduler claim/start boundary](2026-10-04-m3-processing-scheduler.md) | partial; merged in PR #99 |

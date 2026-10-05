@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-04 (M3 step 10 request and scheduler claim/start boundaries merged in PRs #97 and #99; exact frozen-export planning is in progress; M4's FastAPI bootstrap now requires the approved per-launch capability token for HTTP and WebSocket handshakes, with loopback hosting/lifespan still pending)_
+_Last updated: 2026-10-05 (M3 identity-less candidate readers merged in PR #95; the step-11 IndexCoordinator write-transaction slice is implemented and awaiting review; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
 
 > **Decision 2026-10-03:** the owner approved the version-1 payload contracts for new ML output: `landmarks_json` has `schema_version` and normalised `points`; observation `quality_json` has `schema_version` and `detection_score`; representation `quality_json` has `schema_version` and `l2_norm`.
 
@@ -20,7 +20,7 @@ _Last updated: 2026-10-04 (M3 step 10 request and scheduler claim/start boundari
   `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository`, `SettingsRepository` and `RuntimeCatalogRepository` (TST-022 has its mechanics for every listed repository; Artifact is `artifact_storage.py`); the library root and lock (`library_root.py`, `library_lock.py`; not yet called by a lifecycle) and the downgrade guard are built; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
-  #29 to #41, #48, #51, #57, #66, #69, #71, #79, #80 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
+  #29 to #41, #48, #51, #57, #66, #69, #71, #79, #80, #102, #104 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
   `docs/implementations/2026-10-01-decide-q25-q26-erasure-and-recovery.md`). When something becomes pending,
   open an issue for it.
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the
@@ -80,7 +80,8 @@ _Last updated: 2026-10-04 (M3 step 10 request and scheduler claim/start boundari
   retry limit and backoff are caller-supplied, settling skips an operation that was deleted (superseded
   by `IndexOperationRepository.append_batch`) while it was in flight, a rebuild skips and reports a
   corrupt vector,
-  eligibility needs an ACTIVE identity, and an erased representation's vector is guaranteed gone
+  eligibility admits an ACTIVE representation with either an ACTIVE identity or no identity (accepted
+  abstention); identity-less candidates are never MATCH_EXISTING targets, and an erased representation's vector is guaranteed gone
   by a rebuild (open question 25); the `REMOVE` of an `ERASING` representation is applied by rebuilding the space (a saved USearch
   generation keeps a removed key's bytes), and no `REMOVE` is `APPLIED` while a superseded generation file remains.
   `backend/app/memory/erasure.py` is the erasure use case (`RepresentationEraser.erase(ids)` / `resume()`: queue and
@@ -102,7 +103,7 @@ _Last updated: 2026-10-04 (M3 step 10 request and scheduler claim/start boundari
   this version does not know is refused untouched: `DatabaseNewerThanApplicationError`), builds the engine, Storage Manager,
   IndexCoordinator and eraser, runs `recover_on_startup`, and releases the lock and the engine on exit or on any failed step.
   The FastAPI lifespan that wraps it does not exist yet. The remaining backend
-  packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is no FastAPI app (so no lifespan yet), no
+  packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is an authenticated in-memory FastAPI application factory but no production loopback host or lifespan yet, and no
   source-import use case and no ML worker yet.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
   Vitest. It is a placeholder `App` shell only; no features.
@@ -267,7 +268,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     work use `BEGIN IMMEDIATE`; retry is bounded and at the whole-transaction boundary, never per statement and never for
     non-idempotent work outside the transaction; exhaustion becomes a retryable application/API error. If implementation
     contradicts an existing spec, isolate that part and open an issue.
-    **Built 2026-10-02:** `UnitOfWork.write` begins with `BEGIN IMMEDIATE` (engine execution option `sqlite_begin_immediate`), retries the whole transaction on SQLITE_BUSY/LOCKED (decided by result code, not text) with the caller's attempts and back-off (no defaults), and raises `DatabaseBusyError`. `work` must be a function of the session only. `open_library` exposes it as `OpenLibrary.unit_of_work`. The existing services (`IndexCoordinator`, `RepresentationEraser`, recovery) still use the plain session factory, so they still begin deferred; moving them onto `UnitOfWork` is issue 66.
+    **Built 2026-10-02:** `UnitOfWork.write` begins with `BEGIN IMMEDIATE` (engine execution option `sqlite_begin_immediate`), retries the whole transaction on SQLITE_BUSY/LOCKED (decided by result code, not text) with the caller's attempts and back-off (no defaults), and raises `DatabaseBusyError`. `work` must be a function of the session only. `open_library` exposes it as `OpenLibrary.unit_of_work`. **Built 2026-10-05:** the IndexCoordinator's requeue and settlement writes use that shared UnitOfWork so acceptance can contend through the same writer boundary. `RepresentationEraser` and recovery intentionally remain on the plain session factory; their adoption stays in issue 66.
 21. **Final (issue 38; spec §6.3 amended 2026-10-02): allocation at ANN-eligibility, run-local index uses ephemeral labels.** Original question follows. Two spec
     passages pull apart. Persistence §6.3 allocates "in the same short transaction that creates
     representations... keys are never reused", and the run-local pending index (§23, "Recognition
