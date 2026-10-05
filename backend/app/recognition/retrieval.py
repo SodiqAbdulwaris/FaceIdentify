@@ -8,8 +8,9 @@ neither a confirmed identity nor a decision (ML spec 1, 3).
 Compatibility is enforced here, not trusted: the query vector, the global index and the run-local
 index must all be the one representation space's, or `IncompatibleSpaceError` is raised and
 nothing is searched; and every candidate an index returns is revalidated against SQLite, which
-drops it unless it is still in that space and eligible (a global candidate: `ACTIVE`, with an
-`ACTIVE` identity, `resolve_ann_candidates`; a run-local one: still `PENDING` in this run). A stale
+drops it unless it is still in that space and eligible (a global candidate: `ACTIVE`, with either
+an `ACTIVE` identity or no identity for an accepted abstention, `resolve_ann_candidates`; a
+run-local one: still `PENDING` in this run). A stale
 index can name a representation that was erased, merged away or discarded; SQLite refuses it. The
 number refused is reported (`dropped`), so a caller can tell a short shortlist from a complete one.
 

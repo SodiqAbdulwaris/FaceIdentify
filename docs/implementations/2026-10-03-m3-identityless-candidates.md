@@ -15,8 +15,10 @@ Everything else is unchanged: a representation in any other state, in another sp
 
 ## Verification
 - New tests: revalidation keeps an accepted abstention with identity None (and the order of a mixed list), drops an identity-less one in any other state or in another space; the coordinator indexes one by an `ADD` (after an index exists, so a rebuild cannot hide a wrong `ADD`) and by a rebuild and does not rebuild again as stale, and an identity that is not `ACTIVE` stays ineligible beside it; retrieval returns one as a global candidate with no identity; end to end, a face near one is `ABSTAIN` / `UNRESOLVED_NEIGHBOUR`.
-- Mutation pass: 7 mutations (each join back to inner, the rule weakened or loosened, the `ADD` check); the first run left one (the `ADD` test passed because the first build of an index is a rebuild), which led to the stronger test; none survive.
-- Full gate: see the PR.
+- Mutation pass: 7 original mutations (each join back to inner, the rule weakened or loosened, the `ADD` check); the first run left one (the `ADD` test passed because the first build of an index is a rebuild), which led to the stronger test; none survive. The post-rebase gate also mutated the candidate revalidation outer join and the `ADD` eligibility predicate: their focused abstention tests failed, then both files were restored to their recorded SHA-256 values.
+- Full gate (post-rebase, serialized with the CI Hypothesis profile): 2168 passed, 100% coverage. The process-sensitive supervisor module was additionally repeated three times: 33 passed each run.
+- Independent review correction: aligned the retrieval and coordinator module docstrings and the
+  TST-040 tracker text with the implemented accepted-`ABSTAIN` eligibility rule.
 
 ## Open issues / follow-ups
 - Step 11 continues: issue 66 (the unit-of-work move), the PENDING-output writer, the acceptance use case.

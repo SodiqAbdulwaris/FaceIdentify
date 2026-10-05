@@ -8,7 +8,8 @@ representation, because the operation only says what was wanted and the row says
 applies it as a *desired state*, so replaying one is harmless:
 
 * `ADD`: ensure the representation's vector is present under its `ann_key`, if it is still `ACTIVE`
-  and eligible (its identity is `ACTIVE` too, persistence §6.2). A representation that is no longer
+  and eligible (its identity is `ACTIVE`, or it has no identity as an accepted abstention,
+  persistence §6.2). A representation that is no longer
   eligible is left alone; the `REMOVE` that its loss of eligibility queued deals with it.
 * `REMOVE`: ensure its key is absent, whatever the index currently holds. Removing a key from a
   USearch index and saving it does *not* remove the vector's bytes from the saved file (probed: they
