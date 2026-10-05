@@ -2,6 +2,7 @@
 
 import io
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 from PIL import Image
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import Identity
@@ -49,7 +50,7 @@ from backend.app.runtime.package_store import RuntimePackageStore
 from backend.app.runtime.perception_client import Detected, FaceVector, Represented
 from backend.app.runtime.registration import RegisteredExport, register_package
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
-from backend.app.sources.models import Artifact
+from backend.app.sources.models import Artifact, Source
 from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
 from backend.ml.contracts.messages import Detection
@@ -75,13 +76,23 @@ class NoFaceClient:
 
 
 class OneFaceClient(NoFaceClient):
-    def __init__(self, detector: PlannedVariant, embedder: PlannedVariant) -> None:
+    def __init__(
+        self,
+        detector: PlannedVariant,
+        embedder: PlannedVariant,
+        *,
+        after_detect: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__(detector)
         self._embedder = embedder
+        self._after_detect = after_detect
 
     def detect(self, pixels: Any) -> Detected:
         self.detect_calls += 1
-        return Detected((Detection(0, 0, (0.2, 0.2, 0.8, 0.8), 0.9, None),), self._detector)
+        result = Detected((Detection(0, 0, (0.2, 0.2, 0.8, 0.8), 0.9, None),), self._detector)
+        if self._after_detect is not None:
+            self._after_detect()
+        return result
 
     def represent(self, pixels: Any, detections: tuple[Detection, ...]) -> Represented:
         self.represent_calls += 1
@@ -594,18 +605,21 @@ def _decision(identity_id: uuid.UUID | None, outcome: RecognitionOutcome) -> Rec
 def test_private_decision_persistence_handles_match_and_abstain(
     build: ModelFactory, outcome: RecognitionOutcome
 ) -> None:
-    run = build.run()
-    observation = build.observation(run)
+    executor, source, started = _finalizer(build)
+    run = build.session.get(ProcessingRun, source.run_id)
+    assert run is not None
+    observation = build.observation(run, execution_segment_id=started.execution_segment_id)
     representation = build.representation(observation)
     identity = build.identity()
-    source = _Input(run.source_id, run.id, {}, "MANAGED", "key", None)
     decision = _decision(
         identity.id if outcome is RecognitionOutcome.MATCH_EXISTING else None, outcome
     )
-    executor: Any = object.__new__(ExecuteProcessingJob)
 
     persisted = executor._persist_decisions(
-        build.session, source, [_Decision(observation.id, representation.id, decision, None)]
+        build.session,
+        source,
+        started,
+        [_Decision(observation.id, representation.id, decision, None)],
     )
 
     assert len(persisted) == 1
@@ -615,23 +629,23 @@ def test_private_decision_persistence_handles_match_and_abstain(
 
 
 def test_private_decision_persistence_rejects_stale_rows(build: ModelFactory) -> None:
-    run = build.run()
-    source = _Input(run.source_id, run.id, {}, "MANAGED", "key", None)
-    executor: Any = object.__new__(ExecuteProcessingJob)
+    executor, source, started = _finalizer(build)
+    run = build.session.get(ProcessingRun, source.run_id)
+    assert run is not None
     missing = _Decision(
         uuid.uuid4(), uuid.uuid4(), _decision(None, RecognitionOutcome.ABSTAIN), None
     )
     with pytest.raises(ProcessingExecutionError, match="no longer this run"):
-        executor._persist_decisions(build.session, source, [missing])
+        executor._persist_decisions(build.session, source, started, [missing])
 
-    observation = build.observation(run)
+    observation = build.observation(run, execution_segment_id=started.execution_segment_id)
     representation = build.representation(observation)
     representation.state = "ACTIVE"
     stale = _Decision(
         observation.id, representation.id, _decision(None, RecognitionOutcome.ABSTAIN), None
     )
     with pytest.raises(ProcessingExecutionError, match="no longer private"):
-        executor._persist_decisions(build.session, source, [stale])
+        executor._persist_decisions(build.session, source, started, [stale])
 
     representation.state = "PENDING"
     unmatched = _Decision(
@@ -641,7 +655,7 @@ def test_private_decision_persistence_rejects_stale_rows(build: ModelFactory) ->
         None,
     )
     with pytest.raises(ProcessingExecutionError, match="no longer ACTIVE"):
-        executor._persist_decisions(build.session, source, [unmatched])
+        executor._persist_decisions(build.session, source, started, [unmatched])
 
 
 def test_decision_refuses_a_representation_space_that_changed() -> None:
@@ -1068,6 +1082,80 @@ def _snapshot_for(
     )
 
 
+def _one_face_execution(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    file_store: Any,
+    storage_roots: Any,
+    tmp_path: Path,
+    *,
+    after_detect: Callable[[], None] | None = None,
+) -> tuple[
+    ExecuteProcessingJob,
+    OneFaceClient,
+    StartedProcessingJob,
+    uuid.UUID,
+    uuid.UUID,
+    uuid.UUID,
+]:
+    package = register_package(
+        build.session,
+        installed(tmp_path / "package", manifest_dict("fixture")),
+        new_id=build.new_id,
+        clock=build.clock,
+    )
+    by_kind = {export.kind: export for export in package.exports}
+    detector, embedder = by_kind["FACE_DETECTOR"], by_kind["FACE_REPRESENTATION"]
+    assert embedder.representation_space_id is not None
+    source = build.source()
+    artifact = build.session.get(Artifact, source.original_artifact_id)
+    assert artifact is not None
+    artifact.storage_key = f"originals/{artifact.id.hex}"
+    encoded = io.BytesIO()
+    Image.new("RGB", (3, 2), "white").save(encoded, format="PNG")
+    file_store.store(artifact.storage_key, io.BytesIO(encoded.getvalue()))
+    snapshot = _snapshot_for(build, detector, embedder)
+    run = build.run(source_id=source.id, configuration_snapshot_id=snapshot.id)
+    segment = build.segment(run)
+    job = build.job(processing_run_id=run.id, state="RUNNING")
+    build.session.commit()
+
+    detector_plan, embedder_plan = _planned(detector), _planned(embedder)
+    plan = PerceptionPlan(embedder.representation_space_id, 512, (detector_plan,), (embedder_plan,))
+    client = OneFaceClient(detector_plan, embedder_plan, after_detect=after_detect)
+    executor = ExecuteProcessingJob(
+        UnitOfWork(sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None),
+        packages=RuntimePackageStore(storage_roots, new_id=build.new_id),
+        files=file_store,
+        client_for=lambda _: client,
+        global_index_for=lambda space_id: RepresentationIndex.empty(
+            storage_roots.local_state_root / "index",
+            representation_space_id=space_id,
+            ndim=512,
+            metric="cos",
+        ),
+        new_id=build.new_id,
+        clock=build.clock,
+        max_pixels=100,
+        recognition_k=2,
+    )
+    executor._plan = lambda _session, _frozen: plan  # type: ignore[method-assign, assignment]
+    started = StartedProcessingJob(
+        ClaimedJob(
+            job.id,
+            job.type,
+            run.id,
+            1,
+            None,
+            1,
+            "worker",
+            build.clock() + timedelta(seconds=1),
+        ),
+        segment.id,
+    )
+    return executor, client, started, source.id, run.id, job.id
+
+
 def test_no_face_image_becomes_a_private_final_checkpoint(
     sqlite_engine: Engine, build: ModelFactory, file_store: Any, storage_roots: Any
 ) -> None:
@@ -1147,64 +1235,10 @@ def test_face_output_stays_pending_and_its_new_identity_stays_private(
     storage_roots: Any,
     tmp_path: Path,
 ) -> None:
-    package = register_package(
-        build.session,
-        installed(tmp_path / "package", manifest_dict("fixture")),
-        new_id=build.new_id,
-        clock=build.clock,
+    executor, client, started, _source_id, _run_id, _job_id = _one_face_execution(
+        sqlite_engine, build, file_store, storage_roots, tmp_path
     )
-    by_kind = {export.kind: export for export in package.exports}
-    detector, embedder = by_kind["FACE_DETECTOR"], by_kind["FACE_REPRESENTATION"]
-    assert embedder.representation_space_id is not None
-    source = build.source()
-    artifact = build.session.get(Artifact, source.original_artifact_id)
-    assert artifact is not None
-    artifact.storage_key = f"originals/{artifact.id.hex}"
-    encoded = io.BytesIO()
-    Image.new("RGB", (3, 2), "white").save(encoded, format="PNG")
-    assert artifact.storage_key is not None
-    file_store.store(artifact.storage_key, io.BytesIO(encoded.getvalue()))
-    snapshot = _snapshot_for(build, detector, embedder)
-    run = build.run(source_id=source.id, configuration_snapshot_id=snapshot.id)
-    segment = build.segment(run)
-    job = build.job(processing_run_id=run.id, state="RUNNING")
-    build.session.commit()
-
-    detector_plan, embedder_plan = _planned(detector), _planned(embedder)
-    plan = PerceptionPlan(embedder.representation_space_id, 512, (detector_plan,), (embedder_plan,))
-    client = OneFaceClient(detector_plan, embedder_plan)
-    executor = ExecuteProcessingJob(
-        UnitOfWork(sqlite_engine, retry=TransactionRetry(1, lambda _: 0), sleep=lambda _: None),
-        packages=RuntimePackageStore(storage_roots, new_id=build.new_id),
-        files=file_store,
-        client_for=lambda _: client,
-        global_index_for=lambda space_id: RepresentationIndex.empty(
-            storage_roots.local_state_root / "index",
-            representation_space_id=space_id,
-            ndim=512,
-            metric="cos",
-        ),
-        new_id=build.new_id,
-        clock=build.clock,
-        max_pixels=100,
-        recognition_k=2,
-    )
-    executor._plan = lambda _session, _frozen: plan  # type: ignore[method-assign, assignment]
-    result = executor.execute(
-        StartedProcessingJob(
-            ClaimedJob(
-                job.id,
-                job.type,
-                run.id,
-                1,
-                None,
-                1,
-                "worker",
-                build.clock() + timedelta(seconds=1),
-            ),
-            segment.id,
-        )
-    )
+    result = executor.execute(started)
 
     assert len(result.observation_ids) == len(result.representation_ids) == 1
     with Session(sqlite_engine) as session:
@@ -1212,10 +1246,10 @@ def test_face_output_stays_pending_and_its_new_identity_stays_private(
         representation = session.get(Representation, result.representation_ids[0])
         assert observation is not None
         assert observation.state == "PENDING"
-        assert observation.runtime_variant_id == detector_plan.runtime_variant_id
+        assert observation.runtime_variant_id == client._detector.runtime_variant_id
         assert representation is not None
         assert representation.state == "PENDING"
-        assert representation.runtime_variant_id == embedder_plan.runtime_variant_id
+        assert representation.runtime_variant_id == client._embedder.runtime_variant_id
         assert representation.identity_id is not None
         identity = session.get(Identity, representation.identity_id)
         assert identity is not None
@@ -1223,3 +1257,118 @@ def test_face_output_stays_pending_and_its_new_identity_stays_private(
         checkpoint = session.get(ProcessingCheckpoint, result.final_checkpoint_id)
         assert checkpoint is not None
         assert checkpoint.payload_json["decisions"][0]["outcome"] == "CREATE_NEW"
+
+
+def test_cancellation_after_detection_settlement_does_not_start_embedding(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    file_store: Any,
+    storage_roots: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor, client, started, _source_id, run_id, job_id = _one_face_execution(
+        sqlite_engine, build, file_store, storage_roots, tmp_path
+    )
+    write = executor._uow.write
+    detection_settled = False
+
+    def cancel_after_detection(work: Callable[[Session], Any]) -> Any:
+        nonlocal detection_settled
+        result = write(work)
+        if not detection_settled:
+            detection_settled = True
+            with Session(sqlite_engine) as session:
+                job = session.get(Job, job_id)
+                assert job is not None
+                job.state = "CANCELLING"
+                session.commit()
+        return result
+
+    monkeypatch.setattr(executor._uow, "write", cancel_after_detection)
+
+    with pytest.raises(ProcessingCancelledError, match="cancelled"):
+        executor.execute(started)
+
+    assert client.detect_calls == 1
+    assert client.represent_calls == 0
+    with Session(sqlite_engine) as session:
+        run = session.get(ProcessingRun, run_id)
+        job = session.get(Job, job_id)
+        assert run is not None
+        assert run.state == "CANCELLED"
+        assert job is not None
+        assert job.state == "CANCELLED"
+        observations = list(
+            session.scalars(select(Observation).where(Observation.processing_run_id == run_id))
+        )
+        assert len(observations) == 1
+        assert observations[0].state == "PENDING"
+        assert not list(
+            session.scalars(
+                select(Representation).where(Representation.processing_run_id == run_id)
+            )
+        )
+
+
+def test_recycled_source_before_settlement_cannot_persist_detection(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    file_store: Any,
+    storage_roots: Any,
+    tmp_path: Path,
+) -> None:
+    executor, client, started, source_id, run_id, _job_id = _one_face_execution(
+        sqlite_engine, build, file_store, storage_roots, tmp_path
+    )
+
+    def recycle_source() -> None:
+        with Session(sqlite_engine) as session:
+            source = session.get(Source, source_id)
+            assert source is not None
+            source.state = "RECYCLED"
+            session.commit()
+
+    client._after_detect = recycle_source
+
+    with pytest.raises(ProcessingExecutionError, match="active image"):
+        executor.execute(started)
+
+    assert client.detect_calls == 1
+    assert client.represent_calls == 0
+    with Session(sqlite_engine) as session:
+        assert not list(
+            session.scalars(select(Observation).where(Observation.processing_run_id == run_id))
+        )
+
+
+@pytest.mark.parametrize(
+    ("changed", "expected"),
+    [
+        ("source", "active image"),
+        ("artifact", "original is not available"),
+        ("job", "job is no longer running"),
+    ],
+)
+def test_private_settlement_revalidates_mutable_owners(
+    build: ModelFactory, changed: str, expected: str
+) -> None:
+    executor, source, started = _finalizer(build)
+    if changed == "source":
+        current_source = build.session.get(Source, source.source_id)
+        assert current_source is not None
+        current_source.state = "RECYCLED"
+    elif changed == "artifact":
+        source_row = build.session.get(Source, source.source_id)
+        assert source_row is not None
+        current_artifact = build.session.get(Artifact, source_row.original_artifact_id)
+        assert current_artifact is not None
+        current_artifact.state = "MISSING"
+    else:
+        current_job = build.session.get(Job, started.job.id)
+        assert current_job is not None
+        current_job.state = "CANCELLED"
+    build.session.flush()
+
+    with pytest.raises(ProcessingExecutionError, match=expected):
+        executor._revalidate_settlement_context(build.session, source, started)
