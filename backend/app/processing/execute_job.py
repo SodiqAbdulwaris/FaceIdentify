@@ -20,11 +20,12 @@ from sqlalchemy.orm import Session
 
 from backend.app.identities.models import Identity, IdentityState
 from backend.app.identities.use_cases import create_pending_identity
-from backend.app.jobs.models import JobState
+from backend.app.jobs.models import Job, JobState
 from backend.app.jobs.repository import JobRepository
 from backend.app.memory.models import Observation, Representation, RepresentationSpace
 from backend.app.processing.models import (
     CheckpointKind,
+    ExecutionSegment,
     ExecutionSegmentState,
     ProcessingConfigurationSnapshot,
     ProcessingRun,
@@ -181,6 +182,7 @@ class ExecuteProcessingJob:
             observations = self._uow.write(
                 lambda session: self._settle_detections(session, source, started, detected)
             )
+            self._cancel_if_requested(started)
             represented = client.represent(pixels, detected.detections)
             self._cancel_if_requested(started)
             representations = self._uow.write(
@@ -192,7 +194,7 @@ class ExecuteProcessingJob:
             self._cancel_if_requested(started)
             decisions = self._decide(source, frozen, representations)
             decisions = self._uow.write(
-                lambda session: self._persist_decisions(session, source, decisions)
+                lambda session: self._persist_decisions(session, source, started, decisions)
             )
             self._cancel_if_requested(started)
             checkpoint = self._uow.write(
@@ -327,6 +329,31 @@ class ExecuteProcessingJob:
             artifact.external_path,
         )
 
+    def _revalidate_settlement_context(
+        self, session: Session, source: _Input, started: StartedProcessingJob
+    ) -> tuple[ProcessingRun, ExecutionSegment, Job]:
+        """Reload every mutable owner immediately before a private-output mutation.
+
+        Compute runs outside a transaction, so its source/artifact may be recycled or become
+        unavailable and its claim may be cancelled or reassigned while the worker is running.  A
+        write UnitOfWork already owns SQLite's writer lock; the fresh reads below are therefore the
+        state that the following settlement mutation protects, not cached pre-compute state.
+        """
+        current = self._input(session, started)
+        run = ProcessingRunRepository(session).lock(current.run_id)
+        assert run is not None  # _input just reloaded the same run in this write transaction
+        segment = SegmentRepository(session).get(started.execution_segment_id)
+        if (
+            segment is None
+            or segment.processing_run_id != current.run_id
+            or segment.state != ExecutionSegmentState.RUNNING
+        ):
+            raise ProcessingExecutionError("the execution segment is no longer running")
+        job = JobRepository(session).get(started.job.id)
+        if job is None or job.processing_run_id != current.run_id or job.state != JobState.RUNNING:
+            raise ProcessingExecutionError("the processing job is no longer running")
+        return run, segment, job
+
     def _plan(self, session: Session, frozen: _FrozenConfiguration) -> PerceptionPlan:
         return plan_perception(
             session,
@@ -357,6 +384,7 @@ class ExecuteProcessingJob:
         started: StartedProcessingJob,
         detected: Detected,
     ) -> list[uuid.UUID]:
+        self._revalidate_settlement_context(session, source, started)
         ids: list[uuid.UUID] = []
         for sequence, detection in enumerate(detected.detections):
             ids.append(
@@ -387,9 +415,11 @@ class ExecuteProcessingJob:
         if not detected.detections:
             if represented.vectors or represented.ran is not None:
                 raise ProcessingExecutionError("a no-face result was unexpectedly represented")
+            self._revalidate_settlement_context(session, source, started)
             return []
         if represented.ran is None or len(represented.vectors) != len(observations):
             raise ProcessingExecutionError("the embedder did not settle every detected face")
+        self._revalidate_settlement_context(session, source, started)
         ids: list[uuid.UUID] = []
         for detection, observation_id, vector in zip(
             detected.detections, observations, represented.vectors, strict=True
@@ -430,19 +460,7 @@ class ExecuteProcessingJob:
         observations: list[uuid.UUID],
         representations: list[uuid.UUID],
     ) -> uuid.UUID:
-        run = ProcessingRunRepository(session).lock(source.run_id)
-        if run is None or run.state != ProcessingRunState.RUNNING:
-            raise ProcessingExecutionError("the processing run is no longer checkpointable")
-        segment = SegmentRepository(session).get(started.execution_segment_id)
-        if (
-            segment is None
-            or segment.processing_run_id != run.id
-            or segment.state != ExecutionSegmentState.RUNNING
-        ):
-            raise ProcessingExecutionError("the execution segment is no longer running")
-        job = JobRepository(session).get(started.job.id)
-        if job is None or job.state != JobState.RUNNING or job.processing_run_id != run.id:
-            raise ProcessingExecutionError("the processing job is no longer running")
+        run, segment, _job = self._revalidate_settlement_context(session, source, started)
         checkpoint = CheckpointRepository(session).append(
             run.id,
             checkpoint_id=self._new_id(),
@@ -527,8 +545,13 @@ class ExecuteProcessingJob:
         return self._uow.read(decide)
 
     def _persist_decisions(
-        self, session: Session, source: _Input, decisions: list[_Decision]
+        self,
+        session: Session,
+        source: _Input,
+        started: StartedProcessingJob,
+        decisions: list[_Decision],
     ) -> list[_Decision]:
+        self._revalidate_settlement_context(session, source, started)
         persisted: list[_Decision] = []
         for entry in decisions:
             representation = session.get(Representation, entry.representation_id)
@@ -578,19 +601,7 @@ class ExecuteProcessingJob:
         observations: list[uuid.UUID],
         decisions: list[_Decision],
     ) -> uuid.UUID:
-        run = ProcessingRunRepository(session).lock(source.run_id)
-        if run is None or run.state != ProcessingRunState.RUNNING:
-            raise ProcessingExecutionError("the processing run is no longer finalizable")
-        segment = SegmentRepository(session).get(started.execution_segment_id)
-        if (
-            segment is None
-            or segment.processing_run_id != run.id
-            or segment.state != ExecutionSegmentState.RUNNING
-        ):
-            raise ProcessingExecutionError("the execution segment is no longer running")
-        job = JobRepository(session).get(started.job.id)
-        if job is None or job.state != JobState.RUNNING or job.processing_run_id != run.id:
-            raise ProcessingExecutionError("the processing job is no longer running")
+        run, segment, _job = self._revalidate_settlement_context(session, source, started)
         payload = {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
             "observations": [str(identifier) for identifier in observations],
