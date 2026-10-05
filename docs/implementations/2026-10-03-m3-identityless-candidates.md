@@ -6,7 +6,7 @@
 - **Commits:** PR (this branch): `feat(memory): accept identity-less active candidates`
 
 ## What changed
-Revision 0005 lets an accepted `ABSTAIN` representation be `ACTIVE` with no identity (decision 2026-10-02). Four readers joined `identities` with an inner join and so would have silently dropped it from every index and from retrieval:
+Revision 0005 lets an accepted `ABSTAIN` representation be `ACTIVE` with no identity (decision 2026-10-02). Three readers joined `identities` with an inner join, and the fourth (`_apply_one`) treated a missing identity as ineligible, so all would have silently dropped it from an index or retrieval:
 - `resolve_ann_candidates` (`backend/app/identities/use_cases.py`): outer join; a candidate is kept if it is `ACTIVE` and has no identity, or an `ACTIVE` identity; `RecognitionCandidate.identity_id` is optional (None: evidence only, never a target to match).
 - `IndexCoordinator._active_keys` (the staleness check) and `_active_entries` (what a rebuild streams): outer join and the same rule, so a rebuild includes the abstention and a sound index is not seen as stale because of it.
 - `IndexCoordinator._apply_one` (an `ADD`): eligibility is `ACTIVE` and (no identity, or an `ACTIVE` one); an identity that exists and is not `ACTIVE` stays ineligible.
