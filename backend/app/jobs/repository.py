@@ -24,10 +24,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import case, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from backend.app.jobs.models import Job, JobPriority, JobState
+from backend.app.jobs.models import Job, JobState
 
 # A job in one of these states is over: nothing will resume it.
 FINISHED_JOB_STATES = (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED)
@@ -35,11 +35,6 @@ FINISHED_JOB_STATES = (JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED)
 # States in which a worker holds the job and so a lease means something. A job in any other state
 # has no lease.
 LEASED_JOB_STATES = (JobState.RUNNING, JobState.PAUSING, JobState.CANCELLING)
-
-# Most urgent first: the order of `JobPriority`.
-_PRIORITY_RANK = case(
-    {priority.value: rank for rank, priority in enumerate(JobPriority)}, value=Job.priority
-)
 
 
 @dataclass(frozen=True)
@@ -92,7 +87,7 @@ class JobRepository:
         chosen = (
             select(Job.id)
             .where(*eligible)
-            .order_by(_PRIORITY_RANK, Job.created_at, Job.id)
+            .order_by(Job.priority_rank, Job.created_at, Job.id)
             .limit(1)
             .scalar_subquery()
         )

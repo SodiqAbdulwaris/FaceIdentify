@@ -146,6 +146,31 @@ def test_claim_picks_by_priority_then_age(
     assert order == expected
 
 
+def test_claim_follows_the_integer_rank_not_the_alphabetical_order_of_the_string(
+    factory: sessionmaker[Session], build: ModelFactory
+) -> None:
+    """Alphabetically it would be HIGH, INTERACTIVE, LOW, MAINTENANCE, NORMAL."""
+    created = build.clock()
+    jobs = {
+        name: build.job(priority=name, created_at=created)
+        for name in ("NORMAL", "MAINTENANCE", "HIGH", "LOW", "INTERACTIVE")
+    }
+    build.session.commit()
+
+    with factory() as session:
+        repository = JobRepository(session)
+        order = []
+        for _ in jobs:
+            claimed = repository.claim_next(owner="w", now=build.clock(), lease_for=LEASE)
+            assert claimed is not None
+            order.append(claimed.id)
+        session.commit()
+
+    assert order == [
+        jobs[name].id for name in ("INTERACTIVE", "HIGH", "NORMAL", "LOW", "MAINTENANCE")
+    ]
+
+
 def test_claim_breaks_a_tie_on_id(factory: sessionmaker[Session], build: ModelFactory) -> None:
     ids = sorted(build.new_id() for _ in range(3))
     # Inserted in the reverse of id order, so insertion order cannot be what decides.

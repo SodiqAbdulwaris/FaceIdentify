@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, CheckConstraint, ForeignKey, Index, Integer, String, text
+from sqlalchemy.engine.default import DefaultExecutionContext
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.infrastructure.db.engine import Base
@@ -41,6 +42,19 @@ class JobPriority(StrEnum):
     MAINTENANCE = "MAINTENANCE"
 
 
+# Scheduling order, most urgent first. `jobs.priority` is descriptive; claiming orders by the
+# integer rank (revision 0007), since ordering by the string is alphabetical (owner decision
+# 2026-10-06).
+PRIORITY_RANK: dict[str, int] = {priority.value: rank for rank, priority in enumerate(JobPriority)}
+
+
+def _rank_of_priority(context: DefaultExecutionContext) -> int:
+    parameters: dict[str, Any] = context.get_current_parameters()  # type: ignore[no-untyped-call]
+    # An unknown priority gets no rank here (the database refuses the row with `ck_jobs_priority`,
+    # exactly as before the rank existed) rather than a KeyError.
+    return PRIORITY_RANK.get(parameters["priority"], -1)
+
+
 class ProgressMode(StrEnum):
     DETERMINATE = "DETERMINATE"
     INDETERMINATE = "INDETERMINATE"
@@ -65,7 +79,13 @@ class Job(Base):
             name="completed_within_total",
         ),
         CheckConstraint("attempt_number >= 1", name="attempt_number_positive"),
-        Index(None, "state", "priority", "created_at"),
+        CheckConstraint(
+            "priority_rank = CASE priority "
+            + " ".join(f"WHEN '{name}' THEN {rank}" for name, rank in PRIORITY_RANK.items())
+            + " ELSE priority_rank END",
+            name="priority_rank_matches_priority",
+        ),
+        Index(None, "state", "priority_rank", "created_at"),
         Index(None, "lease_expires_at"),
         Index(None, "processing_run_id"),
     )
@@ -80,6 +100,7 @@ class Job(Base):
     )
     state: Mapped[str] = mapped_column(String)
     priority: Mapped[str] = mapped_column(String)
+    priority_rank: Mapped[int] = mapped_column(Integer, default=_rank_of_priority)
     payload_schema_version: Mapped[int] = mapped_column(Integer)
     payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     progress_mode: Mapped[str] = mapped_column(String)
