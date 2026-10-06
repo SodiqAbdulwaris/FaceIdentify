@@ -50,12 +50,22 @@ from backend.app.processing.models import (
 )
 from backend.app.processing.repository import CheckpointRepository
 from backend.app.processing.run_repository import ProcessingRunRepository
+from backend.app.recognition.assessment import (
+    ASSESSMENT_VERSION,
+    INTERPRETATION,
+    CandidateGroup,
+    GroupMember,
+    ObservationQuality,
+    RecognitionAssessment,
+)
 from backend.app.recognition.reasoner import (
     EVIDENCE_SCHEMA_VERSION,
     DecisionPolicy,
+    IdentityReasoner,
     Reason,
     RecognitionOutcome,
 )
+from backend.app.recognition.retrieval import Pool
 from backend.app.sources.models import Artifact, ArtifactState, Source, SourceKind, SourceState
 from backend.app.sources.repository import SourceRepository
 from backend.infrastructure.db.optimistic import optimistic_locked_update
@@ -278,6 +288,89 @@ class AcceptProcessingRunUseCase:
                     "a representation is not the private output described by FINAL"
                 )
             self._validate_decision_identity(session, run, decision, representation)
+            self._validate_reasoned_decision(session, run, decision, representation)
+
+    def _validate_reasoned_decision(
+        self,
+        session: Session,
+        run: ProcessingRun,
+        decision: _Decision,
+        representation: Representation,
+    ) -> None:
+        evidence = decision.evidence
+        policy_data = evidence["policy"]
+        assert isinstance(policy_data, dict)
+        policy = DecisionPolicy(
+            policy_data["version"],
+            policy_data["min_detection_score"],
+            policy_data["match_threshold"],
+            policy_data["margin"],
+            policy_data["new_identity_ceiling"],
+        )
+        groups: list[CandidateGroup] = []
+        for candidate in evidence["candidates"]:
+            assert isinstance(candidate, dict)
+            identity_id = (
+                None
+                if candidate["identity_id"] is None
+                else self._uuid(candidate["identity_id"], "candidate identity")
+            )
+            members: list[GroupMember] = []
+            for member in candidate["members"]:
+                assert isinstance(member, dict)
+                member_id = self._uuid(member["representation_id"], "candidate")
+                persisted = session.get(Representation, member_id)
+                pool = Pool(member["pool"])
+                if (
+                    persisted is None
+                    or persisted.id == representation.id
+                    or persisted.representation_space_id != representation.representation_space_id
+                    or persisted.identity_id != identity_id
+                    or pool is Pool.GLOBAL
+                    and persisted.state != RepresentationState.ACTIVE
+                    or pool is Pool.RUN_LOCAL
+                    and (
+                        persisted.state != RepresentationState.PENDING
+                        or persisted.processing_run_id != run.id
+                    )
+                ):
+                    raise AcceptanceError("FINAL checkpoint candidate member is not authoritative")
+                members.append(GroupMember(member_id, pool, member["similarity"]))
+            group = CandidateGroup(identity_id, tuple(members))
+            if tuple(
+                sorted(
+                    members,
+                    key=lambda item: (-item.similarity, item.pool, str(item.representation_id)),
+                )
+            ) != tuple(members):
+                raise AcceptanceError("FINAL checkpoint candidate members are not best-first")
+            groups.append(group)
+        if tuple(
+            sorted(
+                groups,
+                key=lambda item: (-item.best_similarity, str(item.members[0].representation_id)),
+            )
+        ) != tuple(groups):
+            raise AcceptanceError("FINAL checkpoint candidates are not best-first")
+        assessment = RecognitionAssessment(
+            evidence["assessment_version"],
+            evidence["interpretation"],
+            self._uuid(evidence["representation_space_id"], "evidence representation space"),
+            ObservationQuality(evidence["quality"]["detection_score"]),
+            evidence["retrieval"]["requested_k"],
+            evidence["retrieval"]["returned"],
+            evidence["retrieval"]["dropped"],
+            evidence["retrieval"]["converged"],
+            tuple(groups),
+        )
+        expected = IdentityReasoner(policy).decide(assessment)
+        if (
+            expected.outcome != decision.outcome
+            or expected.reason != decision.reason
+            or decision.outcome is RecognitionOutcome.MATCH_EXISTING
+            and expected.identity_id != decision.identity_id
+        ):
+            raise AcceptanceError("FINAL checkpoint decision does not follow its evidence")
 
     def _validate_decision_identity(
         self,
@@ -494,10 +587,8 @@ class AcceptProcessingRunUseCase:
         ):
             raise AcceptanceError("FINAL checkpoint decision evidence contradicts its decision")
         if (
-            not isinstance(value["assessment_version"], str)
-            or not value["assessment_version"]
-            or not isinstance(value["interpretation"], str)
-            or not value["interpretation"]
+            value["assessment_version"] != ASSESSMENT_VERSION
+            or value["interpretation"] != INTERPRETATION
         ):
             raise AcceptanceError(
                 "FINAL checkpoint decision evidence has invalid assessment metadata"
