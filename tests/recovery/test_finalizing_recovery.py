@@ -27,6 +27,7 @@ from backend.app.memory.models import (
 from backend.app.processing import execute_job
 from backend.app.processing.accept_run import AcceptProcessingRunUseCase
 from backend.app.processing.models import ExecutionSegment, ProcessingCheckpoint, ProcessingRun
+from backend.app.processing.process_source import ProcessSourceError
 from backend.app.processing.retry import RetryProcessingUseCase
 from backend.app.processing.scheduler import ProcessingScheduler
 from backend.app.recovery.startup import (
@@ -243,7 +244,10 @@ def test_a_refused_final_is_not_resumable_and_its_output_stays_private(
     refused = harness.row(ProcessingRun, run.id)
     assert refused.state == "NOT_RESUMABLE"
     assert refused.failure_code == "FINAL_NOT_ACCEPTABLE"
-    assert harness.row(Job, job.id).state == "INTERRUPTED"
+    refused_job = harness.row(Job, job.id)
+    assert refused_job.state == "INTERRUPTED"
+    assert refused_job.lease_owner is None
+    assert refused_job.lease_expires_at is None
     assert harness.row(Observation, observation.id).state == "PENDING"
     assert harness.row(Representation, representation.id).state == "PENDING"
     assert harness.count(Evidence) == harness.count(Occurrence) == 0
@@ -291,8 +295,17 @@ def test_recovery_handles_every_kind_of_run_in_one_start(
         harness.build.session, clock, new_id, "ABSTAIN"
     )
     dead_run, dead_job, dead_observation, dead_rep = pre_final_run(harness.build)
+    refused_run, _o2, refused_rep, _i2, refused_job = finalizing(
+        harness.build.session, clock, new_id, "CREATE_NEW"
+    )
+    drop_final(harness.build.session, refused_run)
 
     harness.recover()
+
+    assert harness.row(ProcessingRun, refused_run.id).state == "NOT_RESUMABLE"
+    assert harness.row(Job, refused_job.id).state == "INTERRUPTED"
+    assert refused_rep is not None
+    assert harness.row(Representation, refused_rep.id).state == "PENDING"
 
     assert harness.row(ProcessingRun, finalizing_run.id).state == "COMPLETED"
     assert harness.row(Job, finalizing_job.id).state == "COMPLETED"
@@ -326,7 +339,10 @@ def test_a_wake_failure_after_commit_does_not_undo_or_fail_the_run(
     assert harness.row(Job, job.id).state == "COMPLETED"
     assert harness.row(Representation, representation.id).state == "ACTIVE"
     with harness.factory() as session:
-        assert list(session.scalars(select(IndexOperation.state))) == ["APPLIED"]
+        operations = list(session.scalars(select(IndexOperation)))
+    assert [(op.state, op.representation_id) for op in operations] == [
+        ("APPLIED", representation.id)
+    ]
 
 
 def test_a_failure_before_acceptance_commits_propagates_and_leaves_the_run_finalizing(
@@ -375,7 +391,11 @@ def test_a_crash_after_acceptance_committed_is_a_no_op_on_the_next_start(
     harness: Harness, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     """Accept, then 'crash' before recovery's index pass (a second start finds it all done)."""
-    run, _o, _r, _i, job = finalizing(harness.build.session, clock, new_id, "MATCH_EXISTING")
+    run, observation, representation, _i, job = finalizing(
+        harness.build.session, clock, new_id, "MATCH_EXISTING"
+    )
+    assert observation is not None
+    assert representation is not None
     harness.build.session.commit()
     AcceptProcessingRunUseCase(harness.uow, new_id=new_id, clock=clock).accept(run.id)
 
@@ -384,6 +404,8 @@ def test_a_crash_after_acceptance_committed_is_a_no_op_on_the_next_start(
     assert report.finalizing.accepted == []
     assert harness.row(ProcessingRun, run.id).state == "COMPLETED"
     assert harness.row(Job, job.id).state == "COMPLETED"
+    assert harness.row(Observation, observation.id).state == "ACTIVE"
+    assert harness.row(Representation, representation.id).state == "ACTIVE"
     assert harness.count(Occurrence) == 1
 
 
@@ -455,7 +477,7 @@ def test_a_not_resumable_run_can_be_retried_once(
 
     assert harness.row(Job, scheduled.job_id).previous_job_id == job.id
     assert harness.row(ProcessingRun, run.id).state == "NOT_RESUMABLE"
-    with pytest.raises(Exception, match="already been retried"):
+    with pytest.raises(ProcessSourceError, match="already been retried"):
         retry.retry(job.id)
 
 
@@ -469,11 +491,11 @@ def test_a_finished_or_unrelated_job_cannot_be_retried(
         harness.uow, new_id=new_id, clock=clock, wake_scheduler=lambda: None
     )
 
-    with pytest.raises(Exception, match="cannot be retried"):
+    with pytest.raises(ProcessSourceError, match="cannot be retried"):
         retry.retry(job.id)
-    with pytest.raises(Exception, match="not a source-processing job"):
+    with pytest.raises(ProcessSourceError, match="not a source-processing job"):
         retry.retry(other.id)
-    with pytest.raises(Exception, match="not a source-processing job"):
+    with pytest.raises(ProcessSourceError, match="not a source-processing job"):
         retry.retry(new_id())
     assert harness.row(ProcessingRun, run.id).state == "COMPLETED"
 
@@ -492,7 +514,7 @@ def test_a_job_whose_run_is_not_retryable_is_refused(
         harness.uow, new_id=new_id, clock=clock, wake_scheduler=lambda: None
     )
 
-    with pytest.raises(Exception, match="cannot be retried"):
+    with pytest.raises(ProcessSourceError, match="cannot be retried"):
         retry.retry(job.id)
 
 
