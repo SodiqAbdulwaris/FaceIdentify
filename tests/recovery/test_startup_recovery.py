@@ -32,6 +32,7 @@ from backend.app.memory.models import (
     Representation,
     RepresentationSpace,
 )
+from backend.app.processing.accept_run import AcceptProcessingRunUseCase
 from backend.app.processing.models import ExecutionSegment, ProcessingRun
 from backend.app.recovery import startup
 from backend.app.recovery.startup import (
@@ -94,7 +95,7 @@ def coordinator(
 def recover(
     factory: sessionmaker[Session], file_store: ManagedFileStore, workspaces: WorkspaceManager,
     coordinator: IndexCoordinator, build: ModelFactory, *, index_batch: int = 50,
-    max_index_passes: int = 5,
+    max_index_passes: int = 5, accept_wake: Callable[[], None] | None = None,
 ) -> StartupReport:  # fmt: skip
     build.session.commit()
     eraser = RepresentationEraser(
@@ -103,8 +104,12 @@ def recover(
     )  # fmt: skip
     return recover_on_startup(
         factory, file_store, workspaces, coordinator, eraser,
-        RuntimePackageStore(file_store.roots, new_id=build.new_id), clock=build.clock,
-        index_batch=index_batch, max_index_passes=max_index_passes,
+        RuntimePackageStore(file_store.roots, new_id=build.new_id),
+        AcceptProcessingRunUseCase(
+            UnitOfWork(factory.kw["bind"], retry=TransactionRetry(1, lambda _: 0)),
+            new_id=build.new_id, clock=build.clock, wake_index=accept_wake,
+        ),
+        clock=build.clock, index_batch=index_batch, max_index_passes=max_index_passes,
     )  # fmt: skip
 
 
@@ -347,16 +352,13 @@ def test_other_states_are_left_exactly_as_they_were(
     world: World, factory: sessionmaker[Session], file_store: ManagedFileStore,
     workspaces: WorkspaceManager, coordinator: IndexCoordinator, build: ModelFactory,
 ) -> None:  # fmt: skip
-    """Only RUNNING, PAUSING and CANCELLING work is moved: a finalization, a pause that finished,
+    """Only RUNNING, PAUSING, CANCELLING and FINALIZING work is moved: a pause that finished,
     queued work and finished work are not ours."""
     before = {
         job.id: reload(factory, Job, job.id).state
         for job in (world.paused_job, world.queued_job, world.done_job, world.failed_job)
     }
-    runs = {
-        run.id: reload(factory, ProcessingRun, run.id)
-        for run in (world.finalizing_run, world.done_run)
-    }
+    runs = {run.id: reload(factory, ProcessingRun, run.id) for run in (world.done_run,)}
     states = {run_id: (run.state, run.revision) for run_id, run in runs.items()}
 
     recover(factory, file_store, workspaces, coordinator, build)
