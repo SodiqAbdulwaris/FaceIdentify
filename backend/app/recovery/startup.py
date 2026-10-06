@@ -211,10 +211,10 @@ def accept_finalizing_runs(
         try:
             accept.accept(run_id)
         except AcceptanceError as error:
-            _mark_not_resumable(uow, run_id, str(error), clock())
+            _refuse_final(uow, run_id, str(error), clock())
             work.not_resumable.append(run_id)
         except Exception:
-            if _run_state(uow, run_id) != ProcessingRunState.COMPLETED:
+            if run_state(uow, run_id) != ProcessingRunState.COMPLETED:
                 raise
             work.accepted.append(run_id)
             work.wake_failures.append(run_id)
@@ -223,7 +223,8 @@ def accept_finalizing_runs(
     return work
 
 
-def _run_state(uow: UnitOfWork, run_id: uuid.UUID) -> str | None:
+def run_state(uow: UnitOfWork, run_id: uuid.UUID) -> str | None:
+    """The run's state now, or None if it does not exist."""
     return uow.read(
         lambda session: session.scalar(
             select(ProcessingRun.state).where(ProcessingRun.id == run_id)
@@ -231,20 +232,24 @@ def _run_state(uow: UnitOfWork, run_id: uuid.UUID) -> str | None:
     )
 
 
-def _mark_not_resumable(uow: UnitOfWork, run_id: uuid.UUID, detail: str, now: datetime) -> None:
-    uow.write(
-        lambda session: session.execute(
-            update(ProcessingRun)
-            .where(ProcessingRun.id == run_id, ProcessingRun.state == ProcessingRunState.FINALIZING)
-            .values(
-                state=ProcessingRunState.NOT_RESUMABLE,
-                revision=ProcessingRun.revision + 1,
-                failure_code="FINAL_NOT_ACCEPTABLE",
-                failure_detail=detail,
-                updated_at=now,
-            )
-            .execution_options(synchronize_session=False)
+def _refuse_final(uow: UnitOfWork, run_id: uuid.UUID, detail: str, now: datetime) -> None:
+    uow.write(lambda session: mark_run_not_resumable(session, run_id, detail, now))
+
+
+def mark_run_not_resumable(session: Session, run_id: uuid.UUID, detail: str, now: datetime) -> None:
+    """A `FINALIZING` run whose FINAL checkpoint acceptance refused is `NOT_RESUMABLE`; its private
+    output stays private. A function of the session only, so a unit of work may run it again."""
+    session.execute(
+        update(ProcessingRun)
+        .where(ProcessingRun.id == run_id, ProcessingRun.state == ProcessingRunState.FINALIZING)
+        .values(
+            state=ProcessingRunState.NOT_RESUMABLE,
+            revision=ProcessingRun.revision + 1,
+            failure_code="FINAL_NOT_ACCEPTABLE",
+            failure_detail=detail,
+            updated_at=now,
         )
+        .execution_options(synchronize_session=False)
     )
 
 

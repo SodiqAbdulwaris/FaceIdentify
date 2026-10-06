@@ -8,31 +8,36 @@ registers a fake catalog and returns what a later process needs (as JSON) to run
 
 import io
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 from PIL import Image
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.app.lifecycle import OpenLibrary
+from backend.app.lifecycle import OpenLibrary, open_library
+from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.processing.accept_run import AcceptProcessingRunUseCase
 from backend.app.processing.execute_job import ExecuteProcessingJob
 from backend.app.processing.process_source import ProcessSourceUseCase
+from backend.app.processing.runner import ProcessingRunner
 from backend.app.processing.scheduler import ProcessingScheduler
 from backend.app.runtime.models import ModelExport, RuntimeVariant
 from backend.app.runtime.package_store import RuntimePackageStore
 from backend.app.runtime.perception_client import Detected, FaceVector, Represented
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
+from backend.infrastructure.db.unit_of_work import TransactionRetry
 from backend.infrastructure.indexing.representation_index import (
     IndexUnusableError,
     RepresentationIndex,
 )
 from backend.ml.contracts.messages import Detection
 from tests.factories.models import ModelFactory
+from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 from tests.fixtures.processing_request import processing_request
 
 NDIM = 4
@@ -154,26 +159,37 @@ class Pipeline:
             session.commit()
             return source.id
 
+    def enqueue(self, source_id: uuid.UUID) -> uuid.UUID:
+        """Request processing: a snapshot, a PENDING run and a QUEUED job. Returns the job id."""
+        return (
+            ProcessSourceUseCase(
+                self.lib.unit_of_work,
+                new_id=self.new_id,
+                clock=self.clock,
+                wake_scheduler=lambda: None,
+            )
+            .process(
+                source_id,
+                processing_request=self.request,
+                priority="NORMAL",
+                created_by_user_action=None,
+            )
+            .job_id
+        )
+
     def execute(self, source_id: uuid.UUID) -> uuid.UUID:
         """Request, claim and privately execute; the run is left FINALIZING. Returns its id."""
-        lib = self.lib
-        ProcessSourceUseCase(
-            lib.unit_of_work, new_id=self.new_id, clock=self.clock, wake_scheduler=lambda: None
-        ).process(
-            source_id,
-            processing_request=self.request,
-            priority="NORMAL",
-            created_by_user_action=None,
-        )
+        self.enqueue(source_id)
         return self.run_next()
 
-    def run_next(self) -> uuid.UUID:
-        """Claim the next queued job and execute it privately (also used to run a retry)."""
+    def scheduler(self) -> ProcessingScheduler:
         lib = self.lib
-        started = ProcessingScheduler(
+        return ProcessingScheduler(
             lib.unit_of_work, new_id=self.new_id, clock=self.clock, lease_for=timedelta(minutes=5)
-        ).claim_source_job("worker")
-        assert started is not None
+        )
+
+    def executor(self) -> ExecuteProcessingJob:
+        lib = self.lib
         executor = ExecuteProcessingJob(
             lib.unit_of_work,
             packages=RuntimePackageStore(lib.roots, new_id=self.new_id),
@@ -186,9 +202,28 @@ class Pipeline:
             recognition_k=2,
         )
         executor._plan = lambda _session, _frozen: self.plan  # type: ignore[method-assign, assignment]
+        return executor
+
+    def runner(self, *, wake_index: Callable[[], None] | None = None) -> ProcessingRunner:
+        uow = self.lib.unit_of_work
+        return ProcessingRunner(
+            uow,
+            self.scheduler(),
+            self.executor(),
+            AcceptProcessingRunUseCase(
+                uow, new_id=self.new_id, clock=self.clock, wake_index=wake_index
+            ),
+            owner="runner",
+            clock=self.clock,
+        )
+
+    def run_next(self) -> uuid.UUID:
+        """Claim the next queued job and execute it privately (also used to run a retry)."""
+        started = self.scheduler().claim_source_job("worker")
+        assert started is not None
         run_id = started.job.processing_run_id
         assert run_id is not None
-        executor.execute(started)
+        self.executor().execute(started)
         return run_id
 
     def accept(self, run_id: uuid.UUID, *, apply_index: bool) -> None:
@@ -218,3 +253,20 @@ class Pipeline:
     def count(self, model: Any) -> int:
         with self.lib.session_factory() as session:
             return session.scalar(select(func.count()).select_from(model)) or 0
+
+
+@pytest.fixture
+def pipeline(tmp_path: Path, clock: FrozenClock, new_id: SeededUUIDs) -> Iterator[Pipeline]:
+    """A freshly opened library with a registered fake catalog, run through the real pipeline."""
+    (tmp_path / "library").mkdir()
+    with open_library(
+        library_root=tmp_path / "library",
+        local_state_root=tmp_path / "local",
+        clock=clock,
+        new_id=new_id,
+        index_batch=50,
+        max_index_passes=5,
+        transaction_retry=TransactionRetry(max_attempts=3, backoff=lambda n: 0.1 * n),
+        retry=RetryPolicy(max_attempts=3, backoff=lambda n: timedelta(minutes=n)),
+    ) as lib:
+        yield Pipeline(lib, clock, new_id, prepare_catalog(lib, clock, new_id))
