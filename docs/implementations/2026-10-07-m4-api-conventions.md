@@ -10,12 +10,13 @@
 - `backend/api/errors.py`: `ApiError` and the handlers that give every REST error one shape,
   `{"error": {code, message, details, retryable, diagnostic_id}}` (API section 23). Expected errors
   keep their status and code; validation failures become `422 VALIDATION_ERROR` naming the field and
-  rule but never echoing what the client sent; unknown routes and methods are `NOT_FOUND` and
+  Pydantic's stable error type but never what the client sent or Pydantic's per-field message (a
+  custom validator may build it from the value); unknown routes and methods are `NOT_FOUND` and
   `METHOD_NOT_ALLOWED`; anything unexpected is `500 INTERNAL_ERROR` with a diagnostic id and no
   message or traceback (the id is logged with the exception class). The authentication failure uses
   the same full shape (it had two fields).
 - `backend/api/pagination.py`: forward-only keyset pagination (sections 26 and 27): `Page`,
-  `PageParams` (default limit 50, maximum 200, a cursor of at most 512 characters),
+  `PageParams` (default limit 50, maximum 200, a cursor of at most 512 characters, its key scalars only),
   `encode_cursor` / `decode_cursor` (versioned, URL-safe, bound to a *context* string so a cursor
   from one query is `400 INVALID_CURSOR` on another) and `paginate` (fetch `limit + 1`; the probe
   row is `has_more`).

@@ -77,6 +77,9 @@ def decode_cursor(cursor: str, context: str) -> list[Any]:
         or data.get("v") != CURSOR_VERSION
         or data.get("c") != context
         or not isinstance(data.get("k"), list)
+        or not all(
+            value is None or isinstance(value, str | int | float) for value in data["k"]
+        )  # (a key is scalars only: no nested structure from a forged cursor)
     ):
         raise invalid_cursor()
     return list(data["k"])
@@ -92,6 +95,8 @@ def paginate[T, R](
 ) -> Page[T]:
     """Turn `limit + 1` fetched rows into a page: trim the probe row, and make the next cursor from
     the last row kept."""
+    if limit < 1:
+        raise ValueError("a page holds at least one item")
     has_more = len(rows) > limit
     kept = list(rows[:limit])
     next_cursor = encode_cursor(context, key(kept[-1])) if has_more else None

@@ -142,7 +142,7 @@ async def test_a_validation_failure_is_normalized_and_never_echoes_what_was_sent
 
     fields = error["details"]["fields"]
     assert fields[0]["location"] == ["body", "size"]
-    assert {"type", "message"} <= set(fields[0])
+    assert set(fields[0]) == {"location", "type"}  # no `msg`, no `input`
     assert "secret.jpg" not in response.text  # the client's input is not reflected back
     ok = await call(app, "POST", "/api/v1/widgets", json={"name": "a", "size": 2})
     assert ok.json() == {"name": "a", "size": 2}
@@ -236,6 +236,9 @@ def test_a_cursor_round_trips_its_key_for_the_query_it_was_made_for() -> None:
         base64.urlsafe_b64encode(b"[1, 2]").decode(),  # valid JSON, wrong shape
         base64.urlsafe_b64encode(json.dumps({"v": 99, "c": "q", "k": [1]}).encode()).decode(),
         base64.urlsafe_b64encode(json.dumps({"v": CURSOR_VERSION, "c": "q"}).encode()).decode(),
+        base64.urlsafe_b64encode(
+            json.dumps({"v": CURSOR_VERSION, "c": "q", "k": [{"a": 1}]}).encode()
+        ).decode(),  # a nested structure is not a key
         "é",
     ],
 )
@@ -243,6 +246,11 @@ def test_a_malformed_cursor_is_invalid(cursor: str) -> None:
     with pytest.raises(ApiError) as error:
         decode_cursor(cursor, "q")
     assert (error.value.status_code, error.value.code) == (400, "INVALID_CURSOR")
+
+
+def test_a_page_holds_at_least_one_item() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        paginate([1, 2], 0, context="q", key=lambda n: [n], item=lambda n: n)
 
 
 def test_a_cursor_made_for_another_query_is_invalid() -> None:
