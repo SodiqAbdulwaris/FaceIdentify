@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M4 W2.2: the processing runner](2026-10-07-m4-processing-runner.md) | done; the loop is W2.3 |
 | 2026-10-07 | [M4 W2.1: revision 0007, the integer job priority rank](2026-10-07-m4-job-priority-rank.md) | done; CONTEXT Q14 built |
 | 2026-10-07 | [M4 W1.2: the sidecar host](2026-10-07-m4-sidecar-host.md) | done; M4 W1 complete; TST-047/048 backend half |
 | 2026-10-06 | [M4 W1.1: the API lifespan and lifecycle-backed readiness](2026-10-06-m4-api-lifespan-readiness.md) | partial; M4 W1 first part; TST-048 |
