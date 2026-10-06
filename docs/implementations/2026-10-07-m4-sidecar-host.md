@@ -16,7 +16,9 @@
 - The per-launch capability comes only from `FACEIDENTIFY_LAUNCH_TOKEN`, validated before anything
   is bound; there is no command-line option for it, and it is never printed or logged. A missing or
   malformed one exits 2 without echoing it.
-- `--parent-pid`: the shell's process id; the host polls it (Windows `OpenProcess` plus
+- The listening socket is made exclusive on Windows (`SO_EXCLUSIVEADDRUSE`) and is closed on every
+  path, including a failure while binding.
+- `--parent-pid` (a positive id): the shell's process id; the host polls it (Windows `OpenProcess` plus
   `WaitForSingleObject`, never `os.kill(pid, 0)`, which would terminate the process on Windows) and
   shuts down gracefully when it ends, so the lifespan releases the library lock.
 - `pyproject.toml` / `uv.lock`: **new dependencies `uvicorn` and `websockets`** (see Decisions).
@@ -49,7 +51,11 @@ The retry policies and index catch-up limits the host passes to `open_library` a
 - The tests found a real defect: when the server failed to start, the cleanup re-awaited the failed
   task before closing the listening socket, leaking it. Fixed.
 - Mutations (restored byte-identically): binding every interface, never watching the parent, a second
-  handshake line, accepting the token on the command line, and skipping token validation each fail a test.
+  handshake line, accepting the token on the command line, skipping token validation, accepting a
+  non-positive parent id, and leaking the listener on a bind failure each fail a test. Removing
+  `SO_EXCLUSIVEADDRUSE` survives, by design: a socket bound to the exact `127.0.0.1` address cannot be
+  undercut by a more specific bind, so it is defence in depth with no observable difference; it is
+  kept, and the "intruder cannot share the port" test guards a regression to a wildcard bind.
 
 ## Open issues / follow-ups
 
