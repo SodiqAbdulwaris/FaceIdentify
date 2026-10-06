@@ -3,7 +3,7 @@
 - **Date:** 2026-10-04
 - **Milestone / tracker IDs:** M4 first slice · TST-045, TST-048, TST-051, SEC-003
 - **Status:** partial
-- **Commits:** pending PR
+- **Commits:** PR #103: `feat(api): add launch capability boundary`
 
 ## What changed
 

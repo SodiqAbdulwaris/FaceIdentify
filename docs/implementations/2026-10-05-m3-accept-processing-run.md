@@ -111,6 +111,8 @@ issue #104 defines the immutable historical abstention record.
 - Full repository gate after the release-review fixes â€” **2,327 passed in 566.21s, 100% backend
   line and branch coverage** (`HYPOTHESIS_PROFILE=ci uv run pytest --cov -q -p no:cacheprovider`,
   2026-10-06).
+- Independent re-run of the gate on `main` at 7d0570a (2026-10-06) — **2,328 passed in 371.76s,
+  100% backend line and branch coverage**; ruff format/check and native/Linux mypy passed.
 
 ## Open issues / follow-ups
 

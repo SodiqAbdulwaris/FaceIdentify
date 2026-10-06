@@ -3,7 +3,7 @@
 - **Date:** 2026-10-04
 - **Milestone / tracker IDs:** M3 step 10; TST-038/TST-039
 - **Status:** done
-- **Commits:** pending PR
+- **Commits:** PR #100: `fix(runtime): plan frozen model exports exactly`
 
 ## What changed
 

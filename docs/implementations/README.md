@@ -39,11 +39,12 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-06 | [M3 cross-check: stale documentation resolved](2026-10-06-m3-cross-check-docs.md) | done |
 | 2026-10-05 | [M3: atomic processing-run acceptance and abstention evidence](2026-10-05-m3-accept-processing-run.md) | merged in PR #106 after full gate, independent review, and exact-head CI; closed issue #104; step 11 acceptance slice |
 | 2026-10-05 | [M3: IndexCoordinator write transactions use the UnitOfWork](2026-10-05-m3-index-coordinator-unit-of-work.md) | done; merged in PR #105; step 11 / issue 66 narrow slice |
 | 2026-10-04 | [M4 authenticated local API bootstrap](2026-10-04-m4-api-launch-capability.md) | partial; merged in PR #103 |
 | 2026-10-04 | [M3 private single-image processing execution](2026-10-04-m3-processing-execution.md) | partial; merged in PR #101 after the approved issue #102 fallback boundaries and final review/CI |
-| 2026-10-04 | [M3 exact frozen-export planning](2026-10-04-m3-frozen-export-planning.md) | done; pending PR |
+| 2026-10-04 | [M3 exact frozen-export planning](2026-10-04-m3-frozen-export-planning.md) | done; merged in PR #100 |
 | 2026-10-04 | [M3 processing scheduler claim/start boundary](2026-10-04-m3-processing-scheduler.md) | partial; merged in PR #99 |
 | 2026-09-23 | [M0 testing foundation](2026-09-23-m0-testing-foundation.md) | done; merged in PR #1 |
 | 2026-09-23 | [Repository structure, agent files and scaffolding](2026-09-23-repo-structure-and-scaffolding.md) | done; merged in PR #1 |
@@ -115,5 +116,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-03 | [M3: revision 0005 (abstentions, output provenance, snapshot replace)](2026-10-03-m3-revision-0005.md) | partial; step 11, first part; issue 55 built |
 | 2026-10-03 | [M3: readers accept an identity-less ACTIVE candidate](2026-10-03-m3-identityless-candidates.md) | done; step 11, second part |
 | 2026-10-03 | [M3: the writer of a run's PENDING output](2026-10-03-m3-pending-output-writer.md) | done; step 7 complete; issue 88 |
-| 2026-10-03 | [M3: durable source-processing request](2026-10-03-m3-process-source-request.md) | partial; step 10 first slice |
-| 2026-10-04 | [M3: private single-image processing execution](2026-10-04-m3-processing-execution.md) | partial; merged in PR #101 with approved issue #102 fallback boundaries |
+| 2026-10-03 | [M3: durable source-processing request](2026-10-03-m3-process-source-request.md) | partial; step 10 first slice; merged in PR #97 |
