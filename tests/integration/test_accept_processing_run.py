@@ -27,6 +27,7 @@ from backend.app.processing.accept_run import (
     _Decision,
 )
 from backend.app.processing.models import ProcessingCheckpoint, ProcessingRun
+from backend.app.recognition.assessment import ASSESSMENT_VERSION
 from backend.app.recognition.reasoner import Reason, RecognitionOutcome
 from backend.app.sources.models import Source
 from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
@@ -75,8 +76,26 @@ def finalizing(
     reason = {
         "CREATE_NEW": Reason.NO_CANDIDATE,
         "MATCH_EXISTING": Reason.MATCHED,
-        "ABSTAIN": Reason.UNCERTAIN_SIMILARITY,
+        "ABSTAIN": Reason.RETRIEVAL_INCOMPLETE,
     }[outcome]
+    candidates: list[dict[str, object]] = []
+    returned = 0
+    dropped = 1 if outcome == "ABSTAIN" else 0
+    if outcome == "MATCH_EXISTING":
+        assert identity is not None
+        candidate_observation = build.observation()
+        candidate_representation = build.representation(
+            candidate_observation,
+            representation_space_id=representation.representation_space_id,
+            state="ACTIVE",
+            identity_id=identity.id,
+            ann_key=2,
+            activated_at=clock(),
+        )
+        candidates = [
+            candidate(candidate_representation.id, identity_id=identity.id, similarity=0.9)
+        ]
+        returned = 1
     final = build.checkpoint(run, 0, "FINAL", "VALID")
     final.payload_json = {
         "schema_version": 1,
@@ -93,17 +112,17 @@ def finalizing(
                     "outcome": outcome,
                     "reason": reason.value,
                     "identity_id": identity_id,
-                    "assessment_version": "test-v1",
+                    "assessment_version": ASSESSMENT_VERSION,
                     "interpretation": "COSINE_UNCALIBRATED",
                     "representation_space_id": str(representation.representation_space_id),
                     "quality": {"detection_score": 0.9},
                     "retrieval": {
                         "requested_k": 2,
-                        "returned": 0,
-                        "dropped": 0,
+                        "returned": returned,
+                        "dropped": dropped,
                         "converged": True,
                     },
-                    "candidates": [],
+                    "candidates": candidates,
                     "margin": None,
                     "policy": {
                         "version": "test-v1",
@@ -336,6 +355,14 @@ def test_abstention_candidates_are_historical_evidence(
         db_session, clock, new_id, "ABSTAIN"
     )
     assert representation is not None
+    build = ModelFactory(db_session, clock, new_id)
+    historical = build.representation(
+        build.observation(),
+        representation_space_id=representation.representation_space_id,
+        state="ACTIVE",
+        ann_key=2,
+        activated_at=clock(),
+    )
     final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
     assert final is not None
     final.payload_json = {
@@ -352,7 +379,7 @@ def test_abstention_candidates_are_historical_evidence(
                             "similarity": 0.4,
                             "members": [
                                 {
-                                    "representation_id": str(representation.id),
+                                    "representation_id": str(historical.id),
                                     "pool": "GLOBAL",
                                     "similarity": 0.4,
                                 }
@@ -392,40 +419,183 @@ def test_matched_identity_evidence_keeps_its_candidate_snapshot(
     final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
     assert final is not None
     assert representation is not None
+    db_session.commit()
+
+    use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+    assert db_session.scalars(select(EvidenceCandidate)).one().evidence_id is not None
+
+
+def test_final_decision_must_follow_its_valid_candidate_snapshot(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "MATCH_EXISTING"
+    )
+    assert representation is not None
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    decision = final.payload_json["decisions"][0]
+    evidence = decision["evidence"]
+    representation.identity_id = None
     final.payload_json = {
         **final.payload_json,
         "decisions": [
             {
-                **final.payload_json["decisions"][0],
+                **decision,
+                "outcome": "ABSTAIN",
+                "reason": Reason.UNCERTAIN_SIMILARITY.value,
+                "identity_id": None,
                 "evidence": {
-                    **final.payload_json["decisions"][0]["evidence"],
-                    "candidates": [
-                        {
-                            "rank": 1,
-                            "identity_id": None,
-                            "similarity": 0.9,
-                            "members": [
-                                {
-                                    "representation_id": str(representation.id),
-                                    "pool": "GLOBAL",
-                                    "similarity": 0.9,
-                                }
-                            ],
-                        }
-                    ],
-                    "retrieval": {
-                        **final.payload_json["decisions"][0]["evidence"]["retrieval"],
-                        "returned": 1,
-                    },
+                    **evidence,
+                    "outcome": "ABSTAIN",
+                    "reason": Reason.UNCERTAIN_SIMILARITY.value,
+                    "identity_id": None,
                 },
             }
         ],
     }
     db_session.commit()
 
-    use_case(sqlite_engine, clock, new_id).accept(run.id)
+    with pytest.raises(AcceptanceError, match="does not follow its evidence"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
 
-    assert db_session.scalars(select(EvidenceCandidate)).one().evidence_id is not None
+
+def test_final_candidate_snapshot_must_stay_best_first(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "MATCH_EXISTING"
+    )
+    assert representation is not None
+    build = ModelFactory(db_session, clock, new_id)
+    later_identity = build.identity()
+    later = build.representation(
+        build.observation(),
+        representation_space_id=representation.representation_space_id,
+        state="ACTIVE",
+        identity_id=later_identity.id,
+        ann_key=3,
+        activated_at=clock(),
+    )
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    decision = final.payload_json["decisions"][0]
+    evidence = decision["evidence"]
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **decision,
+                "evidence": {
+                    **evidence,
+                    "candidates": [
+                        *evidence["candidates"],
+                        candidate(later.id, rank=2, identity_id=later_identity.id, similarity=0.95),
+                    ],
+                    "retrieval": {**evidence["retrieval"], "returned": 2},
+                    "margin": 0.9 - 0.95,
+                },
+            }
+        ],
+    }
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="candidates are not best-first"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+
+def test_final_candidate_member_must_not_name_private_output(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "MATCH_EXISTING"
+    )
+    assert representation is not None
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    decision = final.payload_json["decisions"][0]
+    evidence = decision["evidence"]
+    original = evidence["candidates"][0]
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **decision,
+                "evidence": {
+                    **evidence,
+                    "candidates": [
+                        {
+                            **original,
+                            "members": [
+                                {
+                                    **original["members"][0],
+                                    "representation_id": str(representation.id),
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="candidate member is not authoritative"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+
+def test_final_candidate_members_must_stay_best_first(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, identity, _job = finalizing(
+        db_session, clock, new_id, "MATCH_EXISTING"
+    )
+    assert representation is not None
+    assert identity is not None
+    build = ModelFactory(db_session, clock, new_id)
+    lesser = build.representation(
+        build.observation(),
+        representation_space_id=representation.representation_space_id,
+        state="ACTIVE",
+        identity_id=identity.id,
+        ann_key=3,
+        activated_at=clock(),
+    )
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    decision = final.payload_json["decisions"][0]
+    evidence = decision["evidence"]
+    original = evidence["candidates"][0]
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **decision,
+                "evidence": {
+                    **evidence,
+                    "candidates": [
+                        {
+                            **original,
+                            "members": [
+                                {
+                                    "representation_id": str(lesser.id),
+                                    "pool": "GLOBAL",
+                                    "similarity": 0.8,
+                                },
+                                *original["members"],
+                            ],
+                        }
+                    ],
+                    "retrieval": {**evidence["retrieval"], "returned": 2},
+                },
+            }
+        ],
+    }
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="candidate members are not best-first"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
 
 
 @pytest.mark.parametrize(
@@ -735,6 +905,7 @@ def test_final_evidence_accepts_a_bounded_snapshot_with_a_correct_margin(
     decision = checkpoint.payload_json["decisions"][0]
     evidence = {
         **decision["evidence"],
+        "reason": Reason.UNCERTAIN_SIMILARITY.value,
         "candidates": [
             candidate(uuid.UUID(int=1), similarity=0.6),
             candidate(uuid.UUID(int=2), rank=2, similarity=0.4),

@@ -29,6 +29,11 @@ authoritative. FINAL construction now replaces CREATE_NEW's proposal-time null e
 with its resolved pending Identity. A completed run also revalidates its exact Evidence payload,
 subject link, candidate rows, image Occurrence/membership rule, and exactly one durable ADD intent.
 
+The follow-up review fix resolves the evidence against SQLite, rejects private, stale, wrong-space,
+wrong-identity, or unordered candidate members, reconstructs the `RecognitionAssessment`, and runs
+the existing `IdentityReasoner` again. The checkpoint outcome, reason, and matched Identity must be
+the result of that canonical evidence rather than a worker-supplied assertion.
+
 ## Why
 
 Persistence sections 6.2, 10--12, 16 and 30 make acceptance the sole SQLite-authority boundary;
@@ -54,7 +59,7 @@ issue #104 defines the immutable historical abstention record.
 - Full repository gate — **2,291 passed, 100% backend coverage** (`HYPOTHESIS_PROFILE=ci uv run
   pytest --cov -q -p no:cacheprovider`, 2026-10-05) was for the original PR commit, before the
   remediation and must not be treated as verification of it.
-- Remediation focused suite — **141 passed**, with **100% line and branch coverage** for
+- Review-remediation focused suite — **145 passed**, with **100% line and branch coverage** for
   `accept_run.py` and `execute_job.py` (`uv run pytest tests/integration/test_accept_processing_run.py
   tests/integration/test_execute_processing_job.py --cov=backend.app.processing.accept_run
   --cov=backend.app.processing.execute_job --cov-branch -q -p no:cacheprovider`, 2026-10-06).
@@ -63,13 +68,16 @@ issue #104 defines the immutable historical abstention record.
   admitting an ABSTAIN occurrence, or ignoring a missing ADD operation each made the relevant
   acceptance test fail. `accept_run.py` returned byte-identically after every probe (SHA-256
   `46EE853BBCFE2E344821B5BBCB6D9946D4A2D5D3CC240B4C3CC2DE1D84E851D4`).
+- The reviewer-P1 mutation which disables the re-derived-decision guard made
+  `test_final_decision_must_follow_its_valid_candidate_snapshot` fail. `accept_run.py` was restored
+  byte-identically (SHA-256 `52349907668370ECD1AD522A4DBB119077FD62D54932D7843E6D4094556D06AD`).
 - Ruff format/check and native/Linux mypy passed after the remediation.
 - Full repository gate after remediation — **2,317 passed in 406.28s, 100% backend coverage**
   (`HYPOTHESIS_PROFILE=ci uv run pytest --cov -q -p no:cacheprovider`, 2026-10-06).
 
 ## Open issues / follow-ups
 
-- PR #106 still needs the remediation commit, a new independent review, and fresh exact-head CI
+- PR #106 still needs the review-fix commit, a new independent review, and fresh exact-head CI
   before merge.
 - Step 12 recovery must invoke this use case for a valid FINAL checkpoint without rerunning ML.
 - Issue #79 remains the separate later `ResolveUnresolvedRepresentation` use case.
