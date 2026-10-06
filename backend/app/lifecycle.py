@@ -171,14 +171,16 @@ def open_library(
             session_factory, unit_of_work, roots.indexes, clock=clock, new_id=new_id, retry=retry
         )
         eraser = RepresentationEraser(
-            session_factory, engine, coordinator, clock=clock, new_id=new_id
-        )
+            session_factory, engine, coordinator,
+            unit_of_work=unit_of_work, clock=clock, new_id=new_id,
+        )  # fmt: skip
         packages = RuntimePackageStore(roots, new_id=new_id)
         # No live index wake yet: recovery's own index passes apply the ADD operations it queues.
         accept_run = AcceptProcessingRunUseCase(unit_of_work, new_id=new_id, clock=clock)
         startup = recover_on_startup(
             session_factory, store, workspaces, coordinator, eraser, packages, accept_run,
-            clock=clock, index_batch=index_batch, max_index_passes=max_index_passes,
+            unit_of_work=unit_of_work, clock=clock, index_batch=index_batch,
+            max_index_passes=max_index_passes,
         )  # fmt: skip
         yield OpenLibrary(
             roots, engine, session_factory, store, workspaces, coordinator, eraser,

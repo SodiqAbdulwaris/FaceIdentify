@@ -58,7 +58,7 @@ from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.workspaces import WorkspaceCleanup, WorkspaceManager
 from tests.factories.models import ModelFactory, float32_vector
-from tests.fixtures.persistence import AppDirs
+from tests.fixtures.persistence import AppDirs, uow_for
 from tests.fixtures.runtime_packages import FACTS, build_package
 
 NDIM = 4
@@ -99,18 +99,32 @@ def recover(
 ) -> StartupReport:  # fmt: skip
     build.session.commit()
     eraser = RepresentationEraser(
-        factory, factory.kw["bind"], coordinator, clock=build.clock, new_id=build.new_id,
+        factory,
+        factory.kw["bind"],
+        coordinator,
+        unit_of_work=uow_for(factory),
+        clock=build.clock,
+        new_id=build.new_id,
         checkpoint_timeout_ms=0,
-    )  # fmt: skip
+    )
     return recover_on_startup(
-        factory, file_store, workspaces, coordinator, eraser,
+        factory,
+        file_store,
+        workspaces,
+        coordinator,
+        eraser,
         RuntimePackageStore(file_store.roots, new_id=build.new_id),
         AcceptProcessingRunUseCase(
             UnitOfWork(factory.kw["bind"], retry=TransactionRetry(1, lambda _: 0)),
-            new_id=build.new_id, clock=build.clock, wake_index=accept_wake,
+            new_id=build.new_id,
+            clock=build.clock,
+            wake_index=accept_wake,
         ),
-        clock=build.clock, index_batch=index_batch, max_index_passes=max_index_passes,
-    )  # fmt: skip
+        unit_of_work=uow_for(factory),
+        clock=build.clock,
+        index_batch=index_batch,
+        max_index_passes=max_index_passes,
+    )
 
 
 def active(build: ModelFactory, space: RepresentationSpace, key: int) -> Representation:
@@ -452,8 +466,8 @@ def test_in_flight_work_is_interrupted_in_one_transaction_and_only_once(
     world: World, factory: sessionmaker[Session], build: ModelFactory
 ) -> None:
     build.session.commit()
-    first = interrupt_in_flight_work(factory, clock=build.clock)
-    second = interrupt_in_flight_work(factory, clock=build.clock)
+    first = interrupt_in_flight_work(uow_for(factory), clock=build.clock)
+    second = interrupt_in_flight_work(uow_for(factory), clock=build.clock)
 
     assert first.jobs == [world.running_job.id]
     assert world.running_run.id in first.runs
@@ -653,13 +667,13 @@ def test_a_stale_lease_is_cleared_from_a_job_that_is_not_running_and_its_state_k
     )
     build.session.commit()
 
-    cleared = interrupt_in_flight_work(factory, clock=build.clock)
+    cleared = interrupt_in_flight_work(uow_for(factory), clock=build.clock)
 
     assert cleared.leases_cleared == [job.id]
     assert cleared.jobs == []  # not interrupted: only RUNNING work is
     after = reload(factory, Job, job.id)
     assert (after.state, after.lease_owner, after.lease_expires_at) == (state, None, None)
-    assert interrupt_in_flight_work(factory, clock=build.clock).leases_cleared == []
+    assert interrupt_in_flight_work(uow_for(factory), clock=build.clock).leases_cleared == []
 
 
 @pytest.mark.parametrize(
@@ -677,7 +691,7 @@ def test_a_job_being_paused_or_cancelled_moves_on_and_its_lease_is_cleared(
     )
     build.session.commit()
 
-    moved = interrupt_in_flight_work(factory, clock=build.clock)
+    moved = interrupt_in_flight_work(uow_for(factory), clock=build.clock)
 
     after = reload(factory, Job, job.id)
     assert (after.state, after.lease_owner, after.lease_expires_at) == (becomes, None, None)
@@ -687,7 +701,7 @@ def test_a_job_being_paused_or_cancelled_moves_on_and_its_lease_is_cleared(
         ([job.id], []) if becomes == "PAUSED" else ([], [job.id])
     )
     assert moved.jobs == []  # not interrupted
-    assert interrupt_in_flight_work(factory, clock=build.clock) == InterruptedWork()
+    assert interrupt_in_flight_work(uow_for(factory), clock=build.clock) == InterruptedWork()
 
 
 def test_what_was_moved_is_reported_in_id_order_whatever_order_it_was_stored_in(
@@ -708,7 +722,7 @@ def test_what_was_moved_is_reported_in_id_order_whatever_order_it_was_stored_in(
     ]
     build.session.commit()
 
-    moved = interrupt_in_flight_work(factory, clock=build.clock)
+    moved = interrupt_in_flight_work(uow_for(factory), clock=build.clock)
 
     assert moved.jobs_paused == sorted(job.id for job in paused_jobs)
     assert moved.jobs_cancelled == sorted(job.id for job in cancelled_jobs)
@@ -745,7 +759,7 @@ def test_a_run_being_paused_or_cancelled_is_moved_by_its_own_state_whatever_its_
     done_job_of_a_cancelling_run = build.job(state="COMPLETED", processing_run_id=cancelling.id)
     build.session.commit()
 
-    moved = interrupt_in_flight_work(factory, clock=build.clock)
+    moved = interrupt_in_flight_work(uow_for(factory), clock=build.clock)
 
     assert moved.runs_paused == [pausing.id]
     assert moved.runs_cancelled == [cancelling.id]
@@ -766,7 +780,7 @@ def test_job_and_run_states_are_recovered_independently_of_each_other(
     finished_job_of_a_live_run = build.job(state="COMPLETED", processing_run_id=live_run.id)
     build.session.commit()
 
-    interrupted = interrupt_in_flight_work(factory, clock=build.clock)
+    interrupted = interrupt_in_flight_work(uow_for(factory), clock=build.clock)
 
     assert {consistent.id, running_job_of_a_finished_run.id} <= set(interrupted.jobs)
     assert finished_job_of_a_live_run.id not in interrupted.jobs
@@ -925,13 +939,15 @@ def test_a_failure_part_way_through_interrupting_work_rolls_all_of_it_back(
     event.listen(sqlite_engine, "before_cursor_execute", fail_on_runs)
     try:
         with pytest.raises(InjectedFault):
-            interrupt_in_flight_work(factory, clock=build.clock)
+            interrupt_in_flight_work(uow_for(factory), clock=build.clock)
     finally:
         event.remove(sqlite_engine, "before_cursor_execute", fail_on_runs)
 
     assert database_state(sqlite_engine) == before  # the jobs updated first were rolled back too
     assert reload(factory, Job, world.running_job.id).state == "RUNNING"
-    assert interrupt_in_flight_work(factory, clock=build.clock).jobs == [world.running_job.id]
+    assert interrupt_in_flight_work(uow_for(factory), clock=build.clock).jobs == [
+        world.running_job.id
+    ]
 
 
 def test_a_crash_inside_the_workspace_removal_is_repaired_by_running_recovery_again(
@@ -1173,7 +1189,12 @@ def test_startup_finishes_an_erasure_that_was_queued_and_nothing_else(
     assert open_index(coordinator, space).contains(1)
     with factory() as session:  # step one of an erasure committed, then the process died
         RepresentationEraser(
-            factory, sqlite_engine, coordinator, clock=build.clock, new_id=build.new_id
+            factory,
+            sqlite_engine,
+            coordinator,
+            unit_of_work=uow_for(factory),
+            clock=build.clock,
+            new_id=build.new_id,
         ).queue([victim.id])
         session.commit()
     assert reload(factory, Representation, victim.id).state == "ERASING"
@@ -1226,7 +1247,12 @@ def test_an_erasure_that_cannot_finish_is_reported_unresolved_not_clean(
     copy = quarantined / f"index.{uuid.UUID(int=9).hex}.usearch"
     copy.write_bytes(b"a copy of an index")
     RepresentationEraser(
-        factory, sqlite_engine, coordinator, clock=build.clock, new_id=build.new_id
+        factory,
+        sqlite_engine,
+        coordinator,
+        unit_of_work=uow_for(factory),
+        clock=build.clock,
+        new_id=build.new_id,
     ).queue([victim.id])
 
     with copy.open("rb"):  # an open handle: Windows refuses to delete the file

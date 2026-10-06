@@ -50,6 +50,7 @@ from backend.app.memory.models import (
 )
 from backend.app.settings.app_state import WAL_TRUNCATION_OWED, AppStateRepository
 from backend.infrastructure.db.engine import truncate_wal
+from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.indexing.representation_index import (
     retire_quarantine,
     superseded_files,
@@ -111,11 +112,13 @@ class RepresentationEraser:
         engine: Engine,
         coordinator: IndexCoordinator,
         *,
+        unit_of_work: UnitOfWork,
         clock: Callable[[], datetime],
         new_id: Callable[[], uuid.UUID],
         checkpoint_timeout_ms: int = 5000,
     ) -> None:
-        self._sessions = session_factory
+        self._sessions = session_factory  # reads; every write goes through the unit of work
+        self._uow = unit_of_work
         self._engine = engine
         self._coordinator = coordinator
         self._clock = clock
@@ -147,50 +150,50 @@ class RepresentationEraser:
         """Move the erasable ones among `representation_ids` to `ERASING` and queue their `REMOVE`s
         in one transaction; then make sure every `ERASING` representation with a key has one."""
         now = self._clock()
-        with self._sessions() as session:
-            operations: list[NewOperation] = []
-            for chunk in _chunks(list(representation_ids)):
-                moved = session.execute(
-                    update(Representation)
-                    .where(Representation.id.in_(chunk), Representation.state.in_(ERASABLE))
-                    .values(state=RepresentationState.ERASING)
-                    .returning(
-                        Representation.id,
-                        Representation.representation_space_id,
-                        Representation.ann_key,
-                    )
-                    .execution_options(synchronize_session=False)
-                ).all()
-                keyed = [
-                    NewOperation(rep_id, space_id, IndexOperationKind.REMOVE)
-                    for rep_id, space_id, ann_key in moved
-                    if ann_key is not None
-                ]
-                operations += keyed
-                # An ordinary REMOVE may be in flight (claimed, applied in place, not yet settled):
-                # its in-place removal leaves the vector's bytes in the live file, and the unique
-                # pending REMOVE would make this erasure skip its own. Delete it so a fresh REMOVE
-                # (applied by a rebuild) takes its place; its late settlement is then skipped. A
-                # `FAILED` one goes too: it would keep this erasure from finishing until the next
-                # call requeued it. Only this chunk's ids are bound, so a huge bulk stays under
-                # SQLite's parameter limit.
-                session.execute(
-                    delete(IndexOperation).where(
-                        IndexOperation.representation_id.in_(
-                            [op.representation_id for op in keyed]
-                        ),
-                        IndexOperation.operation == IndexOperationKind.REMOVE,
-                        IndexOperation.state.in_(
-                            (IndexOperationState.PENDING, IndexOperationState.FAILED)
-                        ),
-                    )
+        ids = list(representation_ids)
+        self._uow.write(lambda session: self._queue(session, ids, now))
+
+    def _queue(self, session: Session, ids: list[uuid.UUID], now: datetime) -> None:
+        operations: list[NewOperation] = []
+        for chunk in _chunks(ids):
+            moved = session.execute(
+                update(Representation)
+                .where(Representation.id.in_(chunk), Representation.state.in_(ERASABLE))
+                .values(state=RepresentationState.ERASING)
+                .returning(
+                    Representation.id,
+                    Representation.representation_space_id,
+                    Representation.ann_key,
                 )
-            repository = IndexOperationRepository(session)
-            repository.append_batch(operations, now=now, new_id=self._new_id)
-            repository.append_batch(self._missing_removes(session), now=now, new_id=self._new_id)
-            for failed in self._failed_removes(session):
-                repository.requeue(failed, now=now)  # out of attempts earlier: a fresh set
-            session.commit()
+                .execution_options(synchronize_session=False)
+            ).all()
+            keyed = [
+                NewOperation(rep_id, space_id, IndexOperationKind.REMOVE)
+                for rep_id, space_id, ann_key in moved
+                if ann_key is not None
+            ]
+            operations += keyed
+            # An ordinary REMOVE may be in flight (claimed, applied in place, not yet settled):
+            # its in-place removal leaves the vector's bytes in the live file, and the unique
+            # pending REMOVE would make this erasure skip its own. Delete it so a fresh REMOVE
+            # (applied by a rebuild) takes its place; its late settlement is then skipped. A
+            # `FAILED` one goes too: it would keep this erasure from finishing until the next
+            # call requeued it. Only this chunk's ids are bound, so a huge bulk stays under
+            # SQLite's parameter limit.
+            session.execute(
+                delete(IndexOperation).where(
+                    IndexOperation.representation_id.in_([op.representation_id for op in keyed]),
+                    IndexOperation.operation == IndexOperationKind.REMOVE,
+                    IndexOperation.state.in_(
+                        (IndexOperationState.PENDING, IndexOperationState.FAILED)
+                    ),
+                )
+            )
+        repository = IndexOperationRepository(session)
+        repository.append_batch(operations, now=now, new_id=self._new_id)
+        repository.append_batch(self._missing_removes(session), now=now, new_id=self._new_id)
+        for failed in self._failed_removes(session):
+            repository.requeue(failed, now=now)  # out of attempts earlier: a fresh set
 
     @staticmethod
     def _missing_removes(session: Session) -> list[NewOperation]:
@@ -303,29 +306,30 @@ class RepresentationEraser:
             if not ready:
                 return [], reason
             now = self._clock()
-            cleared: list[uuid.UUID] = []
-            with self._sessions() as session:
-                # A value of its own for every clearing commit, whatever `new_id` is: a checkpoint
-                # that ran before this commit must not clear the marker this commit sets.
-                AppStateRepository(session).set(WAL_TRUNCATION_OWED, uuid.uuid4().hex, now=now)
-                for chunk in _chunks(ready):
-                    cleared += session.scalars(
-                        update(Representation)
-                        .where(
-                            Representation.id.in_(chunk),
-                            Representation.state == RepresentationState.ERASING,
-                        )
-                        .values(
-                            state=RepresentationState.ERASED,
-                            vector=None,
-                            ann_key=None,
-                            erased_at=now,
-                        )
-                        .returning(Representation.id)
-                        .execution_options(synchronize_session=False)
-                    ).all()
-                session.commit()
-            return cleared, reason
+            return self._uow.write(lambda session: self._clear(session, ready, now)), reason
+
+    def _clear(self, session: Session, ready: list[uuid.UUID], now: datetime) -> list[uuid.UUID]:
+        cleared: list[uuid.UUID] = []
+        # A value of its own for every clearing commit, whatever `new_id` is: a checkpoint
+        # that ran before this commit must not clear the marker this commit sets.
+        AppStateRepository(session).set(WAL_TRUNCATION_OWED, uuid.uuid4().hex, now=now)
+        for chunk in _chunks(ready):
+            cleared += session.scalars(
+                update(Representation)
+                .where(
+                    Representation.id.in_(chunk),
+                    Representation.state == RepresentationState.ERASING,
+                )
+                .values(
+                    state=RepresentationState.ERASED,
+                    vector=None,
+                    ann_key=None,
+                    erased_at=now,
+                )
+                .returning(Representation.id)
+                .execution_options(synchronize_session=False)
+            ).all()
+        return cleared
 
     @staticmethod
     def _removal_done(session: Session, space_id: uuid.UUID) -> set[uuid.UUID]:
@@ -366,9 +370,9 @@ class RepresentationEraser:
         if not done:
             report.wal_truncated = False
             return
-        with self._sessions() as session:
-            AppStateRepository(session).clear(WAL_TRUNCATION_OWED, value=owed)
-            session.commit()
+        self._uow.write(
+            lambda session: AppStateRepository(session).clear(WAL_TRUNCATION_OWED, value=owed)
+        )
         report.truncated = True
 
     def _verify(self, cleared: Sequence[uuid.UUID], report: ErasureReport) -> None:

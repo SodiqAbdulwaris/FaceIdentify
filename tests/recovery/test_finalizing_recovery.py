@@ -45,7 +45,7 @@ from backend.infrastructure.storage.workspaces import WorkspaceManager
 from tests.factories.models import ModelFactory
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 from tests.fixtures.final_checkpoint import finalizing
-from tests.fixtures.persistence import AppDirs
+from tests.fixtures.persistence import AppDirs, uow_for
 
 
 class Harness:
@@ -80,6 +80,7 @@ class Harness:
             self.factory,
             self.engine,
             self.coordinator,
+            unit_of_work=self.uow,
             clock=self.build.clock,
             new_id=self.build.new_id,
             checkpoint_timeout_ms=0,
@@ -94,6 +95,7 @@ class Harness:
             AcceptProcessingRunUseCase(
                 self.uow, new_id=self.build.new_id, clock=self.build.clock, wake_index=self.wake
             ),
+            unit_of_work=self.uow,
             clock=self.build.clock,
             index_batch=50,
             max_index_passes=5,
@@ -201,7 +203,7 @@ def test_interruption_alone_leaves_a_finalizing_runs_job_running(
     unlinked = harness.build.job(type="PROCESS_SOURCE", state="RUNNING")
     harness.build.session.commit()
 
-    interrupted = interrupt_in_flight_work(harness.factory, clock=clock)
+    interrupted = interrupt_in_flight_work(uow_for(harness.factory), clock=clock)
 
     assert harness.row(Job, finalizing_job.id).state == "RUNNING"
     assert harness.row(ProcessingRun, run.id).state == "FINALIZING"
@@ -407,6 +409,69 @@ def test_a_crash_after_acceptance_committed_is_a_no_op_on_the_next_start(
     assert harness.row(Observation, observation.id).state == "ACTIVE"
     assert harness.row(Representation, representation.id).state == "ACTIVE"
     assert harness.count(Occurrence) == 1
+
+
+# --- the writes are a unit of work: safe to run again whole -----------------------------------
+
+
+def test_recovery_writes_are_safe_to_run_again_whole(
+    harness: Harness, clock: FrozenClock, new_id: SeededUUIDs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A SQLITE_BUSY retry reruns the whole write. Each recovery write (interrupting work, marking a
+    refused FINAL) must therefore leave the same state and report no row twice."""
+    refused_run, _o, _r, _i, refused_job = finalizing(
+        harness.build.session, clock, new_id, "ABSTAIN"
+    )
+    drop_final(harness.build.session, refused_run)
+    dead_run, dead_job, _obs, _rep = pre_final_run(harness.build)
+    harness.build.session.commit()
+    real_write = harness.uow.write
+    attempts = 0
+
+    def retry_once(work: Callable[[Session], Any]) -> Any:
+        nonlocal attempts
+        attempts += 1
+        with harness.factory() as rolled_back:
+            work(rolled_back)
+            rolled_back.rollback()
+        return real_write(work)
+
+    monkeypatch.setattr(harness.uow, "write", retry_once)
+
+    report = harness.recover()
+
+    assert attempts >= 2  # at least the NOT_RESUMABLE write and the interruption, each run twice
+    assert report.finalizing.not_resumable == [refused_run.id]
+    assert report.interrupted.jobs == sorted([refused_job.id, dead_job.id])
+    assert report.interrupted.runs == [dead_run.id]
+    assert harness.row(ProcessingRun, refused_run.id).state == "NOT_RESUMABLE"
+    assert harness.row(ProcessingRun, dead_run.id).state == "INTERRUPTED"
+
+
+def test_the_interruption_write_goes_through_the_unit_of_work_and_reruns_cleanly(
+    harness: Harness, clock: FrozenClock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run, job, _obs, _rep = pre_final_run(harness.build)
+    harness.build.session.commit()
+    real_write = harness.uow.write
+    attempts = 0
+
+    def retry_once(work: Callable[[Session], Any]) -> Any:
+        nonlocal attempts
+        attempts += 1
+        with harness.factory() as rolled_back:
+            work(rolled_back)
+            rolled_back.rollback()
+        return real_write(work)
+
+    monkeypatch.setattr(harness.uow, "write", retry_once)
+
+    interrupted = interrupt_in_flight_work(harness.uow, clock=clock)
+
+    assert attempts == 1  # one write unit of work for the whole interruption
+    assert interrupted.jobs == [job.id]
+    assert interrupted.runs == [run.id]
+    assert harness.row(Job, job.id).state == "INTERRUPTED"
 
 
 # --- retry lineage ---------------------------------------------------------------------------
