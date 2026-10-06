@@ -55,12 +55,20 @@ class HostOptions:
     parent_pid: int | None
 
 
+def _process_id(text: str) -> int:
+    """A positive process id: 0 and below are not the shell (and 0 is the Windows idle process)."""
+    value = int(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("a process id is positive")
+    return value
+
+
 def parse_options(argv: Sequence[str]) -> HostOptions:
     """Parse the command line. There is deliberately no option for the launch capability."""
     parser = argparse.ArgumentParser(prog="backend.api.host")
     parser.add_argument("--library-root", type=Path, required=True)
     parser.add_argument("--local-state-root", type=Path, required=True)
-    parser.add_argument("--parent-pid", type=int, default=None)
+    parser.add_argument("--parent-pid", type=_process_id, default=None)
     arguments = parser.parse_args(list(argv))  # a usage error exits 2, as argparse does
     return HostOptions(arguments.library_root, arguments.local_state_root, arguments.parent_pid)
 
@@ -123,6 +131,21 @@ else:  # pragma: no cover - the suite runs on Windows
         return True
 
 
+def _loopback_listener() -> socket.socket:
+    """A listening socket on loopback and a port the operating system picks. Never SO_REUSEADDR:
+    on Windows that lets another process share the port; there it is made exclusive instead."""
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if sys.platform == "win32":  # pragma: no branch - the suite runs on Windows
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        listener.bind((LOOPBACK, 0))
+        listener.listen(16)
+    except BaseException:
+        listener.close()
+        raise
+    return listener
+
+
 async def serve(
     options: HostOptions,
     token: str,
@@ -145,14 +168,11 @@ async def serve(
         max_index_passes=PROVISIONAL_INDEX_PASSES,
     )
     app = create_backend_app(token, library)
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # (No SO_REUSEADDR: on Windows it would let another process share this port.)
-    listener.bind((LOOPBACK, 0))
-    listener.listen(16)
-    bound_host, port = listener.getsockname()[:2]
+    listener = _loopback_listener()  # from here on, whatever happens, it is closed below
     server = uvicorn.Server(
         uvicorn.Config(app, log_config=None, log_level="warning", access_log=False, lifespan="on")
     )
+    bound_host, port = listener.getsockname()[:2]
     serving = asyncio.create_task(server.serve(sockets=[listener]))
     try:
         while not server.started and not serving.done():

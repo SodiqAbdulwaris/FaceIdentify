@@ -12,6 +12,7 @@ import json
 import os
 import runpy
 import secrets
+import socket
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +24,7 @@ import httpx
 import pytest
 import uvicorn
 
+from backend.api import host
 from backend.api.app import WEBSOCKET_PROTOCOL, LaunchTokenError
 from backend.api.host import (
     HANDSHAKE_SCHEMA_VERSION,
@@ -98,6 +100,8 @@ def test_options_come_from_the_command_line_and_there_is_no_token_option(tmp_pat
     for bad in (
         ["--library-root", "a"],
         ["--library-root", "a", "--local-state-root", "b", "--token", "secret"],
+        ["--library-root", "a", "--local-state-root", "b", "--parent-pid", "0"],
+        ["--library-root", "a", "--local-state-root", "b", "--parent-pid", "-5"],
     ):
         with pytest.raises(SystemExit) as error:
             parse_options(bad)
@@ -171,6 +175,11 @@ async def test_the_host_serves_loopback_prints_one_handshake_and_stops_when_the_
     assert handshake["port"] > 0
     assert handshake["pid"] == os.getpid()
     assert secret not in out.getvalue()
+    # another local process cannot take the same port, even with SO_REUSEADDR (the Windows hijack)
+    intruder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    intruder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    with pytest.raises(OSError, match="(?i)access|usage|address"), intruder:
+        intruder.bind((LOOPBACK, handshake["port"]))
     base = f"http://{LOOPBACK}:{handshake['port']}"
     auth = {"Authorization": f"Bearer {secret}"}
 
@@ -216,6 +225,29 @@ async def test_a_host_that_cannot_start_serving_raises_instead_of_hanging(
     with pytest.raises(RuntimeError, match="could not start"):
         await serve(options, token(), out=out, settings=settings_for(options, clock, new_id))
     assert out.getvalue() == ""  # no handshake for a server that never accepted connections
+
+
+async def test_a_failure_while_binding_closes_the_listening_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[socket.socket] = []
+    real_socket = socket.socket
+
+    class Tracked(real_socket):  # type: ignore[misc, valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            opened.append(self)
+
+        def listen(self, *args: Any) -> None:
+            raise OSError("cannot listen")
+
+    monkeypatch.setattr("backend.api.host.socket.socket", Tracked)
+
+    with pytest.raises(OSError, match="cannot listen"):
+        host._loopback_listener()
+
+    assert len(opened) == 1
+    assert opened[0].fileno() == -1  # closed, not leaked
 
 
 # --- main -------------------------------------------------------------------------------------
