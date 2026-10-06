@@ -39,7 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
-| 2026-10-05 | [M3: atomic processing-run acceptance and abstention evidence](2026-10-05-m3-accept-processing-run.md) | final review fix ready for fresh full gate/review/CI; step 11 acceptance slice and issue #104 |
+| 2026-10-05 | [M3: atomic processing-run acceptance and abstention evidence](2026-10-05-m3-accept-processing-run.md) | final review-fix full gate passed; final review/CI pending; step 11 acceptance slice and issue #104 |
 | 2026-10-05 | [M3: IndexCoordinator write transactions use the UnitOfWork](2026-10-05-m3-index-coordinator-unit-of-work.md) | done; merged in PR #105; step 11 / issue 66 narrow slice |
 | 2026-10-04 | [M4 authenticated local API bootstrap](2026-10-04-m4-api-launch-capability.md) | partial; merged in PR #103 |
 | 2026-10-04 | [M3 private single-image processing execution](2026-10-04-m3-processing-execution.md) | partial; PR #101 implements approved issue #102 fallback boundaries; final gate/review pending |
