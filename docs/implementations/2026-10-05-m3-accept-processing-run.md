@@ -39,6 +39,10 @@ The reconstructed decision uses only the immutable run snapshot's exact decision
 private Observation's version-1 persisted detection score. Checkpoint copies of either value must
 agree before acceptance, so they cannot alter the decision rationale.
 
+The release review additionally refuses a snapshot or canonical snapshot root outside version 1.
+It requires a run-local candidate Identity to be `ACTIVE` or a pending Identity created by the
+same run, preventing an unrelated private or retired identity from altering a final decision.
+
 ## Why
 
 Persistence sections 6.2, 10--12, 16 and 30 make acceptance the sole SQLite-authority boundary;
@@ -64,7 +68,7 @@ issue #104 defines the immutable historical abstention record.
 - Full repository gate — **2,291 passed, 100% backend coverage** (`HYPOTHESIS_PROFILE=ci uv run
   pytest --cov -q -p no:cacheprovider`, 2026-10-05) was for the original PR commit, before the
   remediation and must not be treated as verification of it.
-- Review-remediation focused suite — **148 passed**, with **100% line and branch coverage** for
+- Review-remediation focused suite — **151 passed**, with **100% line and branch coverage** for
   `accept_run.py` and `execute_job.py` (`uv run pytest tests/integration/test_accept_processing_run.py
   tests/integration/test_execute_processing_job.py --cov=backend.app.processing.accept_run
   --cov=backend.app.processing.execute_job --cov-branch -q -p no:cacheprovider`, 2026-10-06).
@@ -83,6 +87,9 @@ issue #104 defines the immutable historical abstention record.
   configuration or accept an altered checkpoint quality both failed their targeted regressions.
   The source was restored byte-identically (SHA-256
   `22919DE0358E259A5FC74D7F62189061E9309505E801B968174B5A1B2D54BE39`).
+- The release-review P1 mutations which skip frozen snapshot-version validation or admit an
+  unrelated pending run-local Identity both failed their targeted regressions. The source was
+  restored byte-identically (SHA-256 `1D97EABF21745DD0CCC455D560D8F9AC8566B48CD5D1CC55567F40D28F1AC0DB`).
 - Ruff format/check and native/Linux mypy passed after the remediation.
 - Full repository gate after remediation — **2,317 passed in 406.28s, 100% backend coverage**
   (`HYPOTHESIS_PROFILE=ci uv run pytest --cov -q -p no:cacheprovider`, 2026-10-06).
@@ -98,7 +105,7 @@ issue #104 defines the immutable historical abstention record.
 
 ## Open issues / follow-ups
 
-- PR #106 still needs final independent review and fresh exact-head CI
+- PR #106 still needs a fresh full gate, a final independent review, and fresh exact-head CI
   before merge.
 - Step 12 recovery must invoke this use case for a valid FINAL checkpoint without rerunning ML.
 - Issue #79 remains the separate later `ResolveUnresolvedRepresentation` use case.
