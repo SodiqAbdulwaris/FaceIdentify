@@ -83,11 +83,17 @@ class ModelFactory:
         )  # fmt: skip
         return self.add(Source(**(fields | kw)))
 
-    def snapshot(self) -> ProcessingConfigurationSnapshot:
+    def snapshot(self, **kw: Any) -> ProcessingConfigurationSnapshot:
+        fields: dict[str, Any] = dict(
+            id=self.new_id(),
+            schema_version=1,
+            canonical_json={},
+            fingerprint_sha256=SHA,
+            created_at=self.clock(),
+        )
         return self.add(
             ProcessingConfigurationSnapshot(
-                id=self.new_id(), schema_version=1, canonical_json={}, fingerprint_sha256=SHA,
-                created_at=self.clock(),
+                **(fields | kw),
             )
         )  # fmt: skip
 

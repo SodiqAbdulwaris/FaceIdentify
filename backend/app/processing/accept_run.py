@@ -45,6 +45,7 @@ from backend.app.processing.models import (
     CheckpointKind,
     CheckpointState,
     ProcessingCheckpoint,
+    ProcessingConfigurationSnapshot,
     ProcessingRun,
     ProcessingRunState,
 )
@@ -307,6 +308,24 @@ class AcceptProcessingRunUseCase:
             policy_data["margin"],
             policy_data["new_identity_ceiling"],
         )
+        snapshot = session.get(ProcessingConfigurationSnapshot, run.configuration_snapshot_id)
+        snapshot_policy = (
+            None
+            if snapshot is None or not isinstance(snapshot.canonical_json, dict)
+            else snapshot.canonical_json.get("decision_policy")
+        )
+        if snapshot_policy != {"schema_version": 1, **policy_data}:
+            raise AcceptanceError(
+                "FINAL checkpoint policy does not match the frozen run configuration"
+            )
+        observation = session.get(Observation, decision.observation_id)
+        observation_quality = None if observation is None else observation.quality_json
+        if (
+            not isinstance(observation_quality, dict)
+            or observation_quality.get("schema_version") != 1
+            or observation_quality.get("detection_score") != evidence["quality"]["detection_score"]
+        ):
+            raise AcceptanceError("FINAL checkpoint quality does not match its private observation")
         groups: list[CandidateGroup] = []
         for candidate in evidence["candidates"]:
             assert isinstance(candidate, dict)
@@ -365,7 +384,7 @@ class AcceptProcessingRunUseCase:
             evidence["assessment_version"],
             evidence["interpretation"],
             self._uuid(evidence["representation_space_id"], "evidence representation space"),
-            ObservationQuality(evidence["quality"]["detection_score"]),
+            ObservationQuality(observation_quality["detection_score"]),
             evidence["retrieval"]["requested_k"],
             evidence["retrieval"]["returned"],
             evidence["retrieval"]["dropped"],
