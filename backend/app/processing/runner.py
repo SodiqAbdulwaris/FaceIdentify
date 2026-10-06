@@ -23,6 +23,7 @@ after the library is reported open (`backend.api.startup`), so this never races 
 
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -96,7 +97,8 @@ class ProcessingRunner:
         except SETTLED_FAILURES as error:
             return RunOutcome(RunOutcomeKind.FAILED, run_id, type(error).__name__)
         except Exception as error:
-            self._executor.fail_claimed(started, UNEXPECTED_CODE)
+            with suppress(Exception):  # best effort: the defect itself must not be masked
+                self._executor.fail_claimed(started, UNEXPECTED_CODE)
             raise RuntimeError(f"unexpected {type(error).__name__} while processing") from error
         try:
             self._accept.accept(run_id)
