@@ -3,7 +3,7 @@
 - **Date:** 2026-10-03
 - **Milestone / tracker IDs:** M3 step 10 · TST-040, TST-041, TST-042
 - **Status:** partial
-- **Commits:** pending PR
+- **Commits:** PR #97: `feat(processing): queue source processing`
 
 ## What changed
 

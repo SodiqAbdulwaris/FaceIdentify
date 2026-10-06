@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-06 (M3 identity-less candidate readers merged in PR #95; PR #101 merged the approved provider-fallback execution segments; PR #106 merged the step-11 acceptance remediation, which validates every FINAL decision from SQLite-authoritative candidate evidence and the versioned run snapshot before all lifecycle branches; its focused coverage, guard mutation proofs, 2,328-test full gate, independent review, and exact-head CI passed, and it closed issue #104; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
+_Last updated: 2026-10-06 (stale M3 documentation corrected by the cross-check; M3 identity-less candidate readers merged in PR #95; PR #101 merged the approved provider-fallback execution segments; PR #106 merged the step-11 acceptance remediation, which validates every FINAL decision from SQLite-authoritative candidate evidence and the versioned run snapshot before all lifecycle branches; its focused coverage, guard mutation proofs, 2,328-test full gate, independent review, and exact-head CI passed, and it closed issue #104; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
 
 > **Decision 2026-10-03:** the owner approved the version-1 payload contracts for new ML output: `landmarks_json` has `schema_version` and normalised `points`; observation `quality_json` has `schema_version` and `detection_score`; representation `quality_json` has `schema_version` and `l2_norm`.
 
@@ -105,8 +105,7 @@ _Last updated: 2026-10-06 (M3 identity-less candidate readers merged in PR #95; 
   this version does not know is refused untouched: `DatabaseNewerThanApplicationError`), builds the engine, Storage Manager,
   IndexCoordinator and eraser, runs `recover_on_startup`, and releases the lock and the engine on exit or on any failed step.
   The FastAPI lifespan that wraps it does not exist yet. The remaining backend
-  packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is an authenticated in-memory FastAPI application factory but no production loopback host or lifespan yet, and no
-  source-import use case and no ML worker yet.
+  packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. There is an authenticated in-memory FastAPI application factory but no production loopback host or lifespan yet. Image source import (PR #82) and the ML worker and supervisor (PRs #76, #77) are built.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) +
   Vitest. It is a placeholder `App` shell only; no features.
 - **Desktop:** Tauri v2 in `desktop/src-tauri`, default shell. It loads the frontend at
@@ -345,7 +344,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     step and a rerun. **Built** (PR for issue 30): the `PAUSING`/`CANCELLING` transitions in
     `backend/app/recovery/startup.py`. **Still open, for the M3 run lifecycle
     (issue 34):**
-    `FINALIZING` runs (revalidate and accept without redoing ML, needing `AcceptProcessingRunUseCase`) and a
+    `FINALIZING` runs (revalidate and accept without redoing ML, `AcceptProcessingRunUseCase` is built, PR #106) and a
     run with pending output and no final checkpoint. (Interrupted runtime installations are built: `RuntimePackageStore.recover`.)
 28. ~~Open: `ann_key` is globally unique but allocated per space (the same conflict as question 13).~~ **Decided 2026-10-01 (owner, issue 48):**
     an `ann_key` is unique within its space, `UNIQUE(representation_space_id, ann_key)`, as revision `0003`
