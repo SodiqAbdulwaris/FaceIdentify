@@ -22,7 +22,7 @@ _Last updated: 2026-10-06 (stale M3 documentation corrected by the cross-check; 
   `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository`, `SettingsRepository` and `RuntimeCatalogRepository` (TST-022 has its mechanics for every listed repository; Artifact is `artifact_storage.py`); the library root and lock (`library_root.py`, `library_lock.py`; not yet called by a lifecycle) and the downgrade guard are built; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
-  #29 to #41, #48, #51, #57, #66, #69, #71, #79, #80, #102 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
+  #29 to #41, #48, #51, #57, #66, #69, #71, #79, #80 and the SQLite erasure policy hold every decided-but-unbuilt item and every provisional decision to validate (the table is in
   `docs/implementations/2026-10-01-decide-q25-q26-erasure-and-recovery.md`). When something becomes pending,
   open an issue for it.
 - **Git:** public repository <https://github.com/SodiqAbdulwaris/FaceIdentify>. `main` contains the

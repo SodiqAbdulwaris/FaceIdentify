@@ -3,7 +3,7 @@
 - **Date:** 2026-10-06
 - **Milestone / tracker IDs:** M3 housekeeping
 - **Status:** done
-- **Commits:** this docs-only PR
+- **Commits:** PR #108: `docs(m3): resolve stale statuses found by cross-check`
 
 ## What changed
 
