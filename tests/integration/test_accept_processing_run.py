@@ -26,7 +26,10 @@ from backend.app.processing.accept_run import (
     AcceptProcessingRunUseCase,
     _Decision,
 )
-from backend.app.processing.models import ProcessingCheckpoint, ProcessingRun
+from backend.app.processing.models import (
+    ProcessingCheckpoint,
+    ProcessingRun,
+)
 from backend.app.recognition.assessment import ASSESSMENT_VERSION
 from backend.app.recognition.reasoner import Reason, RecognitionOutcome
 from backend.app.sources.models import Source
@@ -53,7 +56,15 @@ def finalizing(
     outcome: str,
 ) -> tuple[ProcessingRun, Observation | None, Representation | None, Identity | None, Job]:
     build = ModelFactory(session, clock, new_id)
-    run = build.run(state="FINALIZING")
+    policy = {
+        "version": "test-v1",
+        "min_detection_score": 0.5,
+        "match_threshold": 0.8,
+        "margin": 0.1,
+        "new_identity_ceiling": 0.2,
+    }
+    snapshot = build.snapshot(canonical_json={"decision_policy": {"schema_version": 1, **policy}})
+    run = build.run(state="FINALIZING", configuration_snapshot_id=snapshot.id)
     job = build.job(processing_run_id=run.id, type="PROCESS_SOURCE", state="RUNNING")
     if outcome == "NO_FACE":
         final = build.checkpoint(run, 0, "FINAL", "VALID")
@@ -62,6 +73,7 @@ def finalizing(
         session.commit()
         return run, None, None, None, job
     observation = build.observation(run)
+    observation.quality_json = {"schema_version": 1, "detection_score": 0.9}
     representation = build.representation(observation)
     identity = None
     identity_id: str | None = None
@@ -124,13 +136,7 @@ def finalizing(
                     },
                     "candidates": candidates,
                     "margin": None,
-                    "policy": {
-                        "version": "test-v1",
-                        "min_detection_score": 0.5,
-                        "match_threshold": 0.8,
-                        "margin": 0.1,
-                        "new_identity_ceiling": 0.2,
-                    },
+                    "policy": policy,
                 },
             }
         ],
@@ -239,6 +245,7 @@ def test_acceptance_handles_each_private_face_in_a_final_checkpoint(
     second_observation = build.observation(
         run, execution_segment_id=observation.execution_segment_id, sequence_in_run=1
     )
+    second_observation.quality_json = {"schema_version": 1, "detection_score": 0.9}
     second_representation = build.representation(
         second_observation, representation_space_id=representation.representation_space_id
     )
@@ -458,6 +465,79 @@ def test_final_decision_must_follow_its_valid_candidate_snapshot(
     db_session.commit()
 
     with pytest.raises(AcceptanceError, match="does not follow its evidence"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+
+def test_final_policy_must_match_the_frozen_run_configuration(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "MATCH_EXISTING"
+    )
+    assert representation is not None
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    decision = final.payload_json["decisions"][0]
+    evidence = decision["evidence"]
+    representation.identity_id = None
+    altered_policy = {**evidence["policy"], "match_threshold": 0.95}
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **decision,
+                "outcome": "ABSTAIN",
+                "reason": Reason.UNCERTAIN_SIMILARITY.value,
+                "identity_id": None,
+                "evidence": {
+                    **evidence,
+                    "outcome": "ABSTAIN",
+                    "reason": Reason.UNCERTAIN_SIMILARITY.value,
+                    "identity_id": None,
+                    "policy": altered_policy,
+                },
+            }
+        ],
+    }
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="policy does not match the frozen"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+
+def test_final_quality_must_match_its_private_observation(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "MATCH_EXISTING"
+    )
+    assert representation is not None
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    decision = final.payload_json["decisions"][0]
+    evidence = decision["evidence"]
+    representation.identity_id = None
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **decision,
+                "outcome": "ABSTAIN",
+                "reason": Reason.LOW_QUALITY.value,
+                "identity_id": None,
+                "evidence": {
+                    **evidence,
+                    "outcome": "ABSTAIN",
+                    "reason": Reason.LOW_QUALITY.value,
+                    "identity_id": None,
+                    "quality": {"detection_score": 0.1},
+                },
+            }
+        ],
+    }
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="quality does not match its private observation"):
         use_case(sqlite_engine, clock, new_id).accept(run.id)
 
 
