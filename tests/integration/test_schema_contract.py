@@ -108,7 +108,7 @@ EXPECTED_INDEXES: dict[str, set[tuple[tuple[str, ...], bool]]] = {
     },
     "processing_runs": {(("source_id", "created_at"), False), (("state", "updated_at"), False)},
     "jobs": {
-        (("state", "priority", "created_at"), False),
+        (("state", "priority_rank", "created_at"), False),
         (("lease_expires_at",), False),
         (("processing_run_id",), False),
     },
