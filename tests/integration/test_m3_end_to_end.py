@@ -244,19 +244,23 @@ def test_recognition_survives_restart_and_a_rebuilt_index(story: Any, stop_b: st
     opened, _state, _tmp_path = story
 
     with opened() as lib:  # --- first process
-        recognise(lib, A)
+        run_a = recognise(lib, A)
         assert lib.count(Identity) == 1  # A created I1
-        recognise(lib, B, stop=stop_b)
+        run_b = recognise(lib, B, stop=stop_b)
         calls_before_restart = lib.perception.calls
 
     with opened() as lib:  # --- restart: recovery finishes whatever B left
         assert lib.perception.calls == calls_before_restart  # recovery never ran ML
         with lib.lib.session_factory() as session:
             runs = list(session.scalars(select(ProcessingRun.state)))
-        assert runs == ["COMPLETED", "COMPLETED"]
+        assert sorted(runs) == ["COMPLETED", "COMPLETED"]
         assert lib.count(Identity) == 1  # B matched I1: no new identity
-        recognise(lib, C)  # C creates I2
+        run_c = recognise(lib, C)  # C creates I2
         assert lib.count(Identity) == 2
+        with lib.lib.session_factory() as session:
+            assert not list(
+                session.scalars(select(IndexOperation).where(IndexOperation.state != "APPLIED"))
+            )
         space = lib.space_id
         index_directory = lib.lib.coordinator.index_directory(space)
 
@@ -268,7 +272,7 @@ def test_recognition_survives_restart_and_a_rebuilt_index(story: Any, stop_b: st
         assert lib.lib.startup.indexes_rebuilt == [space]
         rebuilt = lib.global_index(space)
         assert len(rebuilt) == 3  # A, B and C are in it again
-        recognise(lib, D)  # D matches I1 through the rebuilt index
+        run_d = recognise(lib, D)  # D matches I1 through the rebuilt index
 
         with lib.lib.session_factory() as session:
             identities = list(session.scalars(select(Identity).order_by(Identity.created_at)))
@@ -279,12 +283,13 @@ def test_recognition_survives_restart_and_a_rebuilt_index(story: Any, stop_b: st
         assert kinds == ["IDENTITY_CREATED"] * 2 + ["IDENTITY_MATCHED"] * 2
         assert lib.count(Occurrence) == 4
         assert all(r.state == "ACTIVE" for r in representations)
-        by_identity: dict[uuid.UUID | None, int] = {}
-        for representation in representations:
-            by_identity[representation.identity_id] = (
-                by_identity.get(representation.identity_id, 0) + 1
-            )
-        assert sorted(by_identity.values()) == [1, 3]  # I2 has C; I1 has A, B and D
+        identity_of = {r.processing_run_id: r.identity_id for r in representations}
+        i1, i2 = identity_of[run_a], identity_of[run_c]
+        assert i1 is not None
+        assert i2 is not None
+        assert i1 != i2
+        assert identity_of[run_b] == i1  # B matched I1
+        assert identity_of[run_d] == i1  # D matched I1 through the rebuilt index
         with lib.lib.session_factory() as session:
             assert not list(
                 session.scalars(select(IndexOperation).where(IndexOperation.state != "APPLIED"))
