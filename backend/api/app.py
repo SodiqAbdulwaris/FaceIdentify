@@ -9,9 +9,10 @@ not by an ASGI application object.
 import base64
 import binascii
 import hmac
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Final
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass, field
+from typing import Any, Final
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -29,9 +30,11 @@ class LaunchTokenError(ValueError):
 
 @dataclass(frozen=True)
 class BackendReadiness:
-    """The small startup projection exposed by the initial API bootstrap."""
+    """The startup projection `/readiness` exposes: the lifecycle state and, once known, the state
+    of each capability (Architecture section 22)."""
 
     state: str
+    capabilities: Mapping[str, str] = field(default_factory=dict)
 
 
 def validate_launch_token(token: str) -> str:
@@ -58,6 +61,7 @@ def create_app(
     launch_token: str,
     *,
     readiness: Callable[[], BackendReadiness] | None = None,
+    lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
 ) -> FastAPI:
     """Build an in-memory-only authenticated sidecar application.
 
@@ -67,7 +71,7 @@ def create_app(
     """
     expected = validate_launch_token(launch_token)
     read = readiness if readiness is not None else lambda: BackendReadiness("READY")
-    app = FastAPI(title="FaceIdentify local API", version="1.0")
+    app = FastAPI(title="FaceIdentify local API", version="1.0", lifespan=lifespan)
 
     @app.middleware("http")
     async def require_launch_capability(
@@ -82,8 +86,12 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/readiness")
-    async def readiness_status() -> dict[str, str]:
-        return {"state": read().state}
+    async def readiness_status() -> dict[str, Any]:
+        current = read()
+        body: dict[str, Any] = {"state": current.state}
+        if current.capabilities:
+            body["capabilities"] = dict(current.capabilities)
+        return body
 
     @app.websocket("/api/v1/events")
     async def events(websocket: WebSocket) -> None:
