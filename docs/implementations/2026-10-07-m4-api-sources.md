@@ -25,7 +25,7 @@
     dimensions, size, latest run; 404 `SOURCE_NOT_FOUND`.
   - `GET /sources/{id}/media`: streams the source's own original in 64 KiB chunks with its content
     type, an `ETag` (the artifact's SHA-256) and `Cache-Control: private, no-cache`; a matching
-    `If-None-Match` gets `304`. 404 `SOURCE_FILE_MISSING` when the artifact is not `AVAILABLE` or
+    `If-None-Match` (including `*` and weak `W/` forms, per weak comparison) gets `304`. 404 `SOURCE_FILE_MISSING` when the artifact is not `AVAILABLE` or
     the file has vanished. The bytes come only from the source's artifact; the client never names
     a path.
 - `MediaLimits(max_pixels, max_bytes)` on `Backend`, passed to `create_backend_app`.

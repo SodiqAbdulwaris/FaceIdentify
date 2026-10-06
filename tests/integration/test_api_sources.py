@@ -255,8 +255,11 @@ async def test_media_answers_304_to_a_matching_etag_and_not_to_another(api: Api)
     same = await api.client.get(url, headers={"If-None-Match": etag})
     listed = await api.client.get(url, headers={"If-None-Match": f'"other", {etag}'})
     different = await api.client.get(url, headers={"If-None-Match": '"other"'})
+    wildcard = await api.client.get(url, headers={"If-None-Match": "*"})
+    weak = await api.client.get(url, headers={"If-None-Match": f"W/{etag}"})
 
     assert (same.status_code, same.content) == (304, b"")
+    assert (wildcard.status_code, weak.status_code) == (304, 304)
     assert same.headers["etag"] == etag
     assert listed.status_code == 304
     assert different.status_code == 200
