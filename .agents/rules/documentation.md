@@ -14,6 +14,38 @@
    *verified* status only. Never mark something complete that you have not run.
 4. **Update guides** in `docs/guides/` when you change how something is run, configured or
    extended.
+5. **Update [`docs/plans/PROJECT_STATUS.md`](../../docs/plans/PROJECT_STATUS.md)** when the change
+   alters what is built or where the project stands (see *Project status* below).
+
+## Plans
+
+An **implementation plan** is written down in [`docs/plans/`](../../docs/plans/) before the work
+starts, never only in chat or in an agent's private plan file. Write one for anything that spans
+several PRs, a milestone or a workstream, or that needs the owner's decisions; a one-PR change does
+not need one (its implementation entry is enough).
+
+- One file per plan, named `<TOPIC>.md` (for example `M3_M4_COMPLETION_PLAN.md`). Extend an existing
+  plan instead of starting a second one for the same work.
+- A plan states: the goal and scope (and what is out of scope), the steps in order, dependencies
+  and blockers, the owner's decisions (as dated `> **Decision YYYY-MM-DD:**` notes), the tracker IDs
+  it serves and its definition of done.
+- Keep it true as the work proceeds: mark finished steps, record changes of approach, and link the
+  implementation entries that delivered each step. A plan that no longer matches reality is a bug.
+- Link it from [`.agents/CONTEXT.md`](../CONTEXT.md) and from `PROJECT_STATUS.md`.
+
+## Project status
+
+[`docs/plans/PROJECT_STATUS.md`](../../docs/plans/PROJECT_STATUS.md) is the one-page overview the
+owner can glance at to see what has been built and where the project stands. It is a map, not a
+log, so keep it short and plain.
+
+- One row per area or milestone: its status (done, in progress, blocked, not started), a line on
+  what exists, and links to the implementation entries for detail ("for more details see ...").
+- It says what is **not** built yet, and the current blockers and open decisions.
+- Update it in the same PR as any change that alters what is built or the project's position, and
+  set its *Last updated* date. Status follows the honesty rules below: only what you verified.
+- It does not repeat test counts, commit lists or design detail. Those live in the implementation
+  entries and the tracker.
 
 ## Honesty in documentation
 

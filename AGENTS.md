@@ -15,6 +15,10 @@ authoritative, USearch is a rebuildable index, ONNX Runtime runs inference.
 
 ## Non-negotiable rules
 
+- **Plan in `docs/plans/`, keep the status page true.** Implementation plans live in
+  [`docs/plans/`](docs/plans/), and [`docs/plans/PROJECT_STATUS.md`](docs/plans/PROJECT_STATUS.md)
+  is the one-page "what is built and where are we" overview, updated with every change that moves
+  it. See [`rules/documentation.md`](.agents/rules/documentation.md).
 - **Document everything you do.** Every change gets an entry in
   [`docs/implementations/`](docs/implementations/), and `.agents/CONTEXT.md` is updated before you
   finish. See [`rules/documentation.md`](.agents/rules/documentation.md).
