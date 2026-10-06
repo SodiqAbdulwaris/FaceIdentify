@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-06 | [M4 W1.1: the API lifespan and lifecycle-backed readiness](2026-10-06-m4-api-lifespan-readiness.md) | partial; M4 W1 first part; TST-048 |
 | 2026-10-06 | [M3 exit gate sweep](2026-10-06-m3-exit-gate.md) | done; docs only |
 | 2026-10-06 | [M3.2: the pipeline in a real process, killed at each stage](2026-10-06-m3-pipeline-process-kill.md) | done (planted perception); TST-043 in progress |
 | 2026-10-06 | [Rules: plans in docs/plans and a project status page](2026-10-06-planning-and-status-rules.md) | done; docs only |
