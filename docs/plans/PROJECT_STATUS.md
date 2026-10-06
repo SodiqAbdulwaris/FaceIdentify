@@ -5,7 +5,7 @@ detail behind any line, follow its link into [`docs/implementations/`](../implem
 the work still to come see [`M3_M4_COMPLETION_PLAN.md`](M3_M4_COMPLETION_PLAN.md) and the per-task
 status in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md).
 
-_Last updated: 2026-10-06. Keep this file true and short (rules:
+_Last updated: 2026-10-07. Keep this file true and short (rules:
 [`documentation.md`](../../.agents/rules/documentation.md))._
 
 **Where we are:** M0 to M3 are done as far as they can be without real face models: M3's exit gate
@@ -24,12 +24,12 @@ desktop shell are placeholders. Nothing user-visible exists yet.
 | **M3 Processing pipeline** | Done | Request, claim, private execution, atomic acceptance, startup recovery of interrupted runs, retry | [request](../implementations/2026-10-03-m3-process-source-request.md), [execution](../implementations/2026-10-04-m3-processing-execution.md), [acceptance](../implementations/2026-10-05-m3-accept-processing-run.md), [recovery](../implementations/2026-10-06-m3-startup-recovery-finalizing.md) |
 | **M3 End to end** | Done with fakes | Recognise, restart, rebuilt index, recognise again, with planted perception | [end-to-end](../implementations/2026-10-06-m3-end-to-end-recognition.md) |
 | **M3 remaining** | Blocked on weights | Done: eraser and recovery writes on the unit of work; the pipeline killed at each stage in a real process. Blocked: real weights and their licence (issue #69) | [unit of work](../implementations/2026-10-06-m3-erasure-recovery-unit-of-work.md), [process kill](../implementations/2026-10-06-m3-pipeline-process-kill.md), [plan, section 3](M3_M4_COMPLETION_PLAN.md) |
-| **M4 API and desktop** | In progress | Authenticated FastAPI bootstrap, the lifespan that opens the library with lifecycle-backed `/readiness`, and the loopback sidecar host (handshake, token from the environment, parent watch). The processing runner and the scheduler loop (started only after the library opens, with fail-closed recognition) exist, run on a fake perception provider until real weights are cleared; no routes, frontend or desktop shell | [API bootstrap](../implementations/2026-10-04-m4-api-launch-capability.md), [lifespan and readiness](../implementations/2026-10-06-m4-api-lifespan-readiness.md), [sidecar host](../implementations/2026-10-07-m4-sidecar-host.md), [processing runner](../implementations/2026-10-07-m4-processing-runner.md), [scheduler loop](../implementations/2026-10-07-m4-scheduler-loop.md), [plan, section 4](M3_M4_COMPLETION_PLAN.md) |
+| **M4 API and desktop** | In progress | Authenticated FastAPI bootstrap, the lifespan that opens the library with lifecycle-backed `/readiness`, and the loopback sidecar host (handshake, token from the environment, parent watch). The processing runner and the scheduler loop (started only after the library opens, with fail-closed recognition) exist, run on a fake perception provider until real weights are cleared. The REST conventions and the source routes (import, list, detail, original media) exist; the process command, runs, identities, WebSocket events, frontend and desktop shell do not | [API bootstrap](../implementations/2026-10-04-m4-api-launch-capability.md), [lifespan and readiness](../implementations/2026-10-06-m4-api-lifespan-readiness.md), [sidecar host](../implementations/2026-10-07-m4-sidecar-host.md), [processing runner](../implementations/2026-10-07-m4-processing-runner.md), [scheduler loop](../implementations/2026-10-07-m4-scheduler-loop.md), [API conventions](../implementations/2026-10-07-m4-api-conventions.md), [source routes](../implementations/2026-10-07-m4-api-sources.md), [plan, section 4](M3_M4_COMPLETION_PLAN.md) |
 | **M5 to M8** | Not started | Corrections, search, movies, cameras, packaging | [tracker](TESTING_IMPLEMENTATION_TRACKER.md) |
 
 **Not built yet (so you know what you cannot try):** no running application, no web or desktop
-UI, no real face model (weights are not selected or committed), no scheduler loop, no REST or
-WebSocket routes beyond the health and readiness bootstrap.
+UI, no real face model (weights are not selected or committed), no REST routes beyond the health,
+readiness and source routes, no WebSocket routes.
 
 **Open decisions and blockers:** the weights licence and selection (issue #69); the decision-policy
 numbers stay a labelled development profile until the evaluation baseline exists. All
