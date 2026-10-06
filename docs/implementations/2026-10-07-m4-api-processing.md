@@ -43,17 +43,18 @@ the run (the spec's `/jobs` resource follows with cancel). The request body is e
 
 ## Verification
 
-- `tests/integration/test_api_processing_routes.py` (13): a requested run is accepted, tracked and
+- `tests/integration/test_api_processing_routes.py` (14): a requested run is accepted, tracked and
   really completed (the source's `processing_status` follows); unknown source; a source whose
   original is gone; no profile; processing not configured; listing newest first with filters;
-  paging with a cursor bound to the query and forged keys refused; unknown state, source and run;
+  paging with a cursor bound to the query, forged keys refused, and runs created at one instant
+  paged without loss or repeats; unknown state, source and run;
   a run listed without a job; retry creates a new linked run once and refuses a second; completed
   and unknown runs; a run without a processing job. `backend/api/routes/processing.py` is at 100%
   line and branch.
 - Mutation probes (15 on the routes: priority, unknown-source check, each status mapping, cursor
   context, ordering, both filters, progress, retry 404, retry job type, failure detail exposure):
-  all killed after a progress test closed one survivor. Two survivors that chose among several jobs
+  plus 3 on the paging tie-break, all killed after a progress test closed one survivor. Two survivors that chose among several jobs
   for one run were deleted instead: a run has exactly one processing job, so that ordering guarded
   nothing.
 - Full gate (2026-10-07): ruff format/check and native/Linux mypy pass; `HYPOTHESIS_PROFILE=ci uv run
-  pytest --cov -q -p no:cacheprovider` - **2,479 passed**, 100% coverage.
+  pytest --cov -q -p no:cacheprovider` - **2,480 passed**, 100% coverage.
