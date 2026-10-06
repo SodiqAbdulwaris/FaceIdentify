@@ -21,8 +21,9 @@ from tests.fixtures.api import Api, error, imported
 RUNS = "/api/v1/processing-runs"
 
 
-async def process(api: Api, source: dict[str, Any]) -> dict[str, Any]:
-    api.clock.advance(seconds=1)  # runs are ordered by creation time
+async def process(api: Api, source: dict[str, Any], *, tick: bool = True) -> dict[str, Any]:
+    if tick:
+        api.clock.advance(seconds=1)  # runs are ordered by creation time
     response = await api.client.post(f"/api/v1/sources/{source['id']}/process")
     assert response.status_code == 202, response.text
     run: dict[str, Any] = response.json()
@@ -202,6 +203,31 @@ async def test_runs_are_paged_by_cursor_and_the_cursor_is_bound_to_the_query(
     error(await api.client.get(RUNS, params={"cursor": "junk"}), 400, "INVALID_CURSOR")
     forged = encode_cursor("runs:None:None", ["not-a-date", "not-an-id"])
     error(await api.client.get(RUNS, params={"cursor": forged}), 400, "INVALID_CURSOR")
+
+
+async def test_runs_created_at_the_same_instant_are_paged_without_loss_or_repeats(
+    processing_api: Api,
+) -> None:
+    api = processing_api
+    source = await imported(api, path=str(api.image()))
+    ids = []
+    for _ in range(4):  # the clock is frozen: every run has the same creation time
+        run = await process(api, source, tick=False)
+        await finished(api, run["id"])
+        ids.append(run["id"])
+
+    seen: list[str] = []
+    cursor: str | None = None
+    while True:
+        params: dict[str, Any] = {"limit": 1} | ({"cursor": cursor} if cursor else {})
+        body = (await api.client.get(RUNS, params=params)).json()
+        seen += [r["id"] for r in body["items"]]
+        cursor = body["page"]["next_cursor"]
+        if cursor is None:
+            break
+
+    assert sorted(seen) == sorted(ids)  # none lost, none repeated
+    assert seen == sorted(ids, reverse=True)  # ties break by id, descending
 
 
 async def test_an_unknown_run_state_or_source_is_refused(processing_api: Api) -> None:
