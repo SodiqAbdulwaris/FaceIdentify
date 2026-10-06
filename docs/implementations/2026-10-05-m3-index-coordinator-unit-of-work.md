@@ -2,8 +2,8 @@
 
 - **Date:** 2026-10-05
 - **Milestone / tracker IDs:** M3 step 11 · TST-028 · issue #66 (narrow coordinator slice)
-- **Status:** done; pending PR
-- **Commits:** pending PR
+- **Status:** done; merged in PR #105
+- **Commits:** `83a51fe` (PR #105)
 
 ## What changed
 
