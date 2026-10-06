@@ -2,8 +2,8 @@
 
 - **Date:** 2026-10-04
 - **Milestone / tracker IDs:** M3 step 10 · TST-038, TST-039, TST-040, TST-041, TST-042
-- **Status:** partial
-- **Commits:** pending PR
+- **Status:** partial; merged in PR #101
+- **Commits:** PR #101
 
 ## What changed
 
@@ -70,8 +70,8 @@ rather than treating the frozen request or compatibility space as execution prov
 - `$env:HYPOTHESIS_PROFILE='ci'; uv run pytest --cov -q -p no:cacheprovider` -- 2,209 passed in 181.62 seconds after coherent Job/run/segment settlement hardening; total line and branch coverage 100%.
 - After rebasing PR #101 onto the current `main` (including the identity-less-candidate readers and
   IndexCoordinator UnitOfWork slice), the exact full gate passed: 2,231 tests in 408.05 seconds,
-  100% coverage. Ruff and both mypy targets also passed; a fresh independent read-only review and
-  exact-head CI remain required before merge.
+  100% coverage. Ruff and both mypy targets also passed. PR #101 subsequently merged after its
+  independent review and exact-head CI.
 - After the independent rebased review fixed cancellation-after-detection and live settlement
   revalidation, the full unmutated gate passed: 2,236 tests in 208.95 seconds, 100% line and
   branch coverage. The focused executor suite then passed 67 tests.
@@ -123,12 +123,11 @@ rather than treating the frozen request or compatibility space as execution prov
 
 ## Open issues / follow-ups
 
-- The independent rebased review found and this branch fixed two additional interleavings:
+- The independent rebased review found and PR #101 fixed two additional interleavings:
   cancellation after detector settlement now stops before embedding, and every private-output
   mutation revalidates the live source/original and claimed lifecycle under the write lock. The
   later duplicate lifecycle checks were removed because the validated objects are returned by the
-  single guard and cannot change in the same write transaction. A fresh independent review remains
-  required after this correction.
+  single guard and cannot change in the same write transaction.
 - Step 11 remains the only acceptance/ANN authority boundary. It must validate FINAL idempotently,
   activate output atomically, create occurrences/index operations, and wake the coordinator only
   after commit.

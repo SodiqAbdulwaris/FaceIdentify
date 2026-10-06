@@ -3,7 +3,7 @@
 - **Date:** 2026-10-05; remediation 2026-10-06
 - **Milestone / tracker IDs:** M3 step 11 · TST-042 · TST-043 (partial) · issue #104
 - **Status:** merged in PR #106 after final focused independent review and exact-head CI
-- **Commits:** PR #106, merged as `3f642f4`
+- **Commits:** PR #106
 
 ## What changed
 
