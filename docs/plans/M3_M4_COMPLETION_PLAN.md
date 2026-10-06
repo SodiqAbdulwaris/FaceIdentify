@@ -59,9 +59,9 @@ shell are placeholders, and there is no production host, lifespan, scheduler loo
 | 3.4 | Weights selection, licence and provenance record (issue #69), then a local-only real-weights integration run | TST-038, TST-039 | owner and licence verification (decision 2) |
 | 3.5 | Initial ML evaluation baseline | TST-044 | licensed datasets and weights; post-M3 per the owner |
 
-**M3 exit gate.** Every M3 tracker row (TST-033 to TST-043) is `PASSING`, or `BLOCKED` with the
-reason and the issue that unblocks it (3.4 and 3.5 are expected to remain `BLOCKED` on weights and
-datasets). The full backend gate passes with 100% coverage, CI is green on `main`, and
+**M3 exit gate.** Every M3 tracker row from TST-033 to TST-043 is `PASSING`, or `BLOCKED` with the
+reason and the issue that unblocks it (3.4 is expected to remain `BLOCKED` on weights). TST-044
+(3.5) is deferred past M3 and is not part of this gate. The full backend gate passes with 100% coverage, CI is green on `main`, and
 `CONTEXT.md`, the implementation log and the tracker agree. TST-044 does not gate M4; it gates
 promoting calibrated values to a release policy (decision 1).
 
@@ -70,7 +70,7 @@ promoting calibrated values to a release policy (decision 1).
 | W | Workstream | Content | Tracker |
 |---|---|---|---|
 | W1 | Host | FastAPI lifespan wrapping `open_library`; loopback bind on a dynamic port; the stdout JSON handshake; token from the inherited environment; parent-PID watch and graceful shutdown; capability-based readiness (`DEGRADED` when ML or the index is unavailable) | TST-048 |
-| W2 | Services | Revision `0007` (integer priority rank); the scheduler loop (claim, execute, accept, index wake); the ML supervisor and `PerceptionClient` wired from the catalog plan; runtime package registration at startup from the dev `runtime/` install; the command boundary that sets `CANCELLING`; the development policy profile (decision 1) | TST-060 |
+| W2 | Services | Revision `0007` (integer priority rank); the scheduler loop (claim, execute, accept, index wake); the ML supervisor and `PerceptionClient` wired from the catalog plan; runtime package registration at startup from the dev `runtime/` install; the command boundary that sets `CANCELLING`; the development policy profile (decision 1) | TST-060 (the claim and transition rules M4 exercises; the full state machine stays M6) |
 | W3 | REST | Import, list/get sources, media delivery, process, runs, jobs, identities, occurrences, system status; error contract, pagination and response conventions; thin routes over use cases; read models for list and detail queries | TST-045 |
 | W4 | Events | WebSocket envelope, namespaces and reliability; REST stays authoritative, so a client resyncs from REST after reconnect | TST-051 |
 | W5 | Contracts | Generated OpenAPI, generated TypeScript types (`openapi-typescript`), CI sync check | TST-046 |
