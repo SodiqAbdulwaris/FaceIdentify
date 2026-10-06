@@ -309,6 +309,8 @@ Checks require determinate values to be non-negative and `completed <= total` wh
 
 > **Decision 2026-10-06 (owner; issue 34): a retry is a new Job and a new Run.** `RetryProcessingUseCase` creates a new `QUEUED` Job (`previous_job_id` is the old job, `attempt_number` is the old one plus one, same priority and payload) and a new `PENDING` Run (`parent_run_id` is the old run) on a *copy* of the old run's immutable configuration snapshot (one snapshot per run, section 13), so the retry executes the same frozen intent. It is allowed once per job, for a job `INTERRUPTED` or `FAILED` whose run is `INTERRUPTED`, `FAILED` or `NOT_RESUMABLE`, and only while the source is still an active image with an available original. Startup recovery never creates a retry and never requeues or discards the old attempt: the old job and run stay as they ended and the old run's `PENDING` output stays private.
 
+> **Decision 2026-10-06 (owner; CONTEXT question 14):** `jobs.priority` stays a descriptive string, but scheduling order is an integer priority rank added by revision `0007` before the scheduler loop is implemented; claiming never orders by the string, which sorts alphabetically. Plan: `docs/plans/M3_M4_COMPLETION_PLAN.md`.
+
 ## 16. ProcessingCheckpoint persistence
 
 A checkpoint is a durable resume boundary, not a visual progress update. `processing_checkpoints` contains `id`; `processing_run_id`; nullable `execution_segment_id`; monotonic `ordinal`; `kind` (`INTERMEDIATE`, `FINAL`); `state` (`VALID`, `INVALIDATED`); `payload_schema_version`; `payload_json`; `created_at`; nullable `invalidated_at`; and nullable `invalidated_reason`. Enforce `UNIQUE(processing_run_id, ordinal)` and one valid final checkpoint per run using a partial unique index.
