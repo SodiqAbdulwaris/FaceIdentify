@@ -69,6 +69,7 @@ from backend.app.sources.artifact_storage import (
     require_library_root,
 )
 from backend.app.sources.referenced_artifacts import mark_missing_referenced_originals
+from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.workspaces import WorkspaceCleanup, WorkspaceManager
 
@@ -184,7 +185,7 @@ class StartupReport:
 
 
 def accept_finalizing_runs(
-    session_factory: sessionmaker[Session],
+    uow: UnitOfWork,
     accept: AcceptProcessingRunUseCase,
     *,
     clock: Callable[[], datetime],
@@ -198,24 +199,23 @@ def accept_finalizing_runs(
     as accepted. Any other failure propagates, because the run is then still `FINALIZING` and the
     next start retries it.
     """
-    with session_factory() as session:
-        run_ids = sorted(
+    run_ids = uow.read(
+        lambda session: sorted(
             session.scalars(
                 select(ProcessingRun.id).where(ProcessingRun.state == ProcessingRunState.FINALIZING)
             )
         )
+    )
     work = FinalizingWork()
     for run_id in run_ids:
         try:
             accept.accept(run_id)
         except AcceptanceError as error:
-            _mark_not_resumable(session_factory, run_id, str(error), clock())
+            _mark_not_resumable(uow, run_id, str(error), clock())
             work.not_resumable.append(run_id)
         except Exception:
-            with session_factory() as session:
-                run = session.get(ProcessingRun, run_id)
-                if run is None or run.state != ProcessingRunState.COMPLETED:
-                    raise
+            if _run_state(uow, run_id) != ProcessingRunState.COMPLETED:
+                raise
             work.accepted.append(run_id)
             work.wake_failures.append(run_id)
         else:
@@ -223,11 +223,17 @@ def accept_finalizing_runs(
     return work
 
 
-def _mark_not_resumable(
-    session_factory: sessionmaker[Session], run_id: uuid.UUID, detail: str, now: datetime
-) -> None:
-    with session_factory() as session:
-        session.execute(
+def _run_state(uow: UnitOfWork, run_id: uuid.UUID) -> str | None:
+    return uow.read(
+        lambda session: session.scalar(
+            select(ProcessingRun.state).where(ProcessingRun.id == run_id)
+        )
+    )
+
+
+def _mark_not_resumable(uow: UnitOfWork, run_id: uuid.UUID, detail: str, now: datetime) -> None:
+    uow.write(
+        lambda session: session.execute(
             update(ProcessingRun)
             .where(ProcessingRun.id == run_id, ProcessingRun.state == ProcessingRunState.FINALIZING)
             .values(
@@ -239,12 +245,10 @@ def _mark_not_resumable(
             )
             .execution_options(synchronize_session=False)
         )
-        session.commit()
+    )
 
 
-def interrupt_in_flight_work(
-    session_factory: sessionmaker[Session], *, clock: Callable[[], datetime]
-) -> InterruptedWork:
+def interrupt_in_flight_work(uow: UnitOfWork, *, clock: Callable[[], datetime]) -> InterruptedWork:
     """Mark every `RUNNING` job, run and segment `INTERRUPTED`, a `PAUSING` job or run `PAUSED` and
     a `CANCELLING` one `CANCELLED`, in one transaction.
 
@@ -261,79 +265,79 @@ def interrupt_in_flight_work(
     closest reasons (`WORKER_CRASH`, `SHUTDOWN`) would claim a cause that is not known.
     """
     now = clock()
-    with session_factory() as session:
-        jobs = (
-            session.execute(
-                update(Job)
-                .where(
-                    Job.state == JobState.RUNNING,
-                    or_(
-                        Job.processing_run_id.is_(None),
-                        Job.processing_run_id.not_in(
-                            select(ProcessingRun.id).where(
-                                ProcessingRun.state == ProcessingRunState.FINALIZING
-                            )
-                        ),
+    return uow.write(lambda session: _interrupt(session, now))
+
+
+def _interrupt(session: Session, now: datetime) -> InterruptedWork:
+    jobs = (
+        session.execute(
+            update(Job)
+            .where(
+                Job.state == JobState.RUNNING,
+                or_(
+                    Job.processing_run_id.is_(None),
+                    Job.processing_run_id.not_in(
+                        select(ProcessingRun.id).where(
+                            ProcessingRun.state == ProcessingRunState.FINALIZING
+                        )
                     ),
-                )
-                .values(
-                    state=JobState.INTERRUPTED,
-                    lease_owner=None,
-                    lease_expires_at=None,
-                    updated_at=now,
-                )
-                .returning(Job.id)
-                .execution_options(synchronize_session=False)
+                ),
             )
-            .scalars()
-            .all()
-        )
-        runs = (
-            session.execute(
-                update(ProcessingRun)
-                .where(ProcessingRun.state == ProcessingRunState.RUNNING)
-                .values(
-                    state=ProcessingRunState.INTERRUPTED,
-                    revision=ProcessingRun.revision + 1,
-                    updated_at=now,
-                )
-                .returning(ProcessingRun.id)
-                .execution_options(synchronize_session=False)
+            .values(
+                state=JobState.INTERRUPTED,
+                lease_owner=None,
+                lease_expires_at=None,
+                updated_at=now,
             )
-            .scalars()
-            .all()
+            .returning(Job.id)
+            .execution_options(synchronize_session=False)
         )
-        segments = (
-            session.execute(
-                update(ExecutionSegment)
-                .where(ExecutionSegment.state == ExecutionSegmentState.RUNNING)
-                .values(state=ExecutionSegmentState.INTERRUPTED, ended_at=now)
-                .returning(ExecutionSegment.id)
-                .execution_options(synchronize_session=False)
+        .scalars()
+        .all()
+    )
+    runs = (
+        session.execute(
+            update(ProcessingRun)
+            .where(ProcessingRun.state == ProcessingRunState.RUNNING)
+            .values(
+                state=ProcessingRunState.INTERRUPTED,
+                revision=ProcessingRun.revision + 1,
+                updated_at=now,
             )
-            .scalars()
-            .all()
+            .returning(ProcessingRun.id)
+            .execution_options(synchronize_session=False)
         )
-        jobs_paused = _move_jobs(session, JobState.PAUSING, JobState.PAUSED, now)
-        jobs_cancelled = _move_jobs(session, JobState.CANCELLING, JobState.CANCELLED, now)
-        runs_paused = _move_runs(
-            session, ProcessingRunState.PAUSING, ProcessingRunState.PAUSED, now
+        .scalars()
+        .all()
+    )
+    segments = (
+        session.execute(
+            update(ExecutionSegment)
+            .where(ExecutionSegment.state == ExecutionSegmentState.RUNNING)
+            .values(state=ExecutionSegmentState.INTERRUPTED, ended_at=now)
+            .returning(ExecutionSegment.id)
+            .execution_options(synchronize_session=False)
         )
-        runs_cancelled = _move_runs(
-            session, ProcessingRunState.CANCELLING, ProcessingRunState.CANCELLED, now
+        .scalars()
+        .all()
+    )
+    jobs_paused = _move_jobs(session, JobState.PAUSING, JobState.PAUSED, now)
+    jobs_cancelled = _move_jobs(session, JobState.CANCELLING, JobState.CANCELLED, now)
+    runs_paused = _move_runs(session, ProcessingRunState.PAUSING, ProcessingRunState.PAUSED, now)
+    runs_cancelled = _move_runs(
+        session, ProcessingRunState.CANCELLING, ProcessingRunState.CANCELLED, now
+    )
+    leased = (
+        session.execute(
+            update(Job)
+            .where(or_(Job.lease_owner.is_not(None), Job.lease_expires_at.is_not(None)))
+            .values(lease_owner=None, lease_expires_at=None, updated_at=now)
+            .returning(Job.id)
+            .execution_options(synchronize_session=False)
         )
-        leased = (
-            session.execute(
-                update(Job)
-                .where(or_(Job.lease_owner.is_not(None), Job.lease_expires_at.is_not(None)))
-                .values(lease_owner=None, lease_expires_at=None, updated_at=now)
-                .returning(Job.id)
-                .execution_options(synchronize_session=False)
-            )
-            .scalars()
-            .all()
-        )
-        session.commit()
+        .scalars()
+        .all()
+    )
     return InterruptedWork(
         sorted(jobs), sorted(runs), sorted(segments), sorted(leased),
         sorted(jobs_paused), sorted(jobs_cancelled), sorted(runs_paused), sorted(runs_cancelled),
@@ -405,6 +409,7 @@ def recover_on_startup(
     packages: RuntimePackageStore,
     accept_run: AcceptProcessingRunUseCase,
     *,
+    unit_of_work: UnitOfWork,
     clock: Callable[[], datetime],
     index_batch: int,
     max_index_passes: int,
@@ -417,8 +422,8 @@ def recover_on_startup(
     artifacts = recover_artifacts(session_factory, store, clock=clock)
     missing = mark_missing_referenced_originals(session_factory, clock=clock)
     missing_managed = mark_missing_managed_files(session_factory, store)
-    finalizing = accept_finalizing_runs(session_factory, accept_run, clock=clock)
-    interrupted = interrupt_in_flight_work(session_factory, clock=clock)
+    finalizing = accept_finalizing_runs(unit_of_work, accept_run, clock=clock)
+    interrupted = interrupt_in_flight_work(unit_of_work, clock=clock)
     cleanup = workspaces.remove_orphans(jobs_that_may_resume(session_factory))
     merged = CoordinatorReport()
     rebuilt = coordinator.validate_indexes(merged)

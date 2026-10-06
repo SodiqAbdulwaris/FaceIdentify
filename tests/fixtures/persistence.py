@@ -14,10 +14,11 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from usearch.index import Index
 
 from backend.infrastructure.db.engine import create_session_factory, create_sqlite_engine
+from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.layout import StorageRoots
 
@@ -64,6 +65,11 @@ def _require_inside(path: Path, root: Path) -> Path:
     if not path.resolve().is_relative_to(root.resolve()):
         raise RuntimeError(f"test storage escaped its sandbox: {path} is not under {root}")
     return path
+
+
+def uow_for(factory: sessionmaker[Session]) -> UnitOfWork:
+    """A write unit of work on the same engine as a session factory (one attempt, no waiting)."""
+    return UnitOfWork(factory.kw["bind"], retry=TransactionRetry(1, lambda _: 0))
 
 
 @pytest.fixture

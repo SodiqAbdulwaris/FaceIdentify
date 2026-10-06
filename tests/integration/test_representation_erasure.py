@@ -10,6 +10,7 @@ assertion about state alone. None of this claims physical erasure from SSD stora
 
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,7 @@ from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
 from backend.infrastructure.indexing import representation_index
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
 from tests.factories.models import ModelFactory, float32_vector
-from tests.fixtures.persistence import AppDirs
+from tests.fixtures.persistence import AppDirs, uow_for
 
 NDIM = 4
 
@@ -72,9 +73,15 @@ def make_eraser(
     build: ModelFactory, **kw: Any,
 ) -> RepresentationEraser:  # fmt: skip
     return RepresentationEraser(
-        factory, engine, coordinator, clock=build.clock, new_id=build.new_id,
-        checkpoint_timeout_ms=0, **kw,
-    )  # fmt: skip
+        factory,
+        engine,
+        coordinator,
+        unit_of_work=uow_for(factory),
+        clock=build.clock,
+        new_id=build.new_id,
+        checkpoint_timeout_ms=0,
+        **kw,
+    )
 
 
 @pytest.fixture
@@ -213,6 +220,42 @@ def test_a_single_erasure_clears_the_row_the_index_the_files_and_the_log(
     assert contains_key(coordinator, space, 2)  # the survivor is untouched
     assert row(factory, survivor.id)[0] == "ACTIVE"
     assert index_files_with(coordinator, space, 2)
+
+
+def test_every_erasure_write_is_safe_to_run_again_whole(
+    eraser: RepresentationEraser, coordinator: IndexCoordinator, factory: sessionmaker[Session],
+    sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """The unit of work may run a write again after SQLITE_BUSY, so each erasure write must be a
+    function of its session: a rolled-back first attempt leaves the same end state, no repeats."""
+    victim, survivor = indexed(build, coordinator, space, 1, 2)
+    real_write = eraser._uow.write
+    attempts = 0
+
+    def retry_once(work: Callable[[Session], Any]) -> Any:
+        nonlocal attempts
+        attempts += 1
+        with factory() as rolled_back:
+            work(rolled_back)
+            rolled_back.rollback()
+        return real_write(work)
+
+    monkeypatch.setattr(eraser._uow, "write", retry_once)
+
+    report = eraser.erase([victim.id])
+
+    assert attempts == 3  # queueing, clearing and the marker, each run twice
+    assert report.complete, report.outstanding_cleanup
+    assert report.erased == [victim.id]
+    assert_gone(factory, sqlite_engine, coordinator, space, victim)
+    assert marker(factory) is None
+    assert row(factory, survivor.id)[0] == "ACTIVE"
+    with factory() as session:
+        removes = list(
+            session.scalars(select(IndexOperation).where(IndexOperation.operation == "REMOVE"))
+        )
+    assert [op.representation_id for op in removes] == [victim.id]
 
 
 def test_a_bulk_erasure_rebuilds_each_space_once(

@@ -46,7 +46,7 @@ from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.workspaces import WorkspaceManager
 from tests.factories.models import ModelFactory, float32_vector
 from tests.fixtures.consistency import library_problems
-from tests.fixtures.persistence import AppDirs
+from tests.fixtures.persistence import AppDirs, uow_for
 
 NDIM = 4
 DATA = b"the original bytes of one imported photo"
@@ -82,18 +82,31 @@ class Library:
     def recover(self) -> StartupReport:
         self.commit()
         eraser = RepresentationEraser(
-            self.factory, self.engine, self.coordinator, clock=self.build.clock,
-            new_id=self.build.new_id, checkpoint_timeout_ms=0,
-        )  # fmt: skip
+            self.factory,
+            self.engine,
+            self.coordinator,
+            unit_of_work=uow_for(self.factory),
+            clock=self.build.clock,
+            new_id=self.build.new_id,
+            checkpoint_timeout_ms=0,
+        )
         return recover_on_startup(
-            self.factory, self.store, self.workspaces, self.coordinator, eraser,
+            self.factory,
+            self.store,
+            self.workspaces,
+            self.coordinator,
+            eraser,
             RuntimePackageStore(self.roots, new_id=self.build.new_id),
             AcceptProcessingRunUseCase(
                 UnitOfWork(self.engine, retry=TransactionRetry(1, lambda _: 0)),
-                new_id=self.build.new_id, clock=self.build.clock,
+                new_id=self.build.new_id,
+                clock=self.build.clock,
             ),
-            clock=self.build.clock, index_batch=50, max_index_passes=5,
-        )  # fmt: skip
+            unit_of_work=uow_for(self.factory),
+            clock=self.build.clock,
+            index_batch=50,
+            max_index_passes=5,
+        )
 
     def artifact(self, artifact_id: uuid.UUID) -> Artifact:
         with self.factory() as session:
