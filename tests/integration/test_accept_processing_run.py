@@ -54,6 +54,9 @@ def finalizing(
     clock: FrozenClock,
     new_id: SeededUUIDs,
     outcome: str,
+    *,
+    snapshot_schema_version: int = 1,
+    snapshot_root_schema_version: int = 1,
 ) -> tuple[ProcessingRun, Observation | None, Representation | None, Identity | None, Job]:
     build = ModelFactory(session, clock, new_id)
     policy = {
@@ -63,7 +66,13 @@ def finalizing(
         "margin": 0.1,
         "new_identity_ceiling": 0.2,
     }
-    snapshot = build.snapshot(canonical_json={"decision_policy": {"schema_version": 1, **policy}})
+    snapshot = build.snapshot(
+        schema_version=snapshot_schema_version,
+        canonical_json={
+            "schema_version": snapshot_root_schema_version,
+            "decision_policy": {"schema_version": 1, **policy},
+        },
+    )
     run = build.run(state="FINALIZING", configuration_snapshot_id=snapshot.id)
     job = build.job(processing_run_id=run.id, type="PROCESS_SOURCE", state="RUNNING")
     if outcome == "NO_FACE":
@@ -539,6 +548,87 @@ def test_final_quality_must_match_its_private_observation(
 
     with pytest.raises(AcceptanceError, match="quality does not match its private observation"):
         use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+
+@pytest.mark.parametrize(
+    ("snapshot_schema_version", "snapshot_root_schema_version"), [(2, 1), (1, 2)]
+)
+def test_final_rejects_an_unsupported_configuration_snapshot(
+    sqlite_engine: Engine,
+    db_session: Session,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    snapshot_schema_version: int,
+    snapshot_root_schema_version: int,
+) -> None:
+    run, _observation, _representation, _identity, _job = finalizing(
+        db_session,
+        clock,
+        new_id,
+        "ABSTAIN",
+        snapshot_schema_version=snapshot_schema_version,
+        snapshot_root_schema_version=snapshot_root_schema_version,
+    )
+
+    with pytest.raises(AcceptanceError, match="unsupported configuration snapshot"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+
+def test_run_local_candidate_identity_must_be_active_or_owned_by_its_run(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert observation is not None
+    assert representation is not None
+    build = ModelFactory(db_session, clock, new_id)
+    stale_identity = build.identity(state="PENDING")
+    local_observation = build.observation(
+        run, execution_segment_id=observation.execution_segment_id, sequence_in_run=1
+    )
+    local = build.representation(
+        local_observation,
+        representation_space_id=representation.representation_space_id,
+        identity_id=stale_identity.id,
+    )
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    decision = final.payload_json["decisions"][0]
+    evidence = decision["evidence"]
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **decision,
+                "evidence": {
+                    **evidence,
+                    "candidates": [
+                        {
+                            "rank": 1,
+                            "identity_id": str(stale_identity.id),
+                            "similarity": 0.4,
+                            "members": [
+                                {
+                                    "representation_id": str(local.id),
+                                    "pool": "RUN_LOCAL",
+                                    "similarity": 0.4,
+                                }
+                            ],
+                        }
+                    ],
+                    "retrieval": {**evidence["retrieval"], "returned": 1},
+                },
+            },
+        ],
+    }
+    db_session.commit()
+
+    _checkpoint, decisions = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+    with pytest.raises(AcceptanceError, match="candidate member is not authoritative"):
+        use_case(sqlite_engine, clock, new_id)._validate_reasoned_decision(
+            db_session, run, decisions[0], representation
+        )
 
 
 def test_final_candidate_snapshot_must_stay_best_first(

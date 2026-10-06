@@ -309,11 +309,14 @@ class AcceptProcessingRunUseCase:
             policy_data["new_identity_ceiling"],
         )
         snapshot = session.get(ProcessingConfigurationSnapshot, run.configuration_snapshot_id)
-        snapshot_policy = (
-            None
-            if snapshot is None or not isinstance(snapshot.canonical_json, dict)
-            else snapshot.canonical_json.get("decision_policy")
-        )
+        if (
+            snapshot is None
+            or snapshot.schema_version != 1
+            or not isinstance(snapshot.canonical_json, dict)
+            or snapshot.canonical_json.get("schema_version") != 1
+        ):
+            raise AcceptanceError("processing run has an unsupported configuration snapshot")
+        snapshot_policy = snapshot.canonical_json.get("decision_policy")
         if snapshot_policy != {"schema_version": 1, **policy_data}:
             raise AcceptanceError(
                 "FINAL checkpoint policy does not match the frozen run configuration"
@@ -360,6 +363,18 @@ class AcceptProcessingRunUseCase:
                     and (
                         persisted.state != RepresentationState.PENDING
                         or persisted.processing_run_id != run.id
+                    )
+                    or pool is Pool.RUN_LOCAL
+                    and identity_id is not None
+                    and (
+                        candidate_identity is None
+                        or (
+                            candidate_identity.state != IdentityState.ACTIVE
+                            and (
+                                candidate_identity.state != IdentityState.PENDING
+                                or candidate_identity.created_by_processing_run_id != run.id
+                            )
+                        )
                     )
                 ):
                     raise AcceptanceError("FINAL checkpoint candidate member is not authoritative")
