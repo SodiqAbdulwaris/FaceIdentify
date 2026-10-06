@@ -114,7 +114,7 @@ issue #104 defines the immutable historical abstention record.
 
 ## Open issues / follow-ups
 
-- PR #106 passed its 2,328-test full gate, final focused independent review, and exact-head CI;
-  it is ready to merge.
+- PR #106 merged after its 2,328-test full gate, final focused independent review, and exact-head
+  CI; it also closed issue #104.
 - Step 12 recovery must invoke this use case for a valid FINAL checkpoint without rerunning ML.
 - Issue #79 remains the separate later `ResolveUnresolvedRepresentation` use case.
