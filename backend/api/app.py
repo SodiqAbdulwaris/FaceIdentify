@@ -18,6 +18,8 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnected
 
+from backend.api.errors import error_response, install_error_handlers
+
 _TOKEN_BYTES: Final = 32
 _AUTH_SCHEME: Final = "Bearer"
 _WEBSOCKET_TOKEN_PREFIX: Final = "fi."
@@ -74,6 +76,7 @@ def create_app(
     expected = validate_launch_token(launch_token)
     read = readiness if readiness is not None else lambda: BackendReadiness("READY")
     app = FastAPI(title="FaceIdentify local API", version="1.0", lifespan=lifespan)
+    install_error_handlers(app)
 
     @app.middleware("http")
     async def require_launch_capability(
@@ -143,8 +146,6 @@ def _constant_time_capability_matches(candidate: str, expected: str) -> bool:
 
 
 def _unauthorized() -> JSONResponse:
-    return JSONResponse(
-        status_code=401,
-        content={"error": {"code": "UNAUTHORIZED", "message": "unauthorized"}},
-        headers={"WWW-Authenticate": _AUTH_SCHEME},
+    return error_response(
+        401, "UNAUTHORIZED", "unauthorized", headers={"WWW-Authenticate": _AUTH_SCHEME}
     )
