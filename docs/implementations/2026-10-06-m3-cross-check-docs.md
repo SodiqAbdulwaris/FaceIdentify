@@ -21,9 +21,9 @@ The rules require `CONTEXT.md`, entries and the README to stay true.
 
 ## Decisions
 
-None new. The owner approved this housekeeping PR and closing #102 on 2026-10-06.
+> **Decision 2026-10-06:** the owner approved this housekeeping PR and closing issue #102.
 
-## Cross-check result (verified 2026-10-06, no code changed)
+## Verification (2026-10-06; no code changed)
 
 - Gate on `main`: ruff format/check, mypy native and `--platform linux` pass; **2,328 passed,
   100% coverage**; CI on main green.
