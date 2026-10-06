@@ -176,6 +176,9 @@ def test_a_crash_after_final_is_accepted_once_on_the_next_start_without_ml(
         assert report.finalizing.not_resumable == []
         assert states(pipeline, ProcessingRun) == ["COMPLETED"]
         assert states(pipeline, Job) == ["COMPLETED"]
+        # recovery redid nothing: still the child's one run, one job and one segment
+        assert pipeline.count(ProcessingRun) == pipeline.count(Job) == 1
+        assert pipeline.count(ExecutionSegment) == 1
         assert states(pipeline, Observation) == ["ACTIVE"]
         assert states(pipeline, Representation) == ["ACTIVE"]
         assert pipeline.count(Identity) == pipeline.count(Occurrence) == 1  # once, not twice
@@ -197,6 +200,7 @@ def test_a_crash_after_acceptance_leaves_only_the_index_to_converge(library: Lib
         pipeline = library.pipeline(reopened)
         assert reopened.startup.finalizing.accepted == []  # nothing left to accept
         assert states(pipeline, ProcessingRun) == ["COMPLETED"]
+        assert pipeline.count(ProcessingRun) == pipeline.count(ExecutionSegment) == 1
         assert pipeline.count(Identity) == pipeline.count(Occurrence) == 1
         assert states(pipeline, IndexOperation) == ["APPLIED"]  # queued by acceptance, applied now
         assert len(indexed_keys(pipeline)) == 1
