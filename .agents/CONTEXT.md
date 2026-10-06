@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-06 (M3 identity-less candidate readers merged in PR #95; PR #101 merged the approved provider-fallback execution segments; PR #106's step-11 acceptance remediation validates every FINAL decision from SQLite-authoritative candidate evidence and validates the versioned run snapshot before all lifecycle branches; its focused coverage, guard mutation proofs, 2,328-test full gate, independent review, and exact-head CI pass are complete, and it is ready to merge; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
+_Last updated: 2026-10-06 (M3 identity-less candidate readers merged in PR #95; PR #101 merged the approved provider-fallback execution segments; PR #106 merged the step-11 acceptance remediation, which validates every FINAL decision from SQLite-authoritative candidate evidence and the versioned run snapshot before all lifecycle branches; its focused coverage, guard mutation proofs, 2,328-test full gate, independent review, and exact-head CI passed, and it closed issue #104; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
 
 > **Decision 2026-10-03:** the owner approved the version-1 payload contracts for new ML output: `landmarks_json` has `schema_version` and normalised `points`; observation `quality_json` has `schema_version` and `detection_score`; representation `quality_json` has `schema_version` and `l2_norm`.
 
