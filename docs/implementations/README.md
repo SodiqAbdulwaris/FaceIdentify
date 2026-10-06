@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M4 W3.3: the process command, run reads and retry](2026-10-07-m4-api-processing.md) | partial; M4 W3 third part; TST-045 |
 | 2026-10-07 | [M4 W3.2: source import, list, detail and media routes](2026-10-07-m4-api-sources.md) | partial; M4 W3 second part; TST-045 |
 | 2026-10-07 | [M4 W3.1: the API conventions every route inherits](2026-10-07-m4-api-conventions.md) | partial; M4 W3 first part; TST-045 |
 | 2026-10-07 | [M4 W2.3: the scheduler loop and fail-closed recognition index](2026-10-07-m4-scheduler-loop.md) | done; M4 W2 complete with a fake perception provider |
