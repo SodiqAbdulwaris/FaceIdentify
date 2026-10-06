@@ -3,7 +3,7 @@
 Read after [`AGENTS.md`](../AGENTS.md). **Keep this file true:** update it at the end of every
 task (see [`rules/documentation.md`](rules/documentation.md)).
 
-_Last updated: 2026-10-06 (stale M3 documentation corrected by the cross-check; M3 identity-less candidate readers merged in PR #95; PR #101 merged the approved provider-fallback execution segments; PR #106 merged the step-11 acceptance remediation, which validates every FINAL decision from SQLite-authoritative candidate evidence and the versioned run snapshot before all lifecycle branches; its focused coverage, guard mutation proofs, 2,328-test full gate, independent review, and exact-head CI passed, and it closed issue #104; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
+_Last updated: 2026-10-06 (Step 12 recovery of FINALIZING and pre-FINAL runs built, with `RetryProcessingUseCase` (issue #34); stale M3 documentation corrected by the cross-check; M3 identity-less candidate readers merged in PR #95; PR #101 merged the approved provider-fallback execution segments; PR #106 merged the step-11 acceptance remediation, which validates every FINAL decision from SQLite-authoritative candidate evidence and the versioned run snapshot before all lifecycle branches; its focused coverage, guard mutation proofs, 2,328-test full gate, independent review, and exact-head CI passed, and it closed issue #104; M4's authenticated FastAPI bootstrap merged in PR #103, with loopback hosting/lifespan still pending)_
 
 > **Decision 2026-10-03:** the owner approved the version-1 payload contracts for new ML output: `landmarks_json` has `schema_version` and normalised `points`; observation `quality_json` has `schema_version` and `detection_score`; representation `quality_json` has `schema_version` and `l2_norm`.
 
@@ -18,7 +18,7 @@ _Last updated: 2026-10-06 (stale M3 documentation corrected by the cross-check; 
   artifacts, relinking, temporary workspaces, Source recycle/restore, conservative cleanup and
   storage usage), the per-space USearch index (TST-027) and the IndexCoordinator that replays
   `IndexOperation`s into it (TST-028) and the cross-storage failure matrix (TST-029) are done;
-  startup recovery (TST-030) is partly done (see open question 26); TST-022 (repository contract) has its
+  startup recovery (TST-030) is done (open question 26 is built, M3 step 12); TST-022 (repository contract) has its
   `JobRepository`, `SegmentRepository`, `CheckpointRepository`, `IndexOperationRepository`, `SourceRepository`, `ProcessingRunRepository`, `SnapshotRepository`, `ObservationRepository`, `RepresentationRepository`, `IdentityRepository`, `OccurrenceRepository`, `EvidenceRepository`, `SettingsRepository` and `RuntimeCatalogRepository` (TST-022 has its mechanics for every listed repository; Artifact is `artifact_storage.py`); the library root and lock (`library_root.py`, `library_lock.py`; not yet called by a lifecycle) and the downgrade guard are built; TST-031's representation erasure is built (Source deletion and identity-level forget are not).
   Status per task: [`docs/plans/TESTING_IMPLEMENTATION_TRACKER.md`](../docs/plans/TESTING_IMPLEMENTATION_TRACKER.md).
 - **Pending work is tracked as GitHub issues** (<https://github.com/SodiqAbdulwaris/FaceIdentify/issues>):
@@ -90,7 +90,7 @@ _Last updated: 2026-10-06 (stale M3 documentation corrected by the cross-check; 
   exclude, rebuild once per space, retire old and quarantined generations under the coordinator's lock, clear vector and
   key with the `wal_truncation_owed` marker, `truncate_wal`, verify; a blocked step is reported, never complete).
   `backend/app/recovery/startup.py` is startup recovery:
-  `recover_on_startup` (it takes the eraser and finishes interrupted erasures and an owed log truncation) settles artifacts and missing referenced originals (existence only), marks
+  `recover_on_startup` (it takes the eraser and finishes interrupted erasures and an owed log truncation, and `AcceptProcessingRunUseCase`) settles artifacts and missing referenced originals (existence only), accepts every `FINALIZING` run from its FINAL checkpoint without ML (its job stays `RUNNING` until then; a refused FINAL makes the run `NOT_RESUMABLE`; a failing post-commit index wake is caught), marks
   `RUNNING` jobs, runs and segments `INTERRUPTED`, moves a job or run found `PAUSING` to `PAUSED` and
   one found `CANCELLING` to `CANCELLED` (a cancelled job ends, its partial output stays private), clears
   stale leases from any job, removes
@@ -345,7 +345,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     `backend/app/recovery/startup.py`. **Still open, for the M3 run lifecycle
     (issue 34):**
     `FINALIZING` runs (revalidate and accept without redoing ML, `AcceptProcessingRunUseCase` is built, PR #106) and a
-    run with pending output and no final checkpoint. (Interrupted runtime installations are built: `RuntimePackageStore.recover`.)
+    run with pending output and no final checkpoint. **Built 2026-10-06 (issue 34; clarification decided by the owner the same day, Persistence 15 and 28):** a `FINALIZING` run is accepted by startup recovery without ML, its job kept `RUNNING` until then; a refused FINAL leaves the run `NOT_RESUMABLE` and its output private; a pre-FINAL crash is `INTERRUPTED` with the PENDING output kept private, never discarded or requeued; a retry is a new Job (`previous_job_id`) and Run (`parent_run_id`) on a copy of the frozen snapshot (`RetryProcessingUseCase`), never made by recovery. (Interrupted runtime installations are built: `RuntimePackageStore.recover`.)
 28. ~~Open: `ann_key` is globally unique but allocated per space (the same conflict as question 13).~~ **Decided 2026-10-01 (owner, issue 48):**
     an `ann_key` is unique within its space, `UNIQUE(representation_space_id, ann_key)`, as revision `0003`
     (specs: persistence 6.2, 6.3), **built** in revision `0003`. Every index lookup and removal carries the
