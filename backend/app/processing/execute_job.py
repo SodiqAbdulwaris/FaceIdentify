@@ -697,7 +697,14 @@ class ExecuteProcessingJob:
                     "outcome": entry.decision.outcome.value,
                     "reason": entry.decision.reason.value,
                     "identity_id": None if entry.identity_id is None else str(entry.identity_id),
-                    "evidence": entry.decision.evidence_payload(),
+                    # CREATE_NEW receives its durable pending identity only after reasoning.
+                    # FINAL evidence must record that resolved result, not the proposal's null id.
+                    "evidence": {
+                        **entry.decision.evidence_payload(),
+                        "identity_id": None
+                        if entry.identity_id is None
+                        else str(entry.identity_id),
+                    },
                 }
                 for entry in decisions
             ],

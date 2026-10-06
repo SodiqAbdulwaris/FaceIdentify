@@ -1281,6 +1281,10 @@ def test_face_output_stays_pending_and_its_new_identity_stays_private(
         checkpoint = session.get(ProcessingCheckpoint, result.final_checkpoint_id)
         assert checkpoint is not None
         assert checkpoint.payload_json["decisions"][0]["outcome"] == "CREATE_NEW"
+        assert (
+            checkpoint.payload_json["decisions"][0]["evidence"]["identity_id"]
+            == checkpoint.payload_json["decisions"][0]["identity_id"]
+        )
         segments = list(
             session.scalars(
                 select(ExecutionSegment)

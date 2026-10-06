@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from math import isclose, isfinite
 from typing import Any
 
 from sqlalchemy import select
@@ -28,10 +29,13 @@ from backend.app.jobs.models import Job, JobState, JobType
 from backend.app.jobs.repository import JobRepository
 from backend.app.memory.index_operation_repository import IndexOperationRepository, NewOperation
 from backend.app.memory.models import (
+    IndexOperation,
+    IndexOperationKind,
     Observation,
     ObservationState,
     Occurrence,
     OccurrenceKind,
+    OccurrenceObservation,
     OccurrenceState,
     Representation,
     RepresentationState,
@@ -46,13 +50,45 @@ from backend.app.processing.models import (
 )
 from backend.app.processing.repository import CheckpointRepository
 from backend.app.processing.run_repository import ProcessingRunRepository
-from backend.app.recognition.reasoner import RecognitionOutcome
+from backend.app.recognition.reasoner import (
+    EVIDENCE_SCHEMA_VERSION,
+    DecisionPolicy,
+    Reason,
+    RecognitionOutcome,
+)
 from backend.app.sources.models import Artifact, ArtifactState, Source, SourceKind, SourceState
 from backend.app.sources.repository import SourceRepository
 from backend.infrastructure.db.optimistic import optimistic_locked_update
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 
 FINAL_SCHEMA_VERSION = 1
+_EVIDENCE_KEYS = {
+    "schema_version",
+    "outcome",
+    "reason",
+    "identity_id",
+    "assessment_version",
+    "interpretation",
+    "representation_space_id",
+    "quality",
+    "retrieval",
+    "candidates",
+    "margin",
+    "policy",
+}
+_CANDIDATE_KEYS = {"rank", "identity_id", "similarity", "members"}
+_CANDIDATE_MEMBER_KEYS = {"representation_id", "pool", "similarity"}
+_REASONS_BY_OUTCOME = {
+    RecognitionOutcome.MATCH_EXISTING: {Reason.MATCHED},
+    RecognitionOutcome.CREATE_NEW: {Reason.NO_CANDIDATE, Reason.NOT_SIMILAR},
+    RecognitionOutcome.ABSTAIN: {
+        Reason.LOW_QUALITY,
+        Reason.RETRIEVAL_INCOMPLETE,
+        Reason.AMBIGUOUS_CANDIDATES,
+        Reason.UNRESOLVED_NEIGHBOUR,
+        Reason.UNCERTAIN_SIMILARITY,
+    },
+}
 
 
 class AcceptanceError(RuntimeError):
@@ -70,6 +106,7 @@ class _Decision:
     observation_id: uuid.UUID
     representation_id: uuid.UUID
     outcome: RecognitionOutcome
+    reason: Reason
     identity_id: uuid.UUID | None
     evidence: dict[str, Any]
 
@@ -105,7 +142,7 @@ class AcceptProcessingRunUseCase:
         checkpoint, decisions = self._final(session, run)
         source, job = self._context(session, run)
         if run.state == ProcessingRunState.COMPLETED:
-            self._validate_completed(session, run, source, job, checkpoint, decisions)
+            self._validate_completed(session, run, source, job, decisions)
             return AcceptedProcessingRun(run.id, already_accepted=True)
         if run.state != ProcessingRunState.FINALIZING:
             raise AcceptanceError(f"processing run is {run.state}, not FINALIZING")
@@ -234,6 +271,8 @@ class AcceptProcessingRunUseCase:
                 representation.state != RepresentationState.PENDING
                 or representation.observation_id != decision.observation_id
                 or representation.vector is None
+                or decision.evidence["representation_space_id"]
+                != str(representation.representation_space_id)
             ):
                 raise AcceptanceError(
                     "a representation is not the private output described by FINAL"
@@ -373,7 +412,6 @@ class AcceptProcessingRunUseCase:
         run: ProcessingRun,
         source: Source,
         job: Job,
-        checkpoint: ProcessingCheckpoint,
         decisions: Sequence[_Decision],
     ) -> None:
         if source.current_processing_run_id != run.id or job.state != JobState.COMPLETED:
@@ -394,6 +432,7 @@ class AcceptProcessingRunUseCase:
                     raise AcceptanceError("accepted ABSTAIN acquired an identity")
             elif representation.identity_id != decision.identity_id:
                 raise AcceptanceError("accepted representation changed identity")
+            self._validate_accepted_artifacts(session, run, source, decision, representation)
 
     @staticmethod
     def _uuid(value: object, field: str) -> uuid.UUID:
@@ -418,19 +457,126 @@ class AcceptProcessingRunUseCase:
             outcome = RecognitionOutcome(value["outcome"])
         except (TypeError, ValueError) as error:
             raise AcceptanceError("FINAL checkpoint decision has an invalid outcome") from error
+        try:
+            reason = Reason(value["reason"])
+        except (TypeError, ValueError) as error:
+            raise AcceptanceError("FINAL checkpoint decision has an invalid reason") from error
+        if reason not in _REASONS_BY_OUTCOME[outcome]:
+            raise AcceptanceError("FINAL checkpoint decision reason does not support its outcome")
         identity_id = (
             None if value["identity_id"] is None else self._uuid(value["identity_id"], "identity")
         )
-        evidence = value["evidence"]
-        if not isinstance(evidence, dict):
-            raise AcceptanceError("FINAL checkpoint decision evidence is not an object")
+        evidence = self._evidence(value["evidence"], outcome, reason, identity_id)
         return _Decision(
             self._uuid(value["observation_id"], "observation"),
             self._uuid(value["representation_id"], "representation"),
             outcome,
+            reason,
             identity_id,
             evidence,
         )
+
+    def _evidence(
+        self,
+        value: object,
+        outcome: RecognitionOutcome,
+        reason: Reason,
+        identity_id: uuid.UUID | None,
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise AcceptanceError("FINAL checkpoint decision evidence is not an object")
+        if set(value) != _EVIDENCE_KEYS or value.get("schema_version") != EVIDENCE_SCHEMA_VERSION:
+            raise AcceptanceError("FINAL checkpoint decision has an unsupported evidence schema")
+        if (
+            value["outcome"] != outcome.value
+            or value["reason"] != reason.value
+            or value["identity_id"] != (None if identity_id is None else str(identity_id))
+        ):
+            raise AcceptanceError("FINAL checkpoint decision evidence contradicts its decision")
+        if (
+            not isinstance(value["assessment_version"], str)
+            or not value["assessment_version"]
+            or not isinstance(value["interpretation"], str)
+            or not value["interpretation"]
+        ):
+            raise AcceptanceError(
+                "FINAL checkpoint decision evidence has invalid assessment metadata"
+            )
+        self._uuid(value["representation_space_id"], "evidence representation space")
+        quality = value["quality"]
+        retrieval = value["retrieval"]
+        policy = value["policy"]
+        if (
+            not isinstance(quality, dict)
+            or set(quality) != {"detection_score"}
+            or not self._number(quality["detection_score"])
+            or not 0.0 <= quality["detection_score"] <= 1.0
+            or not isinstance(retrieval, dict)
+            or set(retrieval) != {"requested_k", "returned", "dropped", "converged"}
+            or not all(
+                isinstance(retrieval[field], int) and retrieval[field] >= 0
+                for field in ("requested_k", "returned", "dropped")
+            )
+            or not isinstance(retrieval["converged"], bool)
+            or value["margin"] is not None
+            and not self._number(value["margin"])
+            or not isinstance(policy, dict)
+            or set(policy)
+            != {
+                "version",
+                "min_detection_score",
+                "match_threshold",
+                "margin",
+                "new_identity_ceiling",
+            }
+            or not isinstance(policy["version"], str)
+            or not all(
+                self._number(policy[field])
+                for field in (
+                    "min_detection_score",
+                    "match_threshold",
+                    "margin",
+                    "new_identity_ceiling",
+                )
+            )
+        ):
+            raise AcceptanceError("FINAL checkpoint decision evidence has invalid semantic fields")
+        try:
+            DecisionPolicy(
+                policy["version"],
+                policy["min_detection_score"],
+                policy["match_threshold"],
+                policy["margin"],
+                policy["new_identity_ceiling"],
+            )
+        except ValueError as error:
+            raise AcceptanceError(
+                "FINAL checkpoint decision evidence has incoherent policy"
+            ) from error
+        candidates = self._candidates(value)
+        if (
+            retrieval["requested_k"] < 2
+            or retrieval["returned"] > retrieval["requested_k"]
+            or len(candidates) > retrieval["returned"]
+            or sum(len(candidate["members"]) for candidate in value["candidates"])
+            != retrieval["returned"]
+        ):
+            raise AcceptanceError("FINAL checkpoint decision evidence has inconsistent retrieval")
+        margin = value["margin"]
+        if len(candidates) < 2:
+            if margin is not None:
+                raise AcceptanceError("FINAL checkpoint decision evidence has an impossible margin")
+        elif not isclose(
+            margin,
+            value["candidates"][0]["similarity"] - value["candidates"][1]["similarity"],
+            abs_tol=1e-12,
+        ):
+            raise AcceptanceError("FINAL checkpoint decision evidence has an inconsistent margin")
+        return value
+
+    @staticmethod
+    def _number(value: object) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
 
     def _observation_ids(
         self, decisions: Sequence[_Decision], checkpoint: ProcessingCheckpoint | None
@@ -446,29 +592,151 @@ class AcceptProcessingRunUseCase:
         if not isinstance(raw, list):
             raise AcceptanceError("decision candidate evidence is not a list")
         candidates: list[EvidenceCandidate] = []
-        for item in raw:
-            if not isinstance(item, Mapping) or not isinstance(item.get("rank"), int):
+        member_ids: set[uuid.UUID] = set()
+        identity_ids: set[uuid.UUID] = set()
+        for expected_rank, item in enumerate(raw, start=1):
+            if (
+                not isinstance(item, Mapping)
+                or set(item) != _CANDIDATE_KEYS
+                or not isinstance(item.get("rank"), int)
+                or isinstance(item["rank"], bool)
+                or item["rank"] != expected_rank
+                or not self._number(item.get("similarity"))
+                or not -1.0 <= item["similarity"] <= 1.0
+            ):
                 raise AcceptanceError("decision candidate evidence is malformed")
             members = item.get("members")
-            representation_id = None
-            if isinstance(members, list) and members:
-                first = members[0]
-                if not isinstance(first, Mapping):
+            if not isinstance(members, list) or not members:
+                raise AcceptanceError("decision candidate evidence is malformed")
+            similarities: list[float] = []
+            first_representation_id: uuid.UUID | None = None
+            for member in members:
+                if (
+                    not isinstance(member, Mapping)
+                    or set(member) != _CANDIDATE_MEMBER_KEYS
+                    or member.get("pool") not in {"GLOBAL", "RUN_LOCAL"}
+                    or not self._number(member.get("similarity"))
+                    or not -1.0 <= member["similarity"] <= 1.0
+                ):
                     raise AcceptanceError("decision candidate member is malformed")
-                representation_id = self._uuid(first.get("representation_id"), "candidate")
+                member_id = self._uuid(member.get("representation_id"), "candidate")
+                if member_id in member_ids:
+                    raise AcceptanceError("decision candidate evidence repeats a representation")
+                member_ids.add(member_id)
+                if first_representation_id is None:
+                    first_representation_id = member_id
+                similarities.append(member["similarity"])
+            if item["similarity"] != max(similarities):
+                raise AcceptanceError("decision candidate evidence has an inconsistent similarity")
             identity = item.get("identity_id")
+            identity_id = None if identity is None else self._uuid(identity, "candidate identity")
+            if identity_id is not None:
+                if identity_id in identity_ids:
+                    raise AcceptanceError("decision candidate evidence repeats an identity")
+                identity_ids.add(identity_id)
             candidates.append(
                 EvidenceCandidate(
                     evidence_id=uuid.UUID(int=0),
                     rank=item["rank"],
-                    representation_id=representation_id,
-                    identity_id=None
-                    if identity is None
-                    else self._uuid(identity, "candidate identity"),
-                    raw_similarity=float(item.get("similarity", 0.0)),
+                    representation_id=first_representation_id,
+                    identity_id=identity_id,
+                    raw_similarity=float(item["similarity"]),
                     calibrated_confidence=None,
                     decision="CONSIDERED",
                     details_json=dict(item),
                 )
             )
         return candidates
+
+    def _validate_accepted_artifacts(
+        self,
+        session: Session,
+        run: ProcessingRun,
+        source: Source,
+        decision: _Decision,
+        representation: Representation,
+    ) -> None:
+        kind = {
+            RecognitionOutcome.CREATE_NEW: EvidenceKind.IDENTITY_CREATED,
+            RecognitionOutcome.MATCH_EXISTING: EvidenceKind.IDENTITY_MATCHED,
+            RecognitionOutcome.ABSTAIN: EvidenceKind.RECOGNITION_ABSTAINED,
+        }[decision.outcome]
+        evidence = list(
+            session.scalars(
+                select(Evidence).where(
+                    Evidence.processing_run_id == run.id,
+                    Evidence.source_id == source.id,
+                    Evidence.kind == kind,
+                )
+            )
+        )
+        matching = [
+            row
+            for row in evidence
+            if row.payload_json
+            == {
+                "representation_id": str(representation.id),
+                "ann_key": representation.ann_key,
+                **decision.evidence,
+            }
+            and row.subject_identity_id == decision.identity_id
+        ]
+        if len(matching) != 1:
+            raise AcceptanceError("completed processing run is missing its decision evidence")
+        evidence_row = matching[0]
+        if evidence_row.payload_schema_version != EVIDENCE_SCHEMA_VERSION:
+            raise AcceptanceError("completed processing run has incompatible decision evidence")
+        if EvidenceRepository(session).links(evidence_row.id) != [
+            EvidenceLink(representation.id, EvidenceRepresentationRole.SUBJECT)
+        ]:
+            raise AcceptanceError(
+                "completed processing run has inconsistent decision evidence links"
+            )
+        expected_candidates = self._candidates(decision.evidence)
+        candidates = EvidenceRepository(session).candidates(evidence_row.id)
+        if len(candidates) != len(expected_candidates) or any(
+            actual.rank != expected.rank
+            or actual.representation_id != expected.representation_id
+            or actual.identity_id != expected.identity_id
+            or actual.raw_similarity != expected.raw_similarity
+            or actual.calibrated_confidence != expected.calibrated_confidence
+            or actual.decision != expected.decision
+            or actual.details_json != expected.details_json
+            for actual, expected in zip(candidates, expected_candidates, strict=True)
+        ):
+            raise AcceptanceError("completed processing run has inconsistent candidate evidence")
+        occurrences = list(
+            session.scalars(
+                select(Occurrence)
+                .join(OccurrenceObservation)
+                .where(
+                    Occurrence.processing_run_id == run.id,
+                    Occurrence.source_id == source.id,
+                    OccurrenceObservation.observation_id == decision.observation_id,
+                )
+            )
+        )
+        if decision.outcome is RecognitionOutcome.ABSTAIN:
+            if occurrences:
+                raise AcceptanceError("accepted ABSTAIN acquired an occurrence")
+        elif (
+            len(occurrences) != 1
+            or occurrences[0].identity_id != decision.identity_id
+            or occurrences[0].state != OccurrenceState.ACTIVE
+            or occurrences[0].kind != OccurrenceKind.IMAGE
+            or OccurrenceRepository(session).observation_ids(occurrences[0].id)
+            != [decision.observation_id]
+        ):
+            raise AcceptanceError("completed processing run is missing its accepted occurrence")
+        operations = list(
+            session.scalars(
+                select(IndexOperation).where(
+                    IndexOperation.representation_id == representation.id,
+                    IndexOperation.representation_space_id
+                    == representation.representation_space_id,
+                    IndexOperation.operation == IndexOperationKind.ADD,
+                )
+            )
+        )
+        if len(operations) != 1:
+            raise AcceptanceError("completed processing run is missing its ADD operation")

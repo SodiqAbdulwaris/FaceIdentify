@@ -1,8 +1,8 @@
 # M3: atomic processing-run acceptance and abstention evidence
 
-- **Date:** 2026-10-05
+- **Date:** 2026-10-05; remediation 2026-10-06
 - **Milestone / tracker IDs:** M3 step 11 · TST-042 · TST-043 (partial) · issue #104
-- **Status:** ready for independent review; pending PR
+- **Status:** ready for a new independent review and fresh exact-head CI
 - **Commits:** pending PR
 
 ## What changed
@@ -21,6 +21,13 @@ which recreates only `evidence` while preserving its rows, foreign keys, and ind
 The index wake occurs only after SQLite commits. A failed wake therefore leaves an accepted,
 replayable `IndexOperation`, never a rolled-back authoritative result. Repeated acceptance checks
 the committed result rather than returning blindly and does not duplicate evidence or operations.
+
+The review remediation makes FINAL's version-1 decision evidence a strict acceptance contract:
+every required field/version, outcome/reason/resolved identity, representation space, finite policy
+and retrieval facts, and bounded ordered candidate snapshot are validated before anything becomes
+authoritative. FINAL construction now replaces CREATE_NEW's proposal-time null evidence identity
+with its resolved pending Identity. A completed run also revalidates its exact Evidence payload,
+subject link, candidate rows, image Occurrence/membership rule, and exactly one durable ADD intent.
 
 ## Why
 
@@ -45,11 +52,24 @@ issue #104 defines the immutable historical abstention record.
   names an Identity, and requiring an ACTIVE rather than PENDING Observation at acceptance, each
   made their acceptance tests fail; the source SHA-256 was restored byte-identically after each.
 - Full repository gate — **2,291 passed, 100% backend coverage** (`HYPOTHESIS_PROFILE=ci uv run
-  pytest --cov -q -p no:cacheprovider`, 2026-10-05). Independent review, PR and exact-head CI
-  remain before this entry is done.
+  pytest --cov -q -p no:cacheprovider`, 2026-10-05) was for the original PR commit, before the
+  remediation and must not be treated as verification of it.
+- Remediation focused suite — **141 passed**, with **100% line and branch coverage** for
+  `accept_run.py` and `execute_job.py` (`uv run pytest tests/integration/test_accept_processing_run.py
+  tests/integration/test_execute_processing_job.py --cov=backend.app.processing.accept_run
+  --cov=backend.app.processing.execute_job --cov-branch -q -p no:cacheprovider`, 2026-10-06).
+- Remediation mutation proofs: disabling the evidence cross-check, weakening exact schema/version
+  validation, admitting a repeated candidate representation, ignoring a corrupted Evidence link,
+  admitting an ABSTAIN occurrence, or ignoring a missing ADD operation each made the relevant
+  acceptance test fail. `accept_run.py` returned byte-identically after every probe (SHA-256
+  `46EE853BBCFE2E344821B5BBCB6D9946D4A2D5D3CC240B4C3CC2DE1D84E851D4`).
+- Ruff format/check and native/Linux mypy passed after the remediation.
+- Full repository gate after remediation — **2,317 passed in 406.28s, 100% backend coverage**
+  (`HYPOTHESIS_PROFILE=ci uv run pytest --cov -q -p no:cacheprovider`, 2026-10-06).
 
 ## Open issues / follow-ups
 
-- Step 11 still needs independent review, PR, and exact-head CI.
+- PR #106 still needs the remediation commit, a new independent review, and fresh exact-head CI
+  before merge.
 - Step 12 recovery must invoke this use case for a valid FINAL checkpoint without rerunning ML.
 - Issue #79 remains the separate later `ResolveUnresolvedRepresentation` use case.
