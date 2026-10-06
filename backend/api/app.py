@@ -35,6 +35,8 @@ class BackendReadiness:
 
     state: str
     capabilities: Mapping[str, str] = field(default_factory=dict)
+    # Why startup failed: an exception class name only, never a path or the launch capability.
+    failure: str | None = None
 
 
 def validate_launch_token(token: str) -> str:
@@ -91,6 +93,8 @@ def create_app(
         body: dict[str, Any] = {"state": current.state}
         if current.capabilities:
             body["capabilities"] = dict(current.capabilities)
+        if current.failure is not None:
+            body["failure"] = current.failure
         return body
 
     @app.websocket("/api/v1/events")

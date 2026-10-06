@@ -49,6 +49,8 @@ scheduler are reported `NOT_STARTED` and do not degrade the state; W2 will make 
 
 ## Open issues / follow-ups
 
+W3 routes that use the library must answer 503 until the state is `READY` or `DEGRADED` (none exist yet).
+
 W1.2: the sidecar host (a server, which needs `uvicorn`, a new dependency recorded then), the
 stdout handshake, the environment token and the parent-process watch. W2: the scheduler, which
 starts only after this reports the library open.
