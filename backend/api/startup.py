@@ -68,6 +68,15 @@ class LibrarySettings:
 
 
 @dataclass(frozen=True)
+class MediaLimits:
+    """Bounds on one imported image (its bytes read, its pixels decoded). No defaults: both are
+    measured choices, so the host chooses them."""
+
+    max_pixels: int
+    max_bytes: int
+
+
+@dataclass(frozen=True)
 class ProcessingSettings:
     """Turns on the scheduler loop. No defaults: the limits are unmeasured, so the host chooses
     them. `client_for` is the perception boundary (a fake until real weights are cleared, #69)."""
@@ -113,6 +122,7 @@ class Backend:
 
     settings: LibrarySettings
     processing: ProcessingSettings | None = None
+    media_limits: MediaLimits | None = None
     state: LifecycleState = LifecycleState.INITIALIZING
     scheduler: SchedulerService | None = None
     library: OpenLibrary | None = None
@@ -240,9 +250,17 @@ def backend_lifespan(backend: Backend) -> Callable[[FastAPI], AbstractAsyncConte
 
 
 def create_backend_app(
-    launch_token: str, settings: LibrarySettings, processing: ProcessingSettings | None = None
+    launch_token: str,
+    settings: LibrarySettings,
+    processing: ProcessingSettings | None = None,
+    media_limits: MediaLimits | None = None,
 ) -> FastAPI:
     """The authenticated application whose lifespan opens the library (and, when `processing` is
-    given, then starts the scheduler) and whose `/readiness` reports the real lifecycle."""
-    backend = Backend(settings, processing)
-    return create_app(launch_token, readiness=backend.readiness, lifespan=backend_lifespan(backend))
+    given, then starts the scheduler), whose `/readiness` reports the real lifecycle, and which
+    serves the versioned API."""
+    backend = Backend(settings, processing, media_limits)
+    from backend.api.routes import api_router  # (here: the routes import this module's types)
+
+    app = create_app(launch_token, readiness=backend.readiness, lifespan=backend_lifespan(backend))
+    app.include_router(api_router)
+    return app
