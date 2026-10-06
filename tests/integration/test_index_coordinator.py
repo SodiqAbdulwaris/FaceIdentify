@@ -25,7 +25,10 @@ from backend.app.memory.index_coordinator import (
 from backend.app.memory.models import IndexOperation, Representation, RepresentationSpace
 from backend.infrastructure.db.engine import create_session_factory
 from backend.infrastructure.db.unit_of_work import TransactionRetry, UnitOfWork
-from backend.infrastructure.indexing.representation_index import RepresentationIndex
+from backend.infrastructure.indexing.representation_index import (
+    IndexUnusableError,
+    RepresentationIndex,
+)
 from tests.factories.models import ModelFactory, float32_vector
 from tests.fixtures.persistence import AppDirs
 
@@ -131,6 +134,50 @@ def test_an_operation_deleted_while_it_was_in_flight_is_skipped_and_the_rest_are
     assert load_op(factory, other.id).state == "APPLIED"
     with factory() as session:
         assert session.get(IndexOperation, superseded.id) is None
+
+
+def test_recognition_opens_an_empty_valid_index_for_a_space_that_holds_no_memory(
+    coordinator: IndexCoordinator, space: RepresentationSpace
+) -> None:
+    index = coordinator.open_for_recognition(space.id)
+
+    assert len(index) == 0
+    assert index.ndim == NDIM
+    assert not coordinator.index_directory(space.id).exists()  # reading creates nothing
+
+
+def test_recognition_opens_the_persisted_index_and_sees_its_vectors(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    queue(build, active(build, space, 1), "ADD")
+    run(coordinator, build)
+
+    index = coordinator.open_for_recognition(space.id)
+
+    assert len(index) == 1
+    assert index.contains(1)
+
+
+def test_recognition_refuses_a_missing_index_over_existing_memory(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    """Answering "nobody here" would create a duplicate identity for every face already known."""
+    active(build, space, 1)
+    build.session.commit()  # memory in SQLite, no index file yet
+
+    with pytest.raises(IndexUnusableError, match="holds memory"):
+        coordinator.open_for_recognition(space.id)
+
+
+def test_recognition_refuses_an_index_that_is_present_but_unusable(
+    coordinator: IndexCoordinator, space: RepresentationSpace, build: ModelFactory
+) -> None:
+    queue(build, active(build, space, 1), "ADD")
+    run(coordinator, build)
+    (coordinator.index_directory(space.id) / "manifest.json").write_text("{not json", "utf-8")
+
+    with pytest.raises(IndexUnusableError):
+        coordinator.open_for_recognition(space.id)
 
 
 def test_an_add_puts_the_representation_in_the_index_and_marks_the_operation_applied(

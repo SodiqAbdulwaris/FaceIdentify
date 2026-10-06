@@ -6,11 +6,13 @@ recovery run. Opening the library (`open_library`) is the staged startup: lock, 
 recovery, indexes. Nothing may claim work before it finishes; the scheduler (W2) is created only
 after this reports the library open, so recovery and normal scheduling never race over a job.
 
-`/readiness` says only what is true: the library capabilities come from the recovery report, and
-the ML worker and the scheduler are `NOT_STARTED` until W2 builds them. A failure to open the
-library is `FAILED` with the exception's class name (never a path, never the launch capability) and
-the process keeps answering, so the shell can show why. Leaving the application releases the
-library lock.
+`/readiness` says only what is true: the library capabilities come from the recovery report; the
+scheduler is `NOT_CONFIGURED` unless processing was configured, then `READY` while its loop runs
+(`DEGRADED` while its last look failed); the ML worker is `NOT_CONFIGURED` until it is wired. A
+failure to open the library is `FAILED` with the exception's class name (never a path, never the
+launch capability) and the process keeps answering, so the shell can show why. Leaving the
+application stops the scheduler first (the call in flight finishes, nothing more is claimed), then
+releases the library lock.
 """
 
 import asyncio
@@ -19,21 +21,27 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import anyio.to_thread
 from fastapi import FastAPI
 
 from backend.api.app import BackendReadiness, create_app
+from backend.api.scheduler import SchedulerService
 from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.index_coordinator import RetryPolicy
+from backend.app.processing.accept_run import AcceptProcessingRunUseCase
+from backend.app.processing.execute_job import ExecuteProcessingJob
+from backend.app.processing.runner import ProcessingRunner, RunOutcome
+from backend.app.processing.scheduler import ProcessingScheduler
 from backend.app.recovery.startup import StartupReport
+from backend.app.runtime.worker_config import PerceptionPlan
 from backend.infrastructure.db.unit_of_work import TransactionRetry
 
-NOT_STARTED: Final = "NOT_STARTED"
+NOT_CONFIGURED: Final = "NOT_CONFIGURED"
 
 
 class LifecycleState(StrEnum):
@@ -59,6 +67,19 @@ class LibrarySettings:
     max_index_passes: int
 
 
+@dataclass(frozen=True)
+class ProcessingSettings:
+    """Turns on the scheduler loop. No defaults: the limits are unmeasured, so the host chooses
+    them. `client_for` is the perception boundary (a fake until real weights are cleared, #69)."""
+
+    client_for: Callable[[PerceptionPlan], Any]
+    max_pixels: int
+    recognition_k: int
+    lease_for: timedelta
+    idle_seconds: float
+    owner: str
+
+
 def capabilities_from(report: StartupReport) -> dict[str, str]:
     """Readiness capabilities from what recovery found. `DEGRADED` means something recoverable is
     outstanding (a reconstructible index, a locked file); the library itself is usable."""
@@ -81,8 +102,8 @@ def capabilities_from(report: StartupReport) -> dict[str, str]:
         "recovery": degraded
         if report.erasure.outstanding_cleanup or report.packages.left or report.packages.invalid
         else "READY",
-        "ml_worker": NOT_STARTED,
-        "scheduler": NOT_STARTED,
+        "ml_worker": NOT_CONFIGURED,
+        "scheduler": NOT_CONFIGURED,
     }
 
 
@@ -91,7 +112,9 @@ class Backend:
     """What the API process owns: the library once opened, and the lifecycle around it."""
 
     settings: LibrarySettings
+    processing: ProcessingSettings | None = None
     state: LifecycleState = LifecycleState.INITIALIZING
+    scheduler: SchedulerService | None = None
     library: OpenLibrary | None = None
     failure: str | None = None
     capabilities: dict[str, str] = field(default_factory=dict)
@@ -101,7 +124,68 @@ class Backend:
     _opened: AbstractContextManager[OpenLibrary] | None = None
 
     def readiness(self) -> BackendReadiness:
-        return BackendReadiness(self.state.value, dict(self.capabilities), self.failure)
+        capabilities = dict(self.capabilities)
+        scheduler = self.scheduler
+        if scheduler is not None:
+            if not scheduler.running:
+                capabilities["scheduler"] = "STOPPED"
+            else:
+                capabilities["scheduler"] = "DEGRADED" if scheduler.last_error else "READY"
+        return BackendReadiness(self.state.value, capabilities, self.failure)
+
+    def wake_scheduler(self) -> None:
+        """Ask the scheduler to look at the queue now (a job was queued). Safe from any thread."""
+        if self.scheduler is not None:
+            self.scheduler.wake()
+
+    async def _boot(self) -> None:
+        """Open the library, and only then start the scheduler: recovery has finished, so the loop
+        and recovery can never race over the same job or run."""
+        await anyio.to_thread.run_sync(self._open)
+        library, processing = self.library, self.processing
+        if library is not None and processing is not None and self.state != LifecycleState.FAILED:
+            self.scheduler = SchedulerService(
+                self._run_once_for(library, processing), idle_seconds=processing.idle_seconds
+            )
+            self.scheduler.start()
+
+    def _run_once_for(
+        self, library: OpenLibrary, processing: ProcessingSettings
+    ) -> Callable[[], RunOutcome]:
+        settings, uow = self.settings, library.unit_of_work
+
+        def wake_index() -> None:
+            library.coordinator.apply_pending(limit=settings.index_batch)
+
+        runner = ProcessingRunner(
+            uow,
+            ProcessingScheduler(
+                uow, new_id=settings.new_id, clock=settings.clock, lease_for=processing.lease_for
+            ),
+            ExecuteProcessingJob(
+                uow,
+                packages=library.packages,
+                files=library.store,
+                client_for=processing.client_for,
+                global_index_for=library.coordinator.open_for_recognition,
+                new_id=settings.new_id,
+                clock=settings.clock,
+                max_pixels=processing.max_pixels,
+                recognition_k=processing.recognition_k,
+            ),
+            AcceptProcessingRunUseCase(
+                uow, new_id=settings.new_id, clock=settings.clock, wake_index=wake_index
+            ),
+            owner=processing.owner,
+            clock=settings.clock,
+        )
+        return runner.run_once
+
+    async def _shutdown(self) -> None:
+        if self.scheduler is not None:
+            await self.scheduler.stop()
+        self.state = LifecycleState.SHUTTING_DOWN
+        await anyio.to_thread.run_sync(self._close)
 
     def _open(self) -> None:
         """Open the library (blocking: migrations and recovery). Runs in a worker thread."""
@@ -145,19 +229,20 @@ def backend_lifespan(backend: Backend) -> Callable[[FastAPI], AbstractAsyncConte
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.backend = backend
-        starting = asyncio.create_task(anyio.to_thread.run_sync(backend._open))
+        starting = asyncio.create_task(backend._boot())
         try:
             yield
         finally:
             await starting  # a blocking open cannot be interrupted: let it finish, then undo it
-            backend.state = LifecycleState.SHUTTING_DOWN
-            await anyio.to_thread.run_sync(backend._close)
+            await backend._shutdown()
 
     return lifespan
 
 
-def create_backend_app(launch_token: str, settings: LibrarySettings) -> FastAPI:
-    """The authenticated application whose lifespan opens the library and whose `/readiness`
-    reports the real lifecycle."""
-    backend = Backend(settings)
+def create_backend_app(
+    launch_token: str, settings: LibrarySettings, processing: ProcessingSettings | None = None
+) -> FastAPI:
+    """The authenticated application whose lifespan opens the library (and, when `processing` is
+    given, then starts the scheduler) and whose `/readiness` reports the real lifecycle."""
+    backend = Backend(settings, processing)
     return create_app(launch_token, readiness=backend.readiness, lifespan=backend_lifespan(backend))
