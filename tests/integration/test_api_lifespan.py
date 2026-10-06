@@ -21,7 +21,7 @@ from fastapi import FastAPI
 
 from backend.api.app import create_app
 from backend.api.startup import (
-    NOT_STARTED,
+    NOT_CONFIGURED,
     Backend,
     LibrarySettings,
     LifecycleState,
@@ -104,8 +104,8 @@ async def test_the_library_opens_after_serving_starts_and_readiness_says_ready(
             "storage": "READY",
             "index": "READY",
             "recovery": "READY",
-            "ml_worker": NOT_STARTED,
-            "scheduler": NOT_STARTED,
+            "ml_worker": NOT_CONFIGURED,
+            "scheduler": NOT_CONFIGURED,
         }
         assert (await client.get("/readiness")).status_code == 401  # still authenticated
         assert backend.library is not None

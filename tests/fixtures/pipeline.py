@@ -32,7 +32,6 @@ from backend.app.runtime.perception_client import Detected, FaceVector, Represen
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.infrastructure.db.unit_of_work import TransactionRetry
 from backend.infrastructure.indexing.representation_index import (
-    IndexUnusableError,
     RepresentationIndex,
 )
 from backend.ml.contracts.messages import Detection
@@ -240,15 +239,7 @@ class Pipeline:
     def global_index(self, space_id: uuid.UUID) -> RepresentationIndex:
         if self.before_global_index is not None:
             self.before_global_index()
-        directory = self.lib.coordinator.index_directory(space_id)
-        try:
-            return RepresentationIndex.open(
-                directory, representation_space_id=space_id, ndim=NDIM, metric="cos"
-            )
-        except IndexUnusableError:
-            return RepresentationIndex.empty(
-                directory, representation_space_id=space_id, ndim=NDIM, metric="cos"
-            )
+        return self.lib.coordinator.open_for_recognition(space_id)
 
     def count(self, model: Any) -> int:
         with self.lib.session_factory() as session:

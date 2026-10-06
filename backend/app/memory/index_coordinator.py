@@ -65,6 +65,8 @@ from backend.app.memory.models import (
 )
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.indexing.representation_index import (
+    MANIFEST_NAME,
+    IndexUnusableError,
     RepresentationIndex,
     open_or_rebuild,
 )
@@ -140,6 +142,28 @@ class IndexCoordinator:
 
     def index_directory(self, space_id: uuid.UUID) -> Path:
         return self._root / space_id.hex
+
+    def open_for_recognition(self, space_id: uuid.UUID) -> RepresentationIndex:
+        """A read-only index handle for recognition, failing closed (API section 65: a known-invalid
+        index must not silently serve recognition).
+
+        A space that never persisted an index is a valid empty one, but only while SQLite holds no
+        eligible vector for it: a missing index over existing memory would answer "nobody here" and
+        create duplicate identities, so that raises `IndexUnusableError`, as does any index that is
+        present but unusable (corrupt, another space or dimension, a missing file). Pending `ADD`s
+        are not an error: an index that lags is reported by retrieval as not converged.
+        """
+        ndim, metric = self._space(space_id)
+        directory = self.index_directory(space_id)
+        if (directory / MANIFEST_NAME).exists():
+            return RepresentationIndex.open(
+                directory, representation_space_id=space_id, ndim=ndim, metric=metric
+            )
+        if any(True for _ in self._active_keys(space_id)):
+            raise IndexUnusableError("the index is missing but the space holds memory")
+        return RepresentationIndex.empty(
+            directory, representation_space_id=space_id, ndim=ndim, metric=metric
+        )
 
     def exclusive(self) -> AbstractContextManager[object]:
         """Hold the coordinator's lock: no pass loads, changes, quarantines or persists an index
