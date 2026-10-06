@@ -81,6 +81,19 @@ class ProcessingExecutionError(RuntimeError):
     """A claimed job cannot safely progress; its private output remains private."""
 
 
+# Failures the executor settles itself (run and job `FAILED`) before re-raising them.
+SETTLED_FAILURES: tuple[type[BaseException], ...] = (
+    BytesMissingError,
+    ImageError,
+    PendingOutputError,
+    PerceptionError,
+    RuntimeUnavailableError,
+    WorkerFailedError,
+    ProcessingExecutionError,
+    OSError,
+)
+
+
 class ProcessingCancelledError(RuntimeError):
     """A cancellation request was observed at a durable processing boundary."""
 
@@ -209,18 +222,14 @@ class ExecuteProcessingJob:
                 tuple(observations),
                 tuple(decision.representation_id for decision in decisions),
             )
-        except (
-            BytesMissingError,
-            ImageError,
-            PendingOutputError,
-            PerceptionError,
-            RuntimeUnavailableError,
-            WorkerFailedError,
-            ProcessingExecutionError,
-            OSError,
-        ) as error:
+        except SETTLED_FAILURES as error:
             self._fail(started, type(error).__name__)
             raise
+
+    def fail_claimed(self, started: StartedProcessingJob, code: str) -> None:
+        """Settle claimed work `FAILED` after a failure this executor did not recognise (best
+        effort, like the recognised ones); the caller re-raises the defect."""
+        self._fail(started, code)
 
     def _cancel_if_requested(self, started: StartedProcessingJob) -> None:
         """Settle an already-requested cancellation between external work units.
