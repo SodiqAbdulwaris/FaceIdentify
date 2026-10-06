@@ -311,6 +311,8 @@ Checks require determinate values to be non-negative and `completed <= total` wh
 
 > **Decision 2026-10-06 (owner; CONTEXT question 14):** `jobs.priority` stays a descriptive string, but scheduling order is an integer priority rank added by revision `0007` before the scheduler loop is implemented; claiming never orders by the string, which sorts alphabetically. Plan: `docs/plans/M3_M4_COMPLETION_PLAN.md`.
 
+> **Built 2026-10-07 (revision `0007`):** `jobs.priority_rank` (INTERACTIVE 0, HIGH 1, NORMAL 2, LOW 3, MAINTENANCE 4) with a CHECK that it agrees with `priority`, and the claim index `(state, priority_rank, created_at)`; `claim_next` orders by it.
+
 ## 16. ProcessingCheckpoint persistence
 
 A checkpoint is a durable resume boundary, not a visual progress update. `processing_checkpoints` contains `id`; `processing_run_id`; nullable `execution_segment_id`; monotonic `ordinal`; `kind` (`INTERMEDIATE`, `FINAL`); `state` (`VALID`, `INVALIDATED`); `payload_schema_version`; `payload_json`; `created_at`; nullable `invalidated_at`; and nullable `invalidated_reason`. Enforce `UNIQUE(processing_run_id, ordinal)` and one valid final checkpoint per run using a partial unique index.
@@ -387,6 +389,8 @@ Indexes are part of the design, not an afterthought. Create these in the initial
 | `evidence` | `(subject_identity_id, created_at DESC)`; `(processing_run_id, created_at)`; `(kind, created_at)` |
 | `index_operations` | `(state, not_before_at, created_at)` coordinator claim; `(representation_space_id, state)` |
 | `people` | `(state, normalized_name)`; `identity_person_associations` partial active identity uniqueness and `(person_id, state)` |
+
+> **Decision 2026-10-07 (owner decision 2026-10-06, built in revision `0007`):** the `jobs` claim index is `(state, priority_rank, created_at)`, replacing `(state, priority, created_at)`, so claiming is ordered by the integer rank and never by the string.
 
 Do not index JSON indiscriminately. Add a generated/indexed scalar only after a stable query path proves it necessary. SQLite FTS5, camera-specific indexes, general audit/event indexes, and counter tables are deferred.
 
