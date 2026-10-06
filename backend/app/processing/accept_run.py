@@ -151,6 +151,7 @@ class AcceptProcessingRunUseCase:
         if run is None:
             raise AcceptanceError("processing run does not exist")
         checkpoint, decisions = self._final(session, run)
+        self._configuration_snapshot(session, run)
         source, job = self._context(session, run)
         if run.state == ProcessingRunState.COMPLETED:
             self._validate_completed(session, run, source, job, decisions)
@@ -308,14 +309,7 @@ class AcceptProcessingRunUseCase:
             policy_data["margin"],
             policy_data["new_identity_ceiling"],
         )
-        snapshot = session.get(ProcessingConfigurationSnapshot, run.configuration_snapshot_id)
-        if (
-            snapshot is None
-            or snapshot.schema_version != 1
-            or not isinstance(snapshot.canonical_json, dict)
-            or snapshot.canonical_json.get("schema_version") != 1
-        ):
-            raise AcceptanceError("processing run has an unsupported configuration snapshot")
+        snapshot = self._configuration_snapshot(session, run)
         snapshot_policy = snapshot.canonical_json.get("decision_policy")
         if snapshot_policy != {"schema_version": 1, **policy_data}:
             raise AcceptanceError(
@@ -414,6 +408,20 @@ class AcceptProcessingRunUseCase:
             and expected.identity_id != decision.identity_id
         ):
             raise AcceptanceError("FINAL checkpoint decision does not follow its evidence")
+
+    @staticmethod
+    def _configuration_snapshot(
+        session: Session, run: ProcessingRun
+    ) -> ProcessingConfigurationSnapshot:
+        snapshot = session.get(ProcessingConfigurationSnapshot, run.configuration_snapshot_id)
+        if (
+            snapshot is None
+            or snapshot.schema_version != 1
+            or not isinstance(snapshot.canonical_json, dict)
+            or snapshot.canonical_json.get("schema_version") != 1
+        ):
+            raise AcceptanceError("processing run has an unsupported configuration snapshot")
+        return snapshot
 
     def _validate_decision_identity(
         self,
