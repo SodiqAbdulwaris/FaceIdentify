@@ -1516,6 +1516,75 @@ def test_cancellation_after_a_successful_fallback_wins_before_its_settlement(
         )
 
 
+def test_cancellation_immediately_before_final_settles_without_recovery(
+    sqlite_engine: Engine,
+    build: ModelFactory,
+    file_store: Any,
+    storage_roots: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cancel requested after the decisions are private and before FINAL is written reaches
+    CANCELLED in this process: no FINAL checkpoint, no FINALIZING run, nothing left for recovery."""
+    executor, _client, started, _source_id, run_id, job_id = _one_face_execution(
+        sqlite_engine, build, file_store, storage_roots, tmp_path
+    )
+    write = executor._uow.write
+    persist = executor._persist_decisions
+    decisions_persisted = False
+    cancelled = False
+
+    def mark_persisted(*args: Any, **kwargs: Any) -> Any:
+        nonlocal decisions_persisted
+        result = persist(*args, **kwargs)
+        decisions_persisted = True
+        return result
+
+    def cancel_after_decisions(work: Callable[[Session], Any]) -> Any:
+        nonlocal cancelled
+        result = write(work)
+        if decisions_persisted and not cancelled:
+            cancelled = True
+            with Session(sqlite_engine) as session:
+                job = session.get(Job, job_id)
+                assert job is not None
+                job.state = "CANCELLING"
+                session.commit()
+        return result
+
+    monkeypatch.setattr(executor, "_persist_decisions", mark_persisted)
+    monkeypatch.setattr(executor._uow, "write", cancel_after_decisions)
+
+    with pytest.raises(ProcessingCancelledError, match="cancelled"):
+        executor.execute(started)
+
+    with Session(sqlite_engine) as session:
+        run = session.get(ProcessingRun, run_id)
+        job = session.get(Job, job_id)
+        assert run is not None
+        assert run.state == "CANCELLED"
+        assert run.current_checkpoint_id is None or (
+            session.get(ProcessingCheckpoint, run.current_checkpoint_id).kind  # type: ignore[union-attr]
+            != "FINAL"
+        )
+        assert job is not None
+        assert job.state == "CANCELLED"
+        assert not list(
+            session.scalars(
+                select(ProcessingCheckpoint).where(
+                    ProcessingCheckpoint.processing_run_id == run_id,
+                    ProcessingCheckpoint.kind == "FINAL",
+                )
+            )
+        )
+        assert [
+            row.state
+            for row in session.scalars(
+                select(Representation).where(Representation.processing_run_id == run_id)
+            )
+        ] == ["PENDING"]
+
+
 def test_cancellation_after_detection_settlement_does_not_start_embedding(
     sqlite_engine: Engine,
     build: ModelFactory,
