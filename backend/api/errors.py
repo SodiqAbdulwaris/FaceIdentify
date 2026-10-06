@@ -84,8 +84,10 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, error: RequestValidationError) -> JSONResponse:
         fields = [
-            {"location": list(item["loc"]), "type": item["type"], "message": item["msg"]}
-            for item in error.errors()  # (never `input`: it is what the client sent)
+            # The location and Pydantic's stable error type only: never `input` (what the client
+            # sent) and never `msg`, which a custom validator may build from the value.
+            {"location": list(item["loc"]), "type": item["type"]}
+            for item in error.errors()
         ]
         return error_response(
             422, "VALIDATION_ERROR", "The request is not valid.", details={"fields": fields}
