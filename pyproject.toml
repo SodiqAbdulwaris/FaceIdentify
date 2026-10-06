@@ -11,6 +11,8 @@ dependencies = [
     "pillow>=12.3.0",
     "sqlalchemy>=2.0",
     "usearch>=2.0",
+    "uvicorn>=0.54.0",
+    "websockets>=17.2",
 ]
 
 [dependency-groups]
