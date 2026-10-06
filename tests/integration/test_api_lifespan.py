@@ -153,12 +153,31 @@ async def test_a_library_that_cannot_open_is_failed_by_class_name_and_still_answ
         response = await client.get("/readiness", headers=auth)
 
         assert response.status_code == 200
-        assert response.json() == {"state": "FAILED"}
+        assert response.json() == {"state": "FAILED", "failure": backend.failure}
         assert backend.failure is not None
         assert str(tmp_path) not in response.text  # never a path
         assert (await client.get("/health", headers=auth)).json() == {"status": "ok"}
 
     assert backend.library is None
+
+
+async def test_an_unreadable_recovery_report_is_failed_and_the_library_is_still_closed(
+    tmp_path: Path, clock: FrozenClock, new_id: SeededUUIDs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = settings_for(tmp_path, clock, new_id)
+    app, backend = app_and_backend(settings, token())
+
+    def broken(report: StartupReport) -> dict[str, str]:
+        raise KeyError("report")
+
+    monkeypatch.setattr("backend.api.startup.capabilities_from", broken)
+
+    async with app.router.lifespan_context(app):
+        assert await settled(backend)
+        assert backend.state is LifecycleState.FAILED
+        assert backend.failure == "KeyError"
+        assert not lock_is_free(settings.library_root)  # it did open ...
+    assert lock_is_free(settings.library_root)  # ... and shutdown still released it
 
 
 async def test_a_library_held_by_another_backend_fails_without_taking_it(

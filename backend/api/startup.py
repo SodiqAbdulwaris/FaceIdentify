@@ -101,7 +101,7 @@ class Backend:
     _opened: AbstractContextManager[OpenLibrary] | None = None
 
     def readiness(self) -> BackendReadiness:
-        return BackendReadiness(self.state.value, dict(self.capabilities))
+        return BackendReadiness(self.state.value, dict(self.capabilities), self.failure)
 
     def _open(self) -> None:
         """Open the library (blocking: migrations and recovery). Runs in a worker thread."""
@@ -122,11 +122,16 @@ class Backend:
             self.failure = type(error).__name__
             self.state = LifecycleState.FAILED
         else:
-            self._opened = opened
+            self._opened = opened  # recorded first: shutdown closes it whatever happens next
             self.library = library
-            self.capabilities = capabilities_from(library.startup)
-            degraded = any(value == "DEGRADED" for value in self.capabilities.values())
-            self.state = LifecycleState.DEGRADED if degraded else LifecycleState.READY
+            try:
+                self.capabilities = capabilities_from(library.startup)
+            except Exception as error:  # noqa: BLE001 - an unreadable report is FAILED, not a crash
+                self.failure = type(error).__name__
+                self.state = LifecycleState.FAILED
+            else:
+                degraded = any(value == "DEGRADED" for value in self.capabilities.values())
+                self.state = LifecycleState.DEGRADED if degraded else LifecycleState.READY
         finally:
             self.settled.set()
 
