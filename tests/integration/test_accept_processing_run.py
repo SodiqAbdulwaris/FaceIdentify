@@ -545,6 +545,48 @@ def test_final_candidate_member_must_not_name_private_output(
         use_case(sqlite_engine, clock, new_id).accept(run.id)
 
 
+def test_global_candidate_member_must_name_an_active_identity(
+    sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    run, _observation, representation, _identity, _job = finalizing(
+        db_session, clock, new_id, "ABSTAIN"
+    )
+    assert representation is not None
+    build = ModelFactory(db_session, clock, new_id)
+    inactive_identity = build.identity(state="PENDING")
+    inactive = build.representation(
+        build.observation(),
+        representation_space_id=representation.representation_space_id,
+        state="ACTIVE",
+        identity_id=inactive_identity.id,
+        ann_key=2,
+        activated_at=clock(),
+    )
+    final = db_session.get(ProcessingCheckpoint, run.current_checkpoint_id)
+    assert final is not None
+    decision = final.payload_json["decisions"][0]
+    evidence = decision["evidence"]
+    final.payload_json = {
+        **final.payload_json,
+        "decisions": [
+            {
+                **decision,
+                "evidence": {
+                    **evidence,
+                    "candidates": [
+                        candidate(inactive.id, identity_id=inactive_identity.id, similarity=0.4)
+                    ],
+                    "retrieval": {**evidence["retrieval"], "returned": 1},
+                },
+            }
+        ],
+    }
+    db_session.commit()
+
+    with pytest.raises(AcceptanceError, match="candidate member is not authoritative"):
+        use_case(sqlite_engine, clock, new_id).accept(run.id)
+
+
 def test_final_candidate_members_must_stay_best_first(
     sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:

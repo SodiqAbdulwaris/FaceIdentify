@@ -321,6 +321,9 @@ class AcceptProcessingRunUseCase:
                 member_id = self._uuid(member["representation_id"], "candidate")
                 persisted = session.get(Representation, member_id)
                 pool = Pool(member["pool"])
+                candidate_identity = (
+                    None if identity_id is None else session.get(Identity, identity_id)
+                )
                 if (
                     persisted is None
                     or persisted.id == representation.id
@@ -328,6 +331,12 @@ class AcceptProcessingRunUseCase:
                     or persisted.identity_id != identity_id
                     or pool is Pool.GLOBAL
                     and persisted.state != RepresentationState.ACTIVE
+                    or pool is Pool.GLOBAL
+                    and identity_id is not None
+                    and (
+                        candidate_identity is None
+                        or candidate_identity.state != IdentityState.ACTIVE
+                    )
                     or pool is Pool.RUN_LOCAL
                     and (
                         persisted.state != RepresentationState.PENDING
