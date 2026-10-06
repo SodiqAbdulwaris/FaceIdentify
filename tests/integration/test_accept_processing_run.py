@@ -551,7 +551,12 @@ def test_final_quality_must_match_its_private_observation(
 
 
 @pytest.mark.parametrize(
-    ("snapshot_schema_version", "snapshot_root_schema_version"), [(2, 1), (1, 2)]
+    ("snapshot_schema_version", "snapshot_root_schema_version", "outcome", "state"),
+    [
+        (2, 1, "ABSTAIN", "FINALIZING"),
+        (1, 2, "NO_FACE", "FINALIZING"),
+        (2, 1, "NO_FACE", "COMPLETED"),
+    ],
 )
 def test_final_rejects_an_unsupported_configuration_snapshot(
     sqlite_engine: Engine,
@@ -560,15 +565,19 @@ def test_final_rejects_an_unsupported_configuration_snapshot(
     new_id: SeededUUIDs,
     snapshot_schema_version: int,
     snapshot_root_schema_version: int,
+    outcome: str,
+    state: str,
 ) -> None:
     run, _observation, _representation, _identity, _job = finalizing(
         db_session,
         clock,
         new_id,
-        "ABSTAIN",
+        outcome,
         snapshot_schema_version=snapshot_schema_version,
         snapshot_root_schema_version=snapshot_root_schema_version,
     )
+    run.state = state
+    db_session.commit()
 
     with pytest.raises(AcceptanceError, match="unsupported configuration snapshot"):
         use_case(sqlite_engine, clock, new_id).accept(run.id)

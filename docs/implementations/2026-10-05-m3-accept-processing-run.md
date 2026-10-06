@@ -43,6 +43,9 @@ The release review additionally refuses a snapshot or canonical snapshot root ou
 It requires a run-local candidate Identity to be `ACTIVE` or a pending Identity created by the
 same run, preventing an unrelated private or retired identity from altering a final decision.
 
+Snapshot compatibility is checked before any lifecycle branch, including zero-face and completed
+runs, rather than only while validating individual decisions.
+
 ## Why
 
 Persistence sections 6.2, 10--12, 16 and 30 make acceptance the sole SQLite-authority boundary;
@@ -90,6 +93,9 @@ issue #104 defines the immutable historical abstention record.
 - The release-review P1 mutations which skip frozen snapshot-version validation or admit an
   unrelated pending run-local Identity both failed their targeted regressions. The source was
   restored byte-identically (SHA-256 `1D97EABF21745DD0CCC455D560D8F9AC8566B48CD5D1CC55567F40D28F1AC0DB`).
+- The final focused-review mutation which moves snapshot validation behind the lifecycle branch
+  made all zero-face and completed-run snapshot regressions fail. The source was restored
+  byte-identically (SHA-256 `768F41C4C83FF7477C3E7D9D87F6382F95DD9F2537E8137A1D1A8E5D1A1A224E`).
 - Ruff format/check and native/Linux mypy passed after the remediation.
 - Full repository gate after remediation — **2,317 passed in 406.28s, 100% backend coverage**
   (`HYPOTHESIS_PROFILE=ci uv run pytest --cov -q -p no:cacheprovider`, 2026-10-06).
@@ -108,7 +114,7 @@ issue #104 defines the immutable historical abstention record.
 
 ## Open issues / follow-ups
 
-- PR #106 still needs a final focused independent review and fresh exact-head CI
+- PR #106 still needs a fresh full gate, final focused independent review, and fresh exact-head CI
   before merge.
 - Step 12 recovery must invoke this use case for a valid FINAL checkpoint without rerunning ML.
 - Issue #79 remains the separate later `ResolveUnresolvedRepresentation` use case.
