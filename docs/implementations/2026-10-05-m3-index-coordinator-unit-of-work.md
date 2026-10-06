@@ -35,4 +35,4 @@ M3 acceptance will atomically activate representations and append index operatio
 ## Open issues / follow-ups
 
 - Issue #66 remains open for its intentionally deferred eraser and recovery write paths; only the acceptance-contending IndexCoordinator writer is in this slice.
-- M3 acceptance is separately blocked on defining the evidence kind for an accepted `ABSTAIN` result ([issue #104](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/104)); this does not alter the coordinator work.
+- PR #106 resolved the accepted-`ABSTAIN` evidence-kind boundary (`RECOGNITION_ABSTAINED`) and closed issue #104; this does not alter the coordinator work.
