@@ -10,6 +10,7 @@ pytest_plugins = [
     "tests.fixtures.persistence",
     "tests.factories.models",
     "tests.fixtures.pipeline",
+    "tests.fixtures.api",
 ]
 
 # Deterministic in CI so a failure reproduces locally; randomised exploration otherwise.
