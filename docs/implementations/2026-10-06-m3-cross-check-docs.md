@@ -9,10 +9,19 @@
 
 A read-only cross-check of `main` at 7d0570a found stale statements, all corrected here:
 `CONTEXT.md` no longer says there is no source-import use case or ML worker, and no longer says
-`AcceptProcessingRunUseCase` is still needed; three entries and two README rows no longer say
-"pending PR" or "partial" for merged PRs #97, #100 and #103; the duplicate README row for the
+`AcceptProcessingRunUseCase` is still needed; obsolete "pending PR" claims for merged PRs #97,
+#100 and #103 are replaced by the PR numbers (genuine "partial" scope statuses are kept); the duplicate README row for the
 processing-execution entry is removed; the acceptance entry's Verification list now records the
-2,328-test gate. Issue #102 (implemented in PR #101, decision recorded) is closed.
+2,328-test gate. Issue #102 (implemented in PR #101, decision recorded) is dropped from the pending list and closed
+with this PR.
+
+## Why
+
+The rules require `CONTEXT.md`, entries and the README to stay true.
+
+## Decisions
+
+None new. The owner approved this housekeeping PR and closing #102 on 2026-10-06.
 
 ## Cross-check result (verified 2026-10-06, no code changed)
 
