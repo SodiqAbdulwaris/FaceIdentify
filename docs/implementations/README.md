@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-06 | [M3 step 13: end-to-end recognition, restart and a rebuilt index](2026-10-06-m3-end-to-end-recognition.md) | done (planted perception); TST-043 in progress |
 | 2026-10-06 | [M3 step 12: startup recovery of FINALIZING and pre-FINAL runs](2026-10-06-m3-startup-recovery-finalizing.md) | done; TST-030; issue 34 |
 | 2026-10-06 | [M3 cross-check: stale documentation resolved](2026-10-06-m3-cross-check-docs.md) | done |
 | 2026-10-05 | [M3: atomic processing-run acceptance and abstention evidence](2026-10-05-m3-accept-processing-run.md) | merged in PR #106 after full gate, independent review, and exact-head CI; closed issue #104; step 11 acceptance slice |
