@@ -19,23 +19,8 @@ from backend.api.pagination import encode_cursor
 from backend.api.startup import Backend, create_backend_app
 from backend.app.sources.models import Artifact, ArtifactState
 from tests.factories.models import ModelFactory
-from tests.fixtures.api import MAX_BYTES, MAX_PIXELS, Api, library_settings
+from tests.fixtures.api import MAX_BYTES, MAX_PIXELS, Api, error, imported, library_settings
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
-
-
-async def imported(api: Api, **body: Any) -> dict[str, Any]:
-    response = await api.client.post("/api/v1/sources/import", json=body)
-    assert response.status_code == 201, response.text
-    created: dict[str, Any] = response.json()
-    return created
-
-
-def error(response: Any, status: int, code: str) -> dict[str, Any]:
-    assert response.status_code == status, response.text
-    body: dict[str, Any] = response.json()["error"]
-    assert body["code"] == code
-    return body
-
 
 # --- import ---------------------------------------------------------------------------------
 

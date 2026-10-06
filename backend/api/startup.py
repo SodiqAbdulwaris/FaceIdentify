@@ -28,6 +28,7 @@ from typing import Any, Final
 
 import anyio.to_thread
 from fastapi import FastAPI
+from sqlalchemy.orm import Session
 
 from backend.api.app import BackendReadiness, create_app
 from backend.api.scheduler import SchedulerService
@@ -76,12 +77,19 @@ class MediaLimits:
     max_bytes: int
 
 
+class ProcessingUnavailableError(Exception):
+    """No processing request can be built (for example, no model is registered yet)."""
+
+
 @dataclass(frozen=True)
 class ProcessingSettings:
     """Turns on the scheduler loop. No defaults: the limits are unmeasured, so the host chooses
-    them. `client_for` is the perception boundary (a fake until real weights are cleared, #69)."""
+    them. `client_for` is the perception boundary (a fake until real weights are cleared, #69).
+    `request_for` builds the `ProcessingRequestV1` a "process" command runs under (the
+    development policy profile; raises `ProcessingUnavailableError` when it cannot)."""
 
     client_for: Callable[[PerceptionPlan], Any]
+    request_for: Callable[[Session], dict[str, Any]]
     max_pixels: int
     recognition_k: int
     lease_for: timedelta

@@ -111,6 +111,7 @@ class World:
         assert perception is not None
         return ProcessingSettings(
             client_for=lambda _plan: perception,
+            request_for=lambda _session: self.catalog["request"],
             max_pixels=100,
             recognition_k=2,
             lease_for=timedelta(minutes=5),
