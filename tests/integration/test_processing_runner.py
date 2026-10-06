@@ -153,6 +153,27 @@ def test_an_error_before_the_acceptance_commits_propagates_and_the_run_stays_fin
     assert states(pipeline, Observation) == ["PENDING"]
 
 
+def test_a_defect_is_not_masked_when_settling_the_claim_fails_too(
+    pipeline: Pipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def defect() -> None:
+        raise ValueError("a bug")
+
+    pipeline.perception.on_represent = defect
+    pipeline.enqueue(pipeline.import_image())
+    runner = pipeline.runner()
+
+    def unavailable(*_args: object) -> None:
+        raise OSError("the database is gone")
+
+    monkeypatch.setattr(runner._executor, "fail_claimed", unavailable)
+
+    with pytest.raises(RuntimeError, match="unexpected ValueError") as raised:
+        runner.run_once()
+
+    assert isinstance(raised.value.__cause__, ValueError)  # the defect, not the settling error
+
+
 def test_an_unexpected_defect_fails_the_claimed_work_and_is_raised(pipeline: Pipeline) -> None:
     def defect() -> None:
         raise ValueError("a bug")
