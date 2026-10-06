@@ -320,7 +320,7 @@ def source_media(
     headers = {"Cache-Control": "private, no-cache"}
     if etag is not None:
         headers["ETag"] = etag
-        if if_none_match is not None and etag in [t.strip() for t in if_none_match.split(",")]:
+        if if_none_match is not None and _matches(etag, if_none_match):
             return Response(status_code=304, headers=headers)
     try:
         stream = _open_original(library, artifact)
@@ -334,6 +334,12 @@ def source_media(
         media_type=artifact.mime_type or "application/octet-stream",
         headers=headers,
     )
+
+
+def _matches(etag: str, if_none_match: str) -> bool:
+    """`If-None-Match` uses weak comparison (RFC 9110 section 13.1.2): `*` and `W/` forms match."""
+    offered = [tag.strip().removeprefix("W/") for tag in if_none_match.split(",")]
+    return "*" in offered or etag in offered
 
 
 def _open_original(library: Any, artifact: Artifact) -> BinaryIO:
