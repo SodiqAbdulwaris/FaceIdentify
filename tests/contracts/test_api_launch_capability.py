@@ -131,7 +131,15 @@ async def test_every_http_route_requires_the_current_bearer_capability() -> None
     for headers in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": f"Token {token}"}):
         response = await _request(app, "/health", headers)
         assert response.status_code == 401
-        assert response.json() == {"error": {"code": "UNAUTHORIZED", "message": "unauthorized"}}
+        assert response.json() == {
+            "error": {
+                "code": "UNAUTHORIZED",
+                "message": "unauthorized",
+                "details": None,
+                "retryable": False,
+                "diagnostic_id": None,
+            }
+        }
         assert response.headers["www-authenticate"] == "Bearer"
 
     assert (await _request(app, "/health", {"Authorization": f"Bearer {token}"})).json() == {
