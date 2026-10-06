@@ -8,8 +8,8 @@ status in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.m
 _Last updated: 2026-10-06. Keep this file true and short (rules:
 [`documentation.md`](../../.agents/rules/documentation.md))._
 
-**Where we are:** M0 to M2 are done. M3 (single-image recognition) is complete with planted
-perception; only real-weights work remains and is blocked on the weights licence (issue #69). M4
+**Where we are:** M0 to M3 are done as far as they can be without real face models: M3's exit gate
+is met (TST-038 and TST-039 are blocked only on the weights licence, issue #69). M4
 (API and desktop vertical slice) has just the authenticated API bootstrap; the frontend and the
 desktop shell are placeholders. Nothing user-visible exists yet.
 
@@ -23,7 +23,7 @@ desktop shell are placeholders. Nothing user-visible exists yet.
 | **M3 Recognition** | Done | Candidate retrieval, assessment and reasoner (match, create, abstain), run-local index | [retrieval](../implementations/2026-10-03-m3-candidate-retrieval.md), [assessment and reasoner](../implementations/2026-10-03-m3-recognition-assessment.md) |
 | **M3 Processing pipeline** | Done | Request, claim, private execution, atomic acceptance, startup recovery of interrupted runs, retry | [request](../implementations/2026-10-03-m3-process-source-request.md), [execution](../implementations/2026-10-04-m3-processing-execution.md), [acceptance](../implementations/2026-10-05-m3-accept-processing-run.md), [recovery](../implementations/2026-10-06-m3-startup-recovery-finalizing.md) |
 | **M3 End to end** | Done with fakes | Recognise, restart, rebuilt index, recognise again, with planted perception | [end-to-end](../implementations/2026-10-06-m3-end-to-end-recognition.md) |
-| **M3 remaining** | In progress / blocked | Done: eraser and recovery writes on the unit of work; the pipeline killed at each stage in a real process. Blocked: real weights and their licence (issue #69) | [unit of work](../implementations/2026-10-06-m3-erasure-recovery-unit-of-work.md), [process kill](../implementations/2026-10-06-m3-pipeline-process-kill.md), [plan, section 3](M3_M4_COMPLETION_PLAN.md) |
+| **M3 remaining** | Blocked on weights | Done: eraser and recovery writes on the unit of work; the pipeline killed at each stage in a real process. Blocked: real weights and their licence (issue #69) | [unit of work](../implementations/2026-10-06-m3-erasure-recovery-unit-of-work.md), [process kill](../implementations/2026-10-06-m3-pipeline-process-kill.md), [plan, section 3](M3_M4_COMPLETION_PLAN.md) |
 | **M4 API and desktop** | Started | Authenticated FastAPI bootstrap only. No host, scheduler loop, routes, frontend or desktop shell yet | [API bootstrap](../implementations/2026-10-04-m4-api-launch-capability.md), [plan, section 4](M3_M4_COMPLETION_PLAN.md) |
 | **M5 to M8** | Not started | Corrections, search, movies, cameras, packaging | [tracker](TESTING_IMPLEMENTATION_TRACKER.md) |
 

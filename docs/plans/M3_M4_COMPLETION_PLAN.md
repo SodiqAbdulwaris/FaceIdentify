@@ -59,6 +59,9 @@ shell are placeholders, and there is no production host, lifespan, scheduler loo
 | 3.4 | Weights selection, licence and provenance record (issue #69), then a local-only real-weights integration run | TST-038, TST-039 | owner and licence verification (decision 2) |
 | 3.5 | Initial ML evaluation baseline | TST-044 | licensed datasets and weights; post-M3 per the owner |
 
+**M3 status (2026-10-06): 3.1 and 3.2 are done (PRs #113 and #114); 3.3's sweep, 3.4 and 3.5 stay
+blocked on weights and datasets. The exit gate below is met: see the M3 status block in the tracker.**
+
 **M3 exit gate.** Every M3 tracker row from TST-033 to TST-043 is `PASSING`, or `BLOCKED` with the
 reason and the issue that unblocks it (3.4 is expected to remain `BLOCKED` on weights). TST-044
 (3.5) is deferred past M3 and is not part of this gate. The full backend gate passes with 100% coverage, CI is green on `main`, and
