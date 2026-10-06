@@ -14,7 +14,7 @@ wraps (no web framework is needed to build or test it):
 4. the folder layout is created (idempotent; nothing is removed);
 5. the engine, the Storage Manager, the IndexCoordinator and the eraser are built, and
    `recover_on_startup` reconciles what a crash left half done (artifacts, in-flight work, indexes,
-   erasures), in the order of §28;
+   erasures; a `FINALIZING` run is accepted without ML), in the order of §28;
 6. the caller gets an `OpenLibrary` and runs; leaving the block disposes the engine and releases the
    lock, and so does a failure at any earlier step, so a failed start never leaves the library held.
 
@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.memory.erasure import RepresentationEraser
 from backend.app.memory.index_coordinator import IndexCoordinator, RetryPolicy
+from backend.app.processing.accept_run import AcceptProcessingRunUseCase
 from backend.app.recovery.startup import StartupReport, recover_on_startup
 from backend.app.runtime.package_store import RuntimePackageStore
 from backend.infrastructure.db.engine import create_session_factory, create_sqlite_engine
@@ -173,8 +174,10 @@ def open_library(
             session_factory, engine, coordinator, clock=clock, new_id=new_id
         )
         packages = RuntimePackageStore(roots, new_id=new_id)
+        # No live index wake yet: recovery's own index passes apply the ADD operations it queues.
+        accept_run = AcceptProcessingRunUseCase(unit_of_work, new_id=new_id, clock=clock)
         startup = recover_on_startup(
-            session_factory, store, workspaces, coordinator, eraser, packages,
+            session_factory, store, workspaces, coordinator, eraser, packages, accept_run,
             clock=clock, index_batch=index_batch, max_index_passes=max_index_passes,
         )  # fmt: skip
         yield OpenLibrary(

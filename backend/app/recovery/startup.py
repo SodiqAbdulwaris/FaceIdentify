@@ -28,9 +28,13 @@ keeps failing): it is retried once per start, bounded, and reported as *unresolv
 repair. It never turns a pending run's partial output into library memory, and it never assumes
 anything in memory survived.
 
-Not handled here, and left exactly as found: a run that was `FINALIZING` or the acceptance of a run
-with a final checkpoint (needs the run lifecycle of M3). An interrupted runtime package installation
-is settled from what is on disk (`RuntimePackageStore.recover`).
+A run found `FINALIZING` is handed to `AcceptProcessingRunUseCase` first, without running any ML:
+its valid FINAL checkpoint says the output is settled (§16, §28, decided 2026-10-06). Its job is
+still `RUNNING` and stays so until acceptance has run, because acceptance requires it; the stale
+lease is cleared. A FINAL that acceptance refuses leaves the run `NOT_RESUMABLE` and its output
+private. A run that crashed before FINAL is only `INTERRUPTED`: its PENDING output stays private and
+nothing is requeued; a retry is a new Job and Run (`retry_processing_job`). An interrupted runtime
+package installation is settled from what is on disk (`RuntimePackageStore.recover`).
 
 Precondition, like `recover_artifacts`: one process, no other user of the library, before workers
 start. Single-instance is the desktop shell's job (tech-stack §2).
@@ -49,6 +53,7 @@ from backend.app.jobs.models import Job, JobState
 from backend.app.jobs.repository import FINISHED_JOB_STATES
 from backend.app.memory.erasure import ErasureReport, RepresentationEraser
 from backend.app.memory.index_coordinator import CoordinatorReport, IndexCoordinator
+from backend.app.processing.accept_run import AcceptanceError, AcceptProcessingRunUseCase
 from backend.app.processing.models import (
     TRANSIENT_RUN_STATES,
     ExecutionSegment,
@@ -85,6 +90,18 @@ class InterruptedWork:
 
 
 @dataclass
+class FinalizingWork:
+    """What recovery did with runs found `FINALIZING`."""
+
+    accepted: list[uuid.UUID] = field(default_factory=list)
+    # Accepted, but the post-commit index wake raised: the durable ADD operations are caught up by
+    # the index steps of the same recovery, so this is informational, never a failed run.
+    wake_failures: list[uuid.UUID] = field(default_factory=list)
+    # The FINAL was refused: the run is `NOT_RESUMABLE` and its output is still private.
+    not_resumable: list[uuid.UUID] = field(default_factory=list)
+
+
+@dataclass
 class StartupReport:
     artifacts: RecoveryReport
     missing_references: list[uuid.UUID]
@@ -97,6 +114,7 @@ class StartupReport:
     index_passes: int
     erasure: ErasureReport
     packages: InstallRecoveryReport
+    finalizing: FinalizingWork = field(default_factory=FinalizingWork)
 
     @property
     def unresolved(self) -> list[str]:
@@ -135,6 +153,8 @@ class StartupReport:
             or artifacts.staging_removed
             or self.missing_references
             or self.missing_managed
+            or self.finalizing.accepted
+            or self.finalizing.not_resumable
             or self.interrupted.jobs
             or self.interrupted.runs
             or self.interrupted.segments
@@ -163,6 +183,65 @@ class StartupReport:
         return self.repaired_nothing and not self.unresolved
 
 
+def accept_finalizing_runs(
+    session_factory: sessionmaker[Session],
+    accept: AcceptProcessingRunUseCase,
+    *,
+    clock: Callable[[], datetime],
+) -> FinalizingWork:
+    """Finish the acceptance of every `FINALIZING` run, never rerunning ML (persistence §16, §28).
+
+    Acceptance revalidates the current FINAL checkpoint against SQLite and either commits the whole
+    result or nothing. A refused FINAL (`AcceptanceError`) leaves the run `NOT_RESUMABLE`; its
+    private output is untouched and never activated. An error raised *after* the acceptance
+    committed (the index wake) cannot undo it: the run is read back and, when `COMPLETED`, counted
+    as accepted. Any other failure propagates, because the run is then still `FINALIZING` and the
+    next start retries it.
+    """
+    with session_factory() as session:
+        run_ids = sorted(
+            session.scalars(
+                select(ProcessingRun.id).where(ProcessingRun.state == ProcessingRunState.FINALIZING)
+            )
+        )
+    work = FinalizingWork()
+    for run_id in run_ids:
+        try:
+            accept.accept(run_id)
+        except AcceptanceError as error:
+            _mark_not_resumable(session_factory, run_id, str(error), clock())
+            work.not_resumable.append(run_id)
+        except Exception:
+            with session_factory() as session:
+                run = session.get(ProcessingRun, run_id)
+                if run is None or run.state != ProcessingRunState.COMPLETED:
+                    raise
+            work.accepted.append(run_id)
+            work.wake_failures.append(run_id)
+        else:
+            work.accepted.append(run_id)
+    return work
+
+
+def _mark_not_resumable(
+    session_factory: sessionmaker[Session], run_id: uuid.UUID, detail: str, now: datetime
+) -> None:
+    with session_factory() as session:
+        session.execute(
+            update(ProcessingRun)
+            .where(ProcessingRun.id == run_id, ProcessingRun.state == ProcessingRunState.FINALIZING)
+            .values(
+                state=ProcessingRunState.NOT_RESUMABLE,
+                revision=ProcessingRun.revision + 1,
+                failure_code="FINAL_NOT_ACCEPTABLE",
+                failure_detail=detail,
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        session.commit()
+
+
 def interrupt_in_flight_work(
     session_factory: sessionmaker[Session], *, clock: Callable[[], datetime]
 ) -> InterruptedWork:
@@ -175,7 +254,9 @@ def interrupt_in_flight_work(
     holding one (an expired or stale lease, persistence §28) with its state left alone. A cancelled
     job gets `ended_at`. A `PAUSING` or `CANCELLING` run's partial output is not touched: it stays
     private and is never activated by recovery (§28), and a paused one can be resumed in a new
-    segment. The decision is the owner's (2026-10-01, CONTEXT open question 26).
+    segment. The `RUNNING` job of a run that is still `FINALIZING` is left `RUNNING`: acceptance
+    requires it (`accept_finalizing_runs` runs first and normally leaves none). The decision is
+    the owner's (2026-10-01, CONTEXT open question 26).
     A segment ends at recovery time with no `ended_reason`: nothing recorded why it stopped, and the
     closest reasons (`WORKER_CRASH`, `SHUTDOWN`) would claim a cause that is not known.
     """
@@ -184,7 +265,17 @@ def interrupt_in_flight_work(
         jobs = (
             session.execute(
                 update(Job)
-                .where(Job.state == JobState.RUNNING)
+                .where(
+                    Job.state == JobState.RUNNING,
+                    or_(
+                        Job.processing_run_id.is_(None),
+                        Job.processing_run_id.not_in(
+                            select(ProcessingRun.id).where(
+                                ProcessingRun.state == ProcessingRunState.FINALIZING
+                            )
+                        ),
+                    ),
+                )
                 .values(
                     state=JobState.INTERRUPTED,
                     lease_owner=None,
@@ -312,6 +403,7 @@ def recover_on_startup(
     coordinator: IndexCoordinator,
     eraser: RepresentationEraser,
     packages: RuntimePackageStore,
+    accept_run: AcceptProcessingRunUseCase,
     *,
     clock: Callable[[], datetime],
     index_batch: int,
@@ -325,6 +417,7 @@ def recover_on_startup(
     artifacts = recover_artifacts(session_factory, store, clock=clock)
     missing = mark_missing_referenced_originals(session_factory, clock=clock)
     missing_managed = mark_missing_managed_files(session_factory, store)
+    finalizing = accept_finalizing_runs(session_factory, accept_run, clock=clock)
     interrupted = interrupt_in_flight_work(session_factory, clock=clock)
     cleanup = workspaces.remove_orphans(jobs_that_may_resume(session_factory))
     merged = CoordinatorReport()
@@ -357,4 +450,5 @@ def recover_on_startup(
         passes,
         erasure,
         installs,
+        finalizing,
     )

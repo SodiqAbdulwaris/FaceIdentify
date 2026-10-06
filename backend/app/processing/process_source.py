@@ -33,6 +33,24 @@ class ScheduledProcessing:
     job_id: uuid.UUID
 
 
+def require_processable_image(session: Session, source_id: uuid.UUID) -> None:
+    """The source must be an ACTIVE image whose original is AVAILABLE, else `ProcessSourceError`."""
+    source = session.execute(
+        select(Source, Artifact.state)
+        .join(Artifact, Artifact.id == Source.original_artifact_id)
+        .where(Source.id == source_id)
+    ).one_or_none()
+    if source is None:
+        raise ProcessSourceError(f"source {source_id} does not exist")
+    row, artifact_state = source
+    if row.kind != SourceKind.IMAGE:
+        raise ProcessSourceError(f"source {source_id} is not an image")
+    if row.state != SourceState.ACTIVE:
+        raise ProcessSourceError(f"source {source_id} is not active")
+    if artifact_state != ArtifactState.AVAILABLE:
+        raise ProcessSourceError(f"source {source_id}'s original is not available")
+
+
 class ProcessSourceUseCase:
     """Create one snapshot, PENDING run and queued PROCESS_SOURCE job atomically.
 
@@ -89,20 +107,7 @@ class ProcessSourceUseCase:
         priority: str,
         created_by_user_action: str | None,
     ) -> ScheduledProcessing:
-        source = session.execute(
-            select(Source, Artifact.state)
-            .join(Artifact, Artifact.id == Source.original_artifact_id)
-            .where(Source.id == source_id)
-        ).one_or_none()
-        if source is None:
-            raise ProcessSourceError(f"source {source_id} does not exist")
-        row, artifact_state = source
-        if row.kind != SourceKind.IMAGE:
-            raise ProcessSourceError(f"source {source_id} is not an image")
-        if row.state != SourceState.ACTIVE:
-            raise ProcessSourceError(f"source {source_id} is not active")
-        if artifact_state != ArtifactState.AVAILABLE:
-            raise ProcessSourceError(f"source {source_id}'s original is not available")
+        require_processable_image(session, source_id)
         try:
             JobPriority(priority)
         except ValueError:
