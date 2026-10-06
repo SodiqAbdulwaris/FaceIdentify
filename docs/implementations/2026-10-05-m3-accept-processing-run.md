@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-05; remediation 2026-10-06
 - **Milestone / tracker IDs:** M3 step 11 · TST-042 · TST-043 (partial) · issue #104
-- **Status:** full gate passed; ready for a new independent review and fresh exact-head CI
+- **Status:** full gate passed; ready for a final independent review and fresh exact-head CI
 - **Commits:** pending PR
 
 ## What changed
@@ -81,10 +81,13 @@ issue #104 defines the immutable historical abstention record.
 - Full repository gate after the review fix — **2,321 passed in 277.63s, 100% backend line and
   branch coverage** (`HYPOTHESIS_PROFILE=ci uv run pytest --cov -q -p no:cacheprovider`,
   2026-10-06).
+- Full repository gate after the active-Identity review fix — **2,322 passed in 371.78s, 100%
+  backend line and branch coverage** (`HYPOTHESIS_PROFILE=ci uv run pytest --cov -q -p
+  no:cacheprovider`, 2026-10-06).
 
 ## Open issues / follow-ups
 
-- PR #106 still needs a fresh full gate, a new independent review, and fresh exact-head CI
+- PR #106 still needs a final independent review and fresh exact-head CI
   before merge.
 - Step 12 recovery must invoke this use case for a valid FINAL checkpoint without rerunning ML.
 - Issue #79 remains the separate later `ResolveUnresolvedRepresentation` use case.
