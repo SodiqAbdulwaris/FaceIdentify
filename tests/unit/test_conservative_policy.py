@@ -2,12 +2,14 @@
 
 from typing import Any
 
+import numpy as np
 import pytest
 
 from evaluation.measure_operating_point import (
     choose_conservative,
     conservative_verdict,
     decision_policy,
+    tail_floor,
 )
 
 
@@ -46,6 +48,31 @@ def test_nothing_is_chosen_without_enough_accepted_queries() -> None:
     assert choose_conservative([query(0.60, 0.0)], floor=0.35, minimum_accepted=2) is None
 
 
+def photo(person: str, *vector: float) -> Any:
+    return (person, f"{person}-{vector}", np.array(vector, dtype=np.float32))
+
+
+def test_the_floor_is_the_owners_figure_unless_the_selection_half_has_a_higher_tail() -> None:
+    low = [photo("a", 1.0, 0.0), photo("b", 0.0, 1.0)]  # one different-person pair, cosine 0
+    assert tail_floor(low, 0.326) == 0.326
+
+    high = [photo("a", 1.0, 0.0), photo("b", 0.6, 0.8)]  # cosine 0.6
+    assert tail_floor(high, 0.326) == 0.6
+
+    assert tail_floor([], 0.326) == 0.326  # nothing to read, the owner's figure stands
+
+
+def test_the_floor_reads_only_the_photographs_it_is_given() -> None:
+    selection = [photo("a", 1.0, 0.0), photo("b", 0.0, 1.0)]
+    final_only = [
+        photo("c", 1.0, 0.0),
+        photo("d", 0.99, 0.141),
+    ]  # a very high different-person pair
+
+    assert tail_floor(selection, 0.326) == tail_floor(selection[:], 0.326) == 0.326
+    assert tail_floor(selection + final_only, 0.326) > 0.326  # (so it would matter if it were read)
+
+
 def final_with(accepted: int, correct: int, recall: float | None) -> dict[str, Any]:
     return {"match": {"accepted": accepted, "correct": correct, "recall": recall}}
 
@@ -74,8 +101,7 @@ def test_the_final_half_decides_whether_the_point_stands(
 def test_a_disabled_policy_accepts_nothing_and_never_creates_an_identity() -> None:
     policy = decision_policy("auto-accept-disabled", {"threshold": 0.4, "margin": 0.02})
 
-    assert policy["match_threshold"] == 1.0
-    assert policy["margin"] == 2.0  # no pair of scores is two apart from the runner-up and above 1
+    assert policy["match_threshold"] == 2.0  # above any cosine: nothing is ever matched
     assert policy["new_identity_ceiling"] == -1.0
     assert policy["version"] == "buffalo-l-abstain-only-v1"
 
