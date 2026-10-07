@@ -270,7 +270,10 @@ async def test_a_failing_look_degrades_the_scheduler_capability_until_a_success(
             raise ValueError("a bug")
 
     perception.on_represent = defect
-    app, backend = world.app(token(), idle_seconds=0.01)
+    # A long idle wait: the loop looks again only when woken, so the failed look's `last_error`
+    # stays observable until the explicit wake below. A short interval lets the loop's own next
+    # (idle, successful) look clear it within milliseconds, before a slow poller can see it.
+    app, backend = world.app(token())
 
     async with app.router.lifespan_context(app):
         await until(
