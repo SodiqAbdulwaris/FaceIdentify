@@ -70,6 +70,26 @@ async fn choose_library(app: AppHandle) -> Result<Option<String>, String> {
     Ok(Some(root.display().to_string()))
 }
 
+/// Let the user pick images to import. The backend reads the files itself (it is on the same
+/// machine), so only their paths cross to the web view.
+#[tauri::command]
+async fn choose_images(app: AppHandle) -> Result<Vec<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Images", config::IMAGE_EXTENSIONS)
+            .blocking_pick_files()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(picked
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|file| file.into_path().ok())
+        .map(|path| path.display().to_string())
+        .collect())
+}
+
 fn repository_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest
@@ -136,7 +156,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             backend_status,
             library_info,
-            choose_library
+            choose_library,
+            choose_images
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

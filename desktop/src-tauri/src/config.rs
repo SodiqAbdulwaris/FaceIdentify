@@ -14,6 +14,9 @@ pub const PYTHON_ENV: &str = "FACEIDENTIFY_PYTHON";
 pub const DEVELOPMENT_PROFILE_ENV: &str = "FACEIDENTIFY_DEVELOPMENT_PROFILE";
 const SETTINGS_FILE: &str = "shell.json";
 
+/// The image formats the backend can import (JPEG, PNG, BMP, WebP): what the file picker offers.
+pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "webp"];
+
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct Saved {
     library_root: Option<PathBuf>,
@@ -88,6 +91,11 @@ pub fn development_profile(from_environment: Option<String>, debug_build: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_picker_offers_exactly_the_formats_the_backend_imports() {
+        assert_eq!(IMAGE_EXTENSIONS, ["jpg", "jpeg", "png", "bmp", "webp"]);
+    }
 
     #[test]
     fn a_saved_library_root_round_trips() {

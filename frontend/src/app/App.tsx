@@ -1,7 +1,22 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
+import { RouterProvider } from 'react-router'
+import { BackendGate } from './BackendGate'
+import { createRouter } from './routes'
+
 export function App() {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: { queries: { staleTime: 5_000, refetchOnWindowFocus: false } },
+      }),
+  )
+  const [router] = useState(createRouter)
   return (
-    <main className="flex min-h-screen items-center justify-center">
-      <h1 className="text-2xl font-semibold">FaceIdentify</h1>
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <BackendGate>
+        <RouterProvider router={router} />
+      </BackendGate>
+    </QueryClientProvider>
   )
 }
