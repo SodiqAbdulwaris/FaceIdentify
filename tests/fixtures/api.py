@@ -47,6 +47,7 @@ class Api:
     secret: str
     folder: Path  # where tests put the files they import (outside the library)
     clock: FrozenClock
+    perception: PlantedPerception | None = None  # set when processing is on: what it "sees"
 
     def image(
         self, name: str = "photo.png", size: tuple[int, int] = (4, 3), fmt: str = "PNG"
@@ -119,6 +120,7 @@ async def processing_api(
         media_limits=MediaLimits(max_pixels=MAX_PIXELS, max_bytes=MAX_BYTES),
     )
     async with serving(app, secret, tmp_path / "user-files", clock) as running:
+        running.perception = perception
         yield running
 
 

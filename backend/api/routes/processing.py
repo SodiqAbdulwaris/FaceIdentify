@@ -20,12 +20,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import Library, get_backend
 from backend.api.errors import ApiError
-from backend.api.pagination import Page, PageQuery, decode_cursor, invalid_cursor, paginate
+from backend.api.pagination import (
+    Page,
+    PageQuery,
+    created_cursor,
+    created_key,
+    older_than,
+    paginate,
+)
 from backend.api.routes.sources import source_not_found
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
 from backend.app.jobs.models import Job, JobPriority, JobType
@@ -184,13 +191,7 @@ def _listing(
     state: ProcessingRunState | None,
 ) -> Page[ProcessingRunDetail]:
     context = f"runs:{source_id}:{state}"
-    after: tuple[datetime, uuid.UUID] | None = None
-    if page.cursor is not None:
-        key = decode_cursor(page.cursor, context)
-        try:
-            after = (datetime.fromisoformat(key[0]), uuid.UUID(key[1]))
-        except (IndexError, TypeError, ValueError):
-            raise invalid_cursor() from None
+    after = created_cursor(page.cursor, context)
 
     def read(session: Session) -> Page[ProcessingRunDetail]:
         query = select(ProcessingRun)
@@ -199,12 +200,7 @@ def _listing(
         if state is not None:
             query = query.where(ProcessingRun.state == state)
         if after is not None:
-            query = query.where(
-                or_(
-                    ProcessingRun.created_at < after[0],
-                    and_(ProcessingRun.created_at == after[0], ProcessingRun.id < after[1]),
-                )
-            )
+            query = query.where(older_than(ProcessingRun.created_at, ProcessingRun.id, after))
         runs = list(
             session.scalars(
                 query.order_by(ProcessingRun.created_at.desc(), ProcessingRun.id.desc())
@@ -217,7 +213,7 @@ def _listing(
             runs,
             page.limit,
             context=context,
-            key=lambda run: [run.created_at.isoformat(), str(run.id)],
+            key=lambda run: created_key(run.created_at, run.id),
             item=lambda run: details[str(run.id)],
         )
 

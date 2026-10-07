@@ -10,12 +10,19 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import Library, get_backend
 from backend.api.errors import ApiError
-from backend.api.pagination import Page, PageQuery, decode_cursor, invalid_cursor, paginate
+from backend.api.pagination import (
+    Page,
+    PageQuery,
+    created_cursor,
+    created_key,
+    older_than,
+    paginate,
+)
 from backend.api.routes.processing import (
     JobBrief,
     ProcessingRunDetail,
@@ -66,13 +73,7 @@ def list_jobs(
     type: Annotated[JobType | None, Query()] = None,  # noqa: A002 - the API's filter name
 ) -> Page[JobDetail]:
     context = f"jobs:{state}:{type}"
-    after: tuple[datetime, uuid.UUID] | None = None
-    if page.cursor is not None:
-        key = decode_cursor(page.cursor, context)
-        try:
-            after = (datetime.fromisoformat(key[0]), uuid.UUID(key[1]))
-        except (IndexError, TypeError, ValueError):
-            raise invalid_cursor() from None
+    after = created_cursor(page.cursor, context)
 
     def read(session: Session) -> Page[JobDetail]:
         query = select(Job)
@@ -81,9 +82,7 @@ def list_jobs(
         if type is not None:
             query = query.where(Job.type == type)
         if after is not None:
-            query = query.where(
-                or_(Job.created_at < after[0], and_(Job.created_at == after[0], Job.id < after[1]))
-            )
+            query = query.where(older_than(Job.created_at, Job.id, after))
         jobs = list(
             session.scalars(
                 query.order_by(Job.created_at.desc(), Job.id.desc())
@@ -95,7 +94,7 @@ def list_jobs(
             jobs,
             page.limit,
             context=context,
-            key=lambda job: [job.created_at.isoformat(), str(job.id)],
+            key=lambda job: created_key(job.created_at, job.id),
             item=_detail,
         )
 

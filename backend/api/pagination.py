@@ -11,12 +11,15 @@ route uses must end in a unique tie-breaker so the keyset is total.
 import base64
 import binascii
 import json
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Annotated, Any, Final
 
 from fastapi import Depends, Query
 from pydantic import BaseModel
+from sqlalchemy import ColumnElement, and_, or_
 
 from backend.api.errors import ApiError
 
@@ -103,3 +106,25 @@ def paginate[T, R](
     return Page(
         items=[item(row) for row in kept], page=PageInfo(next_cursor=next_cursor, has_more=has_more)
     )
+
+
+def created_cursor(cursor: str | None, context: str) -> tuple[datetime, uuid.UUID] | None:
+    """The `(created_at, id)` position a newest-first cursor names; None for the first page."""
+    if cursor is None:
+        return None
+    key = decode_cursor(cursor, context)
+    try:
+        return datetime.fromisoformat(key[0]), uuid.UUID(key[1])
+    except (IndexError, TypeError, ValueError):
+        raise invalid_cursor() from None
+
+
+def created_key(created_at: datetime, row_id: uuid.UUID) -> list[str]:
+    return [created_at.isoformat(), str(row_id)]
+
+
+def older_than(
+    created_at: Any, row_id: Any, after: tuple[datetime, uuid.UUID]
+) -> ColumnElement[bool]:
+    """Rows strictly after `after` in `created_at DESC, id DESC` order."""
+    return or_(created_at < after[0], and_(created_at == after[0], row_id < after[1]))
