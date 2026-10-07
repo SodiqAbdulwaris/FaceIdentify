@@ -314,7 +314,9 @@ def main() -> None:
             }
             for name, half in halves.items()
         },
-        "genuine_pairs": {"n": len(genuine), "percentiles": percentiles(genuine, [1, 5, 25, 50, 75])},
+        "genuine_pairs": {
+            "n": len(genuine), "percentiles": percentiles(genuine, [1, 5, 25, 50, 75])
+        },
         "impostor_pairs": {
             "n": len(impostor), "percentiles": percentiles(impostor, [50, 95, 99, 99.9])
         },
