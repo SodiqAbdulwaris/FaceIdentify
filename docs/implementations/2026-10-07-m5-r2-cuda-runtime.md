@@ -11,7 +11,7 @@
   directory, the worker (a spawned process, so it does this itself, before any model library is
   imported) puts it first on `sys.path`, so its `onnxruntime-gpu` shadows the CPU build, and
   registers every `nvidia/*/bin` in it on the DLL search path and `PATH`. With the variable unset
-  nothing changes. Called from `worker_entry`; `tests/unit/test_gpu_path.py` (3) covers it.
+  nothing changes. Called from `worker_entry`; `tests/unit/test_gpu_path.py` (4) covers it.
 - Nothing else in the application changed: the worker still never falls back by itself
   (`load_session`), so a machine where CUDA cannot start gets a provider error the backend turns into
   the planned CPU fallback.
@@ -44,7 +44,7 @@ path of `local-models/ort-gpu` before starting the worker or a script that start
   of the smoke test agree to 0.001.
 - `uv run pytest -m e2e tests/e2e/test_real_models.py` with `FACEIDENTIFY_PROVIDER=CUDAExecutionProvider`:
   1 passed.
-- Static gate on both platforms; see the PR for the full-suite result.
+- Gate on Windows: `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform linux` clean (269 source files); `uv run pytest --cov`: 2670 passed, 100% line and branch coverage (12 min 34 s). CI runs the Linux static job.
 
 ## Licences
 
