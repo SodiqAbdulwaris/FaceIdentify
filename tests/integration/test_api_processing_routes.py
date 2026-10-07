@@ -16,7 +16,9 @@ from backend.api.startup import ProcessingUnavailableError
 from backend.app.jobs.models import Job
 from backend.app.processing.models import ProcessingRun
 from backend.app.sources.models import Artifact
+from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, error, imported
+from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 
 RUNS = "/api/v1/processing-runs"
 
@@ -73,6 +75,11 @@ async def test_processing_a_source_is_accepted_tracked_and_completed(processing_
     assert accepted["state"] in ("PENDING", "RUNNING", "FINALIZING", "COMPLETED")
     assert accepted["job"]["priority"] == "INTERACTIVE"
     assert accepted["parent_run_id"] is None
+    assert accepted["policy"] == {  # the notice a screen shows for results from this policy
+        "calibration_mode": "UNCALIBRATED",
+        "decision_policy_version": "m3-fixture-v1",
+        "calibrated": False,
+    }
     run = await finished(api, accepted["id"])
     assert run["job"]["state"] == "COMPLETED"
     assert run["job"]["id"] == accepted["job"]["id"]
@@ -253,6 +260,33 @@ async def test_a_run_with_no_job_is_listed_without_one(processing_api: Api) -> N
         session.commit()
 
     assert (await api.client.get(f"{RUNS}/{run['id']}")).json()["job"] is None
+
+
+async def test_a_run_frozen_with_a_calibrated_policy_is_not_marked_uncalibrated(
+    processing_api: Api, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    api = processing_api
+    source = await imported(api, path=str(api.image()))
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        build = ModelFactory(session, clock, new_id)
+        frozen = {"calibration": {"mode": "CALIBRATED"}, "decision_policy": {}}
+        snapshot = build.snapshot(canonical_json=frozen)
+        run = build.run(
+            source_id=uuid.UUID(source["id"]),
+            configuration_snapshot_id=snapshot.id,
+            state="COMPLETED",
+        )
+        session.commit()
+        run_id = run.id
+
+    policy = (await api.client.get(f"{RUNS}/{run_id}")).json()["policy"]
+
+    assert policy == {
+        "calibration_mode": "CALIBRATED",
+        "decision_policy_version": None,
+        "calibrated": True,
+    }
 
 
 async def test_a_jobs_progress_is_reported_once_recorded(processing_api: Api) -> None:
