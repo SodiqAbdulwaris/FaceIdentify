@@ -119,6 +119,12 @@ def _summaries(session: Session, people: list[Person]) -> list[PersonSummary]:
     ]
 
 
+def _announced(backend: Backend, summary: PersonSummary) -> PersonSummary:
+    """Tell connected screens a person changed (after the commit; they refetch by id)."""
+    backend.announce("person.updated", "person", summary.id)
+    return summary
+
+
 def _conflict(code: str, message: str, error: IdentityManagerError) -> ApiError:
     return ApiError(409, code, message, details={"reason": str(error)})
 
@@ -145,7 +151,7 @@ def name_an_identity(
             ) from None
         return _summaries(session, [person])[0]
 
-    return library.unit_of_work.write(write)
+    return _announced(backend, library.unit_of_work.write(write))
 
 
 @router.get("/people")
@@ -209,7 +215,7 @@ def rename(
             ) from None
         return _summaries(session, [person])[0]
 
-    return library.unit_of_work.write(write)
+    return _announced(backend, library.unit_of_work.write(write))
 
 
 @router.post("/people/{person_id}/assign-identity")
@@ -238,7 +244,7 @@ def assign_identity(
             ) from None
         return _summaries(session, [person])[0]
 
-    return library.unit_of_work.write(write)
+    return _announced(backend, library.unit_of_work.write(write))
 
 
 @router.post("/people/{person_id}/remove-identity")
@@ -271,4 +277,4 @@ def remove_identity(
         )
         return _summaries(session, [person])[0]
 
-    return library.unit_of_work.write(write)
+    return _announced(backend, library.unit_of_work.write(write))

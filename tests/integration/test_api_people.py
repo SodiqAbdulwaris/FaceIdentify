@@ -185,3 +185,28 @@ async def test_a_person_who_is_not_active_is_not_found(api: Api, new_id: SeededU
 
     error(await api.client.get(f"{PEOPLE}/{person['id']}"), 404, "PERSON_NOT_FOUND")
     assert (await api.client.get(PEOPLE)).json()["items"] == []
+
+
+async def test_every_change_to_a_person_is_announced_and_a_refusal_is_not(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    first, second = identity_ids(api, new_id, count=2)
+    subscription = api.backend.events.subscribe()
+    try:
+        person = await named(api, first)
+        url = f"{PEOPLE}/{person['id']}"
+        await api.client.patch(url, json={"display_name": "Alicia", "expected_revision": 1})
+        await api.client.post(f"{url}/assign-identity", json={"identity_id": second})
+        await api.client.post(f"{url}/remove-identity", json={"identity_id": second})
+        await api.client.patch(url, json={"display_name": "Late", "expected_revision": 1})  # stale
+        await api.client.post(PEOPLE, json={"display_name": "Again", "identity_id": first})  # named
+
+        events = []
+        while not subscription.queue.empty():
+            events.append(subscription.queue.get_nowait())
+    finally:
+        api.backend.events.unsubscribe(subscription)
+
+    assert [(e["type"], e["resource"]) for e in events] == [
+        ("person.updated", {"type": "person", "id": person["id"]})
+    ] * 4
