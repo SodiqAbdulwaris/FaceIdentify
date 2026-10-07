@@ -38,7 +38,10 @@ pub fn save_library_root(config_dir: &Path, root: &Path) -> io::Result<()> {
         library_root: Some(root.to_path_buf()),
     })
     .map_err(io::Error::other)?;
-    fs::write(settings_path(config_dir), text)
+    // Write beside it, then replace: a crash leaves the old choice or the new one, never half.
+    let temporary = config_dir.join(format!("{SETTINGS_FILE}.tmp"));
+    fs::write(&temporary, text)?;
+    fs::rename(&temporary, settings_path(config_dir))
 }
 
 /// Which root to use: the environment, then the saved choice, then the default.
@@ -97,6 +100,23 @@ mod tests {
             load_saved_library_root(&dir.path().join("config")),
             Some(root)
         );
+    }
+
+    #[test]
+    fn saving_replaces_the_old_choice_and_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("one");
+        let second = dir.path().join("two");
+
+        save_library_root(dir.path(), &first).unwrap();
+        save_library_root(dir.path(), &second).unwrap();
+
+        assert_eq!(load_saved_library_root(dir.path()), Some(second));
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, [std::ffi::OsString::from(SETTINGS_FILE)]);
     }
 
     #[test]

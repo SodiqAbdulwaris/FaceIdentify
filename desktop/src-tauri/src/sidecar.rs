@@ -177,23 +177,23 @@ pub fn start(config: &SidecarConfig, timeout: Duration) -> Result<Sidecar, Sidec
     let stdin = child.stdin.take();
     if let Some(stderr) = child.stderr.take() {
         thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                log::warn!(target: "backend", "{line}");
-            }
+            for_each_line(
+                BufReader::new(stderr),
+                |line| log::warn!(target: "backend", "{line}"),
+            );
         });
     }
     let stdout = child.stdout.take().expect("stdout is piped");
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        let outcome = reader.read_line(&mut line).map(|_| line);
+        let mut first = Vec::new();
+        let outcome = reader
+            .read_until(b'\n', &mut first)
+            .map(|_| String::from_utf8_lossy(&first).into_owned());
         let _ = sender.send(outcome);
         // Keep draining so the host never blocks writing to a pipe nobody reads.
-        let mut sink = String::new();
-        while reader.read_line(&mut sink).map(|n| n > 0).unwrap_or(false) {
-            sink.clear();
-        }
+        for_each_line(reader, drop);
     });
     let outcome = match receiver.recv_timeout(timeout) {
         Ok(Ok(line)) if !line.trim().is_empty() => parse_handshake(&line),
@@ -213,6 +213,20 @@ pub fn start(config: &SidecarConfig, timeout: Duration) -> Result<Sidecar, Sidec
             let _ = child.kill();
             let _ = child.wait();
             Err(error)
+        }
+    }
+}
+
+/// Read a pipe to its end, a line at a time, whatever bytes it carries: text that is not valid
+/// UTF-8 (a Windows code page in a traceback) is shown with replacement characters and never ends
+/// the reading early, because a child whose pipe fills up would block.
+fn for_each_line(mut reader: impl BufRead, mut each: impl FnMut(String)) {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => each(String::from_utf8_lossy(&line).trim_end().to_string()),
         }
     }
 }
@@ -458,6 +472,19 @@ while True:
             fs::read_to_string(beat).unwrap(),
             first,
             "the failed host is still running"
+        );
+    }
+
+    #[test]
+    fn a_pipe_is_read_to_its_end_even_when_a_line_is_not_valid_utf8() {
+        let bytes: &[u8] = b"first\ncaf\xe9 and more\nlast without newline";
+        let mut lines = Vec::new();
+
+        for_each_line(bytes, |line| lines.push(line));
+
+        assert_eq!(
+            lines,
+            ["first", "caf\u{fffd} and more", "last without newline"]
         );
     }
 
