@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M4 W5: the generated API contract](2026-10-07-m4-api-contract.md) | done; TST-046 |
 | 2026-10-07 | [M4 W4: the event connection](2026-10-07-m4-api-events.md) | done; server side; TST-049 |
 | 2026-10-07 | [M4 W3.6: every run reports its policy provenance](2026-10-07-m4-api-policy-provenance.md) | done; M4 W3 complete |
 | 2026-10-07 | [M4 W3.5: identities and occurrences, read-only](2026-10-07-m4-api-memory-reads.md) | partial; M4 W3 fifth part; TST-045 |
