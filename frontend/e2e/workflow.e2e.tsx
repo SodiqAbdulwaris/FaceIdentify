@@ -49,6 +49,7 @@ async function launch() {
 async function quit(): Promise<number | null> {
   const code = (await backend?.stop()) ?? null
   backend = null
+  shell.status = { state: 'starting' } // nothing is serving until the next launch
   return code
 }
 
@@ -63,7 +64,8 @@ beforeAll(() => {
 
 afterAll(async () => {
   await quit()
-  rmSync(root, { recursive: true, force: true })
+  // (Windows may hold a file for a moment after the process exits: retry before giving up)
+  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 describe('the desktop image workflow', () => {
