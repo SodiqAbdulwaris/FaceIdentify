@@ -29,6 +29,11 @@ Putting it on the run keeps one source of truth and makes the notice survive res
 > `GET /runtime/status` describes runtime packages and belongs with the runtime work (M8). Adding a
 > third status endpoint would only duplicate `/readiness`.
 
+> **Decision 2026-10-07 (owner):** confirmed. `/health` answers whether the sidecar process and API
+> are alive; `/readiness` answers whether this instance can serve the application and returns
+> structured component state (database, scheduler, ML runtime and catalog, index), including
+> `DEGRADED`. The frontend treats `/readiness` as the authoritative operational-status read model.
+
 ## Verification
 
 - `tests/integration/test_api_processing_routes.py` (16): a requested run reports

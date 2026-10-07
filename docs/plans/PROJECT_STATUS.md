@@ -5,7 +5,7 @@ detail behind any line, follow its link into [`docs/implementations/`](../implem
 the work still to come see [`M3_M4_COMPLETION_PLAN.md`](M3_M4_COMPLETION_PLAN.md) and the per-task
 status in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md).
 
-_Last updated: 2026-10-07. Keep this file true and short (rules:
+_Last updated: 2026-10-07 (M5 plan drafted). Keep this file true and short (rules:
 [`documentation.md`](../../.agents/rules/documentation.md))._
 
 **Where we are:** M0 to M3 are done as far as they can be without real face models: M3's exit gate
@@ -25,13 +25,14 @@ desktop shell are placeholders. Nothing user-visible exists yet.
 | **M3 End to end** | Done with fakes | Recognise, restart, rebuilt index, recognise again, with planted perception | [end-to-end](../implementations/2026-10-06-m3-end-to-end-recognition.md) |
 | **M3 remaining** | Blocked on weights | Done: eraser and recovery writes on the unit of work; the pipeline killed at each stage in a real process. Blocked: real weights and their licence (issue #69) | [unit of work](../implementations/2026-10-06-m3-erasure-recovery-unit-of-work.md), [process kill](../implementations/2026-10-06-m3-pipeline-process-kill.md), [plan, section 3](M3_M4_COMPLETION_PLAN.md) |
 | **M4 API and desktop** | Done with the development profile | The complete desktop image workflow runs end to end and survives a restart: the Tauri shell starts the Python backend (token in the environment, validated handshake, clean stop), the web app imports images, processes them in the background, shows each image with its faces and the people found, and keeps its memory across restarts. REST, events and the generated contract are built and kept in sync by tests and CI. It runs on the sidecar's development profile (fake catalog and perception under a labelled uncalibrated policy) because no real model is cleared yet (issue #69) | [API bootstrap](../implementations/2026-10-04-m4-api-launch-capability.md), [lifespan and readiness](../implementations/2026-10-06-m4-api-lifespan-readiness.md), [sidecar host](../implementations/2026-10-07-m4-sidecar-host.md), [processing runner](../implementations/2026-10-07-m4-processing-runner.md), [scheduler loop](../implementations/2026-10-07-m4-scheduler-loop.md), [API conventions](../implementations/2026-10-07-m4-api-conventions.md), [source routes](../implementations/2026-10-07-m4-api-sources.md), [processing routes](../implementations/2026-10-07-m4-api-processing.md), [cancel and jobs](../implementations/2026-10-07-m4-api-cancel-jobs.md), [identity and occurrence reads](../implementations/2026-10-07-m4-api-memory-reads.md), [policy provenance](../implementations/2026-10-07-m4-api-policy-provenance.md), [events](../implementations/2026-10-07-m4-api-events.md), [API contract](../implementations/2026-10-07-m4-api-contract.md), [development profile](../implementations/2026-10-07-m4-development-profile.md), [host lifeline](../implementations/2026-10-07-host-stdin-lifeline.md), [desktop shell](../implementations/2026-10-07-m4-desktop-sidecar.md), [frontend foundation](../implementations/2026-10-07-m4-frontend-foundation.md), [library screen](../implementations/2026-10-07-m4-frontend-library.md), [source screen](../implementations/2026-10-07-m4-frontend-source.md), [people and processing screens](../implementations/2026-10-07-m4-frontend-people.md), [plan, section 4](M3_M4_COMPLETION_PLAN.md), [end to end](../implementations/2026-10-07-m4-end-to-end.md) |
-| **M5 to M8** | Not started | Corrections, search, movies, cameras, packaging | [tracker](TESTING_IMPLEMENTATION_TRACKER.md) |
+| **M5 Corrections, search and memory** | Planned | The plan is drafted and awaits approval: naming, corrections, merge and split, recycle/delete/forget, search. No code yet | [M5 plan](M5_PLAN.md), [owner decisions](../implementations/2026-10-07-m4-owner-decisions-and-m5-plan.md) |
+| **M6 to M8** | Not started | Movies, cameras, packaging | [tracker](TESTING_IMPLEMENTATION_TRACKER.md) |
 
 **Not built yet (so you know what you cannot try):** no real face model (weights are not selected
 or committed, so the app runs on the development profile), no corrections, merging or naming of
 people (M5), no search (M5), no movies or cameras (M6, M7), no installer or packaged runtime (M8).
 Run it with `npm run tauri dev` after `uv sync` and `npm install` (see the desktop entry).
 
-**Open decisions and blockers:** the weights licence and selection (issue #69); the decision-policy
+**Open decisions and blockers:** the weights licence and selection (issue #69); the M5 plan's approval and its open questions; the development-profile guard (issue #137); the decision-policy
 numbers stay a labelled development profile until the evaluation baseline exists. All
 recorded decisions are in [`CONTEXT.md`](../../.agents/CONTEXT.md).
