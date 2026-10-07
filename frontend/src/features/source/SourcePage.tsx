@@ -6,7 +6,7 @@ import { keys } from '@/api/keys'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '../StatusBadge'
-import { canCancel, canProcess, canRetry, isActive } from '../status'
+import { ACTIVE_REFETCH_MS, canCancel, canProcess, canRetry, isActive } from '../status'
 import { useSourceImage } from '../useSourceImage'
 import { errorMessage } from '../library/messages'
 import { useRunActions } from '../processing/useRunActions'
@@ -37,6 +37,10 @@ export function SourcePage() {
     queryKey: keys.sourceRuns(sourceId),
     queryFn: () => endpoints.sourceRuns(sourceId),
     enabled: source.isSuccess,
+    refetchInterval: (query) =>
+      query.state.data?.items[0] && isActive(query.state.data.items[0].state)
+        ? ACTIVE_REFETCH_MS
+        : false,
   })
 
   if (source.isError) {

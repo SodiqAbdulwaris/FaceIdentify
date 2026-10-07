@@ -18,11 +18,14 @@
   job (state and attempt), progress while under way, the earlier attempt it retries, the policy it
   ran under ("development-uncalibrated-v1 (uncalibrated)"), a plain explanation of a failure
   ("it stopped without a result ... nothing from this attempt was kept"), and **Cancel processing**
-  or **Try again** only where they apply. It updates by itself through the events.
+  or **Try again** only where they apply. It updates by itself through the events, and looks again every three seconds while the run is
+  under way (the source screen's history does the same), for when the live connection is down.
 - **`FaceCrop`**: the backend stores no face crops yet (`face_crop` is null), so a face is cut out of
   its original for display: the image is scaled uniformly and shifted so the box fills a square tile
   (centred on its shorter side); until the image's own size is known the plain image is shown, never
   a distorted one.
+- A crop remembers which image it measured, so a tile reused for another image is not sized with the
+  first one's dimensions.
 - The placeholder screen is gone; every route in the plan is a real screen.
 
 ## Why
@@ -36,7 +39,7 @@ None new. The "Person XXXXXX" label is a stand-in for names, which arrive with t
 
 ## Verification
 
-- `npm test` (110 across 16 files): the people list (empty, faces and counts with correct plurals,
+- `npm test` (113 across 16 files): the people list (empty, faces and counts with correct plurals,
   paging, failure), a person (counts and wording, appearances as links to their images, a face crop
   when there is a face and none when there is not, paging, no appearances, not found, other failure,
   the appearances failing, and that nothing is asked for when the person is unknown), a processing
@@ -44,7 +47,7 @@ None new. The "Person XXXXXX" label is a stand-in for names, which arrive with t
   a failure with its earlier attempt and retry, a refused request's message, not found and other
   failure), the face crop (plain image first, scaled and centred in proportion for a wide and for a
   tall face, plain when no size is reported) and the label.
-- Mutation probes (27 by hand on every rule above): all killed after tests were added for what
+- Mutation probes (32 by hand on every rule above): all killed after tests were added for what
   survived (nothing requested for an unknown person, no "under way" for a finished run, centring
   of a narrow face, a reported size of zero).
 - `npm run typecheck`, `npm run lint -- --deny-warnings` and `npm run build` pass.

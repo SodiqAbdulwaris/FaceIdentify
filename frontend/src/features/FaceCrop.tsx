@@ -20,7 +20,11 @@ export function FaceCrop({
   label: string
 }) {
   const { url } = useSourceImage(sourceId)
-  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null)
+  const [measured, setMeasured] = useState<{ url: string; width: number; height: number } | null>(
+    null,
+  )
+  // a size measured on another image (this tile was reused) is not this image's size
+  const natural = measured && measured.url === url ? measured : null
 
   const style = (() => {
     if (!natural) return { width: size, height: size, objectFit: 'cover' as const }
@@ -50,7 +54,11 @@ export function FaceCrop({
           onLoad={(event) => {
             const image = event.currentTarget
             if (image.naturalWidth > 0 && image.naturalHeight > 0) {
-              setNatural({ width: image.naturalWidth, height: image.naturalHeight })
+              setMeasured({
+                url: image.src,
+                width: image.naturalWidth,
+                height: image.naturalHeight,
+              })
             }
           }}
         />
