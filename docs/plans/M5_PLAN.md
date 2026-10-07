@@ -113,7 +113,7 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
 - **R0. Issue #137, the development-profile guard (entry cleanup). Built 2026-10-07** ([entry](../implementations/2026-10-07-m5-r0-library-profile-guard.md)). Built first, because every later
   step may touch a library worth keeping. Its history stays an M4 follow-up; M5 refuses to go on to
   real-library use without it.
-- **R1. Issue #69, select and verify the weights.** Done only when all of this is recorded: the exact
+- **R1. Issue #69, select and verify the weights. Selected and verified on CPU 2026-10-07** ([record](../research/reference-model-selection.md), [entry](../implementations/2026-10-07-m5-r1-reference-models.md)); the owner delegated the final choice. Done only when all of this is recorded: the exact
   SCRFD and ArcFace models; the authoritative source; the hashes; the licences, reviewed, and the
   redistribution status; and, in the existing runtime and catalog architecture, the model and version
   provenance. **Gate:** the owner approves the selection from my candidates report before any download.
