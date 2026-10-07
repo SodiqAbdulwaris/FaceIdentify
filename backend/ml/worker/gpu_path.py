@@ -7,13 +7,20 @@ the directory itself, before any model library is imported: the directory goes f
 (so its `onnxruntime` shadows the CPU one) and every `nvidia/*/bin` in it goes on the DLL search
 path. With the variable unset nothing changes, and a worker that cannot start CUDA fails with a
 provider error the backend turns into the CPU fallback (`load_session` never falls back itself).
+The variable is trusted, owner-set configuration: an absolute path of a directory the owner
+installed into, which can shadow any module under it by design.
 """
 
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 GPU_DIR_ENV = "FACEIDENTIFY_ORT_GPU_DIR"
+
+# The handles `os.add_dll_directory` returns: a directory stays on the search path until its handle
+# is closed, so they are kept for the life of the process.
+_dll_handles: list[Any] = []
 
 
 def activate(environ: dict[str, str] | os._Environ[str] = os.environ) -> Path | None:
@@ -28,7 +35,7 @@ def activate(environ: dict[str, str] | os._Environ[str] = os.environ) -> Path | 
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     for directory in bins:
-        os.add_dll_directory(directory)  # type: ignore[attr-defined,unused-ignore]
+        _dll_handles.append(os.add_dll_directory(directory))  # type: ignore[attr-defined,unused-ignore]
     if bins:
         environ["PATH"] = os.pathsep.join([*bins, environ.get("PATH", "")])
     return root

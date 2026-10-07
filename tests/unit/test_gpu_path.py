@@ -9,10 +9,32 @@ import pytest
 from backend.ml.worker import gpu_path
 
 
+class Handle:
+    """What `os.add_dll_directory` returns: the directory leaves the search path when closed."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+handles: list[Handle] = []
+
+
 @pytest.fixture
 def dll_dirs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     added: list[str] = []
-    monkeypatch.setattr(os, "add_dll_directory", added.append, raising=False)
+    handles.clear()
+
+    def add(directory: str) -> Handle:
+        added.append(directory)
+        handle = Handle()
+        handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(os, "add_dll_directory", add, raising=False)
+    monkeypatch.setattr(gpu_path, "_dll_handles", [])
     monkeypatch.setattr(sys, "path", list(sys.path))
     return added
 
@@ -50,3 +72,14 @@ def test_a_directory_without_nvidia_libraries_leaves_the_search_path_alone(
     assert gpu_path.activate(environ) == tmp_path
     assert dll_dirs == []
     assert environ["PATH"] == "base"
+
+
+def test_the_dll_handles_are_kept_open_for_the_life_of_the_process(
+    tmp_path: Path, dll_dirs: list[str]
+) -> None:
+    (tmp_path / "nvidia" / "cudnn" / "bin").mkdir(parents=True)
+
+    gpu_path.activate({gpu_path.GPU_DIR_ENV: str(tmp_path), "PATH": ""})
+
+    assert len(gpu_path._dll_handles) == 1
+    assert not any(handle.closed for handle in handles)
