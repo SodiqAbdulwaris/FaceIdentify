@@ -78,6 +78,7 @@ function stubBackend(handlers: Handler[]) {
   const unexpected: string[] = []
   const all: Handler[] = [
     { path: '/api/v1/processing-runs', respond: page([]) }, // the layout asks for the newest run
+    { path: /\/unresolved-faces$/, respond: { items: [] } }, // a source screen asks for these
     ...handlers,
   ].reverse() // the test's own handlers win over the default
   vi.stubGlobal('WebSocket', QuietSocket)

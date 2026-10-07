@@ -21,6 +21,13 @@ export function UnresolvedFaces({ sourceId }: { sourceId: string }) {
     queryFn: () => endpoints.unresolvedFaces(sourceId),
   })
   const items = faces.data?.items ?? []
+  if (faces.isError) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        The faces still to place could not be loaded: {errorMessage(faces.error)}
+      </p>
+    )
+  }
   if (items.length === 0) return null
   return (
     <div>

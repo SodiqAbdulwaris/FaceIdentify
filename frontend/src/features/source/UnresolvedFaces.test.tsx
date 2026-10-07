@@ -40,6 +40,19 @@ describe('faces to place', () => {
     expect(screen.getByRole('button', { name: 'This is someone new' })).toBeInTheDocument()
   })
 
+  it('says so when the list could not be loaded, instead of showing nothing', async () => {
+    open([], [
+      {
+        path: `${SOURCE}/unresolved-faces`,
+        respond: () => failure(503, 'LIBRARY_UNAVAILABLE', 'The library is not available.'),
+      },
+    ])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The faces still to place could not be loaded: The library is not available.',
+    )
+  })
+
   it('shows nothing when every face has been placed', async () => {
     open([])
 
