@@ -81,6 +81,12 @@ promoting calibrated values to a release policy (decision 1).
 | W7 | Frontend | Routes `/library`, `/library/source/:id`, `/identities/:id`, `/processing/:runId`; API and WebSocket clients; import flow; results view (faces to identity); observability before polish; the uncalibrated-policy notice | TST-049, TST-050 |
 | W8 | End to end | Complete image workflow, then restart | TST-052, TST-053 |
 
+> **Decision 2026-10-07 (agent's, for the owner to confirm; W3.6):** W3 builds no separate "system
+> status" route. `/health` and `/readiness` already report the lifecycle and every capability, and
+> the spec's `/runtime/status` is about runtime packages (M8). The development-policy notice is
+> carried by each processing run's `policy` field instead. Pause/resume and observation reads stay
+> out of M4; see the implementation entries for W3.4 and W3.5.
+
 **Ordering.** W1, then W2 and the read side of W3 in parallel, then the write side of W3, then W4
 and W5, then W6 and W7 in parallel, then W8. Within W2, revision `0007` comes first, then the
 scheduler, and the scheduler starts only after startup recovery has completed (the constraint in
