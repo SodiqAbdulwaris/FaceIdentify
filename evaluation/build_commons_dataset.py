@@ -17,6 +17,7 @@ import argparse
 import json
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -34,14 +35,31 @@ PEOPLE = [
     "Colin Powell", "Condoleezza Rice", "Donald Rumsfeld", "Dick Cheney", "Jimmy Carter",
     "Ronald Reagan", "Bill Clinton", "Robert Gates", "Leon Panetta", "John Kerry",
     "Madeleine Albright", "Janet Napolitano", "Ash Carter",
+    "Nancy Pelosi", "Mitch McConnell", "Chuck Schumer", "Bernie Sanders", "Elizabeth Warren",
+    "John McCain", "Mitt Romney", "Paul Ryan", "Kamala Harris", "Mike Pence",
+    "Antony Blinken", "Lloyd Austin", "Mark Milley", "David Petraeus", "Jim Mattis",
+    "Eric Holder", "Janet Yellen", "Ben Bernanke", "Alan Greenspan", "Timothy Geithner",
+    "Sonia Sotomayor", "Elena Kagan", "John Roberts", "Ruth Bader Ginsburg", "Stephen Breyer",
+    "Clarence Thomas", "Samuel Alito", "Antonin Scalia", "Sandra Day O'Connor",
+    "Al Gore", "Gerald Ford", "George H. W. Bush", "Richard Nixon", "Lyndon B. Johnson",
+    "Dwight D. Eisenhower", "Harry S. Truman", "Henry Kissinger", "Chuck Hagel", "Tom Vilsack",
 ]  # fmt: skip
 
 
 def get(url: str) -> bytes:
+    """One GET, politely: it waits and retries when Commons says "too many requests"."""
     request = urllib.request.Request(url, headers={"User-Agent": AGENT})
-    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 (https only)
-        data: bytes = response.read()
-    return data
+    for attempt in range(6):
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 (https)
+                data: bytes = response.read()
+            time.sleep(1.0)
+            return data
+        except urllib.error.HTTPError as error:
+            if error.code != 429 or attempt == 5:
+                raise
+            time.sleep(30 * (attempt + 1))
+    raise AssertionError("unreachable")
 
 
 def api(**params: str) -> dict:  # type: ignore[type-arg]
@@ -59,7 +77,7 @@ def photographs(person: str, limit: int) -> list[dict]:  # type: ignore[type-arg
     """Public-domain JPEG photographs in the person's category (title, 900 px URL, licence)."""
     members = api(
         action="query", list="categorymembers", cmtitle=f"Category:{person}",
-        cmtype="file", cmlimit="60",
+        cmtype="file", cmlimit="250",
     )["query"]["categorymembers"]  # fmt: skip
     found: list[dict] = []  # type: ignore[type-arg]
     for start in range(0, len(members), 25):
@@ -79,7 +97,7 @@ def photographs(person: str, limit: int) -> list[dict]:  # type: ignore[type-arg
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--per-person", type=int, default=10)
+    parser.add_argument("--per-person", type=int, default=24)
     parser.add_argument("--minimum", type=int, default=4, help="people with fewer are dropped")
     arguments = parser.parse_args()
     arguments.out.mkdir(parents=True, exist_ok=True)

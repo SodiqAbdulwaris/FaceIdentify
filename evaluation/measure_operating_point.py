@@ -43,6 +43,7 @@ POLICY = SupervisorPolicy(120, 120, 10, 10, 1, 600)
 DEVICES = {"CUDAExecutionProvider": "GPU", "CPUExecutionProvider": "CPU"}
 TARGET_PRECISION = 0.99
 MARGINS = (0.0, 0.02, 0.05, 0.1)
+DOMINANCE = 2.5  # a subject's face is this many times larger than any other face in the photograph
 
 
 def plan_from(store: RuntimePackageStore, provider: str) -> tuple[PerceptionPlan, str]:
@@ -71,9 +72,25 @@ def plan_from(store: RuntimePackageStore, provider: str) -> tuple[PerceptionPlan
     return plan, hashlib.sha256("".join(digests).encode()).hexdigest()
 
 
+def dominant(detections: tuple, ratio: float = DOMINANCE) -> object:  # type: ignore[type-arg]
+    """The photograph's subject: its only face, or a face at least `ratio` times the area of the
+    next one (a group photograph has no subject, so it is not used). None if there is none."""
+    if not detections:
+        return None
+
+    def area(d: object) -> float:
+        x1, y1, x2, y2 = d.box  # type: ignore[attr-defined]
+        return (x2 - x1) * (y2 - y1)
+
+    ranked = sorted(detections, key=area, reverse=True)
+    if len(ranked) == 1 or area(ranked[0]) >= ratio * area(ranked[1]):
+        return ranked[0]
+    return None
+
+
 def embed_dataset(dataset: Path, provider: str, store: RuntimePackageStore) -> tuple[dict, dict]:  # type: ignore[type-arg]
     plan, digest = plan_from(store, provider)
-    cache = dataset / f"embeddings-{digest[:12]}.npz"
+    cache = dataset / f"embeddings-{digest[:12]}-subject.npz"
     manifest = json.loads((dataset / "manifest.json").read_text(encoding="utf-8"))
     if cache.exists():
         stored = np.load(cache, allow_pickle=False)
@@ -89,10 +106,11 @@ def embed_dataset(dataset: Path, provider: str, store: RuntimePackageStore) -> t
                 try:
                     pixels = np.asarray(Image.open(dataset / photo["file"]).convert("RGB"))
                     detected = client.detect(pixels.astype(np.uint8))
-                    if len(detected.detections) != 1:
+                    subject = dominant(detected.detections)
+                    if subject is None:
                         skipped["none" if not detected.detections else "several"] += 1
                         continue
-                    face = client.represent(pixels.astype(np.uint8), detected.detections).vectors[0]
+                    face = client.represent(pixels.astype(np.uint8), (subject,)).vectors[0]
                     vectors[photo["file"]] = face.vector
                 except Exception:  # noqa: BLE001 - a bad photograph is skipped, and counted
                     skipped["failed"] += 1
@@ -128,7 +146,7 @@ def main() -> None:
     parser.add_argument("--provider", default="CPUExecutionProvider")
     parser.add_argument("--report", type=Path, required=True)
     arguments = parser.parse_args()
-    store = RuntimePackageStore(StorageRoots(Path(), arguments.local_state_root), uuid.uuid4)  # type: ignore[arg-type]
+    store = RuntimePackageStore(StorageRoots(Path(), arguments.local_state_root), new_id=uuid.uuid4)
     manifest, vectors = embed_dataset(arguments.dataset, arguments.provider, store)
 
     photos: list[tuple[str, str, np.ndarray]] = []  # (person, file, vector)
