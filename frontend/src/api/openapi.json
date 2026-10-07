@@ -29,6 +29,20 @@
         "title": "BoundingBox",
         "type": "object"
       },
+      "Confirm": {
+        "properties": {
+          "expected_identity_id": {
+            "format": "uuid",
+            "title": "Expected Identity Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_identity_id"
+        ],
+        "title": "Confirm",
+        "type": "object"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -942,6 +956,33 @@
         "title": "Progress",
         "type": "object"
       },
+      "Reassign": {
+        "properties": {
+          "expected_identity_id": {
+            "format": "uuid",
+            "title": "Expected Identity Id",
+            "type": "string"
+          },
+          "identity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Id"
+          }
+        },
+        "required": [
+          "expected_identity_id",
+          "identity_id"
+        ],
+        "title": "Reassign",
+        "type": "object"
+      },
       "RenamePerson": {
         "properties": {
           "display_name": {
@@ -1541,6 +1582,155 @@
         "summary": "Cancel Job",
         "tags": [
           "jobs"
+        ]
+      }
+    },
+    "/api/v1/occurrences/{occurrence_id}": {
+      "get": {
+        "operationId": "get_occurrence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "occurrence_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Occurrence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Get Occurrence",
+        "tags": [
+          "corrections"
+        ]
+      }
+    },
+    "/api/v1/occurrences/{occurrence_id}/confirm": {
+      "post": {
+        "operationId": "confirm",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "occurrence_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Occurrence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Confirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Confirm",
+        "tags": [
+          "corrections"
+        ]
+      }
+    },
+    "/api/v1/occurrences/{occurrence_id}/reassign": {
+      "post": {
+        "operationId": "reassign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "occurrence_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Occurrence Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Reassign"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Reassign",
+        "tags": [
+          "corrections"
         ]
       }
     },
