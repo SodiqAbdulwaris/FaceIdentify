@@ -12,6 +12,7 @@ export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
     const sourceId = event.data.source_id
     return [
       keys.run(event.resource.id),
+      keys.runs, // the newest run (its policy is shown on every screen) and any list of runs
       ...(typeof sourceId === 'string' ? [keys.source(sourceId)] : []),
       keys.sources, // a source's processing status is part of the library list
       keys.identities, // an accepted run creates and grows identities
