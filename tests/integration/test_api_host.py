@@ -381,7 +381,8 @@ def test_the_lifeline_is_alive_until_standard_input_ends() -> None:
     try:
         alive = stdin_lifeline(stream)
         assert alive()
-        os.write(write_end, b"ignored: the input never carries commands")
+        os.write(write_end, b"x" * 10_000)  # more than one read's worth: ignored, never kept
+        time.sleep(0.3)  # long enough for the reader to have taken (and discarded) the data
         assert alive()  # data is not the end
 
         os.close(write_end)  # the shell let go (or died)
