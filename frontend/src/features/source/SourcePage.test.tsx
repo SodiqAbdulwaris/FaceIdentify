@@ -53,19 +53,19 @@ describe('a source', () => {
       noRuns,
     ])
 
-    const first = await screen.findByRole('link', { name: 'Person 1: open' })
-    const second = screen.getByRole('link', { name: 'Person 2: open' })
+    const first = await screen.findByRole('link', { name: 'Person I1: open' })
+    const second = screen.getByRole('link', { name: 'Person I2: open' })
 
     expect(first).toHaveAttribute('href', '/identities/i1')
     expect(first).toHaveStyle({ left: '20%', top: '10%', width: '40%', height: '50%' })
     expect(second).toHaveAttribute('href', '/identities/i2')
     expect(second).toHaveStyle({ left: '60%', top: '30%', width: '20%', height: '25%' })
     const people = screen.getByRole('heading', { name: 'People in this image' }).parentElement!
-    expect(within(people).getByRole('link', { name: 'Person 1' })).toHaveAttribute(
+    expect(within(people).getByRole('link', { name: 'Person I1' })).toHaveAttribute(
       'href',
       '/identities/i1',
     )
-    expect(within(people).getByRole('link', { name: 'Person 2' })).toBeInTheDocument()
+    expect(within(people).getByRole('link', { name: 'Person I2' })).toBeInTheDocument()
   })
 
   it('draws no box for a face whose observation is not shown, and still lists the person', async () => {
@@ -82,8 +82,8 @@ describe('a source', () => {
     const people = (await screen.findByRole('heading', { name: 'People in this image' }))
       .parentElement!
 
-    expect(await within(people).findByRole('link', { name: 'Person 1' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Person 1: open' })).toBeNull()
+    expect(await within(people).findByRole('link', { name: 'Person I1' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Person I1: open' })).toBeNull()
   })
 
   it('says so when a processed image has no faces', async () => {
