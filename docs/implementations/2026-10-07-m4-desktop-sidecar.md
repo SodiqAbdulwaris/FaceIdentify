@@ -19,7 +19,9 @@
     verified not left running);
   - `stop` closes the pipe (the host's `--stdin-lifeline`), waits up to a grace period for the host to
     close the library, and ends it only if it did not;
-  - the host's stderr is forwarded to the shell's log, and its stdout is kept drained.
+  - the host's stderr is forwarded to the shell's log and its stdout kept drained, both read as bytes
+    (text in a Windows code page is shown with replacement characters and never ends the reading,
+    which would let a full pipe block the child);
 - `desktop/src-tauri/src/config.rs` (new): the shell owns where things are. The library root is the
   environment (`FACEIDENTIFY_LIBRARY_ROOT`), else the user's saved choice (`shell.json` in the app
   config directory; an unreadable or relative record means "nothing saved"), else
@@ -52,16 +54,16 @@ the screens need one).
 
 ## Verification
 
-- `cargo test` (16, plus 1 ignored): token shape and uniqueness; the handshake accepted only when
+- `cargo test` (18, plus 1 ignored): token shape and uniqueness; the handshake accepted only when
   loopback, on a port, and our protocol and version; the token only in the environment, the exact
   arguments, the working directory, the profile flag only when configured; a started stand-in host
   reports its connection and leaves cleanly when its pipe is closed; one that ignores the request is
   ended after the grace period; a host that never reports, exits early (with its exit code), prints
   nonsense or cannot be spawned is reported, and a host that failed to start is verified not left
-  running; the config rules (environment over saved over default, broken/relative/missing saved
+  running; the lossy line reading; the config rules (environment over saved over default, saving replaces the old choice atomically, broken/relative/missing saved
   record, Python and profile resolution). The ignored test starts the **real** Python host with the
   development profile through this contract and stops it cleanly (4 s).
-- Mutation probes (15 by hand on the handshake checks, the token size, the arguments, the profile
+- Mutation probes (19 by hand on the handshake checks, the token size, the arguments, the profile
   flag, the stop path, the connection URLs and the config rules): all killed after one test was added
   (a failed start leaves no process behind).
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean; the scaffold's
