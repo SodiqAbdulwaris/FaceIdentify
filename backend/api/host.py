@@ -32,7 +32,14 @@ from typing import IO, Final
 import uvicorn
 
 from backend.api.app import WEBSOCKET_PROTOCOL, LaunchTokenError, validate_launch_token
-from backend.api.startup import LibrarySettings, create_backend_app
+from backend.api.development import development_processing
+from backend.api.startup import (
+    PROVISIONAL_MAX_BYTES,
+    PROVISIONAL_MAX_PIXELS,
+    LibrarySettings,
+    MediaLimits,
+    create_backend_app,
+)
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.infrastructure.db.unit_of_work import TransactionRetry
 
@@ -53,6 +60,8 @@ class HostOptions:
     library_root: Path
     local_state_root: Path
     parent_pid: int | None
+    # Run with the fake catalog, fake perception and uncalibrated policy (not a release setting).
+    development_profile: bool = False
 
 
 def _process_id(text: str) -> int:
@@ -69,8 +78,18 @@ def parse_options(argv: Sequence[str]) -> HostOptions:
     parser.add_argument("--library-root", type=Path, required=True)
     parser.add_argument("--local-state-root", type=Path, required=True)
     parser.add_argument("--parent-pid", type=_process_id, default=None)
+    parser.add_argument(
+        "--development-profile",
+        action="store_true",
+        help="use the fake development catalog and perception (uncalibrated; never for release)",
+    )
     arguments = parser.parse_args(list(argv))  # a usage error exits 2, as argparse does
-    return HostOptions(arguments.library_root, arguments.local_state_root, arguments.parent_pid)
+    return HostOptions(
+        arguments.library_root,
+        arguments.local_state_root,
+        arguments.parent_pid,
+        arguments.development_profile,
+    )
 
 
 def read_launch_token(environ: Mapping[str, str]) -> str:
@@ -167,7 +186,12 @@ async def serve(
         index_batch=PROVISIONAL_INDEX_BATCH,
         max_index_passes=PROVISIONAL_INDEX_PASSES,
     )
-    app = create_backend_app(token, library)
+    app = create_backend_app(
+        token,
+        library,
+        development_processing(library) if options.development_profile else None,
+        MediaLimits(PROVISIONAL_MAX_PIXELS, PROVISIONAL_MAX_BYTES),
+    )
     listener = _loopback_listener()  # from here on, whatever happens, it is closed below
     server = uvicorn.Server(
         uvicorn.Config(app, log_config=None, log_level="warning", access_log=False, lifespan="on")

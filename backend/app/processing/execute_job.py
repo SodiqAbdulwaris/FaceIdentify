@@ -8,7 +8,7 @@ acceptance use case; it is *not* acceptance and creates neither ANN operations n
 """
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -98,6 +98,22 @@ class ProcessingCancelledError(RuntimeError):
     """A cancellation request was observed at a durable processing boundary."""
 
 
+class PerceptionPlanner(Protocol):
+    """Turns a frozen selection into a plan: `plan_perception`, or the development profile's."""
+
+    def __call__(
+        self,
+        session: Session,
+        store: RuntimePackageStore,
+        *,
+        detector_component_version_id: uuid.UUID,
+        representation_space_id: uuid.UUID,
+        providers: Sequence[str],
+        detector_model_export_id: uuid.UUID | None = None,
+        embedder_model_export_id: uuid.UUID | None = None,
+    ) -> PerceptionPlan: ...
+
+
 class _Perception(Protocol):
     def detect(self, pixels: Any) -> Detected: ...
 
@@ -163,9 +179,11 @@ class ExecuteProcessingJob:
         clock: Callable[[], datetime],
         max_pixels: int,
         recognition_k: int,
+        planner: PerceptionPlanner = plan_perception,
     ) -> None:
         if max_pixels < 1:
             raise ValueError("max_pixels must be positive")
+        self._planner = planner
         self._uow = uow
         self._packages = packages
         self._files = files
@@ -385,7 +403,7 @@ class ExecuteProcessingJob:
         return run, segment, job
 
     def _plan(self, session: Session, frozen: _FrozenConfiguration) -> PerceptionPlan:
-        return plan_perception(
+        return self._planner(
             session,
             self._packages,
             detector_component_version_id=frozen.detector_component_version_id,

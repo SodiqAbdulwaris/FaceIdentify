@@ -837,9 +837,7 @@ def test_checkpoint_and_finalization_refuse_a_segment_of_another_run(
         action(build.session, source, wrong_started, [], [])
 
 
-def test_planning_uses_only_frozen_component_and_export_selections(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_planning_uses_only_frozen_component_and_export_selections() -> None:
     frozen = _frozen(_payload())
     executor: Any = object.__new__(ExecuteProcessingJob)
     executor._packages = object()
@@ -852,7 +850,7 @@ def test_planning_uses_only_frozen_component_and_export_selections(
         assert packages is executor._packages
         return sentinel
 
-    monkeypatch.setattr(execute_job, "plan_perception", planned)
+    executor._planner = planned
 
     assert executor._plan("session", frozen) is sentinel
     assert seen == {
