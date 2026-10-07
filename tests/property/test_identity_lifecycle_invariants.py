@@ -191,6 +191,7 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
             expected_revision=self.revision[loser_id], new_id=self.new_id, clock=self.clock,
         )  # fmt: skip
         self.active_reps_by_identity[survivor_id] |= self.active_reps_by_identity.pop(loser_id)
+        self.revision[survivor_id] += 1  # what it owns changed: a view of it is now stale
         if self.has_person.pop(loser_id):
             self.has_person[survivor_id] = True
         del self.revision[loser_id]
@@ -210,6 +211,7 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
             self.session, source_id, to_move, new_id=self.new_id, clock=self.clock
         )
         self.active_reps_by_identity[source_id] -= set(to_move)
+        self.revision[source_id] += 1  # likewise the identity the faces left
         self.active_reps_by_identity[new_identity.id] = set(to_move)
         self.revision[new_identity.id] = new_identity.revision
         # split_identity records IDENTITY_SPLIT, not IDENTITY_CREATED, for the new identity, so

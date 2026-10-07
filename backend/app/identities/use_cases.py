@@ -338,12 +338,47 @@ def _reconcile_person_on_merge(
     loser_association.revision += 1
 
 
+def touch_identity(
+    session: Session,
+    identity: Identity,
+    now: datetime,
+    *,
+    expected_revision: int | None = None,
+) -> None:
+    """Record that what an identity owns changed: bump its revision once (and `updated_at`), so a
+    view of it taken earlier is stale. With `expected_revision` the bump is a compare-and-set and a
+    mismatch is `StaleRevisionError`; without it the caller is inside the transaction that read it.
+    """
+    if expected_revision is None:
+        session.execute(
+            update(Identity)
+            .where(Identity.id == identity.id)
+            .values(revision=Identity.revision + 1, updated_at=now),
+            execution_options={"synchronize_session": False},
+        )
+    else:
+        changed = optimistic_locked_update(
+            session,
+            Identity,
+            identity.id,
+            expected_revision=expected_revision,
+            values={"updated_at": now},
+        )
+        if changed == 0:
+            raise StaleRevisionError(
+                f"identity {identity.id} changed since it was read"
+                f" (it is no longer at revision {expected_revision})"
+            )
+    session.expire(identity, ["revision", "updated_at"])
+
+
 def merge_identities(
     session: Session,
     losing_identity_id: uuid.UUID,
     surviving_identity_id: uuid.UUID,
     *,
     expected_revision: int,
+    expected_survivor_revision: int | None = None,
     new_id: Callable[[], uuid.UUID],
     clock: Callable[[], datetime],
     payload_schema_version: int = 1,
@@ -359,9 +394,9 @@ def merge_identities(
     reaches the same end state as a single N-way operation without this function having to
     arbitrate which of several losing identities' Person links should win.
 
-    `expected_revision` guards the losing identity only: it is the one whose own row changes.
-    The survivor's row is not touched by a merge (only its representations/associations), so it
-    takes no revision.
+    `expected_revision` guards the losing identity, whose own row changes. The survivor's row gains
+    representations, occurrences and maybe a person link, so its revision is bumped once, and with
+    `expected_survivor_revision` the merge is refused if the survivor changed since it was read.
     """
     if losing_identity_id == surviving_identity_id:
         raise IdentityManagerError("cannot merge an identity into itself")
@@ -388,6 +423,7 @@ def merge_identities(
     )
 
     now = clock()
+    touch_identity(session, survivor, now, expected_revision=expected_survivor_revision)
     moved_representation_ids = session.scalars(
         select(Representation.id).where(
             Representation.identity_id == losing_identity_id,
@@ -483,6 +519,7 @@ def split_identity(
     source_identity_id: uuid.UUID,
     representation_ids: Sequence[uuid.UUID],
     *,
+    expected_revision: int | None = None,
     new_id: Callable[[], uuid.UUID],
     clock: Callable[[], datetime],
     payload_schema_version: int = 1,
@@ -537,6 +574,7 @@ def split_identity(
     moving = [o for o, reps in supports.items() if reps & selected]  # (all of them, by the above)
 
     now = clock()
+    touch_identity(session, source, now, expected_revision=expected_revision)
     new_identity = Identity(
         id=new_id(),
         state=IdentityState.ACTIVE,

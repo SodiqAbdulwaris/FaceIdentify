@@ -596,3 +596,30 @@ def test_the_abstention_cited_is_the_one_about_this_face(build: ModelFactory) ->
 
     (correction,) = corrections(build)
     assert correction.payload_json["resolves_evidence_id"] == str(abstention.id)
+
+
+def test_a_correction_bumps_the_revision_of_both_identities_it_changes(build: ModelFactory) -> None:
+    mine = a_face(build)
+    other = build.identity()
+    seen = (mine.identity.revision, other.revision)
+
+    reassign_occurrence(
+        build.session, mine.occurrence.id, other.id, expected_identity_id=mine.identity.id,
+        new_id=build.new_id, clock=build.clock,
+    )  # fmt: skip
+
+    assert (mine.identity.revision, other.revision) == (seen[0] + 1, seen[1] + 1)
+
+
+def test_resolving_a_face_bumps_the_revision_of_the_identity_that_received_it(
+    build: ModelFactory,
+) -> None:
+    representation, _ = an_unresolved_face(build)
+    person = build.identity()
+    seen = person.revision
+
+    resolve_representation(
+        build.session, representation.id, person.id, new_id=build.new_id, clock=build.clock
+    )
+
+    assert person.revision == seen + 1

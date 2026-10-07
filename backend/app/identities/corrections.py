@@ -40,6 +40,7 @@ from backend.app.identities.use_cases import (
     IdentityManagerError,
     StaleRevisionError,
     refresh_representative,
+    touch_identity,
 )
 from backend.app.memory.models import (
     Observation,
@@ -238,6 +239,9 @@ def reassign_occurrence(
         )
     session.flush()  # (so the identity's remaining faces are read as they now are)
     refresh_representative(session, source, observation_ids, now)
+    touch_identity(session, source, now)
+    if not created:
+        touch_identity(session, target, now)
     if target.representative_observation_id is None:
         target.representative_observation_id = occurrence.representative_observation_id
         target.updated_at = now
@@ -363,6 +367,8 @@ def resolve_representation(
     )
     OccurrenceRepository(session).add(occurrence, (observation.id,))
     representation.identity_id = target.id
+    if not created:
+        touch_identity(session, target, now)
     if target.representative_observation_id is None:
         target.representative_observation_id = observation.id
         target.updated_at = now
