@@ -33,6 +33,14 @@ describe('staleBecauseOf', () => {
     ])
   })
 
+  it('a person change makes every screen that shows a name stale', () => {
+    expect(staleBecauseOf(event('person.updated', 'p1'))).toEqual([
+      keys.identities,
+      ['identity'],
+      ['source'],
+    ])
+  })
+
   it('a run change without a source id still refreshes what it can', () => {
     expect(staleBecauseOf(event('processing_run.created', 'r1'))).toEqual([
       keys.run('r1'),

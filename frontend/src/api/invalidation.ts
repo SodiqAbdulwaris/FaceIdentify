@@ -19,5 +19,9 @@ export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
       ['identity'], // every open identity page (their counts and faces change)
     ]
   }
+  if (event.type.startsWith('person.')) {
+    // A name shows on the people list, on every person page and on the faces of every source.
+    return [keys.identities, ['identity'], ['source']]
+  }
   return []
 }
