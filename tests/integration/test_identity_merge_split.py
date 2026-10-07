@@ -431,8 +431,9 @@ def test_split_creates_an_active_identity_and_moves_only_the_selected_representa
 
 
 def test_split_source_remains_active_and_unchanged(build: ModelFactory) -> None:
-    """The source identity is not retired by a split: it keeps its own id, state and revision
-    (identity-and-memory-model-v1.md §19.2 shows the source keeping some of its evidence)."""
+    """The source identity is not retired by a split: it keeps its own id and state
+    (identity-and-memory-model-v1.md §19.2 shows the source keeping some of its evidence). What it
+    owns changed, so its revision is bumped once and a view taken earlier is stale."""
     source = build.identity()
     space = build.representation_space()
     kept = build.representation(
@@ -448,12 +449,8 @@ def test_split_source_remains_active_and_unchanged(build: ModelFactory) -> None:
     build.session.expire_all()
     unchanged_source = build.session.get(type(source), source.id)
     assert unchanged_source is not None
-    assert (
-        unchanged_source.id,
-        unchanged_source.state,
-        unchanged_source.revision,
-        unchanged_source.updated_at,
-    ) == snapshot
+    assert (unchanged_source.id, unchanged_source.state) == snapshot[:2]
+    assert unchanged_source.revision == snapshot[2] + 1
     still_kept = build.session.get(Representation, kept.id)
     assert still_kept is not None
     assert still_kept.identity_id == source.id
@@ -763,3 +760,48 @@ def test_an_occurrence_known_only_through_its_membership_rows_is_split_with_its_
     )
 
     assert occurrence.identity_id == created.id
+
+
+# --- revisions: what an identity owns changing makes an older view stale -----------------------
+
+
+def test_a_merge_bumps_the_survivors_revision_and_refuses_a_stale_survivor(
+    build: ModelFactory,
+) -> None:
+    survivor, loser = build.identity(), build.identity()
+    a_face(build, loser, 1)
+    seen = survivor.revision
+
+    with pytest.raises(StaleRevisionError, match="survivor|changed since"):
+        merge_identities(
+            build.session, loser.id, survivor.id, expected_revision=loser.revision,
+            expected_survivor_revision=seen + 3, new_id=build.new_id, clock=build.clock,
+        )  # fmt: skip
+    assert loser.state == "ACTIVE"  # nothing was written (the revision check is first)
+
+    merge_identities(
+        build.session, loser.id, survivor.id, expected_revision=loser.revision,
+        expected_survivor_revision=seen, new_id=build.new_id, clock=build.clock,
+    )  # fmt: skip
+
+    assert survivor.revision == seen + 1
+
+
+def test_a_split_bumps_the_sources_revision_and_refuses_a_stale_one(build: ModelFactory) -> None:
+    source = build.identity()
+    _, representation, _ = a_face(build, source, 1)
+    seen = source.revision
+
+    with pytest.raises(StaleRevisionError):
+        split_identity(
+            build.session, source.id, [representation.id], expected_revision=seen + 3,
+            new_id=build.new_id, clock=build.clock,
+        )  # fmt: skip
+    assert representation.identity_id == source.id
+
+    split_identity(
+        build.session, source.id, [representation.id], expected_revision=seen,
+        new_id=build.new_id, clock=build.clock,
+    )  # fmt: skip
+
+    assert source.revision == seen + 1
