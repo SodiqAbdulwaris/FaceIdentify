@@ -106,6 +106,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List People */
+        get: operations["list_people"];
+        put?: never;
+        /** Name An Identity */
+        post: operations["name_an_identity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/people/{person_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Person */
+        get: operations["get_person"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename */
+        patch: operations["rename"];
+        trace?: never;
+    };
+    "/api/v1/people/{person_id}/assign-identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Assign Identity */
+        post: operations["assign_identity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/people/{person_id}/remove-identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove Identity */
+        post: operations["remove_identity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/processing-runs": {
         parameters: {
             query?: never;
@@ -364,6 +434,14 @@ export interface components {
         ErrorEnvelope: {
             error: components["schemas"]["ErrorBody"];
         };
+        /** IdentityLink */
+        IdentityLink: {
+            /**
+             * Identity Id
+             * Format: uuid
+             */
+            identity_id: string;
+        };
         /** IdentitySummary */
         IdentitySummary: {
             /** Activated At */
@@ -377,6 +455,7 @@ export interface components {
             id: string;
             /** Occurrence Count */
             occurrence_count: number;
+            person: components["schemas"]["PersonReference"] | null;
             representative_observation: components["schemas"]["ObservationBrief"] | null;
             /** Source Count */
             source_count: number;
@@ -461,6 +540,16 @@ export interface components {
             /** Url */
             url: string;
         };
+        /** NamePerson */
+        NamePerson: {
+            /** Display Name */
+            display_name: string;
+            /**
+             * Identity Id
+             * Format: uuid
+             */
+            identity_id: string;
+        };
         /** ObservationBrief */
         ObservationBrief: {
             bounding_box: components["schemas"]["BoundingBox"];
@@ -483,6 +572,7 @@ export interface components {
             identity_id: string;
             /** Kind */
             kind: string;
+            person: components["schemas"]["PersonReference"] | null;
             representative_observation: components["schemas"]["ObservationBrief"] | null;
             /** Source Display Name */
             source_display_name: string;
@@ -514,6 +604,12 @@ export interface components {
             items: components["schemas"]["OccurrenceSummary"][];
             page: components["schemas"]["PageInfo"];
         };
+        /** Page[PersonSummary] */
+        Page_PersonSummary_: {
+            /** Items */
+            items: components["schemas"]["PersonSummary"][];
+            page: components["schemas"]["PageInfo"];
+        };
         /** Page[ProcessingRunDetail] */
         Page_ProcessingRunDetail_: {
             /** Items */
@@ -525,6 +621,36 @@ export interface components {
             /** Items */
             items: components["schemas"]["SourceSummary"][];
             page: components["schemas"]["PageInfo"];
+        };
+        /** PersonReference */
+        PersonReference: {
+            /** Display Name */
+            display_name: string;
+            /** Id */
+            id: string;
+            /** Revision */
+            revision: number;
+        };
+        /** PersonSummary */
+        PersonSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Display Name */
+            display_name: string;
+            /** Id */
+            id: string;
+            /** Identity Count */
+            identity_count: number;
+            /** Revision */
+            revision: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * PolicyProvenance
@@ -583,6 +709,13 @@ export interface components {
             completed: number;
             /** Total */
             total: number | null;
+        };
+        /** RenamePerson */
+        RenamePerson: {
+            /** Display Name */
+            display_name: string;
+            /** Expected Revision */
+            expected_revision: number;
         };
         /** SourceDetail */
         SourceDetail: {
@@ -839,6 +972,207 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProcessingRunDetail"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_people: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_PersonSummary_"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    name_an_identity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NamePerson"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_person: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    rename: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenamePerson"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    assign_identity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityLink"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    remove_identity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityLink"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonSummary"];
                 };
             };
             /** @description The one error shape. */

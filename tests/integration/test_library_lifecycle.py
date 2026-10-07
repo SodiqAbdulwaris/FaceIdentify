@@ -293,7 +293,7 @@ def test_a_database_stamped_with_an_older_known_revision_is_upgraded_whatever_th
 
     with opener() as library:
         assert library.startup.clean
-    assert stamps(opener) == [("0007",)]
+    assert stamps(opener) == [("0008",)]
 
 
 def test_an_install_path_with_a_percent_sign_still_migrates(

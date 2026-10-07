@@ -76,12 +76,16 @@ def test_a_stale_rename_is_rejected_and_the_first_rename_wins(
 
     in_transaction(
         factory,
-        lambda s: rename_person(s, person.id, "Alice B", expected_revision=1, clock=build.clock),
+        lambda s: rename_person(
+            s, person.id, "Alice B", expected_revision=1, new_id=build.new_id, clock=build.clock
+        ),
     )
     with pytest.raises(StaleRevisionError):  # the second user still holds revision 1
         in_transaction(
             factory,
-            lambda s: rename_person(s, person.id, "Alicia", expected_revision=1, clock=build.clock),
+            lambda s: rename_person(
+                s, person.id, "Alicia", expected_revision=1, new_id=build.new_id, clock=build.clock
+            ),
         )
 
     with factory() as check:
@@ -166,7 +170,12 @@ def test_simultaneous_renames_from_one_revision_land_exactly_once(
                 lambda name=name: in_transaction(
                     factory,
                     lambda s: rename_person(
-                        s, person.id, name, expected_revision=1, clock=build.clock
+                        s,
+                        person.id,
+                        name,
+                        expected_revision=1,
+                        new_id=build.new_id,
+                        clock=build.clock,
                     ),
                 )
             )

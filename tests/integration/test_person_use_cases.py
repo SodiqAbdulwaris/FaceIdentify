@@ -15,6 +15,7 @@ from backend.app.identities.use_cases import IdentityManagerError, StaleRevision
 from backend.app.people.models import IdentityPersonAssociation, Person
 from backend.app.people.use_cases import (
     assign_identity_to_person,
+    name_identity,
     remove_identity_from_person,
     rename_person,
 )
@@ -236,7 +237,12 @@ def test_removal_does_not_require_an_active_identity(build: ModelFactory) -> Non
 def test_rename_changes_the_display_and_normalized_name(build: ModelFactory) -> None:
     person = build.person(display_name="Alice")
     renamed = rename_person(
-        build.session, person.id, "Alicia Smith", expected_revision=1, clock=build.clock
+        build.session,
+        person.id,
+        "Alicia Smith",
+        expected_revision=1,
+        new_id=build.new_id,
+        clock=build.clock,
     )
     assert renamed.display_name == "Alicia Smith"
     assert renamed.normalized_name == "alicia smith"
@@ -248,27 +254,60 @@ def test_rename_never_changes_the_person_identifier(build: ModelFactory) -> None
     person = build.person()
     original_id = person.id
     renamed = rename_person(
-        build.session, person.id, "New Name", expected_revision=1, clock=build.clock
+        build.session,
+        person.id,
+        "New Name",
+        expected_revision=1,
+        new_id=build.new_id,
+        clock=build.clock,
     )
     assert renamed.id == original_id
 
 
 def test_rename_rejects_a_stale_revision(build: ModelFactory) -> None:
     person = build.person()
-    rename_person(build.session, person.id, "First", expected_revision=1, clock=build.clock)
+    rename_person(
+        build.session,
+        person.id,
+        "First",
+        expected_revision=1,
+        new_id=build.new_id,
+        clock=build.clock,
+    )
     with pytest.raises(StaleRevisionError, match="expected 1"):
-        rename_person(build.session, person.id, "Second", expected_revision=1, clock=build.clock)
+        rename_person(
+            build.session,
+            person.id,
+            "Second",
+            expected_revision=1,
+            new_id=build.new_id,
+            clock=build.clock,
+        )
 
 
 def test_rename_rejects_an_unknown_person(build: ModelFactory) -> None:
     with pytest.raises(IdentityManagerError, match="does not exist"):
-        rename_person(build.session, build.new_id(), "Name", expected_revision=1, clock=build.clock)
+        rename_person(
+            build.session,
+            build.new_id(),
+            "Name",
+            expected_revision=1,
+            new_id=build.new_id,
+            clock=build.clock,
+        )
 
 
 def test_a_rejected_rename_leaves_the_person_untouched(build: ModelFactory) -> None:
     person = build.person(display_name="Alice")
     with pytest.raises(StaleRevisionError):
-        rename_person(build.session, person.id, "Wrong", expected_revision=99, clock=build.clock)
+        rename_person(
+            build.session,
+            person.id,
+            "Wrong",
+            expected_revision=99,
+            new_id=build.new_id,
+            clock=build.clock,
+        )
     build.session.expire_all()
     unchanged = build.session.get(Person, person.id)
     assert unchanged is not None
@@ -287,7 +326,14 @@ def test_renaming_a_person_does_not_touch_the_linked_identity_or_its_evidence(
     )
     identity_snapshot = (identity.id, identity.state, identity.revision, identity.updated_at)
 
-    rename_person(build.session, person.id, "Alicia", expected_revision=1, clock=build.clock)
+    rename_person(
+        build.session,
+        person.id,
+        "Alicia",
+        expected_revision=1,
+        new_id=build.new_id,
+        clock=build.clock,
+    )
 
     build.session.expire_all()
     unchanged_identity = build.session.get(type(identity), identity.id)
@@ -318,8 +364,17 @@ def test_multiple_renames_do_not_rewrite_evidence_recorded_under_an_earlier_name
     )
     evidence_id = build.session.scalars(select(Evidence.id)).one()
 
-    rename_person(build.session, person.id, "Alicia", expected_revision=1, clock=build.clock)
-    rename_person(build.session, person.id, "Ali", expected_revision=2, clock=build.clock)
+    rename_person(
+        build.session,
+        person.id,
+        "Alicia",
+        expected_revision=1,
+        new_id=build.new_id,
+        clock=build.clock,
+    )
+    rename_person(
+        build.session, person.id, "Ali", expected_revision=2, new_id=build.new_id, clock=build.clock
+    )
 
     build.session.expire_all()
     evidence = build.session.get(Evidence, evidence_id)
@@ -328,3 +383,107 @@ def test_multiple_renames_do_not_rewrite_evidence_recorded_under_an_earlier_name
     final_person = build.session.get(Person, person.id)
     assert final_person is not None
     assert final_person.display_name == "Ali"
+
+
+# --- naming an identity and the rename event (M5 step 1) -----------------------------------------
+
+
+def test_naming_an_identity_creates_the_person_and_the_link_together(build: ModelFactory) -> None:
+    identity = build.identity()
+
+    person, association = name_identity(
+        build.session, identity.id, "  Alice Smith ", new_id=build.new_id, clock=build.clock
+    )
+
+    assert person.display_name == "Alice Smith"
+    assert person.normalized_name == "alice smith"
+    assert person.state == "ACTIVE"
+    assert association.person_id == person.id
+    assert association.identity_id == identity.id
+    assert association.state == "ACTIVE"
+    evidence = build.session.get(Evidence, association.evidence_id)
+    assert evidence is not None
+    assert evidence.kind == "IDENTITY_ASSIGNED_TO_PERSON"
+
+
+def test_naming_an_identity_that_already_has_a_person_is_refused_and_creates_nothing(
+    build: ModelFactory,
+) -> None:
+    identity = build.identity()
+    person = build.person(display_name="Alice")
+    build.association(identity_id=identity.id, person_id=person.id)
+    people_before = len(build.session.scalars(select(Person)).all())
+
+    with pytest.raises(IdentityManagerError, match="already has a person"):
+        name_identity(build.session, identity.id, "Bob", new_id=build.new_id, clock=build.clock)
+
+    assert len(build.session.scalars(select(Person)).all()) == people_before
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+def test_an_empty_name_is_refused_for_naming_and_for_renaming(
+    build: ModelFactory, name: str
+) -> None:
+    identity = build.identity()
+    person = build.person()
+    with pytest.raises(IdentityManagerError, match="empty"):
+        name_identity(build.session, identity.id, name, new_id=build.new_id, clock=build.clock)
+    with pytest.raises(IdentityManagerError, match="empty"):
+        rename_person(
+            build.session,
+            person.id,
+            name,
+            expected_revision=1,
+            new_id=build.new_id,
+            clock=build.clock,
+        )
+
+
+def test_naming_an_unknown_identity_is_refused(build: ModelFactory) -> None:
+    with pytest.raises(IdentityManagerError, match="does not exist"):
+        name_identity(
+            build.session, build.new_id(), "Alice", new_id=build.new_id, clock=build.clock
+        )
+
+
+def test_naming_an_inactive_identity_creates_no_person(build: ModelFactory) -> None:
+    identity = build.identity(state="PENDING")
+    people_before = len(build.session.scalars(select(Person)).all())
+    with pytest.raises(IdentityManagerError, match="not ACTIVE"):
+        name_identity(build.session, identity.id, "Alice", new_id=build.new_id, clock=build.clock)
+    assert len(build.session.scalars(select(Person)).all()) == people_before
+
+
+def test_renaming_appends_one_rename_event_with_revisions_not_names(build: ModelFactory) -> None:
+    person = build.person(display_name="Alice")
+    rename_person(
+        build.session,
+        person.id,
+        "Alicia",
+        expected_revision=1,
+        new_id=build.new_id,
+        clock=build.clock,
+    )
+    (event,) = build.session.scalars(
+        select(Evidence).where(Evidence.kind == "PERSON_RENAMED")
+    ).all()
+    assert event.subject_person_id == person.id
+    assert event.subject_identity_id is None
+    assert event.payload_json == {"previous_revision": 1, "revision": 2}
+    assert "Alic" not in str(event.payload_json)
+
+
+def test_a_rejected_rename_writes_no_event(build: ModelFactory) -> None:
+    person = build.person()
+    with pytest.raises(StaleRevisionError):
+        rename_person(
+            build.session,
+            person.id,
+            "X",
+            expected_revision=9,
+            new_id=build.new_id,
+            clock=build.clock,
+        )
+    assert (
+        build.session.scalars(select(Evidence).where(Evidence.kind == "PERSON_RENAMED")).all() == []
+    )

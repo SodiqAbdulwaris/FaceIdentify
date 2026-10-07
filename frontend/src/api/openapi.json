@@ -90,6 +90,20 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "IdentityLink": {
+        "properties": {
+          "identity_id": {
+            "format": "uuid",
+            "title": "Identity Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity_id"
+        ],
+        "title": "IdentityLink",
+        "type": "object"
+      },
       "IdentitySummary": {
         "properties": {
           "activated_at": {
@@ -117,6 +131,16 @@
             "title": "Occurrence Count",
             "type": "integer"
           },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "representative_observation": {
             "anyOf": [
               {
@@ -139,6 +163,7 @@
         "required": [
           "id",
           "state",
+          "person",
           "representative_observation",
           "occurrence_count",
           "source_count",
@@ -396,6 +421,27 @@
         "title": "MediaReference",
         "type": "object"
       },
+      "NamePerson": {
+        "properties": {
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "identity_id": {
+            "format": "uuid",
+            "title": "Identity Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name",
+          "identity_id"
+        ],
+        "title": "NamePerson",
+        "type": "object"
+      },
       "ObservationBrief": {
         "properties": {
           "bounding_box": {
@@ -448,6 +494,16 @@
             "title": "Kind",
             "type": "string"
           },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "representative_observation": {
             "anyOf": [
               {
@@ -474,6 +530,7 @@
           "identity_id",
           "kind",
           "representative_observation",
+          "person",
           "created_at"
         ],
         "title": "OccurrenceSummary",
@@ -564,6 +621,26 @@
         "title": "Page[OccurrenceSummary]",
         "type": "object"
       },
+      "Page_PersonSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PersonSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo"
+          }
+        },
+        "required": [
+          "items",
+          "page"
+        ],
+        "title": "Page[PersonSummary]",
+        "type": "object"
+      },
       "Page_ProcessingRunDetail_": {
         "properties": {
           "items": {
@@ -602,6 +679,69 @@
           "page"
         ],
         "title": "Page[SourceSummary]",
+        "type": "object"
+      },
+      "PersonReference": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "revision"
+        ],
+        "title": "PersonReference",
+        "type": "object"
+      },
+      "PersonSummary": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "identity_count": {
+            "title": "Identity Count",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "revision",
+          "identity_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PersonSummary",
         "type": "object"
       },
       "PolicyProvenance": {
@@ -800,6 +940,26 @@
           "total"
         ],
         "title": "Progress",
+        "type": "object"
+      },
+      "RenamePerson": {
+        "properties": {
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "display_name",
+          "expected_revision"
+        ],
+        "title": "RenamePerson",
         "type": "object"
       },
       "SourceDetail": {
@@ -1381,6 +1541,307 @@
         "summary": "Cancel Job",
         "tags": [
           "jobs"
+        ]
+      }
+    },
+    "/api/v1/people": {
+      "get": {
+        "operationId": "list_people",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_PersonSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "List People",
+        "tags": [
+          "people"
+        ]
+      },
+      "post": {
+        "operationId": "name_an_identity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NamePerson"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Name An Identity",
+        "tags": [
+          "people"
+        ]
+      }
+    },
+    "/api/v1/people/{person_id}": {
+      "get": {
+        "operationId": "get_person",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Person Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Get Person",
+        "tags": [
+          "people"
+        ]
+      },
+      "patch": {
+        "operationId": "rename",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Person Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenamePerson"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Rename",
+        "tags": [
+          "people"
+        ]
+      }
+    },
+    "/api/v1/people/{person_id}/assign-identity": {
+      "post": {
+        "operationId": "assign_identity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Person Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityLink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Assign Identity",
+        "tags": [
+          "people"
+        ]
+      }
+    },
+    "/api/v1/people/{person_id}/remove-identity": {
+      "post": {
+        "operationId": "remove_identity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "person_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Person Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityLink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Remove Identity",
+        "tags": [
+          "people"
         ]
       }
     },

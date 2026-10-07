@@ -49,13 +49,13 @@ export function IdentitiesPage() {
                     <FaceCrop
                       sourceId={face.source_id}
                       box={face.bounding_box}
-                      label={`${personLabel(person.id)}'s face`}
+                      label={`${personLabel(person.id, person.person)}'s face`}
                     />
                   ) : (
                     <div className="size-24 shrink-0 rounded-md bg-muted" aria-hidden="true" />
                   )}
                   <span className="flex flex-col">
-                    <span className="font-medium">{personLabel(person.id)}</span>
+                    <span className="font-medium">{personLabel(person.id, person.person)}</span>
                     <span className="text-sm text-muted-foreground">
                       {plural(person.occurrence_count, 'appearance', 'appearances')} in{' '}
                       {plural(person.source_count, 'image', 'images')}

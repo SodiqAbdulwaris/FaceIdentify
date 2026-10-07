@@ -6,6 +6,7 @@ import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import { FaceCrop } from '../FaceCrop'
 import { errorMessage } from '../library/messages'
+import { NameForm } from './NameForm'
 import { personLabel } from './label'
 
 export function IdentityPage() {
@@ -41,7 +42,7 @@ export function IdentityPage() {
   }
   if (person.isPending) return <p className="text-muted-foreground">Loading…</p>
 
-  const label = personLabel(identityId)
+  const label = personLabel(identityId, person.data.person)
   const items = appearances.data?.pages.flatMap((page) => page.items) ?? []
   const { occurrence_count: count, source_count: sources } = person.data
 
@@ -55,8 +56,10 @@ export function IdentityPage() {
       </div>
       <p className="text-muted-foreground">
         Appears {count === 1 ? 'once' : `${count} times`} in {sources}{' '}
-        {sources === 1 ? 'image' : 'images'}. Nobody has named this person yet.
+        {sources === 1 ? 'image' : 'images'}.
+        {person.data.person ? '' : ' Nobody has named this person yet.'}
       </p>
+      <NameForm identityId={identityId} person={person.data.person ?? null} />
 
       <h2 className="font-medium">Where this person appears</h2>
       {appearances.isPending ? <p className="text-sm text-muted-foreground">Loading…</p> : null}

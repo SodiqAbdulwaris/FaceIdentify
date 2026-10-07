@@ -158,21 +158,73 @@ def remove_identity_from_person(
     return current
 
 
+def name_identity(
+    session: Session,
+    identity_id: uuid.UUID,
+    display_name: str,
+    *,
+    new_id: Callable[[], uuid.UUID],
+    clock: Callable[[], datetime],
+) -> tuple[Person, IdentityPersonAssociation]:
+    """Name an unnamed Identity: create the Person and link it, in the caller's one transaction.
+
+    This is the normal way a Person comes to exist (owner decision 2026-10-07): an unknown
+    Identity never has a placeholder Person, and a Person is never created without the Identity
+    that prompted it. An Identity that already has a Person is refused (rename that Person, or
+    correct the link with `assign_identity_to_person`).
+    """
+    name = display_name.strip()
+    if not name:
+        raise IdentityManagerError("a person's name cannot be empty")
+    identity = session.get(Identity, identity_id)
+    if identity is None:
+        raise IdentityManagerError(f"identity {identity_id} does not exist")
+    if identity.state != IdentityState.ACTIVE:  # (checked first: no person is made for nothing)
+        raise IdentityManagerError(
+            f"identity {identity_id} is {identity.state}, not ACTIVE; only an active identity"
+            " can be named"
+        )
+    if _active_association(session, identity_id) is not None:
+        raise IdentityManagerError(
+            f"identity {identity_id} already has a person; rename that person instead"
+        )
+    now = clock()
+    person = Person(
+        id=new_id(),
+        state=PersonState.ACTIVE,
+        display_name=name,
+        normalized_name=name.casefold(),
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(person)
+    session.flush()
+    association = assign_identity_to_person(
+        session, identity_id, person.id, new_id=new_id, clock=clock
+    )
+    return person, association
+
+
 def rename_person(
     session: Session,
     person_id: uuid.UUID,
     display_name: str,
     *,
     expected_revision: int,
+    new_id: Callable[[], uuid.UUID],
     clock: Callable[[], datetime],
 ) -> Person:
     """Change a Person's display name (§38: a semantic event, never visual evidence).
 
-    Never touches any linked Identity's own identifier, state or Evidence (TST-014): renaming
-    only updates this one `people` row. No `EvidenceKind` exists yet for a pure rename — the
-    locked enum has none — so unlike the identity/association mutations above, this records no
-    Evidence; see `.agents/CONTEXT.md` for that open question.
+    Never touches any linked Identity's own identifier or state (TST-014): renaming only updates
+    this one `people` row and appends one `PERSON_RENAMED` Evidence row (owner decision
+    2026-10-07). The Evidence records the revisions, not the names: it is immutable, and a name is
+    personal data that must stay changeable.
     """
+    name = display_name.strip()
+    if not name:
+        raise IdentityManagerError("a person's name cannot be empty")
+    display_name = name
     normalized_name = display_name.casefold()
     rowcount = optimistic_locked_update(
         session,
@@ -192,6 +244,17 @@ def rename_person(
     # this session's cached copy cannot be trusted otherwise.
     person = session.get(Person, person_id, populate_existing=True)
     assert person is not None  # the UPDATE above just matched this row
+    session.add(
+        Evidence(
+            id=new_id(),
+            kind=EvidenceKind.PERSON_RENAMED,
+            subject_person_id=person_id,
+            payload_schema_version=1,
+            payload_json={"previous_revision": expected_revision, "revision": person.revision},
+            created_at=person.updated_at,
+        )
+    )
+    session.flush()
     return person
 
 

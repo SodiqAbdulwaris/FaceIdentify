@@ -250,7 +250,7 @@ Evidence records a durable reason for an authoritative memory decision. It is im
 
 > **Decision 2026-10-05 (owner; GitHub issue 104):** acceptance of an `ABSTAIN` persists `RECOGNITION_ABSTAINED` evidence with the recognition decision payload and the bounded candidate evidence. Its subject identity is NULL: acceptance creates neither an Identity nor an Occurrence, while the representation becomes identity-less `ACTIVE` evidence as specified in section 6.2. This is a historical record of why identity assignment was declined at that event. A later `ResolveUnresolvedRepresentation` adds resolution evidence; it never rewrites or deletes the abstention evidence. The new EvidenceKind/check constraint and acceptance writer are delivered together in the acceptance slice.
 
-> **Decision 2026-10-07:** `PERSON_RENAMED` will be added to the Evidence kinds by a reviewed Alembic revision (planned as `0008`, M5 step 1; not built, so the list above is still the current schema) so that a Person rename leaves a historical semantic event as identity-and-memory-model section 38 requires (CONTEXT question 12; `docs/plans/M5_PLAN.md`).
+> **Decision 2026-10-07:** `PERSON_RENAMED` is added to the Evidence kinds by revision `0008` (built 2026-10-07; the list above is the schema before it) so that a Person rename leaves a historical semantic event as identity-and-memory-model section 38 requires (CONTEXT question 12; `docs/plans/M5_PLAN.md`).
 
 Recognition Evidence must preserve the representation-space and calibration provenance through typed FKs and the snapshot payload. It records a bounded candidate set, never an unbounded raw ANN dump. Transient assessments that do not affect durable memory do not create Evidence.
 
