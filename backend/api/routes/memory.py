@@ -69,6 +69,7 @@ class OccurrenceSummary(BaseModel):
 class IdentitySummary(BaseModel):
     id: str
     state: str
+    revision: int
     person: PersonReference | None
     representative_observation: ObservationBrief | None
     occurrence_count: int
@@ -224,7 +225,7 @@ def person_references(
     }
 
 
-def _identity_summaries(session: Session, identities: list[Identity]) -> list[IdentitySummary]:
+def identity_summaries(session: Session, identities: list[Identity]) -> list[IdentitySummary]:
     ids = [identity.id for identity in identities]
     counts = {
         identity_id: (occurrences, sources)
@@ -244,6 +245,7 @@ def _identity_summaries(session: Session, identities: list[Identity]) -> list[Id
         IdentitySummary(
             id=str(identity.id),
             state=identity.state,
+            revision=identity.revision,
             person=people.get(identity.id),
             representative_observation=_brief(observations, identity.representative_observation_id),
             occurrence_count=counts.get(identity.id, (0, 0))[0],
@@ -271,7 +273,7 @@ def list_identities(library: Library, page: PageQuery) -> Page[IdentitySummary]:
                 .execution_options(populate_existing=True)
             )
         )
-        summaries = {s.id: s for s in _identity_summaries(session, identities)}
+        summaries = {s.id: s for s in identity_summaries(session, identities)}
         return paginate(
             identities,
             page.limit,
@@ -286,6 +288,6 @@ def list_identities(library: Library, page: PageQuery) -> Page[IdentitySummary]:
 @router.get("/identities/{identity_id}")
 def get_identity(identity_id: uuid.UUID, library: Library) -> IdentitySummary:
     def read(session: Session) -> IdentitySummary:
-        return _identity_summaries(session, [_active_identity(session, identity_id)])[0]
+        return identity_summaries(session, [_active_identity(session, identity_id)])[0]
 
     return library.unit_of_work.read(read)
