@@ -283,6 +283,18 @@ def unresolved(api: Api, new_id: SeededUUIDs) -> Unresolved:
                     decision="CANDIDATE", details_json={},
                 )
             )  # fmt: skip
+        stray = build.evidence(kind="RECOGNITION_ABSTAINED")  # cites this face only as a candidate
+        build.add(
+            EvidenceRepresentation(
+                evidence_id=stray.id, representation_id=representation.id, role="CANDIDATE"
+            )
+        )
+        build.add(
+            EvidenceCandidate(
+                evidence_id=stray.id, rank=0, identity_id=build.identity().id,
+                raw_similarity=0.99, decision="CANDIDATE", details_json={},
+            )
+        )  # fmt: skip
         old = build.observation(
             session.get(ProcessingRun, observation.processing_run_id), state="SUPERSEDED"
         )
@@ -373,3 +385,33 @@ async def test_resolving_refuses_unknown_things(api: Api, new_id: SeededUUIDs) -
         "IDENTITY_NOT_FOUND",
     )
     assert kinds(api) == []
+
+
+async def test_a_busy_database_retries_a_resolution_once(api: Api, new_id: SeededUUIDs) -> None:
+    u = unresolved(api, new_id)
+    failures = {"left": 1}
+
+    def fail_first_commit(_session: Session) -> None:
+        if failures["left"]:
+            failures["left"] -= 1
+            inner = sqlite3.OperationalError("database is locked")
+            inner.sqlite_errorcode = sqlite3.SQLITE_BUSY
+            raise OperationalError("COMMIT", {}, inner)
+
+    event.listen(Session, "before_commit", fail_first_commit)
+    subscription = api.backend.events.subscribe()
+    try:
+        response = await api.client.post(
+            f"/api/v1/representations/{u.representation}/resolve", json={"identity_id": u.bob}
+        )
+        announced = subscription.queue.qsize()
+    finally:
+        event.remove(Session, "before_commit", fail_first_commit)
+        api.backend.events.unsubscribe(subscription)
+
+    assert response.status_code == 200
+    assert failures["left"] == 0
+    assert kinds(api) == ["RESOLVE"]  # one evidence row, one occurrence
+    occurrences = (await api.client.get(f"/api/v1/sources/{u.source}/occurrences")).json()
+    assert len(occurrences["items"]) == 1
+    assert announced == 1
