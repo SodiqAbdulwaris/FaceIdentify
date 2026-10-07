@@ -10,6 +10,7 @@ import { ACTIVE_REFETCH_MS, canCancel, canProcess, canRetry, isActive } from '..
 import { useSourceImage } from '../useSourceImage'
 import { errorMessage } from '../library/messages'
 import { useRunActions } from '../processing/useRunActions'
+import { FaceCorrection } from './FaceCorrection'
 import { FaceOverlay } from './FaceOverlay'
 import { labelFaces } from './faces'
 
@@ -150,6 +151,20 @@ export function SourcePage() {
               </ul>
             )}
           </div>
+
+          {faces.length > 0 ? (
+            <div>
+              <h2 className="mb-1 font-medium">Faces</h2>
+              <ul className="flex flex-col gap-2">
+                {faces.map((face) => (
+                  <li key={face.occurrence.id} className="flex flex-col gap-1">
+                    <span className="text-sm">{face.label}</span>
+                    <FaceCorrection face={face} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div>
             <h2 className="mb-1 font-medium">Processing history</h2>

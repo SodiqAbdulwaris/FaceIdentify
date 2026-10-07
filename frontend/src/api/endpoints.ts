@@ -38,6 +38,15 @@ export const endpoints = (api: ApiClient) => ({
   listIdentities: (cursor?: string) =>
     api.get<Page<IdentitySummary>>(`${V1}/identities`, { cursor, limit: 50 }),
   getIdentity: (id: string) => api.get<IdentitySummary>(`${V1}/identities/${id}`),
+  confirmFace: (occurrenceId: string, expectedIdentityId: string) =>
+    api.post<OccurrenceSummary>(`${V1}/occurrences/${occurrenceId}/confirm`, {
+      expected_identity_id: expectedIdentityId,
+    }),
+  moveFace: (occurrenceId: string, expectedIdentityId: string, identityId: string | null) =>
+    api.post<OccurrenceSummary>(`${V1}/occurrences/${occurrenceId}/reassign`, {
+      expected_identity_id: expectedIdentityId,
+      identity_id: identityId,
+    }),
   nameIdentity: (identityId: string, displayName: string) =>
     api.post<PersonSummary>(`${V1}/people`, { display_name: displayName, identity_id: identityId }),
   renamePerson: (personId: string, displayName: string, expectedRevision: number) =>
