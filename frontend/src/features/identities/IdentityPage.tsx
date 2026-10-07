@@ -5,6 +5,7 @@ import { keys } from '@/api/keys'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import { FaceCrop } from '../FaceCrop'
+import { FaceCorrection } from '../source/FaceCorrection'
 import { errorMessage } from '../library/messages'
 import { NameForm } from './NameForm'
 import { personLabel } from './label'
@@ -95,6 +96,9 @@ export function IdentityPage() {
                     {occurrence.source_display_name}
                   </span>
                 </Link>
+                <div className="mt-1">
+                  <FaceCorrection face={{ occurrence, label }} />
+                </div>
               </li>
             )
           })}

@@ -243,12 +243,19 @@ def _refresh_representative(
     """An identity's representative face must not be one that has just left it."""
     if identity.representative_observation_id not in moved_observations:
         return
+    # Only a face whose representation the identity still owns can stand for it (an observation
+    # can belong to two occurrences, and moving one moves the representation both rest on).
     identity.representative_observation_id = session.scalar(
         select(Occurrence.representative_observation_id)
+        .join(
+            Representation,
+            Representation.observation_id == Occurrence.representative_observation_id,
+        )
         .where(
             Occurrence.identity_id == identity.id,
             Occurrence.state == OccurrenceState.ACTIVE,
-            Occurrence.representative_observation_id.is_not(None),
+            Representation.identity_id == identity.id,
+            Representation.state == RepresentationState.ACTIVE,
         )
         .order_by(Occurrence.created_at, Occurrence.id)
         .limit(1)

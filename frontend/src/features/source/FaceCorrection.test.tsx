@@ -113,3 +113,49 @@ describe('checking a face', () => {
     expect(screen.getByRole('button', { name: 'Check this face' })).toBeInTheDocument()
   })
 })
+
+describe('the people to choose from', () => {
+  it('can be paged: more people are loaded on request', async () => {
+    const user = userEvent.setup()
+    const { calls } = renderApp('/library/source/s1', [
+      { path: SOURCE, respond: detail({ processing_status: 'COMPLETED' }) },
+      { path: `${SOURCE}/media`, respond: 'bytes' },
+      { path: `${SOURCE}/occurrences`, respond: page([occurrence()]) },
+      { path: `${SOURCE}/processing-runs`, respond: page([]) },
+      {
+        path: '/api/v1/identities',
+        respond: (call) =>
+          call.query.get('cursor') === 'more'
+            ? page([identity({ id: 'i3' })])
+            : page([identity({ id: 'i2' })], 'more'),
+      },
+    ])
+
+    await check(user)
+    expect(await screen.findByRole('option', { name: 'Person I2' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Person I3' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Show more people' }))
+
+    expect(await screen.findByRole('option', { name: 'Person I3' })).toBeInTheDocument()
+    const cursors = calls.filter((c) => c.path === '/api/v1/identities').map((c) => c.query.get('cursor'))
+    expect(cursors).toContain('more')
+  })
+
+  it('are offered from the person screen too, for each appearance', async () => {
+    const user = userEvent.setup()
+    renderApp('/identities/i1', [
+      { path: '/api/v1/identities/i1', respond: identity() },
+      {
+        path: '/api/v1/identities/i1/occurrences',
+        respond: page([occurrence({ id: 'o1' }), occurrence({ id: 'o2', source_id: 's2' })]),
+      },
+      { path: /\/media$/, respond: 'bytes' },
+      { path: '/api/v1/identities', respond: page([identity({ id: 'i2' })]) },
+    ])
+
+    const buttons = await screen.findAllByRole('button', { name: 'Check this face' })
+    expect(buttons).toHaveLength(2)
+    await user.click(buttons[0])
+    expect(screen.getByRole('group', { name: 'Check Person I1' })).toBeInTheDocument()
+  })
+})

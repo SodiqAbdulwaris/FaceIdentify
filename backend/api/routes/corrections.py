@@ -107,7 +107,9 @@ def reassign(
     settings = backend.settings
 
     def write(session: Session) -> OccurrenceSummary:
-        _summary(session, occurrence_id)
+        current = _summary(session, occurrence_id)  # 404 if it is not an active face
+        if current.identity_id != str(body.expected_identity_id):
+            raise _moved(StaleRevisionError("the face is under another identity"))
         if body.identity_id is not None:
             target = session.get(Identity, body.identity_id)
             if target is None or target.state != IdentityState.ACTIVE:

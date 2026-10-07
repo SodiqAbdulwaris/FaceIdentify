@@ -46,8 +46,9 @@ reject and reassign move the face with Evidence; there is no cannot-link constra
   representations stay; 100% line and branch coverage of the module; nine mutations of the guards,
   one survivor (the representation state filter) fixed by a test and re-checked.
 - `tests/integration/test_api_corrections.py` (7), 100% of the route module.
-- Frontend: 5 tests (`FaceCorrection.test.tsx`), `npm test` 125 passed, typecheck, `oxlint` and build clean.
-- Full backend gate: see the PR.
+- Frontend: 7 tests (`FaceCorrection.test.tsx`), `npm test` 127 passed, typecheck, `oxlint` and build clean.
+- Full backend gate: `ruff format --check`, `ruff check`, `mypy` (both platforms) clean; `uv run pytest --cov`: 2598 passed, 100% total coverage (before the review fixes; re-run after them, see the PR).
+- Review (Codex, read-only), all five findings answered: a shared observation can no longer stay an identity's representative once its representation has left (the replacement must have an active representation the identity still owns; regression test, mutation checked); a stale view is reported before an unusable target (`OCCURRENCE_MOVED` first); the person picker can load more people; the person screen offers "Check this face" per appearance; a route-level test makes the first commit fail busy and shows the whole correction runs again once (one evidence row, one event).
 
 ## Open issues / follow-ups
 
