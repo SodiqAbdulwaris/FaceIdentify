@@ -8,10 +8,10 @@ status in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.m
 _Last updated: 2026-10-07 (M5 plan drafted). Keep this file true and short (rules:
 [`documentation.md`](../../.agents/rules/documentation.md))._
 
-**Where we are:** M0 to M3 are done as far as they can be without real face models: M3's exit gate
-is met (TST-038 and TST-039 are blocked only on the weights licence, issue #69). M4
-(API and desktop vertical slice) has just the authenticated API bootstrap; the frontend and the
-desktop shell are placeholders. Nothing user-visible exists yet.
+**Where we are:** M0 to M4 are done as far as they can be without real face models (TST-038 and
+TST-039 are blocked on the weights licence, issue #69). M4's complete desktop image workflow runs end
+to end on the development profile and survives a restart. Next is M5, the first real recognition
+milestone: [M5 plan](M5_PLAN.md).
 
 | Area | Status | What exists | More detail |
 |---|---|---|---|

@@ -37,7 +37,7 @@ walks: images in, faces found, who they are, and what happened to each attempt.
 
 None new. The "Person XXXXXX" label is a stand-in for names, which arrive with the M5 corrections.
 
-> **Decision 2026-10-07 (owner):** confirmed. Until semantic naming exists (M5), an unnamed identity
+> **Decision 2026-10-07:** Owner confirmed. Until semantic naming exists (M5), an unnamed identity
 > is shown as `Person {SHORT_ID}`, the uppercase first 6 hexadecimal characters of the identity
 > UUID. It is a presentation-only derived label, never persisted as a name, derived the same way on
 > every screen; first-seen timestamps are separate metadata and play no part in it.
