@@ -1318,6 +1318,10 @@
       },
       "Split": {
         "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
           "occurrence_ids": {
             "items": {
               "format": "uuid",
@@ -1328,7 +1332,8 @@
           }
         },
         "required": [
-          "occurrence_ids"
+          "occurrence_ids",
+          "expected_revision"
         ],
         "title": "Split",
         "type": "object"
