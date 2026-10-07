@@ -33,6 +33,8 @@ or committed, so the app runs on the development profile), no corrections or mer
 people (M5; naming and renaming are built), no search (M5), no movies or cameras (M6, M7), no installer or packaged runtime (M8).
 Run it with `npm run tauri dev` after `uv sync` and `npm install` (see the desktop entry).
 
+**Licences:** the application is personal-use only; every third-party licence that would matter to a commercial release is in [`licensing-and-commercialization.md`](../research/licensing-and-commercialization.md) (the face weights are research-only, and the repository has no licence file yet).
+
 **Open decisions and blockers:** the weights licence and selection (issue #69, now M5 track R, owner chooses before any download); the M5 plan's open questions; the decision-policy
 numbers stay a labelled development profile until the evaluation baseline exists. All
 recorded decisions are in [`CONTEXT.md`](../../.agents/CONTEXT.md).

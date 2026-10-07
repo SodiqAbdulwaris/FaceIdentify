@@ -14,7 +14,10 @@
    *verified* status only. Never mark something complete that you have not run.
 4. **Update guides** in `docs/guides/` when you change how something is run, configured or
    extended.
-5. **Update [`docs/plans/PROJECT_STATUS.md`](../../docs/plans/PROJECT_STATUS.md)** when the change
+5. **Record every new third-party thing** (a dependency, a model, a dataset, a font, an icon set or a
+   build tool) in [`docs/research/licensing-and-commercialization.md`](../../docs/research/licensing-and-commercialization.md)
+   with its licence and where it is used, so a future commercial release starts from a list.
+6. **Update [`docs/plans/PROJECT_STATUS.md`](../../docs/plans/PROJECT_STATUS.md)** when the change
    alters what is built or where the project stands (see *Project status* below).
 
 ## Plans

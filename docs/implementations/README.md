@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [A licensing and commercialisation record](2026-10-07-licensing-record.md) | done; documentation |
 | 2026-10-07 | [M5 step 3: merging identities and splitting faces off one](2026-10-07-m5-merge-split.md) | done; TST-058 |
 | 2026-10-07 | [M5 step 2b: placing a face recognition declined to place](2026-10-07-m5-unresolved-faces.md) | done; issue #79 |
 | 2026-10-07 | [M5 step 2a: correcting a recognised face](2026-10-07-m5-corrections.md) | partial; TST-054 second part |
