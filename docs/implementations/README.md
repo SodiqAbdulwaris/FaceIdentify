@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M5 R3: the real models through the production client, and the evaluation tools](2026-10-07-m5-r3-real-inference.md) | partial; CPU proven |
 | 2026-10-07 | [M5 step 1: naming a person](2026-10-07-m5-naming.md) | done; TST-054 first part |
 | 2026-10-07 | [M5 R1: select, verify and install the reference models](2026-10-07-m5-r1-reference-models.md) | partial; issue #69 part 1 |
 | 2026-10-07 | [M5 R0: a library belongs to one profile](2026-10-07-m5-r0-library-profile-guard.md) | done; issue #137 |
