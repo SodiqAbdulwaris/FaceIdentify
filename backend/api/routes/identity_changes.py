@@ -43,6 +43,9 @@ class Merge(BaseModel):
 
 class Split(BaseModel):
     occurrence_ids: list[uuid.UUID]
+    expected_revision: (
+        int  # the revision of the person the faces are split from, as the caller saw it
+    )
 
 
 def _active(session: Session, identity_id: uuid.UUID) -> Identity:
@@ -73,13 +76,16 @@ def merge(
         survivor = _active(session, body.preferred_identity_id)
         for member in members.values():
             _active(session, member.id)
+        survivor_revision: int | None = members[survivor.id].revision  # checked once, by the first
         try:
             for member in members.values():
                 if member.id != survivor.id:
                     merge_identities(
                         session, member.id, survivor.id, expected_revision=member.revision,
+                        expected_survivor_revision=survivor_revision,
                         new_id=settings.new_id, clock=settings.clock,
                     )  # fmt: skip
+                    survivor_revision = None
         except StaleRevisionError as error:
             raise ApiError(
                 409, "IDENTITY_CHANGED", "One of the people changed since you looked. Reload.",
@@ -119,14 +125,24 @@ def split(
                     404, "OCCURRENCE_NOT_FOUND", "A chosen face is not one of this person's.",
                     details={"occurrence_id": str(occurrence_id)},
                 )  # fmt: skip
-        representation_ids = sorted({r for o in wanted for r in support.get(o, set())})
-        if not representation_ids:
-            raise ApiError(422, "INVALID_SPLIT", "The chosen faces have nothing to split off.")
+        bare = [o for o in wanted if not support.get(o)]
+        if bare:
+            raise ApiError(
+                422, "INVALID_SPLIT", "Some chosen faces have nothing to split off.",
+                details={"occurrence_ids": [str(o) for o in bare]},
+            )  # fmt: skip
+        representation_ids = sorted({r for o in wanted for r in support[o]})
         try:
             created = split_identity(
                 session, identity_id, representation_ids,
+                expected_revision=body.expected_revision,
                 new_id=settings.new_id, clock=settings.clock,
             )  # fmt: skip
+        except StaleRevisionError as error:
+            raise ApiError(
+                409, "IDENTITY_CHANGED", "This person changed since you looked. Reload.",
+                details={"reason": str(error)},
+            ) from None  # fmt: skip
         except SplitConflictError as error:
             raise ApiError(
                 409, "SPLIT_CONFLICT",

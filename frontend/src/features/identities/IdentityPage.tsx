@@ -79,7 +79,7 @@ export function IdentityPage() {
       ) : null}
 
       <SplitControl
-        identityId={identityId}
+        identity={person.data}
         selected={chosen}
         onAdd={(ids) => setChosen((now) => [...new Set([...now, ...ids])])}
         onDone={() => setChosen([])}

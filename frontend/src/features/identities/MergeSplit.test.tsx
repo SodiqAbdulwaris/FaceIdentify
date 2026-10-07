@@ -106,7 +106,10 @@ describe('splitting faces off a person', () => {
     await user.click(screen.getByRole('button', { name: 'These are someone else' }))
 
     expect(await screen.findByRole('heading', { name: 'Person I9' })).toBeInTheDocument()
-    expect(calls.find((c) => c.path.endsWith('/split'))?.body).toEqual({ occurrence_ids: ['o2'] })
+    expect(calls.find((c) => c.path.endsWith('/split'))?.body).toEqual({
+      occurrence_ids: ['o2'],
+      expected_revision: 3,
+    })
   })
 
   it('offers the faces a split would have cut in two, and chooses them on request', async () => {
@@ -147,7 +150,10 @@ describe('splitting faces off a person', () => {
 
     expect(await screen.findByRole('heading', { name: 'Person I9' })).toBeInTheDocument()
     const bodies = calls.filter((c) => c.path.endsWith('/split')).map((c) => c.body)
-    expect(bodies).toEqual([{ occurrence_ids: ['o1'] }, { occurrence_ids: ['o1', 'o2'] }])
+    expect(bodies).toEqual([
+      { occurrence_ids: ['o1'], expected_revision: 3 },
+      { occurrence_ids: ['o1', 'o2'], expected_revision: 3 },
+    ])
   })
 
   it('can be cleared, and unchoosing the last face hides the split controls', async () => {

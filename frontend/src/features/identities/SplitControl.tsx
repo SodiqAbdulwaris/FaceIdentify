@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { ApiError } from '@/api/client'
 import { keys } from '@/api/keys'
+import type { IdentitySummary } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '../library/messages'
@@ -12,12 +13,12 @@ import { errorMessage } from '../library/messages'
  * faces involved are offered so the choice can be completed.
  */
 export function SplitControl({
-  identityId,
+  identity,
   selected,
   onAdd,
   onDone,
 }: {
-  identityId: string
+  identity: IdentitySummary
   selected: string[]
   onAdd: (ids: string[]) => void
   onDone: () => void
@@ -27,7 +28,7 @@ export function SplitControl({
   const navigate = useNavigate()
 
   const split = useMutation({
-    mutationFn: () => endpoints.splitFaces(identityId, selected),
+    mutationFn: () => endpoints.splitFaces(identity, selected),
     onSuccess: (created) => {
       onDone()
       navigate(`/identities/${created.id}`)

@@ -53,9 +53,10 @@ export const endpoints = (api: ApiClient) => ({
       ],
       preferred_identity_id: survivor.id,
     }),
-  splitFaces: (identityId: string, occurrenceIds: string[]) =>
-    api.post<IdentitySummary>(`${V1}/identities/${identityId}/split`, {
+  splitFaces: (identity: IdentitySummary, occurrenceIds: string[]) =>
+    api.post<IdentitySummary>(`${V1}/identities/${identity.id}/split`, {
       occurrence_ids: occurrenceIds,
+      expected_revision: identity.revision,
     }),
   confirmFace: (occurrenceId: string, expectedIdentityId: string) =>
     api.post<OccurrenceSummary>(`${V1}/occurrences/${occurrenceId}/confirm`, {
