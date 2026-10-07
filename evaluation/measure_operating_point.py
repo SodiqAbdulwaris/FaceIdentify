@@ -120,11 +120,11 @@ def embed_dataset(
     skipped = {"no_face": 0, "no_subject": 0, "failed": 0}
     if cache.exists():
         stored = np.load(cache, allow_pickle=False)
-        vectors = {name.replace("|", "/"): stored[name] for name in stored.files}
+        cached = {name.replace("|", "/"): stored[name] for name in stored.files}
         skipped["not_embedded_in_the_cached_run"] = sum(
             len(photos) for photos in manifest.values()
-        ) - len(vectors)
-        return manifest, vectors, skipped, digest
+        ) - len(cached)
+        return manifest, cached, skipped, digest
     supervisor = supervisor_for(plan, POLICY)
     client = PerceptionClient(supervisor, plan, new_id=uuid.uuid4)
     vectors: dict[str, np.ndarray] = {}
