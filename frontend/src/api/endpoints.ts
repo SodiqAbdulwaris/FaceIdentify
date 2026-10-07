@@ -6,6 +6,7 @@ import type {
   ImportRequest,
   OccurrenceSummary,
   Page,
+  UnresolvedFace,
   PersonSummary,
   ProcessingRun,
   Readiness,
@@ -38,6 +39,12 @@ export const endpoints = (api: ApiClient) => ({
   listIdentities: (cursor?: string) =>
     api.get<Page<IdentitySummary>>(`${V1}/identities`, { cursor, limit: 50 }),
   getIdentity: (id: string) => api.get<IdentitySummary>(`${V1}/identities/${id}`),
+  unresolvedFaces: (sourceId: string) =>
+    api.get<{ items: UnresolvedFace[] }>(`${V1}/sources/${sourceId}/unresolved-faces`),
+  resolveFace: (representationId: string, identityId: string | null) =>
+    api.post<OccurrenceSummary>(`${V1}/representations/${representationId}/resolve`, {
+      identity_id: identityId,
+    }),
   confirmFace: (occurrenceId: string, expectedIdentityId: string) =>
     api.post<OccurrenceSummary>(`${V1}/occurrences/${occurrenceId}/confirm`, {
       expected_identity_id: expectedIdentityId,
