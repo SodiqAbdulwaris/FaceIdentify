@@ -187,6 +187,38 @@ describe('EventsClient', () => {
     expect(log.statuses.at(-1)).toBe('stopped')
   })
 
+  it('after stopping, nothing the old socket still delivers reaches the handlers', () => {
+    const { client, sockets, log } = setup()
+    client.start()
+    const [socket] = sockets
+    const lateOpen = socket.onopen
+    const lateMessage = socket.onmessage
+
+    client.stop()
+
+    expect(socket.onopen).toBeNull()
+    expect(socket.onmessage).toBeNull()
+    expect(socket.onerror).toBeNull()
+    lateOpen?.() // (as if a frame already in flight were delivered)
+    lateMessage?.({ data: JSON.stringify(envelope(9)) })
+    expect(log.events).toEqual([])
+    expect(log.resyncs).toBe(0)
+  })
+
+  it('starting twice closes the first connection and cancels its retry', () => {
+    const { client, sockets } = setup()
+    client.start()
+    sockets[0].onclose?.() // a retry is now pending
+
+    client.start()
+    vi.advanceTimersByTime(60_000)
+
+    expect(sockets).toHaveLength(2) // the retry did not add a third
+    client.start()
+    expect(sockets[1].closed).toBe(true)
+    expect(sockets).toHaveLength(3)
+  })
+
   it('stopping while a reconnection is pending cancels it', () => {
     const { client, sockets } = setup()
     client.start()
