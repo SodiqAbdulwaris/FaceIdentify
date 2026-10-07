@@ -36,7 +36,11 @@ from backend.app.identities.models import (
     IdentityState,
 )
 from backend.app.identities.repository import OccurrenceRepository
-from backend.app.identities.use_cases import IdentityManagerError, StaleRevisionError
+from backend.app.identities.use_cases import (
+    IdentityManagerError,
+    StaleRevisionError,
+    refresh_representative,
+)
 from backend.app.memory.models import (
     Observation,
     ObservationState,
@@ -233,7 +237,7 @@ def reassign_occurrence(
             )
         )
     session.flush()  # (so the identity's remaining faces are read as they now are)
-    _refresh_representative(session, source, observation_ids, now)
+    refresh_representative(session, source, observation_ids, now)
     if target.representative_observation_id is None:
         target.representative_observation_id = occurrence.representative_observation_id
         target.updated_at = now
@@ -364,29 +368,3 @@ def resolve_representation(
         target.updated_at = now
     session.flush()
     return occurrence
-
-
-def _refresh_representative(
-    session: Session, identity: Identity, moved_observations: list[uuid.UUID], now: datetime
-) -> None:
-    """An identity's representative face must not be one that has just left it."""
-    if identity.representative_observation_id not in moved_observations:
-        return
-    # Only a face whose representation the identity still owns can stand for it (an observation
-    # can belong to two occurrences, and moving one moves the representation both rest on).
-    identity.representative_observation_id = session.scalar(
-        select(Occurrence.representative_observation_id)
-        .join(
-            Representation,
-            Representation.observation_id == Occurrence.representative_observation_id,
-        )
-        .where(
-            Occurrence.identity_id == identity.id,
-            Occurrence.state == OccurrenceState.ACTIVE,
-            Representation.identity_id == identity.id,
-            Representation.state == RepresentationState.ACTIVE,
-        )
-        .order_by(Occurrence.created_at, Occurrence.id)
-        .limit(1)
-    )
-    identity.updated_at = now

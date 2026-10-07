@@ -34,6 +34,9 @@ from backend.app.identities.models import (
 )
 from backend.app.memory.models import (
     IndexOperation,
+    Occurrence,
+    OccurrenceObservation,
+    OccurrenceState,
     Representation,
     RepresentationState,
 )
@@ -44,6 +47,20 @@ from backend.infrastructure.db.optimistic import optimistic_locked_update
 
 class IdentityManagerError(Exception):
     """A requested identity-lifecycle mutation is not authoritatively valid."""
+
+
+class SplitConflictError(IdentityManagerError):
+    """A split would cut an occurrence in two: some of the representations it rests on are selected
+    and some are not. Nothing is written. `occurrence_ids` are those occurrences; selecting all or
+    none of each one's representations resolves it."""
+
+    def __init__(self, occurrence_ids: Sequence[uuid.UUID]) -> None:
+        self.occurrence_ids = tuple(occurrence_ids)
+        super().__init__(
+            "the selection would split "
+            + str(len(self.occurrence_ids))
+            + " occurrence(s) between two identities"
+        )
 
 
 class StaleRevisionError(IdentityManagerError):
@@ -387,6 +404,21 @@ def merge_identities(
         execution_options={"synchronize_session": False},
     )
 
+    moved_occurrence_ids = session.scalars(
+        select(Occurrence.id).where(
+            Occurrence.identity_id == losing_identity_id,
+            Occurrence.state == OccurrenceState.ACTIVE,
+        )
+    ).all()
+    session.execute(
+        update(Occurrence)
+        .where(Occurrence.id.in_(moved_occurrence_ids))
+        .values(identity_id=surviving_identity_id),
+        execution_options={"synchronize_session": False},
+    )
+    if survivor.representative_observation_id is None:
+        survivor.representative_observation_id = loser.representative_observation_id
+
     evidence = Evidence(
         id=new_id(),
         kind=EvidenceKind.IDENTITY_MERGED,
@@ -395,6 +427,7 @@ def merge_identities(
         payload_json={
             "merged_into_identity_id": str(surviving_identity_id),
             "moved_representation_ids": [str(rep_id) for rep_id in moved_representation_ids],
+            "moved_occurrence_ids": [str(occurrence_id) for occurrence_id in moved_occurrence_ids],
         },
         created_at=now,
     )
@@ -494,6 +527,15 @@ def split_identity(
                 f"representation {representation_id} is {representation.state}, not ACTIVE"
             )
 
+    # An occurrence moves when every representation it rests on is selected, stays when none is,
+    # and is a conflict when only some are: nothing is written then (owner decision 2026-10-07).
+    selected = set(representation_ids)
+    supports = occurrence_support(session, source_identity_id)
+    conflicts = [o for o, reps in supports.items() if reps & selected and not reps <= selected]
+    if conflicts:
+        raise SplitConflictError(conflicts)
+    moving = [o for o, reps in supports.items() if reps & selected]  # (all of them, by the above)
+
     now = clock()
     new_identity = Identity(
         id=new_id(),
@@ -514,6 +556,7 @@ def split_identity(
         payload_json={
             "split_from_identity_id": str(source_identity_id),
             "moved_representation_ids": [str(rep_id) for rep_id in representation_ids],
+            "moved_occurrence_ids": [str(occurrence_id) for occurrence_id in moving],
         },
         created_at=now,
     )
@@ -540,8 +583,87 @@ def split_identity(
             created_at=now,
         )
     )
+    moved_observations = [
+        observation_id
+        for occurrence_id in moving
+        for observation_id in _occurrence_observations(session, occurrence_id)
+    ]
+    for occurrence_id in moving:
+        occurrence = session.get(Occurrence, occurrence_id)
+        assert occurrence is not None  # (listed above)
+        occurrence.identity_id = new_identity.id
+        if new_identity.representative_observation_id is None:
+            new_identity.representative_observation_id = occurrence.representative_observation_id
+    session.flush()  # (so the source's remaining faces are read as they now are)
+    refresh_representative(session, source, moved_observations, now)
     session.flush()
     return new_identity
+
+
+def _occurrence_observations(session: Session, occurrence_id: uuid.UUID) -> list[uuid.UUID]:
+    """The observations an occurrence rests on: its members and its representative."""
+    occurrence = session.get(Occurrence, occurrence_id)
+    assert occurrence is not None  # (a caller's own row)
+    members = list(
+        session.scalars(
+            select(OccurrenceObservation.observation_id).where(
+                OccurrenceObservation.occurrence_id == occurrence_id
+            )
+        )
+    )
+    if occurrence.representative_observation_id is not None:
+        members.append(occurrence.representative_observation_id)
+    return list(dict.fromkeys(members))
+
+
+def occurrence_support(session: Session, identity_id: uuid.UUID) -> dict[uuid.UUID, set[uuid.UUID]]:
+    """For each ACTIVE occurrence of the identity, the ACTIVE representations the identity owns that
+    rest on its observations (the occurrence's evidence)."""
+    support: dict[uuid.UUID, set[uuid.UUID]] = {}
+    occurrences = session.scalars(
+        select(Occurrence.id).where(
+            Occurrence.identity_id == identity_id, Occurrence.state == OccurrenceState.ACTIVE
+        )
+    ).all()
+    for occurrence_id in occurrences:
+        support[occurrence_id] = set(
+            session.scalars(
+                select(Representation.id).where(
+                    Representation.observation_id.in_(
+                        _occurrence_observations(session, occurrence_id)
+                    ),
+                    Representation.identity_id == identity_id,
+                    Representation.state == RepresentationState.ACTIVE,
+                )
+            )
+        )
+    return support
+
+
+def refresh_representative(
+    session: Session, identity: Identity, moved_observations: list[uuid.UUID], now: datetime
+) -> None:
+    """An identity's representative face must not be one that has just left it, and must be a face
+    whose active representation the identity still owns (an observation can belong to two
+    occurrences, and moving one moves the representation both rest on)."""
+    if identity.representative_observation_id not in moved_observations:
+        return
+    identity.representative_observation_id = session.scalar(
+        select(Occurrence.representative_observation_id)
+        .join(
+            Representation,
+            Representation.observation_id == Occurrence.representative_observation_id,
+        )
+        .where(
+            Occurrence.identity_id == identity.id,
+            Occurrence.state == OccurrenceState.ACTIVE,
+            Representation.identity_id == identity.id,
+            Representation.state == RepresentationState.ACTIVE,
+        )
+        .order_by(Occurrence.created_at, Occurrence.id)
+        .limit(1)
+    )
+    identity.updated_at = now
 
 
 # --- query-only recognition --------------------------------------------------------------------
