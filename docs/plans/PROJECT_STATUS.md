@@ -33,6 +33,6 @@ or committed, so the app runs on the development profile), no corrections, mergi
 people (M5), no search (M5), no movies or cameras (M6, M7), no installer or packaged runtime (M8).
 Run it with `npm run tauri dev` after `uv sync` and `npm install` (see the desktop entry).
 
-**Open decisions and blockers:** the weights licence and selection (issue #69, now M5 track R, owner chooses before any download); the M5 plan's open questions; the development-profile guard  the decision-policy
+**Open decisions and blockers:** the weights licence and selection (issue #69, now M5 track R, owner chooses before any download); the M5 plan's open questions; the decision-policy
 numbers stay a labelled development profile until the evaluation baseline exists. All
 recorded decisions are in [`CONTEXT.md`](../../.agents/CONTEXT.md).

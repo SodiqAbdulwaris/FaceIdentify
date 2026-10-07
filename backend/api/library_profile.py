@@ -8,8 +8,8 @@ every open afterwards. There is no override: a development library and a real on
 libraries. Nothing here cleans up development data (deliberately unsolved).
 
 A library with no marker (one made before this guard) is classified from what it holds: development
-catalog rows mean DEVELOPMENT, imported sources without them mean REAL, and an empty one takes the
-profile it is being opened with.
+catalog rows mean DEVELOPMENT, any other catalog row or an imported source means REAL (it fails
+closed: real data is never mistaken for empty), and an empty one takes the requested profile.
 """
 
 from collections.abc import Callable
@@ -62,6 +62,8 @@ def _claim(session: Session, requested: LibraryProfile, now: datetime) -> None:
 def _classified(session: Session) -> LibraryProfile | None:
     if session.scalar(select(exists().where(Component.key.in_(DEVELOPMENT_COMPONENT_KEYS)))):
         return LibraryProfile.DEVELOPMENT
-    if session.scalar(select(exists().where(Source.id.is_not(None)))):
+    if session.scalar(select(exists().where(Source.id.is_not(None)))) or session.scalar(
+        select(exists().where(Component.key.not_in(DEVELOPMENT_COMPONENT_KEYS)))
+    ):
         return LibraryProfile.REAL
     return None

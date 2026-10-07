@@ -22,7 +22,9 @@ from backend.api.library_profile import (
 )
 from backend.api.startup import create_backend_app
 from backend.app.lifecycle import OpenLibrary, open_library
+from backend.app.runtime.models import Component
 from backend.app.settings.app_state import AppStateRepository
+from backend.infrastructure.storage.library_lock import LibraryLock
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import library_settings
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
@@ -112,6 +114,22 @@ def test_an_unrecognised_marker_is_refused(opened, clock) -> None:  # type: igno
                 claim_library_profile(library, profile, clock)
 
 
+def test_an_unmarked_library_with_a_real_catalog_is_real_even_without_sources(  # type: ignore[no-untyped-def]
+    opened, clock, new_id
+) -> None:
+    with opened() as library:
+        with Session(library.engine) as session:
+            session.add(
+                Component(
+                    id=new_id(), key="scrfd", kind="FACE_DETECTOR", display_name="d", state="ACTIVE"
+                )
+            )
+            session.commit()
+        with pytest.raises(LibraryProfileMismatchError):
+            claim_library_profile(library, DEV, clock)
+        claim_library_profile(library, REAL, clock)
+
+
 async def test_the_application_reports_a_refused_library_as_failed(  # type: ignore[no-untyped-def]
     tmp_path, clock, new_id, opened
 ) -> None:
@@ -124,4 +142,7 @@ async def test_the_application_reports_a_refused_library_as_failed(  # type: ign
         assert await anyio.to_thread.run_sync(backend.settled.wait, 60)
         assert backend.state == "FAILED"
         assert backend.failure == "LibraryProfileMismatchError"
-        assert backend.library is not None  # opened, then refused: shutdown still releases it
+        assert backend.library is not None  # opened, then refused
+    assert backend.library is None  # shutdown closed it
+    with LibraryLock(settings.library_root):  # and released the lock
+        pass
