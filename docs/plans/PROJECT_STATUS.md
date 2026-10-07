@@ -5,11 +5,11 @@ detail behind any line, follow its link into [`docs/implementations/`](../implem
 the work still to come see [`M3_M4_COMPLETION_PLAN.md`](M3_M4_COMPLETION_PLAN.md) and the per-task
 status in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md).
 
-_Last updated: 2026-10-07 (M5 plan drafted). Keep this file true and short (rules:
+_Last updated: 2026-10-07 (baseline gate green on main: 2,646 tests, 100% coverage). Keep this file true and short (rules:
 [`documentation.md`](../../.agents/rules/documentation.md))._
 
-**Where we are:** M0 to M4 are done as far as they can be without real face models (TST-038 and
-TST-039 are blocked on the weights licence, issue #69). M4's complete desktop image workflow runs end
+**Where we are:** M0 to M4 are done on the development profile (TST-038 and TST-039 close on the
+real-model path in M5; the `buffalo_l` weights are chosen and run for real on CPU). M4's complete desktop image workflow runs end
 to end on the development profile and survives a restart. Next is M5, the first real recognition
 milestone: [M5 plan](M5_PLAN.md).
 
@@ -28,13 +28,13 @@ milestone: [M5 plan](M5_PLAN.md).
 | **M5 Corrections, search and memory** | In progress | M5 is the first real recognition milestone (owner, 2026-10-07): scope and order approved; two parallel tracks, identity management (naming, corrections, merge and split, recycle/delete/forget) and real models (#69 weights chosen by the owner, runtime, calibrated policy, #137), converging for search and cross-source recognition. Built so far: the library-profile guard (#137); naming and renaming people (step 1); confirming, moving and separating a face, placing unplaced faces (step 2), and merging identities and splitting faces off one (step 3); revision `0009` removed the unused `SPLIT` identity state ([entry](../implementations/2026-10-07-m5-revision-0009-drop-split-state.md)); `buffalo_l` (SCRFD and ArcFace) selected, installed as a runtime package and run for real on CPU (a local smoke test; the first measured policy (R4) was evaluated and says automatic acceptance stays off on the small evaluation set (it takes effect when the real host reads it); CUDA is pending) | [M5 plan](M5_PLAN.md), [owner decisions](../implementations/2026-10-07-m4-owner-decisions-and-m5-plan.md) |
 | **M6 to M8** | Not started | Movies, cameras, packaging | [tracker](TESTING_IMPLEMENTATION_TRACKER.md) |
 
-**Not built yet (so you know what you cannot try):** no real face model (weights are not selected
-or committed, so the app runs on the development profile), no corrections or merging of
-people (M5; naming and renaming are built), no search (M5), no movies or cameras (M6, M7), no installer or packaged runtime (M8).
+**Not built yet (so you know what you cannot try):** the app host still runs on the development profile (the real
+model runs only in a local smoke test; the host wiring, GPU and the measured policy are in
+progress), no search (M5; naming, corrections, merge and split are built), no movies or cameras (M6, M7), no installer or packaged runtime (M8).
 Run it with `npm run tauri dev` after `uv sync` and `npm install` (see the desktop entry).
 
 **Licences:** the application is personal-use only; the direct dependencies, the models, the data and the open licensing questions that would matter to a commercial release are recorded (transitive packages, the Rust crates and the build tools are not yet reviewed) in [`licensing-and-commercialization.md`](../research/licensing-and-commercialization.md) (the face weights are research-only, and the repository has no licence file yet).
 
-**Open decisions and blockers:** the weights licence and selection (issue #69, now M5 track R, owner chooses before any download); the M5 plan's open questions; the decision-policy
+**Open decisions and blockers:** the weights are research-licence, so they are a release blocker (owner accepted the risk for personal use); the M5 plan's open questions; the decision-policy
 numbers stay a labelled development profile until the evaluation baseline exists. All
 recorded decisions are in [`CONTEXT.md`](../../.agents/CONTEXT.md).
