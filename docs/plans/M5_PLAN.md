@@ -100,8 +100,11 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 > precision, recall, false accepts, abstention rate, counts, intervals and provenance, and let scores
 > below the threshold ABSTAIN. If the higher threshold still produces false accepts, disable automatic
 > acceptance (ABSTAIN and manual resolution only) until the evaluation set improves. Result: it did
-> (5 false accepts of 40 on the held-out half), so the policy in force is ABSTAIN-only
-> (`docs/research/measured-operating-point.md`).
+> (5 false accepts of 40 on the held-out half), so the evaluated policy is ABSTAIN-only
+> (`docs/research/measured-operating-point.md`); it takes effect when the real host reads it.
+> **Agent design awaiting the owner's confirmation:** a `match_threshold` above 1.0 (up to 2.0) is
+> accepted by the validators and means no automatic matching; the first face of an empty gallery still
+> creates an identity (`NO_CANDIDATE`); say if that should wait for manual resolution too.
 
 > **Decision 2026-10-07:** **Forget is confirmed as proposed in step 4:** `ForgetIdentity` is the only
 > operation that removes biometric memory; "forget person" runs it on each of a Person's identities; the
