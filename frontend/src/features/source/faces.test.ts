@@ -7,11 +7,11 @@ const make = (id: string, identity: string) =>
   occurrence({ id, identity_id: identity }) as unknown as OccurrenceSummary
 
 describe('labelFaces', () => {
-  it('numbers people in the order they first appear and gives one person one label', () => {
-    const faces = labelFaces([make('a', 'x'), make('b', 'y'), make('c', 'x'), make('d', 'z')])
+  it('labels each face with its person, the same person the same way', () => {
+    const faces = labelFaces([make('a', 'x1'), make('b', 'y2'), make('c', 'x1')])
 
-    expect(faces.map((f) => f.label)).toEqual(['Person 1', 'Person 2', 'Person 1', 'Person 3'])
-    expect(faces.map((f) => f.occurrence.id)).toEqual(['a', 'b', 'c', 'd'])
+    expect(faces.map((f) => f.label)).toEqual(['Person X1', 'Person Y2', 'Person X1'])
+    expect(faces.map((f) => f.occurrence.id)).toEqual(['a', 'b', 'c'])
   })
 
   it('has nobody to label when there are no faces', () => {

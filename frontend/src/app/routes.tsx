@@ -1,5 +1,7 @@
 import { Navigate, createHashRouter, type RouteObject } from 'react-router'
-import { Placeholder } from '@/features/Placeholder'
+import { IdentitiesPage } from '@/features/identities/IdentitiesPage'
+import { IdentityPage } from '@/features/identities/IdentityPage'
+import { ProcessingPage } from '@/features/processing/ProcessingPage'
 import { LibraryPage } from '@/features/library/LibraryPage'
 import { SourcePage } from '@/features/source/SourcePage'
 import { Layout } from './Layout'
@@ -14,9 +16,9 @@ export const routes: RouteObject[] = [
       { index: true, element: <Navigate to="/library" replace /> },
       { path: 'library', element: <LibraryPage /> },
       { path: 'library/source/:sourceId', element: <SourcePage /> },
-      { path: 'identities', element: <Placeholder title="People" /> },
-      { path: 'identities/:identityId', element: <Placeholder title="Person" /> },
-      { path: 'processing/:runId', element: <Placeholder title="Processing" /> },
+      { path: 'identities', element: <IdentitiesPage /> },
+      { path: 'identities/:identityId', element: <IdentityPage /> },
+      { path: 'processing/:runId', element: <ProcessingPage /> },
     ],
   },
 ]
