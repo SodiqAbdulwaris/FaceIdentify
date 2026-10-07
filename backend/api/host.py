@@ -170,7 +170,8 @@ def stdin_lifeline(stream: IO[bytes] | None = None) -> Callable[[], bool]:
 
     def watch() -> None:
         try:
-            source.read()  # returns only at end of file (the input is never meant to carry data)
+            while source.read(4096):  # discarded: the input never carries data, but never buffers
+                pass  # it either; the loop ends only at end of file
         finally:
             closed.set()
 
