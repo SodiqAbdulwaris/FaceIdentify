@@ -957,6 +957,8 @@ export interface components {
         };
         /** Split */
         Split: {
+            /** Expected Revision */
+            expected_revision: number;
             /** Occurrence Ids */
             occurrence_ids: string[];
         };
