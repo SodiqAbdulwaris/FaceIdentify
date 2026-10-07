@@ -136,3 +136,7 @@ jobs:
       - name: Tests against the real backend
         run: cargo test -- --ignored
         working-directory: desktop/src-tauri
+      # The whole workflow (TST-052, TST-053): the real web app against the real backend, with a
+      # restart in the middle.
+      - name: End-to-end workflow
+        run: npm run test:e2e
