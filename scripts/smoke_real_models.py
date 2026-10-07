@@ -56,12 +56,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--local-state-root", type=Path, required=True)
     parser.add_argument("--key", default="insightface-buffalo-l")
-    parser.add_argument("--providers", nargs="+", default=["CPUExecutionProvider"])
+    parser.add_argument(
+        "--providers", default="CPUExecutionProvider", help="comma-separated, preferred first"
+    )
+    parser.add_argument("--allow-fallback", action="store_true", help="accept a later provider")
     parser.add_argument("images", nargs="+", type=Path)
     arguments = parser.parse_args()
 
     store = RuntimePackageStore(StorageRoots(Path(), arguments.local_state_root), new_id=uuid.uuid4)
-    plan = plan_from(store, arguments.key, arguments.providers)
+    providers = arguments.providers.split(",")
+    plan = plan_from(store, arguments.key, providers)
     supervisor = supervisor_for(plan, POLICY)
     client = PerceptionClient(supervisor, plan, new_id=uuid.uuid4)
     vectors: list[tuple[str, np.ndarray]] = []
@@ -74,15 +78,21 @@ def main() -> None:
             represented = client.represent(pixels, detected.detections)
             done = time.perf_counter()
             ran = represented.ran.provider if represented.ran else "-"
+            if represented.ran and not arguments.allow_fallback:
+                assert ran == providers[0], f"ran on {ran}, not {providers[0]}"
             print(
                 f"{path.name}: {len(detected.detections)} face(s); detect {found - started:.2f}s, "
                 f"embed {done - found:.2f}s on {ran}; scores "
                 f"{[round(d.score, 3) for d in detected.detections]}"
             )
             for i, vector in enumerate(represented.vectors):
+                assert vector.vector.shape == (plan.dimension,), "wrong dimension"
+                assert np.isfinite(vector.vector).all(), "a vector is not finite"
+                assert abs(float(np.linalg.norm(vector.vector)) - 1.0) < 1e-4, "not a unit vector"
                 vectors.append((f"{path.name}#{i}", vector.vector))
     finally:
         supervisor.stop()
+    assert vectors, "no face was found in any picture"
     for (a, va), (b, vb) in combinations(vectors, 2):
         print(f"cosine {a} ~ {b}: {float(np.dot(va, vb)):.3f}")
 

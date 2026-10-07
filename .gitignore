@@ -28,3 +28,4 @@ frontend/dist/
 
 # Model weights are developer-supplied local files and are never committed (issue 69)
 local-models/
+*.onnx

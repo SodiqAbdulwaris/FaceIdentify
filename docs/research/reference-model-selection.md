@@ -8,9 +8,12 @@ components (ML spec 18.1).
 ## Intended use and what that allows
 
 Owner decision 2026-10-07: FaceIdentify is **personal and local only**; it is never sold, bundled or
-distributed. That makes research-only weights acceptable as developer-supplied local files. It does
-not make them shippable: the licence below is a **release blocker** (ML spec 18.1), recorded in every
-manifest as `redistributable: false`. The weights are never committed (`local-models/` is Git-ignored).
+distributed, and the owner accepted using research-licensed weights as developer-supplied local files
+under that. **This is not a legal opinion:** the licence text says "non-commercial research purposes
+only", and whether a personal application falls inside "research" is the rights-holder's to say, so the
+use right is an **owner-accepted risk**, not a verified permission. The licence is also a **release
+blocker** (ML spec 18.1), recorded in every manifest as `redistributable: false`. The weights are
+never committed (`local-models/` and `*.onnx` are Git-ignored).
 
 ## Candidates
 
