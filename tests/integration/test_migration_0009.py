@@ -29,8 +29,12 @@ def populated_0008(
     def fill(session: Session) -> None:
         build = ModelFactory(session, clock, new_id)
         survivor = build.identity()
-        build.identity(state="MERGED", merged_into_identity_id=survivor.id)
+        loser = build.identity(state="MERGED", merged_into_identity_id=survivor.id)
         build.identity()
+        # rows in other tables that point at identities must survive the recreation
+        build.evidence(kind="IDENTITY_MERGED", subject_identity_id=survivor.id)
+        build.lineage(loser.id, survivor.id, "MERGED_INTO")
+        build.occurrence(identity_id=survivor.id)
 
     populate_legacy(tmp_path / "scratch.db", monkeypatch, path, fill)
     assert len(dump(path)["identities"]) == 3
@@ -54,6 +58,9 @@ def test_a_populated_database_keeps_its_identities_and_refuses_the_removed_state
             build = ModelFactory(session, clock, new_id)
             with pytest.raises(IntegrityError, match="ck_identities_state"):
                 build.identity(state="SPLIT")
+            session.rollback()
+            with pytest.raises(IntegrityError, match="FOREIGN KEY"):  # enforcement is back on
+                build.evidence(kind="IDENTITY_MERGED", subject_identity_id=new_id())
             session.rollback()
     finally:
         engine.dispose()
