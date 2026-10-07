@@ -2,30 +2,34 @@
 
 - **Date:** 2026-10-07
 - **Milestone / tracker IDs:** M5 track R, R3 and the tools for R4; TST-038, TST-039 (real path, CPU), TST-044 (tools only)
-- **Status:** partial: CPU inference is proven; CUDA and the measured policy are not yet
+- **Status:** partial: CPU inference runs; CUDA and the measured policy are not done
 - **Commits:** PR to be recorded when merged
 
 ## What changed
 
-- `tests/e2e/test_real_models.py` (marker `e2e`, never in the default run or CI, because the weights are
-  local files): installs nothing itself; it expects the package installed by
-  `scripts/install_reference_models.py` and pictures in `local-models/images`, runs the production
-  `PerceptionClient` over the supervised real worker, and checks that faces are found, vectors are
-  finite unit 512-d vectors, the provider used is the requested one (no silent fallback), and the same
-  person scores above different people. `FACEIDENTIFY_PROVIDER` selects the provider.
-- `evaluation/build_commons_dataset.py`: builds an identity-labelled evaluation set from Wikimedia
-  Commons photographs, checking each file's licence in Commons' metadata and keeping only public
-  domain ones (US government works and similar); the label is the person's Commons category. It
-  waits and retries on "too many requests". The photographs are biometric data: `evaluation/datasets/`
-  is Git-ignored and nothing is committed.
-- `evaluation/measure_operating_point.py`: an open-set, leave-one-out measurement. People are split
-  70/30 (by hash of the name) into known and unknown; each photograph's subject is its only face or a
-  face 2.5 times larger than any other (group photographs have no subject and are skipped); an
-  identity scores as its best-matching photograph. It sweeps the match threshold and the margin,
-  reports precision and recall with a Wilson lower bound, picks the highest-recall point that reaches
-  99% precision (the owner's rule, 2026-10-07), and finds the new-identity ceiling. It caches
-  embeddings next to the dataset, keyed by the weights digest.
-- Tracker: TST-038/039 `IN_PROGRESS` with the evidence above.
+- `tests/e2e/test_real_models.py` (marker `e2e`, never in the default run or CI, because the weights
+  are local files). It is a **real-worker integration smoke test**, not an application workflow: it
+  bypasses the catalog, the host, the scheduler, persistence, retrieval and the decision policy. It
+  runs the production `PerceptionClient` over the supervised real worker and checks that faces are
+  found, vectors are finite unit 512-d vectors, detection and embedding both ran on the requested
+  provider (no silent fallback), and the same person scores above different people.
+  `FACEIDENTIFY_PROVIDER` selects the provider.
+- `evaluation/build_commons_dataset.py`: builds an identity-labelled set from Wikimedia Commons
+  photographs. It keeps only an allow-listed public-domain status (`Public domain`, `PD-USGov*`) read
+  from each file's own metadata, and records per photograph the exact licence name and URL, usage
+  terms, author, credit, source page, acquisition time and the SHA-256 of the bytes. It refuses an
+  `--out` outside `evaluation/datasets/` (Git-ignored: the photographs are biometric data) and waits
+  and retries on "too many requests".
+- `evaluation/measure_operating_point.py`: a subject-disjoint, open-set, leave-one-out measurement
+  (the protocol is in its docstring). People are split by hash into a **selection** half and a
+  **final** half that share nobody; the operating point is chosen on the selection half only, from
+  the scores actually observed, under the owner's rule (precision at least 0.99) with predeclared
+  minimums (`--minimum-accepted` 30, `--minimum-recall` 0.5, `--minimum-below` 20); the chosen point
+  is then reported on the final half with Wilson 95% intervals. A person needs two usable photographs;
+  queries without two competing known identities are set aside and counted. The report records the
+  configuration, the environment (weights digest, library versions), the exclusions and the hash of
+  the dataset manifest.
+- Tracker: TST-038/039 `IN_PROGRESS`. The testing guide lists the new local commands.
 
 ## Why
 
@@ -44,19 +48,25 @@ and prefer ABSTAIN when that confidence cannot be achieved.
 > probabilities) and the UI notice is reworded to say what was measured and its limits. No new
 > `CALIBRATED` mode is built.
 
-- Label noise: a Commons category holds photographs that show the person among others, so some
-  "same person" pairs are not (the genuine pairs' low percentiles near zero show it). Noise makes
-  recall look worse; it cannot make precision look better, because a wrongly labelled correct match
-  is counted as an error. The limit is recorded with the result.
+- "Minimum useful recall" had no number from the owner: the agent predeclared 0.5 (`--minimum-recall`)
+  and flags it for the owner to change.
+- Identity labels are Commons categories, not verified. A mislabelled photograph can push the result
+  either way, so the residual label uncertainty is non-directional; it is reported as a limit, not
+  claimed away.
+- The Wilson interval is reported on the final half; the 99% target is a rule for choosing a point,
+  not a claim that the interval's lower end reaches 99%. With a set this small it will not.
 
 ## Verification
 
-- The e2e test passes on CPU on this machine (real weights, four public-domain photographs).
-- The measurement runs end to end; its numbers on the small first set are not used for a policy.
-- Full gate: see the PR.
+- `uv run pytest -m e2e tests/e2e/test_real_models.py`: 1 passed on CPU on this machine (real
+  weights, four public-domain photographs).
+- `uv run ruff format --check . && uv run ruff check .`: clean; `uv run mypy`: clean; unit and
+  contract tests pass.
+- The measurement ran end to end on the first small set during development; its numbers are not
+  used. The measured result is recorded with R4.
 
 ## Open issues / follow-ups
 
 - CUDA on the RTX 4070 (the GPU runtime libraries are still downloading) and CPU/CUDA agreement.
-- The measured policy, its reworded notice, and the real host wiring come after the bigger
-  evaluation set is measured (R4).
+- The measured policy, its reworded notice and the real host wiring come after the full set is
+  measured (R4).
