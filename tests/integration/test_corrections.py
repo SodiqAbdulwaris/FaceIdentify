@@ -353,3 +353,27 @@ def test_a_retired_representation_does_not_move_with_the_face(build: ModelFactor
 
     assert face.representation.identity_id == created.id
     assert retired.identity_id == face.identity.id
+
+
+def test_a_shared_observation_cannot_remain_the_representative_after_its_representation_leaves(
+    build: ModelFactory,
+) -> None:
+    first = a_face(build)
+    shared = build.occurrence(  # another occurrence resting on the same observation
+        build.session.get(Observation, first.representation.observation_id),
+        identity_id=first.identity.id,
+        state="ACTIVE",
+    )
+    build.clock.advance(seconds=1)  # (the shared occurrence is older: it would win a tie)
+    own = a_face(build, first.identity, ann_key=2)
+    assert shared.representative_observation_id == first.occurrence.representative_observation_id
+
+    reassign_occurrence(
+        build.session, first.occurrence.id, None, expected_identity_id=first.identity.id,
+        new_id=build.new_id, clock=build.clock,
+    )  # fmt: skip
+
+    assert first.representation.identity_id != first.identity.id  # it left with the face
+    assert (
+        first.identity.representative_observation_id == own.occurrence.representative_observation_id
+    )

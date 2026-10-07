@@ -5,10 +5,13 @@ is checked here is the correction commands: what they return, what they refuse, 
 announce a change only when one was made.
 """
 
+import sqlite3
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import event, select
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 from backend.app.identities.models import Evidence
 from tests.factories.models import ModelFactory
@@ -188,3 +191,52 @@ async def test_corrections_are_announced(api: Api, new_id: SeededUUIDs) -> None:
     assert [(e["type"], e["resource"]) for e in events] == [
         ("occurrence.updated", {"type": "occurrence", "id": f.occurrence})
     ] * 2
+
+
+async def test_a_stale_view_is_reported_before_an_unusable_target(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    f = faces(api, new_id)
+    await api.client.post(
+        f"{OCCURRENCES}/{f.occurrence}/reassign",
+        json={"expected_identity_id": f.identity, "identity_id": f.other},
+    )
+
+    response = await api.client.post(
+        f"{OCCURRENCES}/{f.occurrence}/reassign",
+        json={"expected_identity_id": f.identity, "identity_id": str(uuid.uuid4())},
+    )
+
+    error(response, 409, "OCCURRENCE_MOVED")
+
+
+async def test_a_busy_database_retries_the_whole_correction_once(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    f = faces(api, new_id)
+    failures = {"left": 1}
+
+    def fail_first_commit(_session: Session) -> None:
+        if failures["left"]:
+            failures["left"] -= 1
+            inner = sqlite3.OperationalError("database is locked")
+            inner.sqlite_errorcode = sqlite3.SQLITE_BUSY
+            raise OperationalError("COMMIT", {}, inner)
+
+    event.listen(Session, "before_commit", fail_first_commit)
+    subscription = api.backend.events.subscribe()
+    try:
+        response = await api.client.post(
+            f"{OCCURRENCES}/{f.occurrence}/reassign",
+            json={"expected_identity_id": f.identity, "identity_id": f.other},
+        )
+        announced = subscription.queue.qsize()
+    finally:
+        event.remove(Session, "before_commit", fail_first_commit)
+        api.backend.events.unsubscribe(subscription)
+
+    assert response.status_code == 200
+    assert failures["left"] == 0  # the first commit really failed
+    assert kinds(api) == ["REASSIGN"]  # one evidence row, not two
+    assert response.json()["identity_id"] == f.other
+    assert announced == 1  # announced once, after the commit that held

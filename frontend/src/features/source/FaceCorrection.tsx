@@ -112,6 +112,16 @@ export function FaceCorrection({ face }: { face: Face }) {
           >
             Move this face
           </Button>
+          {others.hasNextPage ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={others.isFetchingNextPage}
+              onClick={() => void others.fetchNextPage()}
+            >
+              {others.isFetchingNextPage ? 'Loading…' : 'Show more people'}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {change.isError ? (
