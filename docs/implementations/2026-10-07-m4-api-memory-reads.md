@@ -33,7 +33,10 @@ and which identity each belongs to, and open an identity to see where else it ap
 
 ## Decisions
 
-None new. Observation list/detail (`/observations`) and `/occurrences/{id}` are left out: the UI's
+None new. Open for the recycle command (no recycle route exists yet): whether the occurrences of a
+recycled source still appear under an identity and in its counts. These reads do not filter on the
+source's state, so today every `ACTIVE` occurrence is shown; the product decision belongs with the
+command that creates recycled sources, not here. Observation list/detail (`/observations`) and `/occurrences/{id}` are left out: the UI's
 M4 views are served by occurrences (each carries its representative observation) and identities.
 
 ## Verification
