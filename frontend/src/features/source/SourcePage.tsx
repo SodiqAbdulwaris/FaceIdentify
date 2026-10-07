@@ -149,11 +149,17 @@ export function SourcePage() {
 
           <div>
             <h2 className="mb-1 font-medium">Processing history</h2>
-            {runs.isSuccess && runs.data.items.length === 0 ? (
+            {runs.isPending ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : runs.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                The processing history could not be loaded: {errorMessage(runs.error)}
+              </p>
+            ) : runs.data.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">This image has not been processed.</p>
             ) : (
               <ul className="flex flex-col gap-1">
-                {runs.data?.items.map((run) => (
+                {runs.data.items.map((run) => (
                   <li key={run.id} className="flex items-center gap-2 text-sm">
                     <StatusBadge state={run.state} />
                     <Link to={`/processing/${run.id}`} className="text-primary underline">

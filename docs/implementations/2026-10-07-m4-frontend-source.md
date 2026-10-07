@@ -35,12 +35,12 @@ None new. The label "Person N" is local to one image; names and merging are M5.
 
 ## Verification
 
-- `npm test` (87): the image and its facts, boxes placed from the bounding box (position and size),
+- `npm test` (88): the image and its facts, boxes placed from the bounding box (position and size),
   links to the right identity, a person with no drawable box, processed-without-faces wording,
   processing and the backend's refusal message, cancelling while running (and no retry offered then),
   retry for a failure (with the history links and no cancel), no retry or process for a missing
   file, a referenced image's wording, refreshing the image, the library and the people after a
-  request, the missing-file, not-found, other-failure and image-failed states; the labelling.
+  request, the missing-file, not-found, other-failure, image-failed and history-failed states; the labelling.
 - Mutation probes (26 by hand on every rule above): all killed after tests were added for the
   button rules, the storage wording and the refresh. One probe was a no-op by construction.
 - `npm run typecheck`, `npm run lint -- --deny-warnings` and `npm run build` pass.
