@@ -105,5 +105,34 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  # Desktop (Tauri/Rust) build is not in CI yet: a cold cargo build is slow and there is no
-  # desktop behaviour to test until M4 (TST-047). Add a windows-latest `cargo check` job then.
+  desktop:
+    name: Desktop shell (TST-047)
+    # The shell starts the Python backend, so it is checked where the product runs.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # The shell embeds the built web app, so it must exist before the shell compiles.
+      - run: npm ci
+      - run: npm run build
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: Format
+        run: cargo fmt --check
+        working-directory: desktop/src-tauri
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: desktop/src-tauri
+      - name: Tests
+        run: cargo test
+        working-directory: desktop/src-tauri
+      # The real backend over the real contract (handshake, development profile, clean stop).
+      - name: Tests against the real backend
+        run: cargo test -- --ignored
+        working-directory: desktop/src-tauri
