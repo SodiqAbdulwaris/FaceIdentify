@@ -214,6 +214,23 @@ describe('a source', () => {
     expect(screen.queryByRole('button', { name: 'Process' })).toBeNull()
   })
 
+  it('says so when the processing history cannot be loaded', async () => {
+    open([
+      { path: SOURCE, respond: detail() },
+      media,
+      noFaces,
+      {
+        path: `${SOURCE}/processing-runs`,
+        ...apiError('LIBRARY_UNAVAILABLE', 'The library is not available.', 503),
+      },
+    ])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The processing history could not be loaded: The library is not available.',
+    )
+    expect(screen.queryByText('This image has not been processed.')).toBeNull()
+  })
+
   it('says a referenced image stays where it was', async () => {
     open([
       { path: SOURCE, respond: detail({ storage_mode: 'REFERENCED' }) },
