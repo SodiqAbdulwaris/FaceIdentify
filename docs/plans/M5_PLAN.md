@@ -110,7 +110,7 @@ M5 starts -------+                                     +-- Step 5 retrieval -> M
 
 Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
 
-- **R0. Issue #137, the development-profile guard (entry cleanup).** Built first, because every later
+- **R0. Issue #137, the development-profile guard (entry cleanup). Built 2026-10-07** ([entry](../implementations/2026-10-07-m5-r0-library-profile-guard.md)). Built first, because every later
   step may touch a library worth keeping. Its history stays an M4 follow-up; M5 refuses to go on to
   real-library use without it.
 - **R1. Issue #69, select and verify the weights.** Done only when all of this is recorded: the exact

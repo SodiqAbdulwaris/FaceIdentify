@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.app import BackendReadiness, create_app
 from backend.api.events import EventHub
+from backend.api.library_profile import LibraryProfile, claim_library_profile
 from backend.api.scheduler import SchedulerService
 from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.index_coordinator import RetryPolicy
@@ -113,6 +114,8 @@ class ProcessingSettings:
     # Runs once the library has opened and recovery is done, before the scheduler starts (the
     # development profile registers its catalog here). A failure leaves the backend FAILED.
     prepare: Callable[[OpenLibrary], None] | None = None
+    # The profile the library is opened as; a library of the other profile is refused (issue 137).
+    profile: LibraryProfile = LibraryProfile.REAL
 
 
 def capabilities_from(report: StartupReport) -> dict[str, str]:
@@ -283,6 +286,8 @@ class Backend:
             self._opened = opened  # recorded first: shutdown closes it whatever happens next
             self.library = library
             try:
+                profile = self.processing.profile if self.processing else LibraryProfile.REAL
+                claim_library_profile(library, profile, settings.clock)
                 self.capabilities = capabilities_from(library.startup)
                 if self.processing is not None and self.processing.prepare is not None:
                     self.processing.prepare(library)
