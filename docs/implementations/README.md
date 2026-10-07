@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M4 W3.4: cancelling a run, and reading jobs](2026-10-07-m4-api-cancel-jobs.md) | partial; M4 W3 fourth part; TST-045, TST-047 |
 | 2026-10-07 | [M4 W3.3: the process command, run reads and retry](2026-10-07-m4-api-processing.md) | partial; M4 W3 third part; TST-045 |
 | 2026-10-07 | [M4 W3.2: source import, list, detail and media routes](2026-10-07-m4-api-sources.md) | partial; M4 W3 second part; TST-045 |
 | 2026-10-07 | [M4 W3.1: the API conventions every route inherits](2026-10-07-m4-api-conventions.md) | partial; M4 W3 first part; TST-045 |
