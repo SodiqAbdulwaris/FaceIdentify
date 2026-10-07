@@ -8,6 +8,7 @@ is always `null` (the field is in the contract so it does not change when they d
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -110,6 +111,26 @@ def _brief(
 # --- occurrences ----------------------------------------------------------------------------
 
 
+def occurrence_summaries(
+    session: Session, rows: Sequence[tuple[Occurrence, Source]]
+) -> list[OccurrenceSummary]:
+    observations = _representatives(session, [occ.representative_observation_id for occ, _ in rows])
+    people = _person_references(session, [occ.identity_id for occ, _ in rows])
+    return [
+        OccurrenceSummary(
+            id=str(occ.id),
+            source_id=str(occ.source_id),
+            source_display_name=source.display_name,
+            identity_id=str(occ.identity_id),
+            kind=occ.kind,
+            representative_observation=_brief(observations, occ.representative_observation_id),
+            person=people.get(occ.identity_id),
+            created_at=occ.created_at,
+        )
+        for occ, source in rows
+    ]
+
+
 def _occurrence_page(
     session: Session, query: Select[tuple[Occurrence, Source]], page: PageQuery, context: str
 ) -> Page[OccurrenceSummary]:
@@ -117,28 +138,22 @@ def _occurrence_page(
     query = query.where(Occurrence.state == OccurrenceState.ACTIVE)
     if after is not None:
         query = query.where(older_than(Occurrence.created_at, Occurrence.id, after))
-    rows = session.execute(
-        query.order_by(Occurrence.created_at.desc(), Occurrence.id.desc())
-        .limit(page.limit + 1)
-        .execution_options(populate_existing=True)
-    ).all()
-    observations = _representatives(session, [occ.representative_observation_id for occ, _ in rows])
-    people = _person_references(session, [occ.identity_id for occ, _ in rows])
+    rows = (
+        session.execute(
+            query.order_by(Occurrence.created_at.desc(), Occurrence.id.desc())
+            .limit(page.limit + 1)
+            .execution_options(populate_existing=True)
+        )
+        .tuples()
+        .all()
+    )
+    summaries = {s.id: s for s in occurrence_summaries(session, rows)}
     return paginate(
         rows,
         page.limit,
         context=context,
         key=lambda row: created_key(row[0].created_at, row[0].id),
-        item=lambda row: OccurrenceSummary(
-            id=str(row[0].id),
-            source_id=str(row[0].source_id),
-            source_display_name=row[1].display_name,
-            identity_id=str(row[0].identity_id),
-            kind=row[0].kind,
-            representative_observation=_brief(observations, row[0].representative_observation_id),
-            person=people.get(row[0].identity_id),
-            created_at=row[0].created_at,
-        ),
+        item=lambda row: summaries[str(row[0].id)],
     )
 
 
