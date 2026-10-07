@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { ApiError } from '@/api/client'
 import { keys } from '@/api/keys'
@@ -7,13 +8,16 @@ import { Button } from '@/components/ui/button'
 import { FaceCrop } from '../FaceCrop'
 import { FaceCorrection } from '../source/FaceCorrection'
 import { errorMessage } from '../library/messages'
+import { MergeControl } from './MergeControl'
 import { NameForm } from './NameForm'
+import { SplitControl } from './SplitControl'
 import { personLabel } from './label'
 
 export function IdentityPage() {
   const { identityId = '' } = useParams()
   const { endpoints } = useBackend()
 
+  const [chosen, setChosen] = useState<string[]>([])
   const person = useQuery({
     queryKey: keys.identity(identityId),
     queryFn: () => endpoints.getIdentity(identityId),
@@ -61,6 +65,7 @@ export function IdentityPage() {
         {person.data.person ? '' : ' Nobody has named this person yet.'}
       </p>
       <NameForm identityId={identityId} person={person.data.person ?? null} />
+      <MergeControl identity={person.data} />
 
       <h2 className="font-medium">Where this person appears</h2>
       {appearances.isPending ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
@@ -72,6 +77,13 @@ export function IdentityPage() {
       {appearances.isSuccess && items.length === 0 ? (
         <p className="text-sm text-muted-foreground">No appearances to show.</p>
       ) : null}
+
+      <SplitControl
+        identityId={identityId}
+        selected={chosen}
+        onAdd={(ids) => setChosen((now) => [...new Set([...now, ...ids])])}
+        onDone={() => setChosen([])}
+      />
 
       {items.length > 0 ? (
         <ul className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-3">
@@ -96,7 +108,21 @@ export function IdentityPage() {
                     {occurrence.source_display_name}
                   </span>
                 </Link>
-                <div className="mt-1">
+                <div className="mt-1 flex flex-col gap-1">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={chosen.includes(occurrence.id)}
+                      onChange={(event) =>
+                        setChosen((now) =>
+                          event.target.checked
+                            ? [...now, occurrence.id]
+                            : now.filter((id) => id !== occurrence.id),
+                        )
+                      }
+                    />
+                    Not {label}: choose this face
+                  </label>
                   <FaceCorrection face={{ occurrence, label }} />
                 </div>
               </li>

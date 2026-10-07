@@ -33,8 +33,8 @@ describe('staleBecauseOf', () => {
     ])
   })
 
-  it('a person or a corrected face makes every screen that shows a name stale', () => {
-    for (const type of ['person.updated', 'occurrence.updated']) {
+  it('a person, a corrected face or a changed identity makes every screen that shows a name stale', () => {
+    for (const type of ['person.updated', 'occurrence.updated', 'identity.updated']) {
       expect(staleBecauseOf(event(type, 'x1'))).toEqual([keys.identities, ['identity'], ['source']])
     }
   })

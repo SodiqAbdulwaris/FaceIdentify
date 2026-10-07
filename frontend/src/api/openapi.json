@@ -165,6 +165,10 @@
               }
             ]
           },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
           "source_count": {
             "title": "Source Count",
             "type": "integer"
@@ -177,6 +181,7 @@
         "required": [
           "id",
           "state",
+          "revision",
           "person",
           "representative_observation",
           "occurrence_count",
@@ -462,6 +467,47 @@
           "content_type"
         ],
         "title": "MediaReference",
+        "type": "object"
+      },
+      "Merge": {
+        "properties": {
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/MergeMember"
+            },
+            "title": "Identities",
+            "type": "array"
+          },
+          "preferred_identity_id": {
+            "format": "uuid",
+            "title": "Preferred Identity Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identities",
+          "preferred_identity_id"
+        ],
+        "title": "Merge",
+        "type": "object"
+      },
+      "MergeMember": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "revision"
+        ],
+        "title": "MergeMember",
         "type": "object"
       },
       "NamePerson": {
@@ -1270,6 +1316,23 @@
         "title": "SourceSummary",
         "type": "object"
       },
+      "Split": {
+        "properties": {
+          "occurrence_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Occurrence Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "occurrence_ids"
+        ],
+        "title": "Split",
+        "type": "object"
+      },
       "UnresolvedFace": {
         "properties": {
           "bounding_box": {
@@ -1386,6 +1449,47 @@
         ]
       }
     },
+    "/api/v1/identities/merge": {
+      "post": {
+        "operationId": "merge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Merge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentitySummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Merge",
+        "tags": [
+          "identities"
+        ]
+      }
+    },
     "/api/v1/identities/{identity_id}": {
       "get": {
         "operationId": "get_identity",
@@ -1498,6 +1602,59 @@
         "summary": "Identity Occurrences",
         "tags": [
           "memory"
+        ]
+      }
+    },
+    "/api/v1/identities/{identity_id}/split": {
+      "post": {
+        "operationId": "split",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Identity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Split"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentitySummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Split",
+        "tags": [
+          "identities"
         ]
       }
     },

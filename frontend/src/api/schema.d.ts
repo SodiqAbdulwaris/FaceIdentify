@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/identities/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Merge */
+        post: operations["merge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/identities/{identity_id}": {
         parameters: {
             query?: never;
@@ -49,6 +66,23 @@ export interface paths {
         get: operations["identity_occurrences"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/identities/{identity_id}/split": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Split */
+        post: operations["split"];
         delete?: never;
         options?: never;
         head?: never;
@@ -550,6 +584,8 @@ export interface components {
             occurrence_count: number;
             person: components["schemas"]["PersonReference"] | null;
             representative_observation: components["schemas"]["ObservationBrief"] | null;
+            /** Revision */
+            revision: number;
             /** Source Count */
             source_count: number;
             /** State */
@@ -640,6 +676,26 @@ export interface components {
             kind: string;
             /** Url */
             url: string;
+        };
+        /** Merge */
+        Merge: {
+            /** Identities */
+            identities: components["schemas"]["MergeMember"][];
+            /**
+             * Preferred Identity Id
+             * Format: uuid
+             */
+            preferred_identity_id: string;
+        };
+        /** MergeMember */
+        MergeMember: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Revision */
+            revision: number;
         };
         /** NamePerson */
         NamePerson: {
@@ -899,6 +955,11 @@ export interface components {
              */
             updated_at: string;
         };
+        /** Split */
+        Split: {
+            /** Occurrence Ids */
+            occurrence_ids: string[];
+        };
         /** UnresolvedFace */
         UnresolvedFace: {
             bounding_box: components["schemas"]["BoundingBox"];
@@ -942,6 +1003,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_IdentitySummary_"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    merge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Merge"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentitySummary"];
                 };
             };
             /** @description The one error shape. */
@@ -1007,6 +1101,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_OccurrenceSummary_"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    split: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                identity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Split"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentitySummary"];
                 };
             };
             /** @description The one error shape. */
