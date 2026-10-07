@@ -195,7 +195,7 @@ def _decision_policy(value: object) -> Mapping[str, Any]:
     ceiling = _number(policy["new_identity_ceiling"], "$.decision_policy.new_identity_ceiling")
     threshold = _number(policy["match_threshold"], "$.decision_policy.match_threshold")
     margin = _number(policy["margin"], "$.decision_policy.margin")
-    if not 0.0 <= minimum <= 1.0 or not -1.0 <= ceiling <= threshold <= 1.0 or not 0 < margin <= 2:
+    if not 0.0 <= minimum <= 1.0 or not -1.0 <= ceiling <= threshold <= 2.0 or not 0 < margin <= 2:
         raise ProcessingConfigurationError("$.decision_policy thresholds are invalid")
     return {
         "schema_version": SCHEMA_VERSION,

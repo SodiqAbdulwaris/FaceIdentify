@@ -95,7 +95,7 @@ def test_active_image_becomes_one_snapshot_run_and_queued_job(
         lambda request: request["decision_policy"].__setitem__("min_detection_score", True),
         lambda request: request["decision_policy"].__setitem__("schema_version", 2),
         lambda request: request["command_options"].__setitem__("schema_version", True),
-        lambda request: request["decision_policy"].__setitem__("match_threshold", 2.0),
+        lambda request: request["decision_policy"].__setitem__("match_threshold", 2.01),
         lambda request: request["decision_policy"].__setitem__("version", ""),
     ],
 )
@@ -106,6 +106,17 @@ def test_processing_request_v1_is_strict_and_fails_closed(build: ModelFactory, m
 
     with pytest.raises(ProcessingConfigurationError):
         ProcessingRequestV1.parse(invalid if replacement is None else replacement)
+
+
+def test_a_decision_policy_may_turn_automatic_matching_off_with_an_unreachable_threshold(
+    build: ModelFactory,
+) -> None:
+    request = processing_request(build)
+    request["decision_policy"]["match_threshold"] = 2.0  # (above 1: no cosine reaches it)
+
+    parsed = ProcessingRequestV1.parse(request)
+
+    assert parsed.decision_policy["match_threshold"] == 2.0
 
 
 def test_processing_request_v1_requires_an_object() -> None:

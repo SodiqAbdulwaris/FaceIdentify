@@ -227,7 +227,7 @@ def test_the_quality_gate_is_decided_before_the_retrieval_check() -> None:
         {"version": ""},
         {"new_identity_ceiling": 0.7},  # above the match threshold
         {"new_identity_ceiling": -1.1},
-        {"match_threshold": 1.1, "new_identity_ceiling": 0.3},
+        {"match_threshold": 2.1, "new_identity_ceiling": 0.3},
         {"margin": 0.0},  # (a match needs a lead)
         {"margin": -0.01},
         {"margin": 2.01},
@@ -378,6 +378,40 @@ def test_a_lead_exactly_the_margin_is_enough_and_a_hair_less_is_not() -> None:
     assert enough.outcome is RecognitionOutcome.MATCH_EXISTING
     short = decide_exact(candidate(1, 0.875, identity=7), candidate(2, 0.76, identity=8))
     assert short.reason is Reason.AMBIGUOUS_CANDIDATES
+
+
+OFF = DecisionPolicy(
+    version="off",
+    min_detection_score=0.5,
+    match_threshold=2.0,
+    margin=2.0,
+    new_identity_ceiling=-1.0,
+)
+
+
+@pytest.mark.parametrize(
+    "candidates",
+    [
+        (candidate(1, 1.0, identity=7),),  # an exact copy, nothing to compare it with
+        (candidate(1, 1.0, identity=7), candidate(2, -1.0, identity=8)),  # the widest possible lead
+    ],
+)
+def test_a_policy_with_matching_off_never_matches_and_never_creates_from_a_weak_score(
+    candidates: Any,
+) -> None:
+    decision = IdentityReasoner(OFF).decide(assess(retrieval(*candidates), GOOD))
+
+    assert decision.outcome is RecognitionOutcome.ABSTAIN
+    assert decision.reason is Reason.UNCERTAIN_SIMILARITY
+
+
+def test_a_policy_with_matching_off_still_starts_an_identity_when_there_is_nobody_to_compare() -> (
+    None
+):
+    decision = IdentityReasoner(OFF).decide(assess(retrieval(), GOOD))
+
+    assert decision.outcome is RecognitionOutcome.CREATE_NEW
+    assert decision.reason is Reason.NO_CANDIDATE
 
 
 def test_a_similarity_exactly_at_the_ceiling_is_not_clearly_new() -> None:
