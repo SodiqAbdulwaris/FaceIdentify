@@ -33,6 +33,7 @@ _Last updated: 2026-10-07 (owner decisions on the M4 agent notes and the M5 plan
   Reviewers for agent-opened PRs (`rules/branches.md`): Codex CLI and a read-only subagent are
   approved. Probed 2026-09-30 and **not** approved: `agy`, OpenCode (see the implementation entry
   for why); the Cursor `agent` CLI is not installed.
+- **Licences:** the application is personal-use only (owner, 2026-10-07). [`docs/research/licensing-and-commercialization.md`](../docs/research/licensing-and-commercialization.md) records every third-party model, dataset and direct dependency with its terms and what is not yet verified (the Rust crates, NVIDIA's runtime terms, the weights' training-data terms, transitive packages); the face weights are research-only and the repository has no `LICENSE` file. The next verification steps are in its section 11.
 - **Backend:** FastAPI is now a locked dependency and `backend/api/app.py` provides the first
   in-memory authenticated application factory: canonical 256-bit per-launch Bearer capability for
   all HTTP routes and a WebSocket credential offered through `Sec-WebSocket-Protocol` but never

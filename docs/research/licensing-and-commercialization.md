@@ -14,7 +14,7 @@ a row here in the same change (`.agents/rules/documentation.md`).
 | # | Blocker | Why | What would unblock it |
 |---|---|---|---|
 | 1 | **The face models** (`buffalo_l`: SCRFD-10GF and ArcFace ResNet50) | InsightFace states that all its pretrained models are "available for non-commercial research purposes only"; the code is MIT, the weights are not. Using them in a personal app is the owner's accepted risk (section 2), not a verified permission. | A commercial licence from InsightFace for these weights, or different weights whose licence and **training-data terms** permit commercial use (section 2.3). A change of model is a new representation space and a re-run of R2 to R4 in `docs/plans/M5_PLAN.md`. |
-| 2 | **No licence for our own code** | The repository has no `LICENSE` file, so by default all rights are reserved to the author(s) and nobody else may use it. | The owner chooses a licence (or keeps it proprietary) and adds the file. See section 3. |
+| 2 | **No licence for our own code** | The repository has no `LICENSE` file, so no licence grants anyone else rights to the code: by default all rights stay with the rightsholder(s), who may still grant permission by contract. | The owner chooses a licence (or keeps it proprietary) and adds the file. See section 3. |
 | 3 | **Biometric-privacy law** | Face recognition of identifiable people is regulated separately from copyright (section 9). | Legal review per market, consent flows, retention and deletion. |
 | 4 | **NVIDIA runtime libraries** | The GPU path uses NVIDIA's CUDA and cuDNN runtime libraries, which are proprietary and have their own redistribution terms (section 4). | Read the current NVIDIA licence for every file that would be shipped; or ship the CPU path only. |
 | 5 | **Unverified Rust crates and the build tools of M8** | `cargo-license` has not been run; the installer, signing and any bundled FFmpeg are not chosen yet. | Run the inventory in section 8 and fill sections 5 to 7. |
@@ -55,8 +55,10 @@ of that training data must be checked before anyone relies on it.
 
 ## 3. Our own code
 
-- No `LICENSE` file exists. Decide before any sharing: proprietary, or an open licence (MIT and
-  Apache-2.0 are compatible with every dependency listed below; GPL would be constrained by section 6).
+- No `LICENSE` file exists. Decide before any sharing: proprietary, or an open licence. Whether a
+  chosen licence fits the dependencies depends on how the product is distributed: the notice and
+  source obligations of the licences below (MPL-2.0, OFL-1.1, Apache-2.0, LGPL builds of FFmpeg) must
+  be reviewed for the actual distribution, not assumed.
 - **Authorship.** Much of the code was written with an AI coding assistant under the owner's
   direction. Whether and how that affects ownership or licensing differs by jurisdiction and is a
   question for the owner's lawyer before commercial use; record the assistant's involvement honestly
@@ -78,11 +80,12 @@ Runtime: `alembic` 1.20.0 MIT; `fastapi` 0.142.2 MIT (with `starlette` 1.7.0 BSD
 `pydantic` 2.13.5 MIT); `numpy` 2.5.3 BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0; `pillow`
 12.3.0 MIT-CMU; `sqlalchemy` 2.0.54 MIT; `uvicorn` 0.54.0 BSD-3-Clause; `websockets` 17.2
 BSD-3-Clause; `usearch` Apache-2.0; `onnxruntime` MIT.
-Development only (not shipped): `pytest` 9.1.1 MIT; `httpx` 0.28.1 BSD-3-Clause; `hypothesis`
-6.168.1 **MPL-2.0** (file-level copyleft; fine as a test tool, do not bundle); `ruff` MIT; `mypy` MIT;
-`onnx` 1.23.1 Apache-2.0.
-Transitive packages were not individually reviewed: regenerate with the commands in section 8
-before a release.
+Development only (not shipped): `pytest` 9.1.1 MIT; `pytest-asyncio` 1.4.0 Apache-2.0; `pytest-cov`
+7.1.0 MIT (with `coverage` 7.16.1 Apache-2.0); `httpx` 0.28.1 BSD-3-Clause; `hypothesis` 6.168.1
+**MPL-2.0** (file-level copyleft; fine as a test tool, do not bundle); `ruff` 0.16.8 MIT; `mypy` 2.3.1
+MIT; `onnx` 1.23.1 Apache-2.0.
+This is the list of **direct** dependencies. Transitive packages were not individually reviewed:
+regenerate with the commands in section 8 before a release.
 
 ## 6. Front end (verified from `node_modules` metadata, 2026-10-07)
 
@@ -93,8 +96,12 @@ licence notice); `class-variance-authority` 0.7.1 Apache-2.0; `cn` 0.4.0 MIT; `t
 MIT; `lucide-react` 1.47.0 **ISC** (icons); `@tauri-apps/api` 2.11.1 Apache-2.0 OR MIT;
 `@fontsource-variable/geist` 5.3.0 **OFL-1.1** (the Geist font: bundling is allowed, selling the font
 alone is not, and the reserved font name must not be reused for a modified font).
-Build and test only: `vite` 8.3.0 MIT; `vitest` 5.0.1 MIT; `typescript` 6.0.3 Apache-2.0;
-`openapi-typescript` 7.13.0 MIT; `oxlint` 1.85.0 MIT.
+Build and test only (direct): `vite` 8.3.0, `vitest` 5.0.1, `@vitejs/plugin-react` 6.1.1, `jsdom` 30.1.1,
+`ws` 8.22.0, `openapi-typescript` 7.13.0, `oxlint` 1.85.0, `@testing-library/dom` 10.4.2,
+`@testing-library/jest-dom` 7.0.1, `@testing-library/react` 16.3.3, `@testing-library/user-event`
+14.6.7, `@types/node` 24.13.6, `@types/react` 19.3.0, `@types/react-dom` 19.3.0, `@types/ws`
+8.18.2: all MIT; `typescript` 6.0.3 Apache-2.0. At the repository root: `@tauri-apps/cli` 2.11.5
+`Apache-2.0 OR MIT` (the Tauri build command).
 A bundle shipped to users must carry the notices these licences require (MIT, ISC, Apache-2.0 and
 OFL all require the licence text to travel with the software): generate a third-party notices file
 at packaging time (M8).
@@ -103,20 +110,23 @@ at packaging time (M8).
 
 Rust crates used directly (`desktop/src-tauri/Cargo.toml`): `tauri` (MIT OR Apache-2.0 as far as is
 known), `tauri-plugin-log`, `tauri-plugin-dialog`, `tauri-plugin-single-instance`, `serde`,
-`serde_json`, `log`, `base64`, `getrandom`; dev: `tempfile`. All are expected to be MIT and/or
-Apache-2.0 but **none has been checked**: run `cargo license` (or `cargo deny`) before a release.
+`serde_json`, `log`, `base64`, `getrandom`; build: `tauri-build`; dev: `tempfile`. All are expected
+to be MIT and/or Apache-2.0 but **none has been checked**: run `cargo license` (or `cargo deny`) before a release.
 Not chosen yet (M6 to M8), each needing a row when it is: FFmpeg or PyAV for video (an LGPL build is
-usable if dynamically linked; a GPL or `--enable-nonfree` build is not suitable for a closed
-product); PyInstaller or another bundler for the Python sidecar; the Windows installer toolkit; code
+usable in a closed product only if its conditions are met: dynamic linking, the exact build
+configuration, the licence text and notices, a source offer where it applies, and the user's ability to
+replace the library; a GPL or `--enable-nonfree` build is not suitable for a closed product); PyInstaller or another bundler for the Python sidecar; the Windows installer toolkit; code
 signing; the Python and Node distributions that would be shipped (the Python licence is permissive).
 
 ## 8. How to regenerate the inventory
 
+These print name, resolved version and licence, and work in PowerShell and Git Bash alike:
+
 ```bash
-# Python (installed packages)
+# Python (every installed package)
 uv run python -c "from importlib.metadata import distributions as d; [print(x.metadata['Name'], x.version, x.metadata.get('License-Expression') or x.metadata.get('License')) for x in sorted(d(), key=lambda y: y.metadata['Name'].lower())]"
-# JavaScript
-npm ls --all --parseable | head
+# JavaScript (every package under node_modules)
+node -e "const fs=require('fs'),path=require('path');const walk=d=>{for(const n of fs.readdirSync(d)){if(n.startsWith('.'))continue;const p=path.join(d,n);if(n.startsWith('@')){walk(p);continue}try{const j=JSON.parse(fs.readFileSync(path.join(p,'package.json')));console.log(j.name,j.version,typeof j.license==='object'?j.license.type:j.license)}catch(e){}}};walk('node_modules')"
 # Rust (after installing cargo-license)
 cargo license --manifest-path desktop/src-tauri/Cargo.toml
 ```
