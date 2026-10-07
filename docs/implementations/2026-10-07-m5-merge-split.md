@@ -18,6 +18,12 @@
 - **A mixed-support occurrence is an explicit conflict** (owner decision): when a selection takes some
   of the representations an occurrence rests on and not others, `split_identity` raises
   `SplitConflictError` naming those occurrences, before writing anything.
+- **Revisions.** What an identity owns changing bumps its revision once (`touch_identity`): the
+  survivor of a merge, the source of a split, and both identities a correction or a resolution
+  changes. A merge refuses a stale survivor and a split a stale source (`409 IDENTITY_CHANGED`; the
+  split body carries `expected_revision`), so a view taken before a correction cannot silently apply a
+  later merge or split. A split also refuses, with the faces named (`422 INVALID_SPLIT`), a selection
+  that includes a face with nothing to split off, instead of quietly leaving it behind.
 - **Atomicity.** Each is one use case in one `UnitOfWork` transaction: the identity states and
   lineage, representations, occurrences, person link, Evidence and representative faces commit
   together or not at all; the index is untouched (ownership is not part of it).
@@ -62,7 +68,10 @@ mixed support is a conflict; merge and split are atomic across entities.
 - `tests/integration/test_api_identity_changes.py` (11): 100% of the module, four guard mutations
   closed by tests.
 - Frontend: `MergeSplit.test.tsx` (6): `npm test` 141 passed, typecheck and `oxlint` clean.
-- Full backend gate: see the PR.
+- Full backend gate: see the PR. Review (Codex, read-only), all three findings answered: the two
+  revision findings and the quietly-omitted face are fixed above with tests (stale survivor, stale
+  source, a stale view after a correction, a chosen bare face; four mutations of the revision code);
+  the route-design note stands as recorded under Decisions, with the owner asked to confirm.
 
 ## Open issues / follow-ups
 
