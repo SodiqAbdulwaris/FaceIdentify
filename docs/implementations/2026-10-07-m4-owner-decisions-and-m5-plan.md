@@ -21,6 +21,12 @@
   atomicity, gates Forget on a decided meaning (`ForgetIdentity` against "forget person"), keeps
   recycled-source Occurrences in historical views and search, splits TST-057 into a workflow line and
   a quality line blocked on issue #69, and keeps reprocessing outside M5.
+- 2026-10-07, later: the owner made M5 the first real recognition milestone. The plan gained track R
+  (R0 issue #137; R1 issue #69 selection and verification, owner approves before any download; R2
+  runtime installation, provider compatibility and issue #80's sweep; R3 real-inference smoke tests;
+  R4 evaluation and TST-044), running in parallel with the identity-management steps, a rule for what
+  M5 absorbs, and a real-world gate. TST-057 is now closed on real models; the earlier workflow/quality
+  split note is superseded by a dated note, not deleted.
 
 ## Why
 

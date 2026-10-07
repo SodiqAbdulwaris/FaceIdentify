@@ -1,11 +1,16 @@
 # M5 plan: corrections, search and memory
 
-**Status:** scope and order approved by the owner 2026-10-07, with seven changes (section 2) made the
-same day; the plan is locked once the owner has read them. Nothing here is built. **Scope:** tracker
-milestone M5 (TST-054 to TST-059, SEC-006) in
-[`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md). **Out of scope:** movies
-(M6), cameras (M7), packaging (M8), **source reprocessing (Roadmap Phase G), which stays outside M5**,
-and the real SCRFD/ArcFace models (issue #69).
+**Status:** scope and order approved by the owner 2026-10-07, with seven changes and then the real-model
+track (section 2) made the same day. Nothing here is built. **Scope:** tracker milestone M5 (TST-054 to
+TST-059, SEC-006) in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md), **plus the
+real-model track: issue #69 (SCRFD and ArcFace), the runtime installation and provenance they need,
+TST-038/039 on the real path, TST-044 (initial calibrated policy), issue #80's sweep, and issue #137.**
+M5 is the first real recognition milestone. **Out of scope:** movies (M6), cameras and their GPU work
+(M7), installer-level model packaging and distribution (M8), and **source reprocessing (Roadmap Phase
+G), which stays outside M5** unless an M5 feature genuinely requires it.
+
+The rule for what M5 absorbs: if M5 cannot truthfully meet its definition of done without it, it is in
+M5; otherwise it stays in its own milestone.
 
 This plan sequences work; it changes no spec. Where it records a decision the affected spec and
 [`CONTEXT.md`](../../.agents/CONTEXT.md) carry the dated note.
@@ -63,6 +68,21 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 
 > **Decision 2026-10-07:** **Source reprocessing stays outside M5** and gets its own plan.
 
+> **Decision 2026-10-07:** **M5 is the first real recognition milestone.** M4 proved the application
+> and its workflow work; M5 must prove the application remembers, recognises, corrects and retrieves
+> real people with a real SCRFD/ArcFace runtime. The real-model track (issue #69, runtime installation
+> and provenance, real-inference tests, TST-044) and issue #137 move into M5 and run **in parallel**
+> with the identity-management track, joining before face search and cross-source recognition and
+> before M5 closes. Not being able to obtain the final ArcFace weights must not stop naming, correction,
+> merge, split or lifecycle work. This **supersedes** the TST-057 note above: the fake-profile workflow
+> stays as a CI test but is no longer evidence that recognition works; TST-057 is closed on real
+> models. M8 packaging and M6/M7 work are not absorbed.
+
+> **Decision 2026-10-07:** **Weights are chosen by the owner.** The earlier rule stands: I select and
+> download nothing without the owner's approval. Track R1 produces a candidates report; the owner picks;
+> only then is anything downloaded, and no weights are committed to Git unless the licence expressly
+> permits that distribution.
+
 Other owner decisions from the same day (routing, status route, development catalog guard, label
 derivation, `.npmrc`) are dated notes in the M4 implementation entries and in `CONTEXT.md`.
 
@@ -71,6 +91,44 @@ derivation, `.npmrc`) are dated notes in the M4 implementation entries and in `C
 Each step is one or more small PRs under the repository rules (branch, docs entry, independent review,
 mutation-tested guards, 100% backend coverage). Every route stays thin and calls a use case; every
 use case runs inside one `UnitOfWork`; the ML worker never touches SQLite.
+
+The work runs as two tracks that converge:
+
+```text
+                 .-- Track R: real models ------------.
+                 |  R0 #137 -> R1 #69 -> R2 -> R3 -> R4 |
+M5 starts -------+                                     +-- Step 5 retrieval -> M5 gate
+                 |  Track I: identity management       |
+                 '-- Step 1 -> 2 -> 3 -> 4 -------------'
+```
+
+### Track R. Real models (parallel to steps 1 to 4)
+
+Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
+
+- **R0. Issue #137, the development-profile guard (entry cleanup).** Built first, because every later
+  step may touch a library worth keeping. Its history stays an M4 follow-up; M5 refuses to go on to
+  real-library use without it.
+- **R1. Issue #69, select and verify the weights.** Done only when all of this is recorded: the exact
+  SCRFD and ArcFace models; the authoritative source; the hashes; the licences, reviewed, and the
+  redistribution status; and, in the existing runtime and catalog architecture, the model and version
+  provenance. **Gate:** the owner approves the selection from my candidates report before any download.
+- **R2. Runtime installation and compatibility.** The runtime packages for the chosen models installed
+  through the existing installer (a documented local `runtime/`, plan decision 6 of the M3/M4 plan;
+  M8 owns distribution); ONNX Runtime provider compatibility verified, the CUDA path tested on the
+  RTX 4070 development machine and the CPU fallback smoke-tested; preprocessing and postprocessing
+  matched to what those exact models expect; embedding dimension and normalisation verified; restart
+  and runtime registration tested. Issue #80's installation-`MISSING` sweep is built here (it was
+  waiting for real weights). TST-038 and TST-039 are closed on the real path.
+- **R3. Real inference smoke tests.** Real image, then detection, then crop and alignment, then
+  embedding, through the production perception client, local-only (no weights in CI; CI keeps the
+  fake-profile tests).
+- **R4. Evaluation and TST-044, the initial calibrated policy.** A real evaluation dataset (licensed,
+  Git-ignored under `evaluation/datasets/`, never committed) and enough evaluation to set a defensible
+  initial application policy and document its limits; this is not a research-grade benchmark. The
+  development profile's "uncalibrated" label is replaced only by this policy. **Ask before building:**
+  the dataset, its licence and the acceptance numbers; per the testing rules no threshold is invented
+  without a measured baseline.
 
 ### Step 1. Naming and Person semantics (TST-054, first part)
 
@@ -155,42 +213,52 @@ use case runs inside one `UnitOfWork`; the ML worker never touches SQLite.
 - Tests: a forgotten or deleted memory cannot be resurrected by later processing or index rebuild,
   checked after a restart (TST-059) and by the byte-level erasure policy tests (SEC-006).
 
-### Step 5. Retrieval (TST-055, TST-056, TST-057)
+### Step 5. Retrieval (TST-055, TST-056, TST-057), after tracks R and I converge
+
+Face search and cross-source recognition start only when track R has reached R4 (real models, initial
+calibrated policy). Historical and name search need only track I and can land earlier.
 
 - Historical search by Person or name, Identity, Source and Occurrence over authoritative (ACTIVE)
   data only (TST-055), per the search architecture spec; I will cite its sections and ask where it is
   silent. Occurrences of recycled Sources are included, marked and filterable (section 2).
-- Face search: upload a query image, perceive it, search, return identities with context, and persist
-  nothing (the query-only guard is built; TST-056 proves it end to end, including after a restart).
-- Cross-source recognition (TST-057): **the workflow** (the same person recognised across different
-  sources, with the repeat appearances shown) is `PASSING` on the development profile. **The quality
-  claim** (that recognition is good enough on real faces) is a separate line, `BLOCKED` on issue #69,
-  recorded as such in the tracker when this step lands; a passing workflow test never closes it.
+- Face search: upload a query image, perceive it with the real runtime, search, return identities with
+  context, and persist nothing (the query-only guard is built; TST-056 proves it end to end, including
+  after a restart).
+- Cross-source recognition (TST-057): real images of the same person from independent sources are
+  recognised under the initial calibrated policy, with the repeat appearances shown. This is closed on
+  real models; the fake-profile version stays as a CI test only and is not evidence for this row.
 - UI: a search screen and result views.
+
+### M5 real-world gate
+
+The complete identity-memory workflow runs with the selected real SCRFD/ArcFace runtime: import real
+images containing the same person across independent sources; detect and embed faces; recognise and
+retrieve the identity across sources under the initial calibrated policy; name and correct identities;
+merge and split; exercise recycle, restore, delete and forget; run historical and face search; restart
+the application; and verify that authoritative identity state, Evidence, indexes and retrieval remain
+consistent. It is a local run (the weights are not in CI), recorded in the tracker with its evidence.
 
 ## 4. Dependencies and blockers
 
-- Real SCRFD/ArcFace weights (issue #69) block any claim about recognition quality: TST-057's quality
-  line and the calibrated policy (TST-044) cannot be met on fakes. Plumbing is built and tested on the
-  development profile.
-- Step 4 needs the development-profile guard (issue #137) built before a kept library is used in
-  practice; it is independent of step 4's code.
+- Track R depends on the owner's choice of weights (R1) and, for R4, on a licensed evaluation dataset.
+  If a model cannot be obtained, track I continues and only step 5's face search, TST-057 and the M5
+  gate wait.
+- Step 4 needs R0 (issue #137) built before a kept library is used in practice.
 - Step 3 depends on step 2 only for the UI; the use cases are independent.
 
 ## 5. Tracker IDs and definition of done
 
 TST-054 (steps 1, 2), TST-058 (step 3), TST-059 and SEC-006 (step 4), TST-055, TST-056 and TST-057
-(step 5). **Done** when those rows are `PASSING` (TST-057's workflow `PASSING` on the development
-profile, its quality gate `BLOCKED` on issue #69 as a separate recorded line), the milestone gate holds
-("identity-management workflows preserve current state and historical evidence"), the full backend gate
-passes with 100% coverage, the desktop end-to-end test covers name, correct, merge, split, recycle,
-search and a restart, CI is green on `main`, and `CONTEXT.md`, `PROJECT_STATUS.md`, the implementation
-log and the tracker agree.
+(step 5), and from track R: TST-038, TST-039 on the real path, TST-044, and issues #69, #80 and #137.
+**Done** when those rows are `PASSING` with TST-057 on real models, the real-world gate above has been
+run and recorded, the milestone gate holds ("identity-management workflows preserve current state and
+historical evidence"), the full backend gate passes with 100% coverage, the desktop end-to-end test
+still passes on the development profile in CI, CI is green on `main`, and `CONTEXT.md`,
+`PROJECT_STATUS.md`, the implementation log and the tracker agree. Fake-profile tests stay valuable CI
+tests; they are not evidence that recognition works.
 
-## 6. Not in this plan, to be scheduled separately
+## 6. Not in this plan
 
-- The development-profile guard the owner required on 2026-10-07 (issue #137): refuse a kept or real
-  library with `--development-profile` and the reverse, record development provenance on the catalog
-  and runtime records, and mark the library. It is M4 follow-up work and builds no migration machinery
-  for cleanup.
 - Source reprocessing (Roadmap Phase G): outside M5 by the owner's decision of 2026-10-07.
+- Installer-level model packaging and distribution (M8), camera GPU and runtime work (M7), movies (M6).
+- Cleanup or migration of development-profile data (deliberately unsolved; #137 builds none).
