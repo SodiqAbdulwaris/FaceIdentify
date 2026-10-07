@@ -48,7 +48,7 @@ threshold still produced false accepts.
 ## The conservative rule and its result
 
 Rule (`--conservative`, predeclared before the run): thresholds only strictly above the
-different-person 99.9th percentile of all pairs (0.3261); a margin is always required (0.02, 0.05,
+floor, the owner's figure 0.326 (the different-person tail of the first run) or the 99.9th percentile of different-person pairs among the *selection* half's photographs if that is higher (it was not); the final half is never read for the floor (a review found the first version had read it); a margin is always required (0.02, 0.05,
 0.1); zero false accepts and at least 20 accepted queries on the selection half; then the highest
 recall; judged on the final half, which must show zero false accepts and a recall of at least 0.25
 (predeclared "useful" minimum), otherwise automatic acceptance is disabled. No new-identity ceiling:
@@ -60,10 +60,14 @@ a face below the threshold abstains.
   Three false accepts were queries of people never enrolled and two were known people matched to the
   wrong person; their scores were 0.409, 0.409, 0.567, 0.598 and 0.615.
 - Verdict: **auto-accept-disabled** (5 false accepts on the held-out half). The policy that results
-  is `buffalo-l-abstain-only-v1`: match threshold 1.0, margin 2.0 (no automatic accept), ceiling -1.0
+  is `buffalo-l-abstain-only-v1`: match threshold 2.0 (above any cosine, so no face is ever matched
+  automatically; the validators now allow a threshold up to 2.0 for this), margin 2.0, ceiling -1.0
   (no automatic new identity), minimum detection score 0.5 (the detector's own floor, which the
   measurement ran under). Every face that has candidates abstains and waits for manual resolution; a
-  face with nobody to compare with still starts a new identity.
+  face with nobody to compare with still starts a new identity (the reasoner's `NO_CANDIDATE`: no
+  existing identity is asserted, and it is bookkeeping the first face of a library cannot avoid).
+  The policy is an evaluated artifact: it takes effect only when the real host reads it (the next
+  change); until then the application runs on the development profile.
 
 False accepts at cosine 0.57 to 0.62 are far above the different-person 99.9th percentile. Either
 the labels are wrong for those pairs (the labels are unverified Commons categories) or the model
