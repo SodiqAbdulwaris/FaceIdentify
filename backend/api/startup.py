@@ -42,12 +42,12 @@ from backend.api.scheduler import SchedulerService
 from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.processing.accept_run import AcceptProcessingRunUseCase
-from backend.app.processing.execute_job import ExecuteProcessingJob
+from backend.app.processing.execute_job import ExecuteProcessingJob, PerceptionPlanner
 from backend.app.processing.models import ProcessingRun
 from backend.app.processing.runner import ProcessingRunner, RunOutcome
 from backend.app.processing.scheduler import ProcessingScheduler
 from backend.app.recovery.startup import StartupReport
-from backend.app.runtime.worker_config import PerceptionPlan
+from backend.app.runtime.worker_config import PerceptionPlan, plan_perception
 from backend.infrastructure.db.unit_of_work import TransactionRetry
 
 NOT_CONFIGURED: Final = "NOT_CONFIGURED"
@@ -74,6 +74,11 @@ class LibrarySettings:
     transaction_retry: TransactionRetry
     index_batch: int
     max_index_passes: int
+
+
+# Provisional (unmeasured) bounds on one imported image: the host's choice until they are measured.
+PROVISIONAL_MAX_PIXELS: Final = 100_000_000
+PROVISIONAL_MAX_BYTES: Final = 512 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,11 @@ class ProcessingSettings:
     lease_for: timedelta
     idle_seconds: float
     owner: str
+    # How a frozen selection becomes a plan (the real one reads installed packages).
+    planner: PerceptionPlanner = plan_perception
+    # Runs once the library has opened and recovery is done, before the scheduler starts (the
+    # development profile registers its catalog here). A failure leaves the backend FAILED.
+    prepare: Callable[[OpenLibrary], None] | None = None
 
 
 def capabilities_from(report: StartupReport) -> dict[str, str]:
@@ -227,6 +237,7 @@ class Backend:
                 clock=settings.clock,
                 max_pixels=processing.max_pixels,
                 recognition_k=processing.recognition_k,
+                planner=processing.planner,
             ),
             AcceptProcessingRunUseCase(
                 uow, new_id=settings.new_id, clock=settings.clock, wake_index=wake_index
@@ -273,7 +284,10 @@ class Backend:
             self.library = library
             try:
                 self.capabilities = capabilities_from(library.startup)
-            except Exception as error:  # noqa: BLE001 - an unreadable report is FAILED, not a crash
+                if self.processing is not None and self.processing.prepare is not None:
+                    self.processing.prepare(library)
+            except Exception as error:  # noqa: BLE001 - an unreadable report or a profile that
+                # cannot register itself is FAILED, not a crash
                 self.failure = type(error).__name__
                 self.state = LifecycleState.FAILED
             else:
