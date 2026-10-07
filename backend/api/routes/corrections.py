@@ -120,9 +120,7 @@ def reassign(
                 expected_identity_id=body.expected_identity_id,
                 new_id=settings.new_id, clock=settings.clock,
             )  # fmt: skip
-        except StaleRevisionError as error:
-            raise _moved(error) from None
-        except IdentityManagerError as error:
+        except IdentityManagerError as error:  # (staleness was checked above, in this transaction)
             raise ApiError(
                 409, "FACE_NOT_CORRECTABLE", "This face cannot be moved there.",
                 details={"reason": str(error)},
