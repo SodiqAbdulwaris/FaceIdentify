@@ -412,7 +412,7 @@ def test_spec_defined_value_sets_reject_unknown_literals(
 SPEC_VALUE_SETS: dict[type[StrEnum], set[str]] = {
     ObservationState: {"PENDING", "ACTIVE", "SUPERSEDED", "REJECTED", "DELETED"},
     RepresentationState: {"PENDING", "ACTIVE", "SUPERSEDED", "ERASING", "ERASED", "DELETED"},
-    IdentityState: {"PENDING", "ACTIVE", "MERGED", "SPLIT", "FORGOTTEN", "DELETED"},
+    IdentityState: {"PENDING", "ACTIVE", "MERGED", "FORGOTTEN", "DELETED"},
     IdentityLineageKind: {"MERGED_INTO", "SPLIT_FROM"},
     PersonState: {"ACTIVE", "RECYCLED", "DELETED"},
     AssociationState: {"ACTIVE", "REMOVED", "SUPERSEDED"},
