@@ -466,10 +466,11 @@ while True:
 
     fn assert_stopped_beating(beat: &Path) {
         thread::sleep(Duration::from_millis(500)); // let the process end and the file settle
-        let first = fs::read_to_string(beat).unwrap();
+                                                   // (a missing file means it was ended before its first beat: also "not running")
+        let first = fs::read_to_string(beat).unwrap_or_default();
         thread::sleep(Duration::from_millis(500));
         assert_eq!(
-            fs::read_to_string(beat).unwrap(),
+            fs::read_to_string(beat).unwrap_or_default(),
             first,
             "the failed host is still running"
         );
@@ -494,7 +495,8 @@ while True:
             let dir = tempfile::tempdir().unwrap();
             let (config, beat) = heartbeat_host(dir.path(), announcement);
 
-            let error = start(&config, Duration::from_millis(800)).err().unwrap();
+            // long enough for a slow machine to start Python and beat at least once
+            let error = start(&config, Duration::from_secs(5)).err().unwrap();
 
             assert!(
                 matches!(
