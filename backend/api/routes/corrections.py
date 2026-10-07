@@ -35,6 +35,7 @@ from backend.app.identities.models import (
     EvidenceCandidate,
     EvidenceKind,
     EvidenceRepresentation,
+    EvidenceRepresentationRole,
     Identity,
     IdentityState,
 )
@@ -196,6 +197,7 @@ def _likely(session: Session, representation_ids: list[uuid.UUID]) -> dict[uuid.
         .where(
             Evidence.kind == EvidenceKind.RECOGNITION_ABSTAINED,
             EvidenceRepresentation.representation_id.in_(representation_ids),
+            EvidenceRepresentation.role == EvidenceRepresentationRole.SUBJECT,
             EvidenceCandidate.identity_id.is_not(None),
         )
         .order_by(EvidenceCandidate.raw_similarity.desc(), EvidenceCandidate.rank)
