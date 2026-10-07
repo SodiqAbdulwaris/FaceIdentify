@@ -24,7 +24,7 @@ Protocol (open set, leave-one-out, subject-disjoint):
   **reported on the final half**, which took no part in the choice, with a Wilson 95% interval.
 * `--conservative` (owner decision 2026-10-07, after the first run: the point chosen on the
   selection half reached 100% precision there and 78% on the final half) chooses differently:
-  only thresholds strictly above the different-person 99.9th percentile of all pairs, zero false
+  only thresholds strictly above a floor, zero false
   accepts on the
   selection half, then the highest recall. The final half must show zero false accepts and a recall
   of at least `USEFUL_RECALL`, or automatic acceptance is disabled (nothing is accepted; every
@@ -64,6 +64,9 @@ DEVICES = {"CUDAExecutionProvider": "GPU", "CPUExecutionProvider": "CPU"}
 TARGET_PRECISION = 0.99
 MARGINS = (0.0, 0.02, 0.05, 0.1)
 USEFUL_RECALL = 0.25  # predeclared: below this share of known-person queries accepted, not useful
+TAIL_FLOOR = (
+    0.326  # the owner's figure (2026-10-07): the different-person tail seen in the first run
+)
 DOMINANCE = 2.5  # a subject's face is this many times larger than any other face in the photograph
 Query = tuple[str, str, float, float, bool]  # (person, best person, best score, runner-up, known)
 Photo = tuple[str, str, np.ndarray]  # (person, file, vector)
@@ -237,6 +240,19 @@ def choose_conservative(
     return best
 
 
+def tail_floor(selection_photos: list[Photo], owner_floor: float) -> float:
+    """The lowest threshold the conservative rule may choose: the owner's figure, or the 99.9th
+    percentile of different-person pairs among the *selection* half's photographs if that is higher.
+    Only the selection half is read, so nothing of the final half reaches the choice."""
+    scores = [
+        float(a[2] @ b[2])
+        for i, a in enumerate(selection_photos)
+        for b in selection_photos[i + 1 :]
+        if a[0] != b[0]
+    ]
+    return round(max(owner_floor, float(np.percentile(scores, 99.9)) if scores else owner_floor), 4)
+
+
 def conservative_verdict(final: dict[str, Any]) -> tuple[str, str]:
     """Whether the point chosen on the selection half may stand, judged on the final half."""
     match = final["match"]
@@ -251,16 +267,16 @@ def conservative_verdict(final: dict[str, Any]) -> tuple[str, str]:
 
 
 def decision_policy(verdict: str, point: dict[str, Any] | None) -> dict[str, Any]:
-    """The request's `decision_policy`. A disabled policy accepts nothing (a threshold of 1.0 and a
-    margin no pair of scores can reach) and, like the other, never creates an identity from a weak
-    score: its ceiling is the lowest cosine, so such a face abstains."""
+    """The request's `decision_policy`. A disabled policy accepts nothing: its threshold, 2.0, is
+    above any cosine, so no face is ever matched, and like the other it never creates an identity
+    from a weak score (its ceiling is the lowest cosine, so such a face abstains)."""
     on = verdict == "provisional-conservative" and point is not None
     return {
         "schema_version": 1,
         "version": "buffalo-l-conservative-provisional-v1" if on else "buffalo-l-abstain-only-v1",
         "min_detection_score": 0.5,  # the detector's own floor, which the measurement ran under
         "new_identity_ceiling": -1.0,
-        "match_threshold": point["threshold"] if on and point else 1.0,
+        "match_threshold": point["threshold"] if on and point else 2.0,
         "margin": point["margin"] if on and point else 2.0,
     }
 
@@ -316,6 +332,7 @@ def main() -> None:
     parser.add_argument("--minimum-below", type=int, default=20)
     parser.add_argument("--conservative", action="store_true", help="the owner's conservative rule")
     parser.add_argument("--conservative-minimum-accepted", type=int, default=20)
+    parser.add_argument("--tail-floor", type=float, default=TAIL_FLOOR)
     parser.add_argument(
         "--write-policy", type=Path, default=None, help="write the decision policy (conservative)"
     )
@@ -354,7 +371,8 @@ def main() -> None:
     impostor = [float(a[2] @ b[2]) for a, b in pairs if a[0] != b[0]]
     conservative: dict[str, Any] | None = None
     if arguments.conservative:
-        floor = round(float(np.percentile(impostor, 99.9)), 4)
+        selection_photos = [x for p in halves["selection"]["people"] for x in by_person[p]]
+        floor = tail_floor(selection_photos, arguments.tail_floor)
         point = choose_conservative(
             halves["selection"]["queries"], floor, arguments.conservative_minimum_accepted
         )
@@ -380,7 +398,8 @@ def main() -> None:
             match["false_accept_scores"] = sorted(round(q[2], 3) for q in wrong)
         policy_object = decision_policy(verdict, point)
         conservative = {
-            "impostor_99_9_percentile_floor": floor,
+            "threshold_floor": floor,
+            "owner_floor": arguments.tail_floor,
             "minimum_accepted": arguments.conservative_minimum_accepted,
             "useful_recall": USEFUL_RECALL,
             "chosen_on_selection_half": point,
