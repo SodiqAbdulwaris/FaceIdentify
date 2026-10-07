@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/api/client'
 import { keys } from '@/api/keys'
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { personLabel } from '../identities/label'
 import { errorMessage } from '../library/messages'
 import type { Face } from './faces'
+import { usePeopleChoices } from './usePeopleChoices'
 
 /**
  * Check one face: say it is right, or say it is someone else (a new person, or a person already
@@ -20,16 +21,7 @@ export function FaceCorrection({ face }: { face: Face }) {
   const [target, setTarget] = useState('')
   const { occurrence, label } = face
 
-  const others = useInfiniteQuery({
-    queryKey: keys.identities,
-    queryFn: ({ pageParam }) => endpoints.listIdentities(pageParam),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (page) => page.page.next_cursor ?? undefined,
-    enabled: open,
-  })
-  const choices = (others.data?.pages.flatMap((page) => page.items) ?? []).filter(
-    (identity) => identity.id !== occurrence.identity_id,
-  )
+  const { choices, query: others } = usePeopleChoices(open, occurrence.identity_id)
 
   const change = useMutation({
     mutationFn: (action: 'confirm' | 'new' | 'existing') =>

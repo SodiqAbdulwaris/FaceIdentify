@@ -399,6 +399,35 @@
         "title": "JobType",
         "type": "string"
       },
+      "Likely": {
+        "properties": {
+          "identity_id": {
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "similarity": {
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "identity_id",
+          "person",
+          "similarity"
+        ],
+        "title": "Likely",
+        "type": "object"
+      },
       "MediaReference": {
         "description": "Media is referenced, never embedded or located by a path (API section 22).",
         "properties": {
@@ -1003,6 +1032,27 @@
         "title": "RenamePerson",
         "type": "object"
       },
+      "Resolve": {
+        "properties": {
+          "identity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Id"
+          }
+        },
+        "required": [
+          "identity_id"
+        ],
+        "title": "Resolve",
+        "type": "object"
+      },
       "SourceDetail": {
         "properties": {
           "availability": {
@@ -1218,6 +1268,52 @@
           "updated_at"
         ],
         "title": "SourceSummary",
+        "type": "object"
+      },
+      "UnresolvedFace": {
+        "properties": {
+          "bounding_box": {
+            "$ref": "#/components/schemas/BoundingBox"
+          },
+          "likely": {
+            "items": {
+              "$ref": "#/components/schemas/Likely"
+            },
+            "title": "Likely",
+            "type": "array"
+          },
+          "observation_id": {
+            "title": "Observation Id",
+            "type": "string"
+          },
+          "representation_id": {
+            "title": "Representation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "representation_id",
+          "observation_id",
+          "bounding_box",
+          "likely"
+        ],
+        "title": "UnresolvedFace",
+        "type": "object"
+      },
+      "UnresolvedFaces": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UnresolvedFace"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "UnresolvedFaces",
         "type": "object"
       }
     }
@@ -2259,6 +2355,59 @@
         ]
       }
     },
+    "/api/v1/representations/{representation_id}/resolve": {
+      "post": {
+        "operationId": "resolve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "representation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Representation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Resolve"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Resolve",
+        "tags": [
+          "corrections"
+        ]
+      }
+    },
     "/api/v1/sources": {
       "get": {
         "operationId": "list_sources",
@@ -2660,6 +2809,49 @@
         "summary": "List Source Runs",
         "tags": [
           "processing"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}/unresolved-faces": {
+      "get": {
+        "operationId": "unresolved_faces",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnresolvedFaces"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Unresolved Faces",
+        "tags": [
+          "corrections"
         ]
       }
     },

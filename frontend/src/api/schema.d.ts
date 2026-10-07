@@ -295,6 +295,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/representations/{representation_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve */
+        post: operations["resolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources": {
         parameters: {
             query?: never;
@@ -406,6 +423,23 @@ export interface paths {
         };
         /** List Source Runs */
         get: operations["list_source_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{source_id}/unresolved-faces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Unresolved Faces */
+        get: operations["unresolved_faces"];
         put?: never;
         post?: never;
         delete?: never;
@@ -585,6 +619,14 @@ export interface components {
          * @enum {string}
          */
         JobType: "PROCESS_SOURCE" | "REPROCESS_SOURCE" | "REBUILD_INDEX" | "RETRAIN_MODEL" | "INSTALL_RUNTIME" | "CLEAN_STORAGE";
+        /** Likely */
+        Likely: {
+            /** Identity Id */
+            identity_id: string;
+            person: components["schemas"]["PersonReference"] | null;
+            /** Similarity */
+            similarity: number;
+        };
         /**
          * MediaReference
          * @description Media is referenced, never embedded or located by a path (API section 22).
@@ -786,6 +828,11 @@ export interface components {
             /** Expected Revision */
             expected_revision: number;
         };
+        /** Resolve */
+        Resolve: {
+            /** Identity Id */
+            identity_id: string | null;
+        };
         /** SourceDetail */
         SourceDetail: {
             /** Availability */
@@ -851,6 +898,21 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** UnresolvedFace */
+        UnresolvedFace: {
+            bounding_box: components["schemas"]["BoundingBox"];
+            /** Likely */
+            likely: components["schemas"]["Likely"][];
+            /** Observation Id */
+            observation_id: string;
+            /** Representation Id */
+            representation_id: string;
+        };
+        /** UnresolvedFaces */
+        UnresolvedFaces: {
+            /** Items */
+            items: components["schemas"]["UnresolvedFace"][];
         };
     };
     responses: never;
@@ -1483,6 +1545,41 @@ export interface operations {
             };
         };
     };
+    resolve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                representation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Resolve"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OccurrenceSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     list_sources: {
         parameters: {
             query?: {
@@ -1699,6 +1796,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_ProcessingRunDetail_"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    unresolved_faces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnresolvedFaces"];
                 };
             };
             /** @description The one error shape. */

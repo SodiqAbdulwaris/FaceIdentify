@@ -5,6 +5,7 @@ export const keys = {
   sources: ['sources'] as const,
   source: (id: string) => ['source', id] as const,
   sourceRuns: (id: string) => ['source', id, 'runs'] as const,
+  sourceUnresolved: (id: string) => ['source', id, 'unresolved'] as const,
   sourceOccurrences: (id: string) => ['source', id, 'occurrences'] as const,
   sourceMedia: (id: string) => ['source', id, 'media'] as const,
   run: (id: string) => ['run', id] as const,

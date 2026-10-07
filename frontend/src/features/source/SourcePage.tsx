@@ -12,6 +12,7 @@ import { errorMessage } from '../library/messages'
 import { useRunActions } from '../processing/useRunActions'
 import { FaceCorrection } from './FaceCorrection'
 import { FaceOverlay } from './FaceOverlay'
+import { UnresolvedFaces } from './UnresolvedFaces'
 import { labelFaces } from './faces'
 
 const kilobytes = (bytes: number | null) => (bytes === null ? '' : `${Math.ceil(bytes / 1024)} KB`)
@@ -151,6 +152,8 @@ export function SourcePage() {
               </ul>
             )}
           </div>
+
+          <UnresolvedFaces sourceId={sourceId} />
 
           {faces.length > 0 ? (
             <div>
