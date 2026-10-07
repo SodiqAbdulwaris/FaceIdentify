@@ -160,7 +160,8 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
 
 ### Step 1. Naming and Person semantics (TST-054, first part). Built 2026-10-07 ([entry](../implementations/2026-10-07-m5-naming.md))
 
-- Revision `0008`: add `PERSON_RENAMED` to the Evidence kinds (Q12).
+- Revision `0008`: add `PERSON_RENAMED` to the Evidence kinds (Q12). Revision `0009`
+  (built 2026-10-07): remove the `SPLIT` identity state (Q15).
 - **Naming an unnamed Identity** is one use case and one route: it creates the Person with the given
   name and attaches the Identity to it in one `UnitOfWork`, writing the attach Evidence
   (`IDENTITY_ASSIGNED_TO_PERSON`). Attaching an Identity to an *existing* Person (reconciliation,

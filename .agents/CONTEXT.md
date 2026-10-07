@@ -50,7 +50,7 @@ _Last updated: 2026-10-07 (owner decisions on the M4 agent notes and the M5 plan
   `UPDATE` helper both feature modules use. The schema is created only by Alembic
   (`backend/alembic/`, revisions `0001_initial_schema`, `0002_representation_erasing_state` (the `ERASING`
   state), `0003_ann_key_per_space_and_snapshot_triggers` (`ann_key` unique per space; immutable snapshots) and
-  `0004_app_state` (a key/value table for the durable `wal_truncation_owed` marker), `0005` (output provenance columns, snapshot-replace trigger), `0006` (the `RECOGNITION_ABSTAINED` evidence kind) `0007` (the integer `jobs.priority_rank`) and `0008` (the `PERSON_RENAMED` Evidence kind)); every persistence test runs on the migrated
+  `0004_app_state` (a key/value table for the durable `wal_truncation_owed` marker), `0005` (output provenance columns, snapshot-replace trigger), `0006` (the `RECOGNITION_ABSTAINED` evidence kind) `0007` (the integer `jobs.priority_rank`) `0008` (the `PERSON_RENAMED` Evidence kind) and `0009` (the `SPLIT` identity state removed)); every persistence test runs on the migrated
   schema. The Storage Manager's managed core: `backend/infrastructure/storage/` (the two roots
   and layout from tech-stack §15, safe key → path resolution, crash-safe staged writes, reads,
   hashing, deletion) and `backend/app/sources/artifact_storage.py` (the three-step
@@ -200,7 +200,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     claiming (§15). Decide with the scheduler: an integer rank column or one equality probe per
     priority.
     **Decided 2026-10-06 (owner):** an integer priority rank column in revision `0007`, added before the scheduler loop; the string is never scheduling semantics (Persistence §15 note; plan W2). **Built 2026-10-07:** revision `0007` and `JobRepository.claim_next` ordering by `priority_rank`.
-15. **Decided 2026-10-07 (owner): do not assign it; remove it in the M5 schema cleanup (plan step 3) unless a compatibility constraint needs it; a split is recorded by `IDENTITY_SPLIT` Evidence and lineage.** Original question follows. `IdentityState.SPLIT` is never assigned. The enum (persistence §7) lists a `SPLIT`
+15. **Decided 2026-10-07 (owner): do not assign it; remove it in the M5 schema cleanup (plan step 3) unless a compatibility constraint needs it; a split is recorded by `IDENTITY_SPLIT` Evidence and lineage. Built 2026-10-07: revision `0009` removes it.** Original question follows. `IdentityState.SPLIT` is never assigned. The enum (persistence §7) lists a `SPLIT`
     state, but no spec text says which of a split's two resulting identities (if either) should
     receive it. `split_identity` (PR #8) reads `identity-and-memory-model-v1.md` §19.2's
     conceptual example — the source keeps some of its own evidence — as meaning neither identity
