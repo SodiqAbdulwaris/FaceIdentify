@@ -4,8 +4,9 @@
         --detector det_10g.onnx --embedder w600k_r50.onnx --local-state-root <dir>
 
 The weights are developer-supplied local files that are never committed. The package is built from
-the files' measured size and hash, installed through the same store the application uses, and the
-library registers it in its catalog when the application next starts.
+the files' measured size and hash and installed through the same store the application uses.
+Registering it in a library's catalog (`register_package`) is not done here: the real host wiring
+that does it on startup is a later M5 step (R2), so today the package is installed, not yet used.
 """
 
 import argparse

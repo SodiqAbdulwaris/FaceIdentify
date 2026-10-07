@@ -41,7 +41,8 @@ met the real weights.
   0.03 to 0.21. The existing detector decode and alignment contracts accepted the real models
   unchanged: the output order and shapes (`[N,1]`, `[N,4]`, `[N,10]` per stride) match. Smoke only,
   not calibration.
-- Full gate: see the PR.
+- Full gate: `ruff format --check`, `ruff check`, `mypy` (both platforms) clean; `uv run pytest`: 2549 passed (before the review fixes below).
+- Review (Codex, read-only): seven findings, all answered: the install script no longer claims the host registers the package (it does not yet); the owner's later authorisations are recorded as a dated note in the plan; the licence use right is recorded as an owner-accepted risk, not a permission; the smoke script now fails on no faces, a non-unit or non-finite vector, or an unexpected provider; a test registers the generated package in the migrated catalog; `*.onnx` is ignored repository-wide; CONTEXT and this entry updated. The tracker keeps TST-038/039 `BLOCKED` until the real-path integration test (R3) passes; the direct smoke does not close them.
 
 ## Open issues / follow-ups
 

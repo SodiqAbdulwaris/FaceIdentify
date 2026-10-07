@@ -87,6 +87,11 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 > only then is anything downloaded, and no weights are committed to Git unless the licence expressly
 > permits that distribution.
 
+> **Decision 2026-10-07:** **Superseded later the same day by the owner's answers to the R-item
+> questions:** use is personal and local only; downloading the official candidates ("all you need") is
+> approved, from official sources, Git-ignored and never committed; and the final selection is
+> delegated to the agent by documented criteria, overridable on return.
+
 Other owner decisions from the same day (routing, status route, development catalog guard, label
 derivation, `.npmrc`) are dated notes in the M4 implementation entries and in `CONTEXT.md`.
 

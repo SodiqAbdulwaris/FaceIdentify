@@ -423,7 +423,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 
 **Current (2026-10-07):** M0 to M4 are done on the development profile. The next milestone is M5, the first
 real recognition milestone: [`docs/plans/M5_PLAN.md`](../docs/plans/M5_PLAN.md) (an identity-management
-track and a real-model track, converging before search; scope and order approved; R0, the library-profile guard (#137), is built). The
+track and a real-model track, converging before search; scope and order approved; R0, the library-profile guard (#137), is built; R1 is partly done: `buffalo_l` selected, installed as a runtime package and run for real on CPU, record in `docs/research/reference-model-selection.md`). The
 numbered list below is the **historical** M2 and M3 record, kept for what was decided and built, not a
 to-do list.
 
