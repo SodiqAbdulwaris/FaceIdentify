@@ -47,6 +47,7 @@ export const occurrence = (over: Record<string, unknown> = {}) => ({
 export const identity = (over: Record<string, unknown> = {}) => ({
   id: 'i1',
   state: 'ACTIVE',
+  revision: 1,
   person: null,
   representative_observation: null,
   occurrence_count: 1,
