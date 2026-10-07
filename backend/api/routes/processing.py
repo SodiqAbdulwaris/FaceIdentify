@@ -7,6 +7,9 @@ and 6; M4 W3.3).
   (`ProcessingSettings.request_for`), never from the client.
 * A run is read with its job: the job is what is scheduled, the run is the logical history.
   `failure_code` is shown; failure detail text stays in the database.
+* `POST /processing-runs/{id}/cancel` cancels a queued run at once and asks a running one to stop
+  (`CancelProcessingUseCase`); a repeat is harmless; a run being made authoritative or already over
+  is refused.
 * `POST /processing-runs/{id}/retry` queues a new attempt for a failed, interrupted or
   not-resumable run (a new job and run, linked; the old attempt is left as it ended).
 """
@@ -26,6 +29,7 @@ from backend.api.pagination import Page, PageQuery, decode_cursor, invalid_curso
 from backend.api.routes.sources import source_not_found
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
 from backend.app.jobs.models import Job, JobPriority, JobType
+from backend.app.processing.cancel import CancelError, CancelProcessingUseCase, RunNotFoundError
 from backend.app.processing.models import ProcessingRun, ProcessingRunState
 from backend.app.processing.process_source import (
     ProcessSourceError,
@@ -79,7 +83,7 @@ def run_not_found(run_id: uuid.UUID) -> ApiError:
 # --- shaping --------------------------------------------------------------------------------
 
 
-def _job_brief(job: Job) -> JobBrief:
+def job_brief(job: Job) -> JobBrief:
     progress = (
         None
         if job.progress_completed is None
@@ -115,7 +119,7 @@ def _details(session: Session, runs: list[ProcessingRun]) -> list[ProcessingRunD
             completed_at=run.completed_at,
             failed_at=run.failed_at,
             failure_code=run.failure_code,
-            job=None if run.id not in jobs else _job_brief(jobs[run.id]),
+            job=None if run.id not in jobs else job_brief(jobs[run.id]),
         )
         for run in runs
     ]
@@ -241,6 +245,29 @@ def list_source_runs(
 @router.get("/processing-runs/{run_id}")
 def get_run(run_id: uuid.UUID, library: Library) -> ProcessingRunDetail:
     return library.unit_of_work.read(lambda session: _run_detail(session, run_id))
+
+
+def cancel_command(library: Library, backend: Backend, run_id: uuid.UUID) -> ProcessingRunDetail:
+    """Shared by the run and job cancel routes: write the request, then show the run."""
+    try:
+        result = CancelProcessingUseCase(library.unit_of_work, clock=backend.settings.clock).cancel(
+            run_id
+        )
+    except RunNotFoundError:
+        raise run_not_found(run_id) from None
+    except CancelError as error:
+        raise ApiError(
+            409, "RUN_NOT_CANCELLABLE", "The processing run cannot be cancelled now.",
+            details={"reason": str(error)},
+        ) from None  # fmt: skip
+    return library.unit_of_work.read(lambda session: _run_detail(session, result.run_id))
+
+
+@router.post("/processing-runs/{run_id}/cancel", status_code=202)
+def cancel_run(
+    run_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> ProcessingRunDetail:
+    return cancel_command(library, backend, run_id)
 
 
 @router.post("/processing-runs/{run_id}/retry", status_code=202)

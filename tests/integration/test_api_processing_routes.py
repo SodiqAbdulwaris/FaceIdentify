@@ -9,7 +9,7 @@ import uuid
 from dataclasses import replace
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import update
 
 from backend.api.pagination import encode_cursor
 from backend.api.startup import ProcessingUnavailableError
@@ -218,7 +218,7 @@ async def test_runs_created_at_the_same_instant_are_paged_without_loss_or_repeat
 
     seen: list[str] = []
     cursor: str | None = None
-    while True:
+    for _ in range(6):  # bounded: a broken cursor must fail the test, not hang it
         params: dict[str, Any] = {"limit": 1} | ({"cursor": cursor} if cursor else {})
         body = (await api.client.get(RUNS, params=params)).json()
         seen += [r["id"] for r in body["items"]]
@@ -292,10 +292,9 @@ async def test_a_failed_run_is_retried_once_as_a_new_linked_run(processing_api: 
     again = error(await api.client.post(f"{RUNS}/{old['id']}/retry"), 409, "RUN_NOT_RETRYABLE")
     assert "already been retried" in again["details"]["reason"]
     assert (await api.client.get(f"{RUNS}/{old['id']}")).json()["state"] == "FAILED"  # as it ended
-    assert api.backend.library is not None
-    with api.backend.library.session_factory() as session:
-        row = session.scalars(select(Job).where(Job.id == uuid.UUID(new["job"]["id"]))).one()
-        assert str(row.previous_job_id) == old["job"]["id"]
+    lineage = (await api.client.get(f"/api/v1/jobs/{new['job']['id']}")).json()
+    assert lineage["previous_job_id"] == old["job"]["id"]  # a retry is a new job linked to the old
+    assert new["parent_run_id"] == old["id"]
 
 
 async def test_a_completed_or_unknown_run_cannot_be_retried(processing_api: Api) -> None:
