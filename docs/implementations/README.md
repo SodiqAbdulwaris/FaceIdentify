@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M4 W6 (host): stop the host by closing its standard input](2026-10-07-host-stdin-lifeline.md) | done; the shell side is next |
 | 2026-10-07 | [M4: the development profile and the host's processing wiring](2026-10-07-m4-development-profile.md) | done; plan decision 1; real models still blocked |
 | 2026-10-07 | [M4 W5: the generated API contract](2026-10-07-m4-api-contract.md) | done; TST-046 |
 | 2026-10-07 | [M4 W4: the event connection](2026-10-07-m4-api-events.md) | done; server side; TST-049 |
