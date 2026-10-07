@@ -82,6 +82,25 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 > stays as a CI test but is no longer evidence that recognition works; TST-057 is closed on real
 > models. M8 packaging and M6/M7 work are not absorbed.
 
+> **Decision 2026-10-07:** **Corrections need no new schema.** Confirm is a `USER_CORRECTION` Evidence row
+> with no recognition effect yet; reject and reassign move a face (its representation and occurrence)
+> to a new unknown identity or to a chosen existing one, with Evidence. There is no cannot-link
+> constraint in M5 (owner, answering step 2's question).
+
+> **Decision 2026-10-07:** **"Calibrated" means measured thresholds in the same mode.** TST-044's policy is
+> the decision thresholds measured at the owner's 99%-precision rule and frozen in the snapshot; scores
+> stay raw cosine, so the mode stays `UNCALIBRATED` and the UI notice says what was measured and its
+> limits. No `CALIBRATED` mode is built.
+
+> **Decision 2026-10-07:** **Forget is confirmed as proposed in step 4:** `ForgetIdentity` is the only
+> operation that removes biometric memory; "forget person" runs it on each of a Person's identities; the
+> Person record and name stay.
+
+> **Decision 2026-10-07:** **Deleting a Source keeps Evidence and named people.** Its observations,
+> representations (erased), Occurrences and runs go; Evidence rows stay (they hold scores, not faces); a
+> named person's identity stays with zero appearances; an unnamed identity left with none becomes
+> `DELETED`.
+
 > **Decision 2026-10-07:** **Weights are chosen by the owner.** The earlier rule stands: I select and
 > download nothing without the owner's approval. Track R1 produces a candidates report; the owner picks;
 > only then is anything downloaded, and no weights are committed to Git unless the licence expressly
@@ -206,7 +225,7 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
   defines what happens to the Source's observations, representations (erasure, built), Occurrences and
   Evidence. **Ask before building:** the fate of Evidence and of an identity that loses its last
   Source; I will propose from Identity model section 60 ("Delete Media vs Forget Person").
-- **Forget: the meaning is fixed before any code (gate).** The API spec's operation is
+- **Forget: the meaning is fixed before any code (gate; confirmed by the owner 2026-10-07).** The API spec's operation is
   `POST /identities/{identity_id}/forget` (section 8.3), an Identity-level memory operation, while the
   Identity model speaks of "Forget Person" and says user-authored Person metadata survives. Proposed
   definitions, for the owner to decide:
