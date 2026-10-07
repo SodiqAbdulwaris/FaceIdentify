@@ -11,6 +11,9 @@
 * The shell passes its own process id as `--parent-pid`; if that process ends, the host shuts down
   gracefully (the lifespan releases the library lock). A crash is still safe: the OS frees the lock
   and the next start recovers (architecture section 23).
+* With `--stdin-lifeline` the shell keeps the host's standard input open for as long as it wants the
+  host to run; closing it (or dying, which closes it) shuts the host down gracefully. This is how
+  the shell asks for a clean stop on Windows, where there is no gentle signal to send.
 
 The retry policies and index catch-up limits are operational limits no measurement has chosen yet;
 the constants below are provisional starting points, named as such, to be set from benchmarks.
@@ -22,6 +25,7 @@ import json
 import os
 import socket
 import sys
+import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -62,6 +66,8 @@ class HostOptions:
     parent_pid: int | None
     # Run with the fake catalog, fake perception and uncalibrated policy (not a release setting).
     development_profile: bool = False
+    # Stop gracefully when standard input reaches end of file.
+    stdin_lifeline: bool = False
 
 
 def _process_id(text: str) -> int:
@@ -83,12 +89,18 @@ def parse_options(argv: Sequence[str]) -> HostOptions:
         action="store_true",
         help="use the fake development catalog and perception (uncalibrated; never for release)",
     )
+    parser.add_argument(
+        "--stdin-lifeline",
+        action="store_true",
+        help="shut down gracefully when standard input is closed",
+    )
     arguments = parser.parse_args(list(argv))  # a usage error exits 2, as argparse does
     return HostOptions(
         arguments.library_root,
         arguments.local_state_root,
         arguments.parent_pid,
         arguments.development_profile,
+        arguments.stdin_lifeline,
     )
 
 
@@ -150,6 +162,22 @@ else:  # pragma: no cover - the suite runs on Windows
         return True
 
 
+def stdin_lifeline(stream: IO[bytes] | None = None) -> Callable[[], bool]:
+    """A check that is true until standard input reaches end of file: the shell closed it, or the
+    shell ended (which closes it). A daemon thread blocks on the read, so nothing polls the pipe."""
+    source = sys.stdin.buffer if stream is None else stream
+    closed = threading.Event()
+
+    def watch() -> None:
+        try:
+            source.read()  # returns only at end of file (the input is never meant to carry data)
+        finally:
+            closed.set()
+
+    threading.Thread(target=watch, name="stdin-lifeline", daemon=True).start()
+    return lambda: not closed.is_set()
+
+
 def _loopback_listener() -> socket.socket:
     """A listening socket on loopback and a port the operating system picks. Never SO_REUSEADDR:
     on Windows that lets another process share the port; there it is made exclusive instead."""
@@ -173,6 +201,7 @@ async def serve(
     parent_alive_check: Callable[[int], bool] = parent_alive,
     poll_seconds: float = PARENT_POLL_SECONDS,
     settings: LibrarySettings | None = None,
+    lifeline: Callable[[], bool] | None = None,
 ) -> None:
     """Bind loopback on a free port, serve until told to stop, and print the handshake once
     the server is accepting connections. Returns after a graceful shutdown."""
@@ -204,8 +233,9 @@ async def serve(
         if server.started:
             print(handshake_line(bound_host, port, os.getpid()), file=out, flush=True)
             while not serving.done():
-                if options.parent_pid is not None and not parent_alive_check(options.parent_pid):
-                    server.should_exit = True  # the shell is gone: shut down gracefully
+                gone = options.parent_pid is not None and not parent_alive_check(options.parent_pid)
+                if gone or (lifeline is not None and not lifeline()):
+                    server.should_exit = True  # the shell is gone or let go: shut down gracefully
                 await asyncio.sleep(poll_seconds)
         await serving
     finally:
@@ -228,7 +258,8 @@ def main(
     except LaunchTokenError as error:
         print(f"backend.api.host: {error}", file=sys.stderr)
         return 2
-    asyncio.run(serve(options, token, out=sys.stdout if out is None else out))
+    lifeline = stdin_lifeline() if options.stdin_lifeline else None
+    asyncio.run(serve(options, token, out=sys.stdout if out is None else out, lifeline=lifeline))
     return 0
 
 

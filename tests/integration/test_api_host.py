@@ -15,6 +15,7 @@ import secrets
 import socket
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
@@ -37,6 +38,7 @@ from backend.api.host import (
     parse_options,
     read_launch_token,
     serve,
+    stdin_lifeline,
 )
 from backend.api.startup import LibrarySettings
 from backend.app.memory.index_coordinator import RetryPolicy
@@ -361,3 +363,106 @@ def test_a_real_host_process_serves_then_a_kill_leaves_the_library_free(tmp_path
             close_streams(child)
 
     acquire_soon(tmp_path / "library")  # the operating system freed the library lock
+
+
+# --- the stdin lifeline ---------------------------------------------------------------------
+
+
+def test_the_flag_asks_for_a_stdin_lifeline_and_is_off_by_default(tmp_path: Path) -> None:
+    base = ["--library-root", str(tmp_path / "l"), "--local-state-root", str(tmp_path / "s")]
+
+    assert parse_options(base).stdin_lifeline is False
+    assert parse_options([*base, "--stdin-lifeline"]).stdin_lifeline is True
+
+
+def test_the_lifeline_is_alive_until_standard_input_ends() -> None:
+    read_end, write_end = os.pipe()
+    stream = os.fdopen(read_end, "rb")
+    try:
+        alive = stdin_lifeline(stream)
+        assert alive()
+        os.write(write_end, b"ignored: the input never carries commands")
+        assert alive()  # data is not the end
+
+        os.close(write_end)  # the shell let go (or died)
+
+        deadline = time.monotonic() + 10
+        while alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not alive()
+    finally:
+        stream.close()
+
+
+async def test_the_host_stops_gracefully_when_its_lifeline_is_cut(tmp_path: Path) -> None:
+    options = options_for(tmp_path)  # no parent to watch: only the lifeline can end it
+    out = io.StringIO()
+    held = True
+
+    task = asyncio.create_task(
+        serve(options, token(), out=out, poll_seconds=0.02, lifeline=lambda: held)
+    )
+    await until(lambda: out.getvalue().endswith("\n") or task.done())
+    assert not task.done()
+    await until(lambda: not lock_is_free(options.library_root))  # the library has opened
+
+    held = False  # the shell closed standard input
+    async with asyncio.timeout(30):
+        await task
+
+    assert lock_is_free(options.library_root)  # graceful: the lifespan released the library
+
+
+def test_main_builds_the_lifeline_only_when_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "library").mkdir()
+    built: list[bool] = []
+
+    def cut_line() -> Any:
+        built.append(True)
+        return lambda: False  # already cut: the host stops as soon as it has started
+
+    monkeypatch.setattr(host, "stdin_lifeline", cut_line)
+    arguments = ["--library-root", str(tmp_path / "library"),
+                 "--local-state-root", str(tmp_path / "local")]  # fmt: skip
+
+    assert main([*arguments, "--stdin-lifeline"], {LAUNCH_TOKEN_ENV: token()}, io.StringIO()) == 0
+    assert built == [True]
+    assert lock_is_free(tmp_path / "library")
+
+
+def test_a_real_host_process_exits_cleanly_when_its_standard_input_is_closed(
+    tmp_path: Path,
+) -> None:
+    secret = token()
+    (tmp_path / "library").mkdir()
+    child = subprocess.Popen(
+        [sys.executable, "-m", "backend.api.host",
+         "--library-root", str(tmp_path / "library"),
+         "--local-state-root", str(tmp_path / "local"), "--stdin-lifeline"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        cwd=REPOSITORY_ROOT, env={**os.environ, LAUNCH_TOKEN_ENV: secret},
+    )  # fmt: skip
+    assert child.stdout is not None
+    assert child.stdin is not None
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        handshake = json.loads(pool.submit(child.stdout.readline).result(timeout=60))
+        health = httpx.get(
+            f"http://{LOOPBACK}:{handshake['port']}/health",
+            headers={"Authorization": f"Bearer {secret}"},
+            timeout=30,
+        )
+        assert health.json() == {"status": "ok"}
+        assert child.poll() is None  # it keeps running while the input is open
+
+        child.stdin.close()  # the shell lets go
+
+        assert child.wait(timeout=60) == 0  # a clean exit, not a kill
+    finally:
+        if child.poll() is None:
+            kill_tree(child)
+        pool.shutdown(wait=False)
+        close_streams(child)
+    acquire_soon(tmp_path / "library")
