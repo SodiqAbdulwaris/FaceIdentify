@@ -3,7 +3,7 @@
 - **Date:** 2026-10-07
 - **Milestone / tracker IDs:** M4 W2.3 test hardening; no tracker row changes
 - **Status:** done
-- **Commits:** PR to be recorded when merged
+- **Commits:** PR #144: `test: stop the scheduler-degrade test racing its own retry`
 
 ## What changed
 
