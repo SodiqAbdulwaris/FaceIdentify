@@ -41,6 +41,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 |---|---|---|
 | 2026-10-07 | [A licensing and commercialisation record](2026-10-07-licensing-record.md) | done; documentation |
 | 2026-10-07 | [M5 R4: the conservative operating point and its result](2026-10-07-m5-r4-conservative-operating-point.md) | measured; auto-accept disabled; TST-044 first baseline |
+| 2026-10-07 | [M5 R2: the CUDA runtime on the RTX 4070](2026-10-07-m5-r2-cuda-runtime.md) | done; CUDA agrees with the CPU (worst cosine 0.99995) |
 | 2026-10-07 | [M5 schema cleanup: revision 0009 removes the `SPLIT` identity state](2026-10-07-m5-revision-0009-drop-split-state.md) | done; CONTEXT question 15 |
 | 2026-10-07 | [M5 step 3: merging identities and splitting faces off one](2026-10-07-m5-merge-split.md) | done; TST-058 |
 | 2026-10-07 | [M5 step 2b: placing a face recognition declined to place](2026-10-07-m5-unresolved-faces.md) | done; issue #79 |
