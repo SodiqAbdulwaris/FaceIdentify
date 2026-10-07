@@ -1,19 +1,36 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
+import { keys } from '@/api/keys'
+import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import type { SourceSummary } from '@/api/types'
 import { StatusBadge } from '../StatusBadge'
 import { canProcess } from '../status'
 import { useSourceImage } from '../useSourceImage'
+import { errorMessage } from './messages'
 
 interface Props {
   source: SourceSummary
-  onProcess: (sourceId: string) => void
-  processing: boolean
+  /** What to tell the person: a message when a request failed, null to clear it. */
+  onNotice: (message: string | null) => void
 }
 
-export function SourceCard({ source, onProcess, processing }: Props) {
+export function SourceCard({ source, onNotice }: Props) {
+  const { endpoints } = useBackend()
+  const queryClient = useQueryClient()
   const missing = source.availability !== 'AVAILABLE'
   const image = useSourceImage(source.id, !missing)
+  // One request per card, so a second click elsewhere cannot make this button look idle again.
+  const process = useMutation({
+    mutationFn: () => endpoints.processSource(source.id),
+    onSuccess: () => onNotice(null),
+    onError: (error) => onNotice(errorMessage(error)),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.sources }),
+        queryClient.invalidateQueries({ queryKey: keys.runs }),
+      ]),
+  })
 
   return (
     <li className="flex flex-col overflow-hidden rounded-lg border bg-card">
@@ -40,8 +57,8 @@ export function SourceCard({ source, onProcess, processing }: Props) {
             <Button
               size="sm"
               variant="outline"
-              disabled={processing}
-              onClick={() => onProcess(source.id)}
+              disabled={process.isPending}
+              onClick={() => process.mutate()}
               aria-label={`Process ${source.display_name}`}
             >
               Process

@@ -171,6 +171,45 @@ describe('the library', () => {
     )
   })
 
+  it('keeps a button disabled while its own request is out, whatever is clicked next', async () => {
+    const user = userEvent.setup()
+    renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: page([
+          source({ id: 's1', display_name: 'one.png' }),
+          source({ id: 's2', display_name: 'two.png' }),
+        ]),
+      },
+      media,
+    ])
+    const scripted = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) =>
+      init?.method === 'POST' ? new Promise<Response>(() => undefined) : scripted(input, init),
+    )
+
+    await user.click(await screen.findByRole('button', { name: 'Process one.png' }))
+    await user.click(screen.getByRole('button', { name: 'Process two.png' }))
+
+    expect(screen.getByRole('button', { name: 'Process one.png' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Process two.png' })).toBeDisabled()
+  })
+
+  it('refreshes the newest run (and so the policy notice) after a request', async () => {
+    const user = userEvent.setup()
+    const { calls } = renderApp('/library', [
+      { path: SOURCES, respond: page([source()]) },
+      media,
+      { method: 'POST', path: '/api/v1/sources/s1/process', status: 202, respond: run() },
+    ])
+
+    await user.click(await screen.findByRole('button', { name: 'Process beach.png' }))
+
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === '/api/v1/processing-runs').length).toBeGreaterThan(1),
+    )
+  })
+
   it('shows the backend message when processing cannot start', async () => {
     const user = userEvent.setup()
     renderApp('/library', [

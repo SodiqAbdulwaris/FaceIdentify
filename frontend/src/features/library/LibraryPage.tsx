@@ -41,26 +41,27 @@ export function LibraryPage() {
     onError: (error) => setNotice(errorMessage(error)),
   })
 
-  const process = useMutation({
-    mutationFn: (sourceId: string) => endpoints.processSource(sourceId),
-    onSuccess: () => setNotice(null),
-    onError: (error) => setNotice(errorMessage(error)),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: keys.sources }),
-  })
-
   const items = sources.data?.pages.flatMap((page) => page.items) ?? []
 
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-semibold">Library</h1>
-        <Button className="ml-auto" disabled={importImages.isPending} onClick={() => importImages.mutate()}>
+        <Button
+          className="ml-auto"
+          disabled={importImages.isPending}
+          onClick={() => importImages.mutate()}
+        >
           {importImages.isPending ? 'Importing…' : 'Import images'}
         </Button>
       </div>
 
       {notice ? (
-        <p role="status" aria-label="Library notice" className="rounded-md bg-muted px-3 py-2 text-sm">
+        <p
+          role="status"
+          aria-label="Library notice"
+          className="rounded-md bg-muted px-3 py-2 text-sm"
+        >
           {notice}
         </p>
       ) : null}
@@ -81,12 +82,7 @@ export function LibraryPage() {
       {items.length > 0 ? (
         <ul className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-4">
           {items.map((source) => (
-            <SourceCard
-              key={source.id}
-              source={source}
-              onProcess={(id) => process.mutate(id)}
-              processing={process.isPending && process.variables === source.id}
-            />
+            <SourceCard key={source.id} source={source} onNotice={setNotice} />
           ))}
         </ul>
       ) : null}
