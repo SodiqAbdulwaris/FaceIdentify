@@ -176,7 +176,7 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
   only while no Person is attached, and a Person's name replaces it everywhere.
 - Event: publish a Person/identity change so open screens refresh (existing event client).
 
-### Step 2. Corrections (TST-054). 2a (confirm, move, separate) built 2026-10-07 ([entry](../implementations/2026-10-07-m5-corrections.md)); 2b (issue #79) open
+### Step 2. Corrections (TST-054). built 2026-10-07: 2a confirm, move, separate ([entry](../implementations/2026-10-07-m5-corrections.md)) and 2b, placing unplaced faces, issue #79 ([entry](../implementations/2026-10-07-m5-unresolved-faces.md))
 
 - Use cases and routes: confirm a match, reject a match, reassign an occurrence or representation to
   another identity, each writing `USER_CORRECTION` Evidence and an index intent where eligibility
