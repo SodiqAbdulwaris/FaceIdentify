@@ -75,6 +75,15 @@ export class ApiClient {
     return (await this.send(path, init)).json() as Promise<T>
   }
 
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    const init: RequestInit = {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+    return (await this.send(path, init)).json() as Promise<T>
+  }
+
   /** A file the API serves (the browser cannot add the token to an `<img src>`). */
   async blob(path: string): Promise<Blob> {
     return (await this.send(path, { method: 'GET' })).blob()

@@ -139,7 +139,7 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
   the dataset, its licence and the acceptance numbers; per the testing rules no threshold is invented
   without a measured baseline.
 
-### Step 1. Naming and Person semantics (TST-054, first part)
+### Step 1. Naming and Person semantics (TST-054, first part). Built 2026-10-07 ([entry](../implementations/2026-10-07-m5-naming.md))
 
 - Revision `0008`: add `PERSON_RENAMED` to the Evidence kinds (Q12).
 - **Naming an unnamed Identity** is one use case and one route: it creates the Person with the given

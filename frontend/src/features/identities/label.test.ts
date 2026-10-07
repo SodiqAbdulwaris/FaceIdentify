@@ -7,6 +7,11 @@ describe('personLabel', () => {
     expect(personLabel('i1')).toBe('Person I1')
   })
 
+  it('is the name once the person has one, whatever the id', () => {
+    expect(personLabel('i1', { display_name: 'Alice' })).toBe('Alice')
+    expect(personLabel('i1', null)).toBe('Person I1')
+  })
+
   it('differs between identities and is the same for the same identity', () => {
     const a = '3f9a2c1d-0000-4000-8000-000000000000'
     const b = '8e11b0aa-0000-4000-8000-000000000000'

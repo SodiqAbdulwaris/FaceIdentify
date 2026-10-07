@@ -39,6 +39,7 @@ export const occurrence = (over: Record<string, unknown> = {}) => ({
     bounding_box: { x: 0.2, y: 0.1, width: 0.4, height: 0.5 },
     face_crop: null,
   },
+  person: null,
   created_at: '2026-01-01T00:00:00Z',
   ...over,
 })
@@ -46,6 +47,7 @@ export const occurrence = (over: Record<string, unknown> = {}) => ({
 export const identity = (over: Record<string, unknown> = {}) => ({
   id: 'i1',
   state: 'ACTIVE',
+  person: null,
   representative_observation: null,
   occurrence_count: 1,
   source_count: 1,

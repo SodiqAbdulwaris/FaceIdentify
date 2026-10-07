@@ -159,7 +159,9 @@ def remove_person_link(build: ModelFactory) -> Operation:
 
 def rename(build: ModelFactory) -> Operation:
     person = build.person()
-    return lambda s: rename_person(s, person.id, "Alicia", expected_revision=1, clock=build.clock)
+    return lambda s: rename_person(
+        s, person.id, "Alicia", expected_revision=1, new_id=build.new_id, clock=build.clock
+    )
 
 
 CASES = [

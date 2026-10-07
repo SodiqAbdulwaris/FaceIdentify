@@ -49,7 +49,7 @@ _Last updated: 2026-10-07 (owner decisions on the M4 agent notes and the M5 plan
   `UPDATE` helper both feature modules use. The schema is created only by Alembic
   (`backend/alembic/`, revisions `0001_initial_schema`, `0002_representation_erasing_state` (the `ERASING`
   state), `0003_ann_key_per_space_and_snapshot_triggers` (`ann_key` unique per space; immutable snapshots) and
-  `0004_app_state` (a key/value table for the durable `wal_truncation_owed` marker), `0005` (output provenance columns, snapshot-replace trigger), `0006` (the `RECOGNITION_ABSTAINED` evidence kind) and `0007` (the integer `jobs.priority_rank`)); every persistence test runs on the migrated
+  `0004_app_state` (a key/value table for the durable `wal_truncation_owed` marker), `0005` (output provenance columns, snapshot-replace trigger), `0006` (the `RECOGNITION_ABSTAINED` evidence kind) `0007` (the integer `jobs.priority_rank`) and `0008` (the `PERSON_RENAMED` Evidence kind)); every persistence test runs on the migrated
   schema. The Storage Manager's managed core: `backend/infrastructure/storage/` (the two roots
   and layout from tech-stack §15, safe key → path resolution, crash-safe staged writes, reads,
   hashing, deletion) and `backend/app/sources/artifact_storage.py` (the three-step
@@ -185,7 +185,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     `Observation.landmarks_json`/`quality_json`. They are plain strings or free JSON until decided
     (before the M2 migration). The transient run-state list for the partial index is inferred from recovery
     (§28).
-12. **Decided 2026-10-07 (owner): add `PERSON_RENAMED` in M5 (revision `0008`, plan step 1).** Original question follows. No `EvidenceKind` for a pure Person rename. `identity-and-memory-model-v1.md`
+12. **Decided 2026-10-07 (owner): add `PERSON_RENAMED` in M5 (revision `0008`, plan step 1); built 2026-10-07 (the rename event records revisions, not names).** Original question follows. No `EvidenceKind` for a pure Person rename. `identity-and-memory-model-v1.md`
     §38 says renaming "produces a historical semantic event", but the locked `EvidenceKind`
     enum (persistence §10, PR #4/#5) has no matching value (e.g. `PERSON_RENAMED`). `rename_person`
     (PR #7) therefore records no Evidence; the Person's own `revision`/`updated_at` are the only

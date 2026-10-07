@@ -8,4 +8,4 @@ export interface Face {
 }
 
 export const labelFaces = (occurrences: OccurrenceSummary[]): Face[] =>
-  occurrences.map((occurrence) => ({ occurrence, label: personLabel(occurrence.identity_id) }))
+  occurrences.map((occurrence) => ({ occurrence, label: personLabel(occurrence.identity_id, occurrence.person) }))

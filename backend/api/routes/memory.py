@@ -28,6 +28,7 @@ from backend.api.pagination import (
 from backend.api.routes.sources import MediaReference, source_not_found
 from backend.app.identities.models import Identity, IdentityState
 from backend.app.memory.models import Observation, ObservationState, Occurrence, OccurrenceState
+from backend.app.people.models import AssociationState, IdentityPersonAssociation, Person
 from backend.app.sources.models import Source
 
 router = APIRouter(tags=["memory"])
@@ -47,6 +48,12 @@ class ObservationBrief(BaseModel):
     face_crop: MediaReference | None
 
 
+class PersonReference(BaseModel):
+    id: str
+    display_name: str
+    revision: int
+
+
 class OccurrenceSummary(BaseModel):
     id: str
     source_id: str
@@ -54,12 +61,14 @@ class OccurrenceSummary(BaseModel):
     identity_id: str
     kind: str
     representative_observation: ObservationBrief | None
+    person: PersonReference | None
     created_at: datetime
 
 
 class IdentitySummary(BaseModel):
     id: str
     state: str
+    person: PersonReference | None
     representative_observation: ObservationBrief | None
     occurrence_count: int
     source_count: int
@@ -114,6 +123,7 @@ def _occurrence_page(
         .execution_options(populate_existing=True)
     ).all()
     observations = _representatives(session, [occ.representative_observation_id for occ, _ in rows])
+    people = _person_references(session, [occ.identity_id for occ, _ in rows])
     return paginate(
         rows,
         page.limit,
@@ -126,6 +136,7 @@ def _occurrence_page(
             identity_id=str(row[0].identity_id),
             kind=row[0].kind,
             representative_observation=_brief(observations, row[0].representative_observation_id),
+            person=people.get(row[0].identity_id),
             created_at=row[0].created_at,
         ),
     )
@@ -178,6 +189,26 @@ def _active_identity(session: Session, identity_id: uuid.UUID) -> Identity:
     return identity
 
 
+def _person_references(
+    session: Session, identity_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, PersonReference]:
+    """Who each identity is named as, for those that are named."""
+    return {
+        identity_id: PersonReference(
+            id=str(person.id), display_name=person.display_name, revision=person.revision
+        )
+        for identity_id, person in session.execute(
+            select(IdentityPersonAssociation.identity_id, Person)
+            .join(Person, Person.id == IdentityPersonAssociation.person_id)
+            .where(
+                IdentityPersonAssociation.identity_id.in_(identity_ids),
+                IdentityPersonAssociation.state == AssociationState.ACTIVE,
+            )
+            .execution_options(populate_existing=True)
+        ).tuples()
+    }
+
+
 def _identity_summaries(session: Session, identities: list[Identity]) -> list[IdentitySummary]:
     ids = [identity.id for identity in identities]
     counts = {
@@ -193,10 +224,12 @@ def _identity_summaries(session: Session, identities: list[Identity]) -> list[Id
         )
     }
     observations = _representatives(session, [i.representative_observation_id for i in identities])
+    people = _person_references(session, ids)
     return [
         IdentitySummary(
             id=str(identity.id),
             state=identity.state,
+            person=people.get(identity.id),
             representative_observation=_brief(observations, identity.representative_observation_id),
             occurrence_count=counts.get(identity.id, (0, 0))[0],
             source_count=counts.get(identity.id, (0, 0))[1],

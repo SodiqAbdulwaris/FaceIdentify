@@ -176,7 +176,7 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
     def rename(self, person_id: uuid.UUID, new_name: str) -> None:
         rename_person(
             self.session, person_id, new_name,
-            expected_revision=self.person_revision[person_id], clock=self.clock,
+            expected_revision=self.person_revision[person_id], new_id=self.new_id, clock=self.clock,
         )  # fmt: skip
         self.person_revision[person_id] += 1
 

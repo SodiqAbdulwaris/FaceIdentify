@@ -6,6 +6,7 @@ import type {
   ImportRequest,
   OccurrenceSummary,
   Page,
+  PersonSummary,
   ProcessingRun,
   Readiness,
   SourceDetail,
@@ -37,6 +38,13 @@ export const endpoints = (api: ApiClient) => ({
   listIdentities: (cursor?: string) =>
     api.get<Page<IdentitySummary>>(`${V1}/identities`, { cursor, limit: 50 }),
   getIdentity: (id: string) => api.get<IdentitySummary>(`${V1}/identities/${id}`),
+  nameIdentity: (identityId: string, displayName: string) =>
+    api.post<PersonSummary>(`${V1}/people`, { display_name: displayName, identity_id: identityId }),
+  renamePerson: (personId: string, displayName: string, expectedRevision: number) =>
+    api.patch<PersonSummary>(`${V1}/people/${personId}`, {
+      display_name: displayName,
+      expected_revision: expectedRevision,
+    }),
   identityOccurrences: (id: string, cursor?: string) =>
     api.get<Page<OccurrenceSummary>>(`${V1}/identities/${id}/occurrences`, { cursor, limit: 50 }),
 })

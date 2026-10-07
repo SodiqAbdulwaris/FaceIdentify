@@ -68,6 +68,23 @@ async def test_a_processed_image_shows_its_face_and_the_identity_made_for_it(
     assert of_identity["items"] == occurrences["items"]
 
 
+async def test_a_named_identity_shows_its_person_on_its_occurrences(
+    processing_api: Api,
+) -> None:
+    api = processing_api
+    source = await processed(api, "alice.png")
+    [identity] = (await api.client.get(IDENTITIES)).json()["items"]
+    [before] = (await api.client.get(f"/api/v1/sources/{source['id']}/occurrences")).json()["items"]
+    assert before["person"] is None
+
+    named = await api.client.post(
+        "/api/v1/people", json={"display_name": "Alice", "identity_id": identity["id"]}
+    )
+
+    [after] = (await api.client.get(f"/api/v1/sources/{source['id']}/occurrences")).json()["items"]
+    assert after["person"] == {"id": named.json()["id"], "display_name": "Alice", "revision": 1}
+
+
 async def test_the_same_face_in_two_images_is_one_identity_with_two_occurrences(
     processing_api: Api,
 ) -> None:
