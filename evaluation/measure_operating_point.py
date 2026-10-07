@@ -144,7 +144,8 @@ def embed_dataset(
                     skipped["failed"] += 1
     finally:
         supervisor.stop()
-    np.savez(cache, **{name.replace("/", "|"): v for name, v in vectors.items()})
+    arrays: dict[str, Any] = {name.replace("/", "|"): v for name, v in vectors.items()}
+    np.savez(cache, **arrays)
     return manifest, vectors, skipped, digest
 
 
