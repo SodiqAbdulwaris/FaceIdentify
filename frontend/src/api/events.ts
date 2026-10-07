@@ -89,21 +89,31 @@ export class EventsClient {
   }
 
   start(): void {
+    this.release() // a second start never leaves the first connection (or its retry) running
     this.stopped = false
+    this.attempt = 0
     this.connect()
   }
 
   stop(): void {
+    this.release()
     this.stopped = true
+    this.handlers.onStatus('stopped')
+  }
+
+  /** Drop the pending retry and the connection, and detach its handlers so nothing late reaches us. */
+  private release(): void {
     if (this.timer !== null) clearTimeout(this.timer)
     this.timer = null
     const socket = this.socket
     this.socket = null
     if (socket) {
+      socket.onopen = null
+      socket.onmessage = null
       socket.onclose = null
+      socket.onerror = null
       socket.close()
     }
-    this.handlers.onStatus('stopped')
   }
 
   private connect(): void {
@@ -112,11 +122,14 @@ export class EventsClient {
     const socket = this.open(this.url, [EVENTS_PROTOCOL, `fi.${this.token}`])
     this.socket = socket
     socket.onopen = () => {
+      if (this.socket !== socket) return // released while it was opening
       this.attempt = 0
       this.handlers.onStatus('open')
       this.handlers.onResync() // whatever changed before the connection existed
     }
-    socket.onmessage = (message) => this.receive(message.data)
+    socket.onmessage = (message) => {
+      if (this.socket === socket) this.receive(message.data)
+    }
     socket.onclose = () => this.lost(socket)
     socket.onerror = () => undefined // `close` follows an error: one place handles both
   }

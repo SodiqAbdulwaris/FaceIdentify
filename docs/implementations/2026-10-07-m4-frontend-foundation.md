@@ -20,7 +20,8 @@
 - **Events** (`api/events.ts`): the connection offers `faceidentify.v1` and the token as protocols;
   a greeting sets the baseline sequence; a repeat is ignored; a gap, and every (re)connection,
   asks for a refetch; a lost connection is retried with a doubling delay (0.5 s to 15 s) that
-  resets after a success. `api/invalidation.ts` maps an event to the queries it makes stale
+  resets after a success. Stopping (or starting again) detaches the old socket's handlers and
+  cancels any pending retry, so nothing late reaches the app. `api/invalidation.ts` maps an event to the queries it makes stale
   (`api/keys.ts` holds the keys, so what an event invalidates and what a screen reads cannot drift).
 - **App** (`app/`): TanStack Query for server state, a small Zustand store only for client state
   (the events connection status), and hash routing for `/library`, `/library/source/:id`,
@@ -47,14 +48,14 @@ one way to reach the backend, one cache, and one way to stay fresh, each already
 
 ## Verification
 
-- `npm test` (36): the client (token, query building, post bodies, the error shape, a non-API
+- `npm test` (38): the client (token, query building, post bodies, the error shape, a non-API
   failure, a network failure, blobs); the events client against a fake socket (protocols, greeting
   baseline, repeats, a single lost event, a loss right after the greeting, ignored non-events,
-  growing and resetting reconnection delay, stop, a stale socket's late close, the delay rule,
+  growing and resetting reconnection delay, stop, a stale socket's late close, a stopped socket's late frames, starting twice, the delay rule,
   envelope validation); invalidation; the gate (starting, failed, the library opening then ready,
   degraded, a backend not yet answering, a failed library with its reason, the token on the readiness
   call); the native bridge in and out of the shell; the app without a shell.
-- Mutation probes (19 by hand on the events client, the HTTP client, invalidation, the gate and the
+- Mutation probes (23 by hand on the events client, the HTTP client, invalidation, the gate and the
   bridge): all killed after tests were added for a single lost event, a lost event right after the
   greeting, and a half-named development backend.
 - `npm run typecheck`, `npm run lint -- --deny-warnings` and `npm run build` pass; `cargo test`,
