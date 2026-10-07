@@ -16,7 +16,7 @@ and 6; M4 W3.3).
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -37,7 +37,12 @@ from backend.api.routes.sources import source_not_found
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
 from backend.app.jobs.models import Job, JobPriority, JobType
 from backend.app.processing.cancel import CancelError, CancelProcessingUseCase, RunNotFoundError
-from backend.app.processing.models import ProcessingRun, ProcessingRunState
+from backend.app.processing.configuration import UNCALIBRATED
+from backend.app.processing.models import (
+    ProcessingConfigurationSnapshot,
+    ProcessingRun,
+    ProcessingRunState,
+)
 from backend.app.processing.process_source import (
     ProcessSourceError,
     ProcessSourceUseCase,
@@ -61,6 +66,15 @@ class JobBrief(BaseModel):
     progress: Progress | None
 
 
+class PolicyProvenance(BaseModel):
+    """What the run's frozen configuration says about its decision policy, so a screen can tell
+    the user when results come from an uncalibrated, non-release policy (plan decision 1)."""
+
+    calibration_mode: str
+    decision_policy_version: str | None
+    calibrated: bool
+
+
 class ProcessingRunDetail(BaseModel):
     id: str
     source_id: str
@@ -71,6 +85,7 @@ class ProcessingRunDetail(BaseModel):
     completed_at: datetime | None
     failed_at: datetime | None
     failure_code: str | None
+    policy: PolicyProvenance
     job: JobBrief | None
 
 
@@ -105,6 +120,15 @@ def job_brief(job: Job) -> JobBrief:
     )
 
 
+def _policy(frozen: dict[str, Any]) -> PolicyProvenance:
+    mode = frozen["calibration"]["mode"]
+    return PolicyProvenance(
+        calibration_mode=mode,
+        decision_policy_version=frozen["decision_policy"].get("version"),
+        calibrated=mode != UNCALIBRATED,
+    )
+
+
 def _details(session: Session, runs: list[ProcessingRun]) -> list[ProcessingRunDetail]:
     """Each run with its source-processing job (a run has exactly one; a retry is a new run)."""
     jobs: dict[uuid.UUID, Job] = {}
@@ -115,6 +139,16 @@ def _details(session: Session, runs: list[ProcessingRun]) -> list[ProcessingRunD
     ):
         assert job.processing_run_id is not None  # selected by it
         jobs[job.processing_run_id] = job
+    snapshots = {
+        s.id: s.canonical_json
+        for s in session.scalars(
+            select(ProcessingConfigurationSnapshot).where(
+                ProcessingConfigurationSnapshot.id.in_(
+                    [run.configuration_snapshot_id for run in runs]
+                )
+            )
+        )
+    }
     return [
         ProcessingRunDetail(
             id=str(run.id),
@@ -126,6 +160,7 @@ def _details(session: Session, runs: list[ProcessingRun]) -> list[ProcessingRunD
             completed_at=run.completed_at,
             failed_at=run.failed_at,
             failure_code=run.failure_code,
+            policy=_policy(snapshots[run.configuration_snapshot_id]),
             job=None if run.id not in jobs else job_brief(jobs[run.id]),
         )
         for run in runs
