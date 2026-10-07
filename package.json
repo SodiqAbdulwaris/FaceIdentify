@@ -10,7 +10,8 @@
     "test": "npm run test --workspace frontend",
     "typecheck": "npm run typecheck --workspace frontend",
     "lint": "npm run lint --workspace frontend",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "generate:api": "uv run python -m backend.api.openapi && npm run generate:types --workspace frontend"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5"

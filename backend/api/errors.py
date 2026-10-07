@@ -18,11 +18,26 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 LOG = logging.getLogger("faceidentify.api")
 
 _HTTP_CODES = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}
+
+
+class ErrorBody(BaseModel):
+    code: str
+    message: str
+    details: dict[str, Any] | None
+    retryable: bool
+    diagnostic_id: str | None
+
+
+class ErrorEnvelope(BaseModel):
+    """The one error shape, for the generated contract (the handlers below produce it)."""
+
+    error: ErrorBody
 
 
 class ApiError(Exception):

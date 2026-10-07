@@ -93,6 +93,13 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # The generated types must match the committed OpenAPI document (which a backend test keeps
+      # in step with the routes): regenerate them and fail on any difference.
+      - run: npm run generate:types --workspace frontend
+      - name: Generated API types are up to date
+        run: |
+          git status --porcelain -- frontend/src/api
+          test -z "$(git status --porcelain -- frontend/src/api)"
       - run: npm run typecheck
       - run: npm run lint -- --deny-warnings
       - run: npm test
