@@ -15,6 +15,7 @@ from sqlalchemy import select
 from backend.app.identities.corrections import (
     confirm_occurrence,
     reassign_occurrence,
+    resolve_representation,
 )
 from backend.app.identities.models import (
     Evidence,
@@ -377,3 +378,145 @@ def test_a_shared_observation_cannot_remain_the_representative_after_its_represe
     assert (
         first.identity.representative_observation_id == own.occurrence.representative_observation_id
     )
+
+
+# --- resolving a face recognition declined to place (issue 79) --------------------------------
+
+
+def an_unresolved_face(build: ModelFactory) -> tuple[Representation, Evidence]:
+    """What an accepted ABSTAIN leaves: an identity-less ACTIVE representation, no occurrence,
+    and `RECOGNITION_ABSTAINED` Evidence citing it."""
+    observation = build.observation(state="ACTIVE")
+    representation = build.representation(observation, state="ACTIVE", ann_key=1, identity_id=None)
+    abstention = build.evidence(kind="RECOGNITION_ABSTAINED", source_id=observation.source_id)
+    build.add(
+        EvidenceRepresentation(
+            evidence_id=abstention.id, representation_id=representation.id, role="SUBJECT"
+        )
+    )
+    build.session.flush()
+    return representation, abstention
+
+
+def test_an_unresolved_face_can_be_given_to_an_existing_identity(build: ModelFactory) -> None:
+    representation, abstention = an_unresolved_face(build)
+    person = build.identity()
+    operations_before = build.session.scalars(select(IndexOperation)).all()
+
+    occurrence = resolve_representation(
+        build.session, representation.id, person.id, new_id=build.new_id, clock=build.clock
+    )
+
+    assert representation.identity_id == person.id
+    assert (occurrence.identity_id, occurrence.state, occurrence.kind) == (
+        person.id,
+        "ACTIVE",
+        "IMAGE",
+    )
+    assert occurrence.representative_observation_id == representation.observation_id
+    assert occurrence.processing_run_id == representation.processing_run_id
+    assert occurrence.activated_at is not None
+    assert build.session.scalars(
+        select(OccurrenceObservation.observation_id).where(
+            OccurrenceObservation.occurrence_id == occurrence.id
+        )
+    ).all() == [representation.observation_id]
+    assert person.representative_observation_id == representation.observation_id
+    (correction,) = corrections(build)
+    assert correction.payload_json["action"] == "RESOLVE"
+    assert correction.payload_json["resolves_evidence_id"] == str(abstention.id)
+    assert correction.payload_json["occurrence_id"] == str(occurrence.id)
+    assert correction.subject_identity_id == person.id
+    assert abstention.kind == "RECOGNITION_ABSTAINED"  # never rewritten
+    assert build.session.scalars(select(IndexOperation)).all() == operations_before
+    assert representation.ann_key == 1
+
+
+def test_an_unresolved_face_can_become_a_new_unknown_identity(build: ModelFactory) -> None:
+    representation, _ = an_unresolved_face(build)
+
+    occurrence = resolve_representation(
+        build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+    )
+
+    created = build.session.get(Identity, occurrence.identity_id)
+    assert created is not None
+    assert (created.state, created.representative_observation_id) == (
+        "ACTIVE",
+        representation.observation_id,
+    )
+    (correction,) = corrections(build)
+    assert correction.payload_json["action"] == "RESOLVE_NEW"
+
+
+def test_an_existing_identity_keeps_its_representative_face(build: ModelFactory) -> None:
+    representation, _ = an_unresolved_face(build)
+    owner = a_face(build)
+    kept = owner.identity.representative_observation_id
+
+    resolve_representation(
+        build.session, representation.id, owner.identity.id, new_id=build.new_id, clock=build.clock
+    )
+
+    assert owner.identity.representative_observation_id == kept
+
+
+def test_a_face_without_recorded_abstention_can_still_be_resolved(build: ModelFactory) -> None:
+    observation = build.observation(state="ACTIVE")
+    representation = build.representation(observation, state="ACTIVE", ann_key=1, identity_id=None)
+
+    resolve_representation(
+        build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+    )
+
+    (correction,) = corrections(build)
+    assert correction.payload_json["resolves_evidence_id"] is None
+
+
+@pytest.mark.parametrize(
+    "how", ["unknown", "owned", "retired", "has_occurrence", "inactive_target"]
+)
+def test_a_refused_resolution_writes_nothing(build: ModelFactory, how: str) -> None:
+    representation, _ = an_unresolved_face(build)
+    target = build.identity(state="PENDING") if how == "inactive_target" else build.identity()
+    wanted = target.id
+    if how == "owned":
+        representation.identity_id = target.id
+    if how == "retired":
+        representation.state = "SUPERSEDED"
+    if how == "has_occurrence":
+        build.occurrence(
+            build.session.get(Observation, representation.observation_id),
+            identity_id=target.id,
+            state="ACTIVE",
+        )
+    if how == "unknown":
+        wanted = uuid.uuid4()
+    build.session.flush()
+    evidence_before = len(build.session.scalars(select(Evidence)).all())
+    occurrences_before = len(build.session.scalars(select(Occurrence)).all())
+
+    with pytest.raises(IdentityManagerError):
+        resolve_representation(
+            build.session,
+            uuid.uuid4() if how == "unknown" else representation.id,
+            wanted,
+            new_id=build.new_id,
+            clock=build.clock,
+        )
+
+    assert len(build.session.scalars(select(Evidence)).all()) == evidence_before
+    assert len(build.session.scalars(select(Occurrence)).all()) == occurrences_before
+
+
+def test_the_abstention_cited_is_the_one_about_this_face(build: ModelFactory) -> None:
+    an_unresolved_face(build)  # another face's abstention, recorded earlier
+    build.clock.advance(seconds=1)
+    representation, abstention = an_unresolved_face(build)
+
+    resolve_representation(
+        build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+    )
+
+    (correction,) = corrections(build)
+    assert correction.payload_json["resolves_evidence_id"] == str(abstention.id)
