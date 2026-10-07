@@ -188,7 +188,7 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
   same pairing, or a one-off unlink). The identity model and decision-engine plan describe it; I will
   quote them and recommend rather than choose.
 
-### Step 3. Merge and split (TST-058)
+### Step 3. Merge and split (TST-058). Built 2026-10-07 ([entry](../implementations/2026-10-07-m5-merge-split.md)); the `SPLIT` removal (revision `0009`) is a separate small PR
 
 - Routes and UI for `merge_identities` (merge one identity into another) and `split_identity`
   (move selected representations to a new identity).

@@ -206,7 +206,7 @@ Unresolved items need the user's decision. Do not settle them silently.
     is retired by a split, so it leaves the source `ACTIVE` and creates the new identity directly
     `ACTIVE`, using `SPLIT` nowhere. Decide whether `SPLIT` should mark the source, the new
     identity, or is dead enum space.
-16. **Decided 2026-10-07 (owner): merge and split also move `Occurrence.identity_id` (M5 plan step 3; a mixed-support Occurrence is an explicit split conflict, never kept automatically by the source).** Original question follows. Merge/split do not move `Occurrence` rows. Only test factories create `Occurrence`
+16. **Decided 2026-10-07 (owner): merge and split also move `Occurrence.identity_id` (M5 plan step 3; a mixed-support Occurrence is an explicit split conflict, never kept automatically by the source). Built 2026-10-07.** Original question follows. Merge/split do not move `Occurrence` rows. Only test factories create `Occurrence`
     rows today (no production pathway does), so `merge_identities`/`split_identity` (PR #8)
     reassign `Representation.identity_id` only. Decide, before a production path creates
     `Occurrence` rows, whether merge/split must also move `Occurrence.identity_id`.
