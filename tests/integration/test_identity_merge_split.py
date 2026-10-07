@@ -12,14 +12,21 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from backend.app.identities.models import Evidence, IdentityLineage
+from backend.app.identities.models import Evidence, Identity, IdentityLineage
 from backend.app.identities.use_cases import (
     IdentityManagerError,
+    SplitConflictError,
     StaleRevisionError,
     merge_identities,
     split_identity,
 )
-from backend.app.memory.models import IndexOperation, Representation
+from backend.app.memory.models import (
+    IndexOperation,
+    Observation,
+    Occurrence,
+    OccurrenceObservation,
+    Representation,
+)
 from backend.app.people.models import IdentityPersonAssociation
 from backend.app.people.use_cases import assign_identity_to_person
 from tests.factories.models import ModelFactory
@@ -579,3 +586,180 @@ def test_a_rejected_split_creates_no_identity_and_moves_nothing(build: ModelFact
     assert unchanged_valid.identity_id == source.id
     assert build.session.scalars(select(Evidence)).all() == []
     assert build.session.scalars(select(IdentityLineage)).all() == []
+
+
+# --- occurrences move with the representations (M5 step 3; CONTEXT question 16) ------------------
+
+
+def a_face(
+    build: ModelFactory, identity: Identity, ann_key: int
+) -> tuple[Observation, Representation, Occurrence]:
+    """An ACTIVE occurrence of the identity resting on one ACTIVE representation."""
+    observation = build.observation()
+    representation = build.representation(
+        observation,
+        representation_space_id=build.representation_space().id,
+        state="ACTIVE",
+        ann_key=ann_key,
+        identity_id=identity.id,
+    )
+    occurrence = build.occurrence(observation, identity_id=identity.id, state="ACTIVE")
+    return observation, representation, occurrence
+
+
+def test_merge_moves_the_active_occurrences_and_names_them_in_the_evidence(
+    build: ModelFactory,
+) -> None:
+    survivor, loser = build.identity(), build.identity()
+    _, _, moving = a_face(build, loser, 1)
+    private = build.occurrence(identity_id=loser.id)  # PENDING: a run's private output
+    _, _, own = a_face(build, survivor, 2)
+
+    merge_identities(
+        build.session, loser.id, survivor.id, expected_revision=loser.revision,
+        new_id=build.new_id, clock=build.clock,
+    )  # fmt: skip
+    build.session.expire_all()
+
+    assert build.session.get(Occurrence, moving.id).identity_id == survivor.id  # type: ignore[union-attr]
+    assert build.session.get(Occurrence, own.id).identity_id == survivor.id  # type: ignore[union-attr]
+    assert build.session.get(Occurrence, private.id).identity_id == loser.id  # type: ignore[union-attr]
+    evidence = build.session.scalars(
+        select(Evidence).where(Evidence.kind == "IDENTITY_MERGED")
+    ).one()
+    assert evidence.payload_json["moved_occurrence_ids"] == [str(moving.id)]
+
+
+def test_merge_gives_a_survivor_without_a_representative_the_losers(build: ModelFactory) -> None:
+    survivor, loser = build.identity(), build.identity()
+    observation, _, _ = a_face(build, loser, 1)
+    loser.representative_observation_id = observation.id
+
+    merge_identities(
+        build.session, loser.id, survivor.id, expected_revision=loser.revision,
+        new_id=build.new_id, clock=build.clock,
+    )  # fmt: skip
+
+    assert survivor.representative_observation_id == observation.id
+
+
+def test_merge_keeps_the_survivors_own_representative(build: ModelFactory) -> None:
+    survivor, loser = build.identity(), build.identity()
+    own, _, _ = a_face(build, survivor, 1)
+    survivor.representative_observation_id = own.id
+    theirs, _, _ = a_face(build, loser, 2)
+    loser.representative_observation_id = theirs.id
+
+    merge_identities(
+        build.session, loser.id, survivor.id, expected_revision=loser.revision,
+        new_id=build.new_id, clock=build.clock,
+    )  # fmt: skip
+
+    assert survivor.representative_observation_id == own.id
+
+
+def test_split_moves_the_occurrences_of_the_selected_representations(build: ModelFactory) -> None:
+    source = build.identity()
+    obs_a, rep_a, occ_a = a_face(build, source, 1)
+    obs_b, _, occ_b = a_face(build, source, 2)
+    source.representative_observation_id = obs_a.id
+
+    created = split_identity(
+        build.session, source.id, [rep_a.id], new_id=build.new_id, clock=build.clock
+    )
+    build.session.expire_all()
+
+    assert build.session.get(Occurrence, occ_a.id).identity_id == created.id  # type: ignore[union-attr]
+    assert build.session.get(Occurrence, occ_b.id).identity_id == source.id  # type: ignore[union-attr]
+    assert created.representative_observation_id == obs_a.id
+    assert source.representative_observation_id == obs_b.id  # never one that has left it
+    evidence = build.session.scalars(
+        select(Evidence).where(Evidence.kind == "IDENTITY_SPLIT")
+    ).one()
+    assert evidence.payload_json["moved_occurrence_ids"] == [str(occ_a.id)]
+
+
+def test_a_split_that_would_cut_an_occurrence_in_two_is_a_conflict_and_writes_nothing(
+    build: ModelFactory,
+) -> None:
+    source = build.identity()
+    observation, first, occurrence = a_face(build, source, 1)
+    second = build.representation(  # a second representation of the same face, another space
+        observation,
+        representation_space_id=build.representation_space().id,
+        state="ACTIVE",
+        ann_key=1,
+        identity_id=source.id,
+    )
+    identities_before = len(build.session.scalars(select(Identity)).all())
+    evidence_before = len(build.session.scalars(select(Evidence)).all())
+
+    with pytest.raises(SplitConflictError) as raised:
+        split_identity(build.session, source.id, [first.id], new_id=build.new_id, clock=build.clock)
+
+    assert raised.value.occurrence_ids == (occurrence.id,)
+    assert len(build.session.scalars(select(Identity)).all()) == identities_before
+    assert len(build.session.scalars(select(Evidence)).all()) == evidence_before
+    assert first.identity_id == source.id
+    assert second.identity_id == source.id
+    assert occurrence.identity_id == source.id
+
+    # selecting all of its representations resolves the conflict, and the occurrence moves
+    created = split_identity(
+        build.session, source.id, [first.id, second.id], new_id=build.new_id, clock=build.clock
+    )
+    assert occurrence.identity_id == created.id
+
+
+def test_a_representation_that_supports_no_occurrence_can_still_be_split_off(
+    build: ModelFactory,
+) -> None:
+    source = build.identity()
+    _, _, stays = a_face(build, source, 1)
+    bare = build.representation(state="ACTIVE", ann_key=2, identity_id=source.id)
+
+    created = split_identity(
+        build.session, source.id, [bare.id], new_id=build.new_id, clock=build.clock
+    )
+
+    assert bare.identity_id == created.id
+    assert stays.identity_id == source.id
+    assert created.representative_observation_id is None
+
+
+def test_splitting_two_faces_moves_both_and_the_first_stands_for_the_new_identity(
+    build: ModelFactory,
+) -> None:
+    source = build.identity()
+    obs_a, rep_a, occ_a = a_face(build, source, 1)
+    obs_b, rep_b, occ_b = a_face(build, source, 2)
+
+    created = split_identity(
+        build.session, source.id, [rep_a.id, rep_b.id], new_id=build.new_id, clock=build.clock
+    )
+
+    assert occ_a.identity_id == occ_b.identity_id == created.id
+    assert created.representative_observation_id in (obs_a.id, obs_b.id)
+
+
+def test_an_occurrence_known_only_through_its_membership_rows_is_split_with_its_face(
+    build: ModelFactory,
+) -> None:
+    source = build.identity()
+    observation = build.observation()
+    representation = build.representation(
+        observation, state="ACTIVE", ann_key=1, identity_id=source.id
+    )
+    occurrence = build.occurrence(
+        observation, identity_id=source.id, state="ACTIVE", representative_observation_id=None
+    )
+    build.add(
+        OccurrenceObservation(occurrence_id=occurrence.id, observation_id=observation.id, ordinal=0)
+    )
+    build.session.flush()
+
+    created = split_identity(
+        build.session, source.id, [representation.id], new_id=build.new_id, clock=build.clock
+    )
+
+    assert occurrence.identity_id == created.id
