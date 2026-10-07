@@ -92,6 +92,17 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 > stay raw cosine, so the mode stays `UNCALIBRATED` and the UI notice says what was measured and its
 > limits. No `CALIBRATED` mode is built.
 
+> **Decision 2026-10-07:** **R4's operating point is conservative and provisional.** After the
+> first measurement (the point chosen on the selection half reached 100% precision there and 78.4% on
+> the held-out half), the owner decided: choose the threshold above the observed different-person tail
+> (above 0.326), put false accepts before recall, re-evaluate on held-out data, label the policy
+> provisional and conservative until a larger verified set can certify 99% precision, record its
+> precision, recall, false accepts, abstention rate, counts, intervals and provenance, and let scores
+> below the threshold ABSTAIN. If the higher threshold still produces false accepts, disable automatic
+> acceptance (ABSTAIN and manual resolution only) until the evaluation set improves. Result: it did
+> (5 false accepts of 40 on the held-out half), so the policy in force is ABSTAIN-only
+> (`docs/research/measured-operating-point.md`).
+
 > **Decision 2026-10-07:** **Forget is confirmed as proposed in step 4:** `ForgetIdentity` is the only
 > operation that removes biometric memory; "forget person" runs it on each of a Person's identities; the
 > Person record and name stay.

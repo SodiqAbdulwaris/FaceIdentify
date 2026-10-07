@@ -1,7 +1,7 @@
 # Measured operating point for `buffalo_l` (TST-044, first baseline)
 
-**Date:** 2026-10-07. **Status:** measured; the policy built from it waits on an owner decision
-(see "What the numbers say"). Numbers only: no photograph is recorded or committed.
+**Date:** 2026-10-07. **Status:** measured twice; automatic acceptance is **disabled** (ABSTAIN-only) under the
+owner's rule of 2026-10-07 until a larger verified set exists. Numbers only: no photograph is recorded or committed.
 
 ## Run
 
@@ -40,11 +40,43 @@ error and some is real age and pose variation; the two cannot be separated here.
 The 99% rule is satisfied on the half it was chosen on and **not** on the held-out half: the point is
 overfit to 100 queries, and 0.2586 sits far below the different-person 99.9th percentile (0.326).
 With this set the 99% precision target cannot be certified at any useful recall; the interval's upper
-end is 0.875. Calling this threshold "calibrated to 99%" would be false. Options (owner's call, not
-taken by the agent): ship the measured point under an honest notice (held-out precision about 78%);
-choose the threshold from the different-person tail (for example above 0.326) and accept lower recall;
-or auto-accept nothing (ABSTAIN) until a larger, verified set exists. No new identity ceiling is
-available either.
+end is 0.875. Calling this threshold "calibrated to 99%" would be false. The owner's decision
+(2026-10-07) was to choose the threshold above the different-person tail, to put false accepts before
+recall, to re-evaluate on the held-out half, and to disable automatic acceptance if the higher
+threshold still produced false accepts.
+
+## The conservative rule and its result
+
+Rule (`--conservative`, predeclared before the run): thresholds only strictly above the
+different-person 99.9th percentile of all pairs (0.3261); a margin is always required (0.02, 0.05,
+0.1); zero false accepts and at least 20 accepted queries on the selection half; then the highest
+recall; judged on the final half, which must show zero false accepts and a recall of at least 0.25
+(predeclared "useful" minimum), otherwise automatic acceptance is disabled. No new-identity ceiling:
+a face below the threshold abstains.
+
+- Chosen on the selection half: threshold 0.3544, margin 0.02, 40 accepted, 40 correct, recall 0.635.
+- Final half (121 queries, 55 of known people): 40 accepted, 35 correct, **5 false accepts**
+  (precision 0.875, Wilson 95% interval 0.739 to 0.945), recall 0.636, abstention rate 0.669.
+  Three false accepts were queries of people never enrolled and two were known people matched to the
+  wrong person; their scores were 0.409, 0.409, 0.567, 0.598 and 0.615.
+- Verdict: **auto-accept-disabled** (5 false accepts on the held-out half). The policy that results
+  is `buffalo-l-abstain-only-v1`: match threshold 1.0, margin 2.0 (no automatic accept), ceiling -1.0
+  (no automatic new identity), minimum detection score 0.5 (the detector's own floor, which the
+  measurement ran under). Every face that has candidates abstains and waits for manual resolution; a
+  face with nobody to compare with still starts a new identity.
+
+False accepts at cosine 0.57 to 0.62 are far above the different-person 99.9th percentile. Either
+the labels are wrong for those pairs (the labels are unverified Commons categories) or the model
+confuses look-alikes; this set cannot say which, so neither is claimed. The result stands as
+"separation is not stable on this set", which is the owner's trigger for ABSTAIN-only operation.
+It is a statement about this set, not about the model in general.
+
+Provenance of the numbers: local report `evaluation/datasets/reports/conservative.json` (never
+committed), produced by `uv run python evaluation/measure_operating_point.py --dataset
+evaluation/datasets/commons-pd --local-state-root local-models/state --report <path> --conservative
+--write-policy local-models/state/policies/insightface-buffalo-l.json`; weights digest and dataset
+manifest hash as in "Run". Re-run it when the set grows or is verified; a policy that passes the
+rule is written by the same command.
 
 ## Limits
 

@@ -424,7 +424,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 
 **Current (2026-10-07):** M0 to M4 are done on the development profile. The next milestone is M5, the first
 real recognition milestone: [`docs/plans/M5_PLAN.md`](../docs/plans/M5_PLAN.md) (an identity-management
-track and a real-model track, converging before search; scope and order approved; R0, the library-profile guard (#137), is built; R1 is done and R3 partly: `buffalo_l` selected (record in `docs/research/reference-model-selection.md`), installed as a runtime package and run for real on CPU by a local real-worker smoke test (`tests/e2e/test_real_models.py`, `-m e2e`, never in CI); the evaluation scripts under `evaluation/` are written; CUDA and the measured policy are pending). The
+track and a real-model track, converging before search; scope and order approved; R0, the library-profile guard (#137), is built; R1 is done and R3 partly: `buffalo_l` selected (record in `docs/research/reference-model-selection.md`), installed as a runtime package and run for real on CPU by a local real-worker smoke test (`tests/e2e/test_real_models.py`, `-m e2e`, never in CI); the measured policy (R4, `docs/research/measured-operating-point.md`) is the owner's conservative rule's result: automatic acceptance disabled, ABSTAIN-only, until a larger verified set exists; CUDA is pending). The
 numbered list below is the **historical** M2 and M3 record, kept for what was decided and built, not a
 to-do list.
 
