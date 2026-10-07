@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M5 R0: a library belongs to one profile](2026-10-07-m5-r0-library-profile-guard.md) | done; issue #137 |
 | 2026-10-07 | [Owner decisions on M4 and the M5 plan](2026-10-07-m4-owner-decisions-and-m5-plan.md) | done; documentation only |
 | 2026-10-07 | [M4 W8: the end-to-end workflow, with a restart](2026-10-07-m4-end-to-end.md) | done; M4 definition of done met on the development profile |
 | 2026-10-07 | [M4 W7.4: the people and processing screens](2026-10-07-m4-frontend-people.md) | done; W7 complete |

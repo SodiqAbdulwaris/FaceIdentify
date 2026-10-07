@@ -29,6 +29,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.api.library_profile import LibraryProfile
 from backend.api.startup import (
     PROVISIONAL_MAX_PIXELS,
     LibrarySettings,
@@ -326,4 +327,5 @@ def development_processing(settings: LibrarySettings) -> ProcessingSettings:
         owner=f"sidecar-{os.getpid()}",
         planner=development_plan,
         prepare=prepare,
+        profile=LibraryProfile.DEVELOPMENT,
     )
