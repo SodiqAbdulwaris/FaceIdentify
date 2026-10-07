@@ -144,7 +144,8 @@ async def test_splitting_moves_the_chosen_faces_to_a_new_identity(
     subscription = api.backend.events.subscribe()
     try:
         split = await api.client.post(
-            f"{IDENTITIES}/{mine.identity}/split", json={"occurrence_ids": [mine.occurrences[0]]}
+            f"{IDENTITIES}/{mine.identity}/split",
+            json={"occurrence_ids": [mine.occurrences[0]], "expected_revision": 1},
         )
         announced = subscription.queue.qsize()
     finally:
@@ -167,7 +168,8 @@ async def test_splitting_off_every_face_leaves_the_first_identity_active(
     mine = person(api, new_id, 2)
 
     split = await api.client.post(
-        f"{IDENTITIES}/{mine.identity}/split", json={"occurrence_ids": mine.occurrences}
+        f"{IDENTITIES}/{mine.identity}/split",
+        json={"occurrence_ids": mine.occurrences, "expected_revision": 1},
     )
 
     assert split.json()["occurrence_count"] == 2
@@ -181,20 +183,29 @@ async def test_a_split_is_refused_for_bad_input_and_changes_nothing(
     mine, other = person(api, new_id, 2), person(api, new_id)
     url = f"{IDENTITIES}/{mine.identity}/split"
 
-    error(await api.client.post(url, json={"occurrence_ids": []}), 422, "INVALID_SPLIT")
     error(
-        await api.client.post(url, json={"occurrence_ids": [other.occurrences[0]]}),
-        404,
-        "OCCURRENCE_NOT_FOUND",
+        await api.client.post(url, json={"occurrence_ids": [], "expected_revision": 1}),
+        422,
+        "INVALID_SPLIT",
     )
     error(
-        await api.client.post(url, json={"occurrence_ids": [str(uuid.uuid4())]}),
+        await api.client.post(
+            url, json={"occurrence_ids": [other.occurrences[0]], "expected_revision": 1}
+        ),
         404,
         "OCCURRENCE_NOT_FOUND",
     )
     error(
         await api.client.post(
-            f"{IDENTITIES}/{uuid.uuid4()}/split", json={"occurrence_ids": mine.occurrences}
+            url, json={"occurrence_ids": [str(uuid.uuid4())], "expected_revision": 1}
+        ),
+        404,
+        "OCCURRENCE_NOT_FOUND",
+    )
+    error(
+        await api.client.post(
+            f"{IDENTITIES}/{uuid.uuid4()}/split",
+            json={"occurrence_ids": mine.occurrences, "expected_revision": 1},
         ),
         404,
         "IDENTITY_NOT_FOUND",
@@ -215,7 +226,8 @@ async def test_a_face_that_is_no_longer_current_cannot_be_chosen(
         old_id = str(old.id)
 
     response = await api.client.post(
-        f"{IDENTITIES}/{mine.identity}/split", json={"occurrence_ids": [old_id]}
+        f"{IDENTITIES}/{mine.identity}/split",
+        json={"occurrence_ids": [old_id], "expected_revision": 1},
     )
 
     error(response, 404, "OCCURRENCE_NOT_FOUND")
@@ -233,7 +245,8 @@ async def test_a_face_with_nothing_to_split_off_is_refused(api: Api, new_id: See
         bare_id = str(bare.id)
 
     response = await api.client.post(
-        f"{IDENTITIES}/{mine.identity}/split", json={"occurrence_ids": [bare_id]}
+        f"{IDENTITIES}/{mine.identity}/split",
+        json={"occurrence_ids": [bare_id], "expected_revision": 1},
     )
 
     error(response, 422, "INVALID_SPLIT")
@@ -262,13 +275,87 @@ async def test_a_split_that_would_cut_a_face_in_two_is_a_conflict_and_changes_no
         ids = (str(identity.id), str(wide.id), str(narrow.id))
 
     refused = await api.client.post(
-        f"{IDENTITIES}/{ids[0]}/split", json={"occurrence_ids": [ids[2]]}
+        f"{IDENTITIES}/{ids[0]}/split", json={"occurrence_ids": [ids[2]], "expected_revision": 1}
     )
 
     body_ = error(refused, 409, "SPLIT_CONFLICT")
     assert body_["details"]["occurrence_ids"] == [ids[1]]  # the face it would have cut in two
     assert (await api.client.get(f"{IDENTITIES}/{ids[0]}")).json()["occurrence_count"] == 2
     both = await api.client.post(
-        f"{IDENTITIES}/{ids[0]}/split", json={"occurrence_ids": [ids[1], ids[2]]}
+        f"{IDENTITIES}/{ids[0]}/split",
+        json={"occurrence_ids": [ids[1], ids[2]], "expected_revision": 1},
     )
     assert both.status_code == 201  # choosing everything that rests on it resolves the conflict
+
+
+async def test_a_merge_is_refused_when_only_the_survivor_changed(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    keep, lose = person(api, new_id, 2), person(api, new_id)
+    # a correction moves one of the survivor's faces away: its revision moves on
+    moved = await api.client.post(
+        f"/api/v1/occurrences/{keep.occurrences[0]}/reassign",
+        json={"expected_identity_id": keep.identity, "identity_id": None},
+    )
+    assert moved.status_code == 200
+
+    stale = await api.client.post(f"{IDENTITIES}/merge", json=body(keep, lose))
+
+    error(stale, 409, "IDENTITY_CHANGED")
+    assert (await api.client.get(f"{IDENTITIES}/{lose.identity}")).status_code == 200  # untouched
+    fresh = (await api.client.get(f"{IDENTITIES}/{keep.identity}")).json()["revision"]
+    assert fresh > keep.revision
+    ok = {**body(keep, lose), "identities": [
+        {"id": keep.identity, "revision": fresh}, {"id": lose.identity, "revision": lose.revision}
+    ]}  # fmt: skip
+    assert (await api.client.post(f"{IDENTITIES}/merge", json=ok)).status_code == 200
+
+
+async def test_merging_several_into_one_survivor_checks_its_revision_once(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    keep, second, third = person(api, new_id), person(api, new_id), person(api, new_id)
+
+    merged = await api.client.post(f"{IDENTITIES}/merge", json=body(keep, second, third))
+
+    assert merged.status_code == 200
+    assert merged.json()["revision"] == keep.revision + 2  # bumped once per merged identity
+
+
+async def test_a_split_is_refused_when_the_person_changed_since_it_was_shown(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    mine = person(api, new_id, 2)
+    await api.client.post(
+        f"/api/v1/occurrences/{mine.occurrences[1]}/reassign",
+        json={"expected_identity_id": mine.identity, "identity_id": None},
+    )
+
+    stale = await api.client.post(
+        f"{IDENTITIES}/{mine.identity}/split",
+        json={"occurrence_ids": [mine.occurrences[0]], "expected_revision": mine.revision},
+    )
+
+    error(stale, 409, "IDENTITY_CHANGED")
+    assert (await api.client.get(f"{IDENTITIES}/{mine.identity}")).json()["occurrence_count"] == 1
+
+
+async def test_a_split_never_quietly_leaves_a_chosen_face_behind(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    mine = person(api, new_id)
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        build = ModelFactory(session, api.clock, new_id)
+        bare = build.occurrence(identity_id=uuid.UUID(mine.identity), state="ACTIVE")
+        session.commit()
+        bare_id = str(bare.id)
+
+    response = await api.client.post(
+        f"{IDENTITIES}/{mine.identity}/split",
+        json={"occurrence_ids": [mine.occurrences[0], bare_id], "expected_revision": 1},
+    )
+
+    refused = error(response, 422, "INVALID_SPLIT")
+    assert refused["details"]["occurrence_ids"] == [bare_id]
+    assert (await api.client.get(f"{IDENTITIES}/{mine.identity}")).json()["occurrence_count"] == 2
