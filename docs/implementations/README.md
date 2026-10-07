@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M4 W7.1: the frontend foundation](2026-10-07-m4-frontend-foundation.md) | partial; screens follow |
 | 2026-10-07 | [M4 W6: the Tauri shell starts, serves to and stops the backend](2026-10-07-m4-desktop-sidecar.md) | done; web view side is W7 |
 | 2026-10-07 | [M4 W6 (host): stop the host by closing its standard input](2026-10-07-host-stdin-lifeline.md) | done; the shell side is next |
 | 2026-10-07 | [M4: the development profile and the host's processing wiring](2026-10-07-m4-development-profile.md) | done; plan decision 1; real models still blocked |
