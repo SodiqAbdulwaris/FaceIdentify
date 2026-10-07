@@ -1,9 +1,14 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { keys } from '@/api/keys'
 import { apiError, failure, page, renderApp, run } from '@/test/harness'
 import { detail, occurrence } from '@/test/fixtures'
+
+vi.mock('../status', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../status')>()),
+  ACTIVE_REFETCH_MS: 40,
+}))
 
 const SOURCE = '/api/v1/sources/s1'
 const media = { path: `${SOURCE}/media`, respond: 'bytes' }
@@ -315,5 +320,23 @@ describe('a source', () => {
     ])
 
     expect(await screen.findByText('The image could not be loaded.')).toBeInTheDocument()
+  })
+
+  it('keeps the history fresh while a run is under way, and stops when it is over', async () => {
+    let state = 'RUNNING'
+    const { calls } = open([
+      { path: SOURCE, respond: detail({ processing_status: 'RUNNING' }) },
+      media,
+      noFaces,
+      { path: `${SOURCE}/processing-runs`, respond: () => page([run({ state })]) },
+    ])
+    await screen.findByText(/Processing is under way/)
+
+    state = 'COMPLETED'
+    await waitFor(() => expect(screen.getAllByText('Done').length).toBeGreaterThan(0))
+
+    const looked = calls.filter((c) => c.path.endsWith('/processing-runs')).length
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(calls.filter((c) => c.path.endsWith('/processing-runs')).length).toBe(looked)
   })
 })

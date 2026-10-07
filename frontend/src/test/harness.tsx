@@ -4,6 +4,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { vi } from 'vitest'
 import { routes } from '@/app/routes'
@@ -72,7 +73,7 @@ class QuietSocket {
   close() {}
 }
 
-export function renderApp(initialPath: string, handlers: Handler[]) {
+function stubBackend(handlers: Handler[]) {
   const calls: Call[] = []
   const unexpected: string[] = []
   const all: Handler[] = [
@@ -109,8 +110,14 @@ export function renderApp(initialPath: string, handlers: Handler[]) {
       return new Response(JSON.stringify(answer), { status: handler.status ?? 200 })
     }),
   )
+  return { calls, unexpected }
+}
 
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+const freshClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+export function renderApp(initialPath: string, handlers: Handler[]) {
+  const { calls, unexpected } = stubBackend(handlers)
+  const queryClient = freshClient()
   const router = createMemoryRouter(routes, { initialEntries: [initialPath] })
   const utils = render(
     <QueryClientProvider client={queryClient}>
@@ -120,6 +127,25 @@ export function renderApp(initialPath: string, handlers: Handler[]) {
     </QueryClientProvider>,
   )
   return { ...utils, calls, unexpected, router, queryClient }
+}
+
+/** One component (not the whole app) with the backend and the query cache around it. */
+export function renderWithBackend(ui: ReactElement, handlers: Handler[]) {
+  const { calls, unexpected } = stubBackend(handlers)
+  const queryClient = freshClient()
+  const wrap = (node: ReactElement) => (
+    <QueryClientProvider client={queryClient}>
+      <BackendProvider connection={connection}>{node}</BackendProvider>
+    </QueryClientProvider>
+  )
+  const utils = render(wrap(ui))
+  return {
+    ...utils,
+    calls,
+    unexpected,
+    queryClient,
+    rerenderWith: (next: ReactElement) => utils.rerender(wrap(next)),
+  }
 }
 
 // --- the shapes the API returns, with sensible defaults ---------------------------------------

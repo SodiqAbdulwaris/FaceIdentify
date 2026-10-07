@@ -40,6 +40,12 @@ export const statusTone = (state: string): Tone => TONES[state] ?? 'neutral'
 
 const ACTIVE = new Set(['PENDING', 'RUNNING', 'PAUSING', 'PAUSED', 'CANCELLING', 'FINALIZING'])
 
+/**
+ * How often to look again while work is under way. Events normally say when something changed;
+ * this is the fallback for when the live connection is down.
+ */
+export const ACTIVE_REFETCH_MS = 3000
+
 /** Work is queued or under way: it can change by itself, and it cannot be started again. */
 export const isActive = (state: string): boolean => ACTIVE.has(state)
 

@@ -1,7 +1,13 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { apiError, failure, renderApp, run } from '@/test/harness'
+
+// look again quickly while work is under way (the real wait is seconds)
+vi.mock('../status', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../status')>()),
+  ACTIVE_REFETCH_MS: 40,
+}))
 
 const RUN = '/api/v1/processing-runs/r1'
 const job = (over: Record<string, unknown> = {}) => ({
@@ -141,5 +147,18 @@ describe('a processing run', () => {
       await screen.findByRole('heading', { name: 'This processing run could not be loaded' }),
     ).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('The library is not available.')
+  })
+
+  it('keeps looking while the run is under way, and stops once it is over', async () => {
+    let state = 'RUNNING'
+    const { calls } = renderApp('/processing/r1', [{ path: RUN, respond: () => run({ state }) }])
+    await screen.findByText(/This is under way\./)
+
+    state = 'COMPLETED' // (the live connection is down: nothing told the page)
+    await screen.findByText('Done')
+
+    const looked = calls.filter((c) => c.path === RUN).length
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(calls.filter((c) => c.path === RUN).length).toBe(looked) // no more once it is over
   })
 })

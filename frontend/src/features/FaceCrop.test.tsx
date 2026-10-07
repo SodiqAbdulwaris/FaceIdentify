@@ -1,6 +1,7 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { page, renderApp } from '@/test/harness'
+import { page, renderApp, renderWithBackend } from '@/test/harness'
+import { FaceCrop } from './FaceCrop'
 
 // The crop is checked through the screen that uses it (the people list), so it has the real
 // image address and the real query behind it.
@@ -80,5 +81,28 @@ describe('FaceCrop', () => {
     const px = (value: string) => Number.parseFloat(value)
     expect(px(image.style.marginLeft)).toBeCloseTo(-(0.5 * 1000 * scale) + (96 - 100 * scale) / 2)
     expect(px(image.style.marginTop)).toBeCloseTo(-(0.25 * 800 * scale))
+  })
+
+  it("does not apply one image's size to another when the tile is reused", async () => {
+    const box = { x: 0.25, y: 0.5, width: 0.25, height: 0.25 }
+    const handlers = [{ path: /\/media$/, respond: 'bytes' }]
+    const { rerenderWith } = renderWithBackend(
+      <FaceCrop sourceId="s1" box={box} label="face" />,
+      handlers,
+    )
+    const first = await screen.findByRole('img', { name: 'face' })
+    loaded(first, 1000, 800)
+    expect(first.style.maxWidth).toBe('none') // sized for the first image
+
+    rerenderWith(<FaceCrop sourceId="s2" box={box} label="face" />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: 'face' }).getAttribute('src')).not.toBe(
+        first.getAttribute('src'),
+      ),
+    )
+    const second = screen.getByRole('img', { name: 'face' })
+    expect(second.style.maxWidth).toBe('') // not sized until it has been measured itself
+    expect(second).toHaveStyle({ width: '96px', height: '96px' })
   })
 })
