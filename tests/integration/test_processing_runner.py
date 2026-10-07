@@ -42,6 +42,25 @@ def test_with_nothing_queued_the_runner_is_idle(pipeline: Pipeline) -> None:
     assert outcome.processing_run_id is None
 
 
+def test_the_run_is_announced_once_its_job_is_claimed_and_a_failed_announcement_is_harmless(
+    pipeline: Pipeline,
+) -> None:
+    seen: list[tuple[Any, str]] = []
+
+    def started(run_id: Any) -> None:
+        seen.append((run_id, only(pipeline, ProcessingRun).state))
+        raise RuntimeError("the notification failed")
+
+    pipeline.enqueue(pipeline.import_image())
+    runner = pipeline.runner()
+    runner._on_started = started
+
+    outcome = runner.run_once()
+
+    assert outcome.kind is RunOutcomeKind.ACCEPTED  # the failed notification changed nothing
+    assert seen == [(outcome.processing_run_id, "RUNNING")]  # told after the claim, before the work
+
+
 def test_a_queued_job_is_executed_accepted_and_indexed(pipeline: Pipeline) -> None:
     pipeline.enqueue(pipeline.import_image())
 

@@ -19,7 +19,12 @@ import asyncio
 import threading
 import uuid
 from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    asynccontextmanager,
+    suppress,
+)
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -28,14 +33,17 @@ from typing import Any, Final
 
 import anyio.to_thread
 from fastapi import FastAPI
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.app import BackendReadiness, create_app
+from backend.api.events import EventHub
 from backend.api.scheduler import SchedulerService
 from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.processing.accept_run import AcceptProcessingRunUseCase
 from backend.app.processing.execute_job import ExecuteProcessingJob
+from backend.app.processing.models import ProcessingRun
 from backend.app.processing.runner import ProcessingRunner, RunOutcome
 from backend.app.processing.scheduler import ProcessingScheduler
 from backend.app.recovery.startup import StartupReport
@@ -139,7 +147,11 @@ class Backend:
     # Set once startup has finished, whether it opened the library or failed. Thread-safe, so a
     # test can wait for it instead of sleeping.
     settled: threading.Event = field(default_factory=threading.Event)
+    events: EventHub = field(init=False)
     _opened: AbstractContextManager[OpenLibrary] | None = None
+
+    def __post_init__(self) -> None:
+        self.events = EventHub(self.settings.clock, self.settings.new_id)
 
     def readiness(self) -> BackendReadiness:
         capabilities = dict(self.capabilities)
@@ -150,6 +162,31 @@ class Backend:
             else:
                 capabilities["scheduler"] = "DEGRADED" if scheduler.last_error else "READY"
         return BackendReadiness(self.state.value, capabilities, self.failure)
+
+    def announce(
+        self, type_: str, resource_type: str, resource_id: str, data: dict[str, Any] | None = None
+    ) -> None:
+        """Notify connected clients. Best effort by design: the change is already committed, so a
+        failing notification must never fail the request or the work that made it."""
+        with suppress(Exception):
+            self.events.publish(type_, resource_type, resource_id, data)
+
+    def announce_run(self, run_id: uuid.UUID, type_: str = "processing_run.updated") -> None:
+        """Tell connected clients a run changed: its id, state and source (they refetch via REST).
+        Safe from any thread; called only once the library is open (a route or the scheduler)."""
+        library = self.library
+        assert library is not None
+        with suppress(Exception):
+            state, source_id = library.unit_of_work.read(
+                lambda session: session.execute(
+                    select(ProcessingRun.state, ProcessingRun.source_id).where(
+                        ProcessingRun.id == run_id
+                    )
+                ).one()
+            )
+            self.announce(
+                type_, "processing_run", str(run_id), {"state": state, "source_id": str(source_id)}
+            )
 
     def wake_scheduler(self) -> None:
         """Ask the scheduler to look at the queue now (a job was queued). Safe from any thread."""
@@ -196,8 +233,16 @@ class Backend:
             ),
             owner=processing.owner,
             clock=settings.clock,
+            on_started=self.announce_run,
         )
-        return runner.run_once
+
+        def run_once() -> RunOutcome:
+            outcome = runner.run_once()
+            if outcome.processing_run_id is not None:
+                self.announce_run(outcome.processing_run_id)
+            return outcome
+
+        return run_once
 
     async def _shutdown(self) -> None:
         if self.scheduler is not None:
@@ -269,6 +314,11 @@ def create_backend_app(
     backend = Backend(settings, processing, media_limits)
     from backend.api.routes import api_router  # (here: the routes import this module's types)
 
-    app = create_app(launch_token, readiness=backend.readiness, lifespan=backend_lifespan(backend))
+    app = create_app(
+        launch_token,
+        readiness=backend.readiness,
+        lifespan=backend_lifespan(backend),
+        events=backend.events,
+    )
     app.include_router(api_router)
     return app

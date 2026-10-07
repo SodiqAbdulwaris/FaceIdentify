@@ -36,7 +36,12 @@ from backend.api.pagination import (
 from backend.api.routes.sources import source_not_found
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
 from backend.app.jobs.models import Job, JobPriority, JobType
-from backend.app.processing.cancel import CancelError, CancelProcessingUseCase, RunNotFoundError
+from backend.app.processing.cancel import (
+    CancelError,
+    CancelOutcome,
+    CancelProcessingUseCase,
+    RunNotFoundError,
+)
 from backend.app.processing.configuration import UNCALIBRATED
 from backend.app.processing.models import (
     ProcessingConfigurationSnapshot,
@@ -213,6 +218,7 @@ def process_source(
             409, "SOURCE_NOT_PROCESSABLE", "The source cannot be processed now.",
             details={"reason": str(error)},
         ) from None  # fmt: skip
+    backend.announce_run(scheduled.processing_run_id, "processing_run.created")
     return library.unit_of_work.read(
         lambda session: _run_detail(session, scheduled.processing_run_id)
     )
@@ -291,6 +297,8 @@ def cancel_command(library: Library, backend: Backend, run_id: uuid.UUID) -> Pro
             409, "RUN_NOT_CANCELLABLE", "The processing run cannot be cancelled now.",
             details={"reason": str(error)},
         ) from None  # fmt: skip
+    if result.outcome != CancelOutcome.ALREADY:  # a repeat changed nothing: nothing to announce
+        backend.announce_run(result.run_id)
     return library.unit_of_work.read(lambda session: _run_detail(session, result.run_id))
 
 
@@ -329,6 +337,7 @@ def retry_run(
             409, "RUN_NOT_RETRYABLE", "The processing run cannot be retried.",
             details={"reason": str(error)},
         ) from None  # fmt: skip
+    backend.announce_run(scheduled.processing_run_id, "processing_run.created")
     return library.unit_of_work.read(
         lambda session: _run_detail(session, scheduled.processing_run_id)
     )

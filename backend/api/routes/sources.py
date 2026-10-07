@@ -245,7 +245,9 @@ def import_source(
             422, "VALIDATION_ERROR", "The request is not valid.",
             details={"fields": [{"location": ["body", "display_name"], "type": "value_error"}]},
         ) from None  # fmt: skip
-    return library.unit_of_work.read(lambda session: _source_detail(session, imported.source_id))
+    detail = library.unit_of_work.read(lambda session: _source_detail(session, imported.source_id))
+    backend.announce("source.created", "source", detail.id)
+    return detail
 
 
 def _cursor_after(cursor: str | None, context: str) -> LibraryCursor | None:

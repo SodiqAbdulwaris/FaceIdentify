@@ -75,7 +75,9 @@ class ProcessingRunner:
         *,
         owner: str,
         clock: Callable[[], datetime],
+        on_started: Callable[[uuid.UUID], None] | None = None,
     ) -> None:
+        self._on_started = on_started
         self._uow = unit_of_work
         self._scheduler = scheduler
         self._executor = executor
@@ -84,12 +86,16 @@ class ProcessingRunner:
         self._clock = clock
 
     def run_once(self) -> RunOutcome:
-        """Process at most one queued job. Returns `IDLE` when there was none."""
+        """Process at most one queued job. Returns `IDLE` when there was none. `on_started` is told
+        the run's id once its job is claimed (best effort: it is a notification)."""
         started = self._scheduler.claim_source_job(self._owner)
         if started is None:
             return RunOutcome(RunOutcomeKind.IDLE)
         run_id = started.job.processing_run_id
         assert run_id is not None  # the scheduler fails a claim without a run: never returned
+        if self._on_started is not None:
+            with suppress(Exception):  # a failed notification must never fail the work
+                self._on_started(run_id)
         try:
             self._executor.execute(started)
         except ProcessingCancelledError:
