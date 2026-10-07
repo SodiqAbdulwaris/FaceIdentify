@@ -13,9 +13,10 @@ The rules are transparent and conservative (ML spec 12.2, Identity Decision Engi
    new identity on a possibly missing neighbour (an unconverged index looks exactly like a person
    never seen, which would create a duplicate identity).
 3. Nothing retrieved is a valid unknown: `CREATE_NEW` (`NO_CANDIDATE`).
-4. The best group at or above `match_threshold` needs the margin to the next group, or the
-   shortlist is `AMBIGUOUS_CANDIDATES`; a group without an identity can never be matched
-   (`UNRESOLVED_NEIGHBOUR`); otherwise `MATCH_EXISTING` that group's identity.
+4. The best group at or above `match_threshold` (above 1 it is unreachable: nothing is matched
+   automatically, the policy that disables automatic acceptance) needs the margin to the next
+   group, or the shortlist is `AMBIGUOUS_CANDIDATES`; a group without an identity can never be
+   matched (`UNRESOLVED_NEIGHBOUR`); otherwise `MATCH_EXISTING` that group's identity.
 5. Below `new_identity_ceiling` the nearest group is clearly not this face: `CREATE_NEW`.
 6. Between the two (similar, not similar enough) is `UNCERTAIN_SIMILARITY`: an abstention.
 
@@ -62,16 +63,18 @@ class Reason(StrEnum):
 class DecisionPolicy:
     version: str
     min_detection_score: float  # the quality gate
-    match_threshold: float  # the best group's similarity at or above which a match is considered
+    # The best group's similarity at or above which a match is considered. Up to 2.0: above 1.0 no
+    # similarity reaches it, so nothing is matched automatically (automatic acceptance is off).
+    match_threshold: float
     margin: float  # the least lead over the next group a match needs
     new_identity_ceiling: float  # below this similarity the nearest group is clearly not this face
 
     def __post_init__(self) -> None:
         if not self.version:
             raise ValueError("a policy has a version")
-        if not -1.0 <= self.new_identity_ceiling <= self.match_threshold <= 1.0:
+        if not -1.0 <= self.new_identity_ceiling <= self.match_threshold <= 2.0:
             raise ValueError(
-                "the thresholds must satisfy -1 <= new_identity_ceiling <= match_threshold <= 1"
+                "the thresholds must satisfy -1 <= new_identity_ceiling <= match_threshold <= 2"
             )
         if not 0.0 < self.margin <= 2.0:
             raise ValueError(
