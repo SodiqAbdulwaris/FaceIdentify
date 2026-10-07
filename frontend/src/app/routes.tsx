@@ -1,6 +1,7 @@
 import { Navigate, createHashRouter, type RouteObject } from 'react-router'
 import { Placeholder } from '@/features/Placeholder'
 import { LibraryPage } from '@/features/library/LibraryPage'
+import { SourcePage } from '@/features/source/SourcePage'
 import { Layout } from './Layout'
 
 // Hash routing: the app is served from a custom protocol, where a reload on a deep path would
@@ -12,7 +13,7 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Navigate to="/library" replace /> },
       { path: 'library', element: <LibraryPage /> },
-      { path: 'library/source/:sourceId', element: <Placeholder title="Source" /> },
+      { path: 'library/source/:sourceId', element: <SourcePage /> },
       { path: 'identities', element: <Placeholder title="People" /> },
       { path: 'identities/:identityId', element: <Placeholder title="Person" /> },
       { path: 'processing/:runId', element: <Placeholder title="Processing" /> },
