@@ -6,6 +6,7 @@ response, a URL, or an application log.  Binding to loopback is enforced by the 
 not by an ASGI application object.
 """
 
+import asyncio
 import base64
 import binascii
 import hmac
@@ -19,6 +20,7 @@ from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocketDisconnected
 
 from backend.api.errors import error_response, install_error_handlers
+from backend.api.events import EventHub, Subscription
 
 _TOKEN_BYTES: Final = 32
 _AUTH_SCHEME: Final = "Bearer"
@@ -66,6 +68,7 @@ def create_app(
     *,
     readiness: Callable[[], BackendReadiness] | None = None,
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
+    events: EventHub | None = None,
 ) -> FastAPI:
     """Build an in-memory-only authenticated sidecar application.
 
@@ -101,18 +104,48 @@ def create_app(
         return body
 
     @app.websocket("/api/v1/events")
-    async def events(websocket: WebSocket) -> None:
+    async def event_stream(websocket: WebSocket) -> None:
         if not _websocket_authorized(websocket.headers.get("sec-websocket-protocol"), expected):
             await websocket.close(code=1008)
             return
         await websocket.accept(subprotocol=WEBSOCKET_PROTOCOL)
-        try:
-            while True:
-                await websocket.receive()
-        except (WebSocketDisconnect, WebSocketDisconnected):
+        if events is None:
+            await _until_disconnected(websocket)
             return
+        subscription = events.subscribe()  # before the greeting: nothing published after it is lost
+        tasks: list[asyncio.Task[None]] = []
+        try:
+            await websocket.send_json(events.hello(subscription.baseline))
+            tasks = [
+                asyncio.create_task(_forward(websocket, subscription)),
+                asyncio.create_task(_until_disconnected(websocket)),
+            ]
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        except (WebSocketDisconnect, WebSocketDisconnected, RuntimeError):
+            pass  # the client went away while the greeting was being sent
+        finally:
+            events.unsubscribe(subscription)
+            for task in tasks:
+                task.cancel()
+            # Whichever ended first may have ended with the disconnect: that is not an error.
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     return app
+
+
+async def _until_disconnected(websocket: WebSocket) -> None:
+    """Read and ignore what the client sends (it never commands over this connection)."""
+    try:
+        while True:
+            await websocket.receive()
+    except (WebSocketDisconnect, WebSocketDisconnected):
+        return
+
+
+async def _forward(websocket: WebSocket, subscription: Subscription) -> None:
+    """Send each published event to this client, in the order it was offered."""
+    while True:
+        await websocket.send_json(await subscription.queue.get())
 
 
 def _http_authorized(value: str | None, expected: str) -> bool:
