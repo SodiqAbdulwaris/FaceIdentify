@@ -1,7 +1,7 @@
 # M5 plan: corrections, search and memory
 
 **Status:** scope and order approved by the owner 2026-10-07, with seven changes and then the real-model
-track (section 2) made the same day. Nothing here is built. **Scope:** tracker milestone M5 (TST-054 to
+track (section 2) made the same day. Built so far: R0 (issue #137). **Scope:** tracker milestone M5 (TST-054 to
 TST-059, SEC-006) in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md), **plus the
 real-model track: issue #69 (SCRFD and ArcFace), the runtime installation and provenance they need,
 TST-038/039 on the real path, TST-044 (initial calibrated policy), issue #80's sweep, and issue #137.**
