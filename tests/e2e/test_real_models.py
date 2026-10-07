@@ -1,4 +1,9 @@
-"""The real SCRFD and ArcFace models through the production perception client (M5 R3; issue #69).
+"""A real-worker integration smoke test of the SCRFD and ArcFace models (M5 R3; issue #69).
+
+It runs the real models through the production perception client and supervised worker. It is not
+an application workflow: it bypasses catalog registration, the host, the scheduler, persistence,
+retrieval and the decision policy, so it is evidence that the models run, not that the product
+recognises people (that is the M5 real-world gate).
 
 Excluded from the default run (the weights are developer-supplied local files, never in the
 repository or CI). Run it explicitly after installing the models and putting some pictures in
@@ -78,6 +83,7 @@ def test_real_faces_are_found_embedded_and_the_same_person_scores_higher() -> No
             pixels = np.asarray(Image.open(picture).convert("RGB"), dtype=np.uint8)
             detected = client.detect(pixels)
             represented = client.represent(pixels, detected.detections)
+            assert detected.ran.provider == PROVIDER  # no silent fallback in detection either
             assert len(represented.vectors) == len(detected.detections)
             if represented.ran is not None:
                 assert represented.ran.provider == PROVIDER  # no silent fallback
