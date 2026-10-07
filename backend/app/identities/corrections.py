@@ -39,6 +39,7 @@ from backend.app.identities.repository import OccurrenceRepository
 from backend.app.identities.use_cases import IdentityManagerError, StaleRevisionError
 from backend.app.memory.models import (
     Observation,
+    ObservationState,
     Occurrence,
     OccurrenceKind,
     OccurrenceObservation,
@@ -240,6 +241,23 @@ def reassign_occurrence(
     return target
 
 
+def abstentions_of(session: Session, representation_id: uuid.UUID) -> list[uuid.UUID]:
+    """The `RECOGNITION_ABSTAINED` Evidence recorded about a representation (it is cited as the
+    SUBJECT of exactly one when recognition accepted an ABSTAIN for it)."""
+    return list(
+        session.scalars(
+            select(Evidence.id)
+            .join(EvidenceRepresentation, EvidenceRepresentation.evidence_id == Evidence.id)
+            .where(
+                Evidence.kind == EvidenceKind.RECOGNITION_ABSTAINED,
+                EvidenceRepresentation.representation_id == representation_id,
+                EvidenceRepresentation.role == EvidenceRepresentationRole.SUBJECT,
+            )
+            .order_by(Evidence.created_at, Evidence.id)
+        )
+    )
+
+
 def resolve_representation(
     session: Session,
     representation_id: uuid.UUID,
@@ -267,14 +285,26 @@ def resolve_representation(
         )
     observation = session.get(Observation, representation.observation_id)
     assert observation is not None  # (a foreign key)
+    if observation.state != ObservationState.ACTIVE:
+        raise IdentityManagerError(f"the observation of {representation_id} is {observation.state}")
     if session.scalar(
-        select(Occurrence.id).where(
-            Occurrence.representative_observation_id == observation.id,
+        select(Occurrence.id)
+        .outerjoin(OccurrenceObservation, OccurrenceObservation.occurrence_id == Occurrence.id)
+        .where(
             Occurrence.state == OccurrenceState.ACTIVE,
+            (Occurrence.representative_observation_id == observation.id)
+            | (OccurrenceObservation.observation_id == observation.id),
         )
+        .limit(1)
     ):
         raise IdentityManagerError(
             f"the face of representation {representation_id} has an occurrence"
+        )
+    abstentions = abstentions_of(session, representation.id)
+    if len(abstentions) != 1:
+        raise IdentityManagerError(
+            f"representation {representation_id} has {len(abstentions)} recorded abstentions,"
+            " not one: it is not a face recognition declined to place"
         )
     now = clock()
     target = (
@@ -292,16 +322,6 @@ def resolve_representation(
         )
         session.add(target)
         session.flush()
-    abstention = session.scalar(
-        select(Evidence.id)
-        .join(EvidenceRepresentation, EvidenceRepresentation.evidence_id == Evidence.id)
-        .where(
-            Evidence.kind == EvidenceKind.RECOGNITION_ABSTAINED,
-            EvidenceRepresentation.representation_id == representation.id,
-        )
-        .order_by(Evidence.created_at, Evidence.id)
-        .limit(1)
-    )
     occurrence = Occurrence(
         id=new_id(),
         source_id=observation.source_id,
@@ -324,7 +344,7 @@ def resolve_representation(
             "occurrence_id": str(occurrence.id),
             "representation_ids": [str(representation.id)],
             "to_identity_id": str(target.id),
-            "resolves_evidence_id": None if abstention is None else str(abstention),
+            "resolves_evidence_id": str(abstentions[0]),
         },
         created_at=now,
     )
