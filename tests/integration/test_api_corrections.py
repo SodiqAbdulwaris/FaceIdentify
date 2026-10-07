@@ -13,7 +13,8 @@ from sqlalchemy import event, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from backend.app.identities.models import Evidence
+from backend.app.identities.models import Evidence, EvidenceCandidate, EvidenceRepresentation
+from backend.app.processing.models import ProcessingRun
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, error
 from tests.fixtures.deterministic import SeededUUIDs
@@ -240,3 +241,135 @@ async def test_a_busy_database_retries_the_whole_correction_once(
     assert kinds(api) == ["REASSIGN"]  # one evidence row, not two
     assert response.json()["identity_id"] == f.other
     assert announced == 1  # announced once, after the commit that held
+
+
+# --- faces recognition declined to place -------------------------------------------------------
+
+
+@dataclass
+class Unresolved:
+    source: str
+    representation: str
+    observation: str
+    alice: str
+    bob: str
+
+
+def unresolved(api: Api, new_id: SeededUUIDs) -> Unresolved:
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        build = ModelFactory(session, api.clock, new_id)
+        alice, bob = build.identity(), build.identity()
+        observation = build.observation(state="ACTIVE", bbox_x=0.1, bbox_y=0.2, bbox_width=0.3)
+        representation = build.representation(
+            observation, state="ACTIVE", ann_key=1, identity_id=None
+        )
+        abstention = build.evidence(kind="RECOGNITION_ABSTAINED", source_id=observation.source_id)
+        build.add(
+            EvidenceRepresentation(
+                evidence_id=abstention.id, representation_id=representation.id, role="SUBJECT"
+            )
+        )
+        others = [build.identity().id for _ in range(3)]
+        hidden = build.identity(state="PENDING").id  # not a person anyone can be told it is
+        ranked = (
+            (bob.id, 0.38), (alice.id, 0.41), (alice.id, 0.2), (hidden, 0.9),
+            (others[0], 0.1), (others[1], 0.09), (others[2], 0.08),
+        )  # fmt: skip
+        for rank, (who, score) in enumerate(ranked):
+            build.add(
+                EvidenceCandidate(
+                    evidence_id=abstention.id, rank=rank, identity_id=who, raw_similarity=score,
+                    decision="CANDIDATE", details_json={},
+                )
+            )  # fmt: skip
+        old = build.observation(
+            session.get(ProcessingRun, observation.processing_run_id), state="SUPERSEDED"
+        )
+        build.representation(old, state="ACTIVE", ann_key=2, identity_id=None)
+        session.commit()
+        return Unresolved(
+            str(observation.source_id), str(representation.id), str(observation.id),
+            str(alice.id), str(bob.id),
+        )  # fmt: skip
+
+
+async def test_unresolved_faces_are_listed_with_who_they_resembled(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    u = unresolved(api, new_id)
+
+    listed = (await api.client.get(f"/api/v1/sources/{u.source}/unresolved-faces")).json()
+
+    [face] = listed["items"]
+    assert face["representation_id"] == u.representation
+    assert face["observation_id"] == u.observation
+    assert face["bounding_box"]["x"] == 0.1
+    assert [(p["identity_id"], p["similarity"]) for p in face["likely"][:2]] == [
+        (u.alice, 0.41),
+        (u.bob, 0.38),
+    ]  # best first, each person once, never a person who is not active
+    assert len(face["likely"]) == 3  # at most three hints
+    error(
+        await api.client.get(f"/api/v1/sources/{uuid.uuid4()}/unresolved-faces"),
+        404,
+        "SOURCE_NOT_FOUND",
+    )
+
+
+async def test_an_unresolved_face_becomes_an_occurrence_and_leaves_the_list(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    u = unresolved(api, new_id)
+    subscription = api.backend.events.subscribe()
+    try:
+        resolved = await api.client.post(
+            f"/api/v1/representations/{u.representation}/resolve", json={"identity_id": u.bob}
+        )
+        announced = subscription.queue.qsize()
+    finally:
+        api.backend.events.unsubscribe(subscription)
+
+    assert resolved.status_code == 200
+    assert resolved.json()["identity_id"] == u.bob
+    assert resolved.json()["source_id"] == u.source
+    assert announced == 1
+    after = (await api.client.get(f"/api/v1/sources/{u.source}/unresolved-faces")).json()
+    assert after["items"] == []
+    assert kinds(api) == ["RESOLVE"]
+    occurrences = (await api.client.get(f"/api/v1/sources/{u.source}/occurrences")).json()
+    assert [o["identity_id"] for o in occurrences["items"]] == [u.bob]
+
+
+async def test_an_unresolved_face_can_be_a_new_person_and_cannot_be_resolved_twice(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    u = unresolved(api, new_id)
+    url = f"/api/v1/representations/{u.representation}/resolve"
+
+    first = await api.client.post(url, json={"identity_id": None})
+    again = await api.client.post(url, json={"identity_id": None})
+
+    assert first.status_code == 200
+    assert first.json()["identity_id"] not in (u.alice, u.bob)
+    error(again, 409, "FACE_NOT_RESOLVABLE")
+    assert kinds(api) == ["RESOLVE_NEW"]
+
+
+async def test_resolving_refuses_unknown_things(api: Api, new_id: SeededUUIDs) -> None:
+    u = unresolved(api, new_id)
+    url = f"/api/v1/representations/{u.representation}/resolve"
+
+    error(
+        await api.client.post(
+            f"/api/v1/representations/{uuid.uuid4()}/resolve", json={"identity_id": None}
+        ),
+        404,
+        "FACE_NOT_FOUND",
+    )
+    error(
+        await api.client.post(url, json={"identity_id": str(uuid.uuid4())}),
+        404,
+        "IDENTITY_NOT_FOUND",
+    )
+    assert kinds(api) == []

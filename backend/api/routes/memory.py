@@ -115,7 +115,7 @@ def occurrence_summaries(
     session: Session, rows: Sequence[tuple[Occurrence, Source]]
 ) -> list[OccurrenceSummary]:
     observations = _representatives(session, [occ.representative_observation_id for occ, _ in rows])
-    people = _person_references(session, [occ.identity_id for occ, _ in rows])
+    people = person_references(session, [occ.identity_id for occ, _ in rows])
     return [
         OccurrenceSummary(
             id=str(occ.id),
@@ -204,7 +204,7 @@ def _active_identity(session: Session, identity_id: uuid.UUID) -> Identity:
     return identity
 
 
-def _person_references(
+def person_references(
     session: Session, identity_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, PersonReference]:
     """Who each identity is named as, for those that are named."""
@@ -239,7 +239,7 @@ def _identity_summaries(session: Session, identities: list[Identity]) -> list[Id
         )
     }
     observations = _representatives(session, [i.representative_observation_id for i in identities])
-    people = _person_references(session, ids)
+    people = person_references(session, ids)
     return [
         IdentitySummary(
             id=str(identity.id),
