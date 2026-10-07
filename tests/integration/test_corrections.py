@@ -461,16 +461,92 @@ def test_an_existing_identity_keeps_its_representative_face(build: ModelFactory)
     assert owner.identity.representative_observation_id == kept
 
 
-def test_a_face_without_recorded_abstention_can_still_be_resolved(build: ModelFactory) -> None:
+def test_a_face_without_a_recorded_abstention_is_not_one_recognition_declined_to_place(
+    build: ModelFactory,
+) -> None:
     observation = build.observation(state="ACTIVE")
     representation = build.representation(observation, state="ACTIVE", ann_key=1, identity_id=None)
+    occurrences_before = len(build.session.scalars(select(Occurrence)).all())
 
-    resolve_representation(
-        build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+    with pytest.raises(IdentityManagerError, match="0 recorded abstentions"):
+        resolve_representation(
+            build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+        )
+
+    assert corrections(build) == []
+    assert len(build.session.scalars(select(Occurrence)).all()) == occurrences_before
+
+
+def test_a_face_with_two_recorded_abstentions_is_ambiguous_and_refused(
+    build: ModelFactory,
+) -> None:
+    representation, _ = an_unresolved_face(build)
+    second = build.evidence(kind="RECOGNITION_ABSTAINED")
+    build.add(
+        EvidenceRepresentation(
+            evidence_id=second.id, representation_id=representation.id, role="SUBJECT"
+        )
     )
+    build.session.flush()
 
-    (correction,) = corrections(build)
-    assert correction.payload_json["resolves_evidence_id"] is None
+    with pytest.raises(IdentityManagerError, match="2 recorded abstentions"):
+        resolve_representation(
+            build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+        )
+
+
+def test_an_abstention_that_merely_cites_the_face_as_a_candidate_does_not_count(
+    build: ModelFactory,
+) -> None:
+    observation = build.observation(state="ACTIVE")
+    representation = build.representation(observation, state="ACTIVE", ann_key=1, identity_id=None)
+    abstention = build.evidence(kind="RECOGNITION_ABSTAINED")
+    build.add(
+        EvidenceRepresentation(
+            evidence_id=abstention.id, representation_id=representation.id, role="CANDIDATE"
+        )
+    )
+    build.session.flush()
+
+    with pytest.raises(IdentityManagerError, match="0 recorded abstentions"):
+        resolve_representation(
+            build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+        )
+
+
+def test_a_face_whose_observation_is_no_longer_current_cannot_be_resolved(
+    build: ModelFactory,
+) -> None:
+    representation, _ = an_unresolved_face(build)
+    observation = build.session.get(Observation, representation.observation_id)
+    assert observation is not None
+    observation.state = "SUPERSEDED"
+    build.session.flush()
+
+    with pytest.raises(IdentityManagerError, match="SUPERSEDED"):
+        resolve_representation(
+            build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+        )
+
+
+def test_a_face_already_a_member_of_an_occurrence_cannot_get_a_second_one(
+    build: ModelFactory,
+) -> None:
+    representation, _ = an_unresolved_face(build)
+    elsewhere = build.occurrence(  # rests on this observation only as a member
+        build.observation(state="ACTIVE"), identity_id=build.identity().id, state="ACTIVE"
+    )
+    build.add(
+        OccurrenceObservation(
+            occurrence_id=elsewhere.id, observation_id=representation.observation_id, ordinal=1
+        )
+    )
+    build.session.flush()
+
+    with pytest.raises(IdentityManagerError, match="has an occurrence"):
+        resolve_representation(
+            build.session, representation.id, None, new_id=build.new_id, clock=build.clock
+        )
 
 
 @pytest.mark.parametrize(
