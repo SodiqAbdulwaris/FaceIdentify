@@ -26,7 +26,6 @@ class IdentityState(StrEnum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     MERGED = "MERGED"
-    SPLIT = "SPLIT"
     FORGOTTEN = "FORGOTTEN"
     DELETED = "DELETED"
 
