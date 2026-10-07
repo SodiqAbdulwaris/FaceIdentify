@@ -41,15 +41,16 @@ the command that caused them: a fast scheduler can announce `RUNNING` before the
 
 ## Verification
 
-- `tests/integration/test_api_events.py` (16): the envelope and numbering; ordered delivery and
+- `tests/integration/test_api_events.py` (18): the envelope and numbering; ordered delivery and
   unsubscribing; publication from other threads; a slow client's drops and the sequence gap; the
-  greeting consuming no sequence; a subscriber whose loop has closed; a connection greeted and then
+  greeting consuming no sequence, and an event that races the greeting numbered after it (a
+  subscription records its baseline sequence when it is created); a subscriber whose loop has closed; a connection greeted and then
   fed (`tests/fixtures/ws.py` drives the ASGI app directly); the capability still required; a
   client vanishing mid-greeting and mid-event; import, process and completion announced in order;
   `RUNNING` announced while work is in progress; a cancel announced once and a repeat silent; a
   retry announced as a new run; a broken hub failing neither a request nor the work; the
   application clock. `test_processing_runner.py` covers the claim hook and a failing hook.
-- Mutation probes (22 on the hub, the endpoint, the announcements and the hook): all killed except
+- Mutation probes (24 on the hub, the endpoint, the announcements and the hook): all killed except
   one equivalent mutant (a full queue re-raising inside the loop callback, which is only logged).
-- Full gate (2026-10-07): ruff format/check and native/Linux mypy pass; see the pull request for
-  the pytest total.
+- Full gate (2026-10-07): ruff format/check and native/Linux mypy pass; `HYPOTHESIS_PROFILE=ci uv run
+  pytest --cov -q -p no:cacheprovider` - **2,521 passed**, 100% coverage.
