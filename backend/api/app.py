@@ -17,6 +17,7 @@ from typing import Any, Final
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from starlette.websockets import WebSocketDisconnected
 
 from backend.api.errors import error_response, install_error_handlers
@@ -41,6 +42,10 @@ class BackendReadiness:
     capabilities: Mapping[str, str] = field(default_factory=dict)
     # Why startup failed: an exception class name only, never a path or the launch capability.
     failure: str | None = None
+
+
+def operation_id(route: APIRoute) -> str:
+    return route.name
 
 
 def validate_launch_token(token: str) -> str:
@@ -78,7 +83,12 @@ def create_app(
     """
     expected = validate_launch_token(launch_token)
     read = readiness if readiness is not None else lambda: BackendReadiness("READY")
-    app = FastAPI(title="FaceIdentify local API", version="1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="FaceIdentify local API",
+        version="1.0",
+        lifespan=lifespan,
+        generate_unique_id_function=operation_id,  # the function name: a readable generated client
+    )
     install_error_handlers(app)
 
     @app.middleware("http")
