@@ -230,14 +230,23 @@ weights. Full gate at this point: 2,359 passed, 100% coverage.
 
 **Dependencies:** M3, frontend and desktop implementation.
 
-**Current evidence:** `tests/contracts/test_api_launch_capability.py` (9) establishes the M4
-FastAPI bootstrap's per-launch capability boundary: canonical 256-bit token validation, protected
-health/readiness, a changed-token rejection, hostile-header denial, and WebSocket authentication via an offered
-credential protocol while selecting only stable `faceidentify.v1`. TST-045, TST-048, and TST-051
-remain `IN_PROGRESS`: application routes, lifecycle-backed readiness, and event delivery/reconnect
-are not built yet.
+**Current evidence** (2026-10-07; every row is `PASSING`; the perception behind TST-052 and TST-053 is
+the development profile's fake, because no real model is cleared (issue #69), and the policy is
+labelled uncalibrated):
 
-**Milestone gate:** The first complete desktop workflow passes.
+| ID | Status | Evidence |
+|---|---|---|
+| TST-045 | `PASSING` | `tests/contracts/test_api_conventions.py`, `test_api_launch_capability.py` and `tests/integration/test_api_{sources,processing_routes,jobs,memory}.py`: every route over HTTP on a real library (schemas, the one error shape, cursors, privacy of PENDING data), each with mutation probes |
+| TST-046 | `PASSING` | `tests/contracts/test_openapi_contract.py` (the committed document equals the application's) and the frontend CI step that regenerates the TypeScript types and fails on any difference |
+| TST-047 | `PASSING` | `desktop/src-tauri` `cargo test` (handshake validation, the token only in the environment, clean stop, no process left behind) plus the ignored test that starts the real backend, run in the CI `desktop` job; `tests/integration/test_api_host.py` for the host's side (loopback, one handshake line, parent watch, stdin lifeline) |
+| TST-048 | `PASSING` | `tests/integration/test_api_lifespan.py` and `test_api_processing.py`: lifecycle and capabilities reported truthfully, the scheduler only after recovery |
+| TST-049 | `PASSING` | `frontend/src/features/library/LibraryPage.test.tsx`: the native picker, importing, a partial failure reported with its reason, a cancelled dialog |
+| TST-050 | `PASSING` | The source, people and processing screen tests in `frontend/src/features/**`, with `tests/integration/test_api_memory.py` (only authoritative data is returned) |
+| TST-051 | `PASSING` | `tests/integration/test_api_events.py` (numbering, drops and gaps, thread safety) and `frontend/src/api/events.test.ts` (duplicates, gaps, reconnection, stop) |
+| TST-052 | `PASSING` | `frontend/e2e/workflow.e2e.tsx`: the real web app against the real backend started as the shell starts it: import, process, people, image, person; `tests/integration/test_api_development_profile.py` is the same flow over HTTP only |
+| TST-053 | `PASSING` | The same test: the backend is stopped cleanly and started again on the same library; every image, result and person is still there, and a new copy of a picture is recognised from the stored memory |
+
+**Milestone gate:** The first complete desktop workflow passes. Met on 2026-10-07 with the development profile (see the evidence above); the same flow on real models waits for issue #69.
 
 ---
 
