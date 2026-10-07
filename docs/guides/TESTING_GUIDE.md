@@ -33,6 +33,8 @@ npm install
 | Integration tests only | `uv run pytest -m integration` |
 | End-to-end / hardware (explicit only) | `uv run pytest -m e2e`, `uv run pytest -m hardware` |
 | ML evaluation (explicit only) | `uv run pytest evaluation -m ml_eval` |
+| Real models, local weights (explicit only) | install them with `scripts/install_reference_models.py`, put pictures in `local-models/images`, then `uv run pytest -m e2e tests/e2e/test_real_models.py` (see the file's docstring; CI never runs it) |
+| Measure the operating point (local) | `evaluation/build_commons_dataset.py`, then `evaluation/measure_operating_point.py` (docs: `docs/implementations/2026-10-07-m5-r3-real-inference.md`) |
 | Benchmarks (explicit only) | `uv run pytest benchmarks -m benchmark` |
 | Coverage report | `uv run pytest --cov --cov-report=term-missing --cov-report=html` → `htmlcov/index.html` |
 | Deterministic Hypothesis (as CI) | set `HYPOTHESIS_PROFILE=ci`, then `uv run pytest` |
