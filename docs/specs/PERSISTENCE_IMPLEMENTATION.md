@@ -206,6 +206,8 @@ An `Identity` is the persistent visual subject, named or unknown. It is the targ
 
 `identities` has: `id`; `state` (`PENDING`, `ACTIVE`, `MERGED`, `SPLIT`, `FORGOTTEN`, `DELETED`); nullable `created_by_processing_run_id`; nullable `representative_observation_id`; nullable `merged_into_identity_id`; `revision`; `created_at`, `activated_at`, `forgotten_at`, and `updated_at`. All identity foreign keys use `RESTRICT` except the optional representative observation uses `SET NULL`.
 
+> **Decision 2026-10-07:** `IdentityState.SPLIT` is not assigned. A split is a provenance-bearing operation (an `IDENTITY_SPLIT` Evidence row and an `identity_lineage` edge record what moved, from which identity, to which new identity, and when), not a lifecycle state: the source stays `ACTIVE` and the new identity is created `ACTIVE`. The value is unused by design and is to be removed in the M5 schema cleanup unless a compatibility constraint requires keeping it (CONTEXT question 15; `docs/plans/M5_PLAN.md`).
+
 Only an accepted run may activate a pending identity. An active identity must not point to a merged/forgotten target. Recognition selects an existing active identity, creates a pending one, or abstains (Roadmap decision 2026-10-02; an abstention assigns and creates no Identity); it never assigns a Person directly. Merge, split, and forget are later explicit use cases. They change current associations/representation eligibility with durable Evidence and IndexOperations; they do not rewrite historical Evidence.
 
 > **Decision 2026-09-23:** domain-level merge and split (with correction and Person association) are built in testing milestone M1; "later" above refers to their UI and integration. Forget is still later. They remain outside the first vertical slice (§30).
@@ -247,6 +249,8 @@ Evidence records a durable reason for an authoritative memory decision. It is im
 > **Decision 2026-09-23:** `evidence_candidates.decision` has no defined value set yet, so it is an unconstrained string until the decision engine defines one. (Owner decision, M1 PR #5.)
 
 > **Decision 2026-10-05 (owner; GitHub issue 104):** acceptance of an `ABSTAIN` persists `RECOGNITION_ABSTAINED` evidence with the recognition decision payload and the bounded candidate evidence. Its subject identity is NULL: acceptance creates neither an Identity nor an Occurrence, while the representation becomes identity-less `ACTIVE` evidence as specified in section 6.2. This is a historical record of why identity assignment was declined at that event. A later `ResolveUnresolvedRepresentation` adds resolution evidence; it never rewrites or deletes the abstention evidence. The new EvidenceKind/check constraint and acceptance writer are delivered together in the acceptance slice.
+
+> **Decision 2026-10-07:** `PERSON_RENAMED` is added to the Evidence kinds by a reviewed Alembic revision in M5, so that a Person rename leaves a historical semantic event as identity-and-memory-model section 38 requires (CONTEXT question 12; `docs/plans/M5_PLAN.md`).
 
 Recognition Evidence must preserve the representation-space and calibration provenance through typed FKs and the snapshot payload. It records a bounded candidate set, never an unbounded raw ANN dump. Transient assessments that do not affect durable memory do not create Evidence.
 

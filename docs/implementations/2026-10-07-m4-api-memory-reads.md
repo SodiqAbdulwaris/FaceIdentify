@@ -39,6 +39,15 @@ source's state, so today every `ACTIVE` occurrence is shown; the product decisio
 command that creates recycled sources, not here. Observation list/detail (`/observations`) and `/occurrences/{id}` are left out: the UI's
 M4 views are served by occurrences (each carries its representative observation) and identities.
 
+> **Decision 2026-10-07 (owner):** recycling a source hides it from normal library browsing and
+> navigation but does not remove or hide its Occurrences from identity history: identity counts keep
+> including them, and identity views show them marked as from a recycled source (thumbnails and
+> crops may show while the media is retained in the recycle bin). Restoring the source clears the
+> mark without recreating anything. Permanent deletion is a separate destructive operation that will
+> define the fate of source-owned observations, media and any evidence cleanup. So today's reads,
+> which do not filter on source state, already match the intended semantics; the "marked as
+> recycled" part is built with the recycle command.
+
 ## Verification
 
 - `tests/integration/test_api_memory.py` (6, real library, planted perception): a processed image

@@ -48,6 +48,14 @@ shell and the end-to-end test a real, honest path, labelled as what it is.
 > migration concern, not solved here. The thresholds are chosen only so identical and unrelated
 > pictures separate; they are not calibrated and not candidates for defaults.
 
+> **Decision 2026-10-07 (owner):** confirmed, **with a strong guard**. Persisting the catalog is
+> right because frozen run references must resolve across a restart. A kept or real library must be
+> refused when opened with `--development-profile` (and the reverse), enforced in code, not only
+> documented: development provenance is recorded explicitly on those catalog and runtime records and
+> the library itself is marked so incompatible opening modes are rejected. Cleanup or migration of
+> development data stays unsolved on purpose; no migration machinery is to be built for it. The
+> guard is not built yet (GitHub issue recorded in `CONTEXT.md`).
+
 ## Known limits
 
 - The catalog's export artifacts point at this module's file path. A library carried to another

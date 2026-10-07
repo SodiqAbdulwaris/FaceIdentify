@@ -46,6 +46,9 @@ one way to reach the backend, one cache, and one way to stay fresh, each already
 > custom protocol for a file that does not exist when a deep path is reloaded. Swapping it later
 > touches only `app/routes.tsx`.
 
+> **Decision 2026-10-07 (owner):** confirmed. React Router hash routing; clean URLs have no product
+> value in a desktop app, and hash routes avoid custom-protocol rewrite problems.
+
 ## Verification
 
 - `npm test` (38): the client (token, query building, post bodies, the error shape, a non-API
