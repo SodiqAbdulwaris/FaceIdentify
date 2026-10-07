@@ -8,6 +8,8 @@ export const keys = {
   sourceOccurrences: (id: string) => ['source', id, 'occurrences'] as const,
   sourceMedia: (id: string) => ['source', id, 'media'] as const,
   run: (id: string) => ['run', id] as const,
+  runs: ['runs'] as const,
+  latestRun: ['runs', 'latest'] as const,
   identities: ['identities'] as const,
   identity: (id: string) => ['identity', id] as const,
   identityOccurrences: (id: string) => ['identity', id, 'occurrences'] as const,

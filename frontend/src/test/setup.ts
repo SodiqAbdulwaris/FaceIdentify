@@ -1,5 +1,13 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { afterEach, vi } from 'vitest'
 
-afterEach(cleanup)
+// jsdom does not implement object URLs (the app shows fetched images through them).
+let counter = 0
+URL.createObjectURL = vi.fn(() => `blob:test/${(counter += 1)}`)
+URL.revokeObjectURL = vi.fn()
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})

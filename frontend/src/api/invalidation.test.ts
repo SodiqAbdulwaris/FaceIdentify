@@ -25,6 +25,7 @@ describe('staleBecauseOf', () => {
 
     expect(stale).toEqual([
       keys.run('r1'),
+      keys.runs,
       keys.source('s1'),
       keys.sources,
       keys.identities,
@@ -35,6 +36,7 @@ describe('staleBecauseOf', () => {
   it('a run change without a source id still refreshes what it can', () => {
     expect(staleBecauseOf(event('processing_run.created', 'r1'))).toEqual([
       keys.run('r1'),
+      keys.runs,
       keys.sources,
       keys.identities,
       ['identity'],
@@ -47,6 +49,7 @@ describe('staleBecauseOf', () => {
 
   it('the keys it names are prefixes of the keys the screens read', () => {
     expect(keys.source('s1')).toEqual(['source', 's1'])
+    expect(keys.latestRun.slice(0, 1)).toEqual(keys.runs)
     expect(keys.sourceRuns('s1').slice(0, 2)).toEqual(keys.source('s1'))
     expect(keys.sourceOccurrences('s1').slice(0, 2)).toEqual(keys.source('s1'))
     expect(keys.identityOccurrences('p1').slice(0, 2)).toEqual(keys.identity('p1'))

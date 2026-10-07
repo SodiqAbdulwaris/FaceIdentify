@@ -1,0 +1,303 @@
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Reply, apiError, failure, page, renderApp, run, source } from '@/test/harness'
+
+const chooseImages = vi.hoisted(() => vi.fn<() => Promise<string[]>>())
+vi.mock('@/native/backend', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/native/backend')>()),
+  chooseImages,
+}))
+
+const SOURCES = '/api/v1/sources'
+const media = { path: /\/api\/v1\/sources\/[^/]+\/media/, respond: 'bytes' }
+
+beforeEach(() => chooseImages.mockReset())
+
+describe('the library', () => {
+  it('lets go of an image address when the screen goes away', async () => {
+    const { unmount } = renderApp('/library', [{ path: SOURCES, respond: page([source()]) }, media])
+    await screen.findByRole('img', { name: 'beach.png' })
+    const made = vi.mocked(URL.createObjectURL).mock.results.map((r) => r.value as string)
+
+    unmount()
+
+    expect(made.length).toBeGreaterThan(0)
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.map((c) => c[0])).toEqual(
+      expect.arrayContaining(made),
+    )
+  })
+
+  it('invites the user to import images when there are none', async () => {
+    renderApp('/library', [{ path: SOURCES, respond: page([]) }])
+
+    expect(await screen.findByText('No images yet')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Import images' })).toBeEnabled()
+  })
+
+  it('lists the sources with their status and shows each image fetched with the token', async () => {
+    const { calls } = renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: page([
+          source({
+            id: 's1',
+            display_name: 'beach.png',
+            processing_status: 'COMPLETED',
+          }),
+          source({
+            id: 's2',
+            display_name: 'party.jpg',
+            processing_status: 'RUNNING',
+          }),
+        ]),
+      },
+      media,
+    ])
+
+    const beach = (await screen.findByText('beach.png')).closest('li')!
+    const party = screen.getByText('party.jpg').closest('li')!
+
+    expect(within(beach).getByText('Done')).toBeInTheDocument()
+    expect(within(party).getByText('Processing')).toBeInTheDocument()
+    expect(await within(beach).findByRole('img', { name: 'beach.png' })).toHaveAttribute(
+      'src',
+      expect.stringMatching(/^blob:/),
+    )
+    const mediaCall = calls.find((c) => c.path === '/api/v1/sources/s1/media')!
+    expect(mediaCall.authorization).toBe('Bearer test-token')
+    expect(calls.find((c) => c.path === SOURCES)!.query.get('state')).toBe('ACTIVE')
+  })
+
+  it('offers Process only where processing can start, and says when the file is missing', async () => {
+    const { calls } = renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: page([
+          source({ id: 's1', display_name: 'new.png' }),
+          source({
+            id: 's2',
+            display_name: 'busy.png',
+            processing_status: 'RUNNING',
+          }),
+          source({
+            id: 's3',
+            display_name: 'done.png',
+            processing_status: 'COMPLETED',
+          }),
+          source({
+            id: 's4',
+            display_name: 'failed.png',
+            processing_status: 'FAILED',
+          }),
+          source({
+            id: 's5',
+            display_name: 'gone.png',
+            availability: 'MISSING',
+          }),
+        ]),
+      },
+      media,
+    ])
+
+    await screen.findByText('new.png')
+
+    const buttons = screen.getAllByRole('button', { name: /^Process / }).map((b) => b.textContent)
+    expect(screen.getAllByRole('button', { name: /^Process / })).toHaveLength(2) // new, failed
+    expect(buttons).toEqual(['Process', 'Process'])
+    expect(screen.getByRole('button', { name: 'Process new.png' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Process failed.png' })).toBeInTheDocument()
+    const gone = screen.getByText('gone.png').closest('li')!
+    expect(within(gone).getByText('The file is missing')).toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/v1/sources/s5/media')).toBe(false)
+  })
+
+  it('requests processing and refreshes the list', async () => {
+    const user = userEvent.setup()
+    let status = 'NOT_PROCESSED'
+    const { calls } = renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: () => page([source({ processing_status: status })]),
+      },
+      media,
+      {
+        method: 'POST',
+        path: '/api/v1/sources/s1/process',
+        status: 202,
+        respond: () => {
+          status = 'PENDING'
+          return run()
+        },
+      },
+    ])
+
+    await user.click(await screen.findByRole('button', { name: 'Process beach.png' }))
+
+    expect(await screen.findByText('Queued')).toBeInTheDocument()
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/process'))).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Process beach.png' })).toBeNull()
+  })
+
+  it('disables Process for the image being requested, and only that one', async () => {
+    const user = userEvent.setup()
+    let answer: (reply: Reply) => void = () => undefined
+    renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: page([
+          source({ id: 's1', display_name: 'one.png' }),
+          source({ id: 's2', display_name: 'two.png' }),
+        ]),
+      },
+      media,
+    ])
+    const scripted = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (init?.method !== 'POST') return scripted(input, init)
+      return new Promise((resolve) => {
+        answer = (reply) =>
+          resolve(new Response(JSON.stringify(reply.body), { status: reply.status }))
+      })
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Process one.png' }))
+
+    expect(screen.getByRole('button', { name: 'Process one.png' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Process two.png' })).toBeEnabled()
+    answer(new Reply(202, run()))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Process one.png' })).toBeEnabled(),
+    )
+  })
+
+  it('shows the backend message when processing cannot start', async () => {
+    const user = userEvent.setup()
+    renderApp('/library', [
+      { path: SOURCES, respond: page([source()]) },
+      media,
+      {
+        method: 'POST',
+        path: '/api/v1/sources/s1/process',
+        ...apiError('PROCESSING_UNAVAILABLE', 'No processing configuration is available.', 503),
+      },
+    ])
+
+    await user.click(await screen.findByRole('button', { name: 'Process beach.png' }))
+
+    expect(await screen.findByRole('status', { name: 'Library notice' })).toHaveTextContent(
+      'No processing configuration is available.',
+    )
+  })
+
+  it('pages through a long library on request', async () => {
+    const user = userEvent.setup()
+    const { calls } = renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: (call) =>
+          call.query.get('cursor') === 'next-page'
+            ? page([source({ id: 's2', display_name: 'second.png' })])
+            : page([source({ id: 's1', display_name: 'first.png' })], 'next-page'),
+      },
+      media,
+    ])
+
+    await user.click(await screen.findByRole('button', { name: 'Load more' }))
+
+    expect(await screen.findByText('second.png')).toBeInTheDocument()
+    expect(screen.getByText('first.png')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
+    expect(calls.filter((c) => c.path === SOURCES).map((c) => c.query.get('cursor'))).toEqual([
+      null,
+      'next-page',
+    ])
+  })
+
+  it('says so when the library cannot be loaded', async () => {
+    renderApp('/library', [
+      {
+        path: SOURCES,
+        ...apiError('LIBRARY_UNAVAILABLE', 'The library is not available.', 503),
+      },
+    ])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The library is not available.')
+  })
+})
+
+describe('importing', () => {
+  it('imports each chosen image and reports how many worked and why one did not', async () => {
+    const user = userEvent.setup()
+    chooseImages.mockResolvedValue(['C:\\pictures\\a.png', 'C:\\pictures\\b.gif'])
+    let imported = false
+    const { calls } = renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: () => page(imported ? [source({ display_name: 'a.png' })] : []),
+      },
+      media,
+      {
+        method: 'POST',
+        path: `${SOURCES}/import`,
+        respond: (call) => {
+          if ((call.body as { path: string }).path.endsWith('.gif')) {
+            return failure(
+              415,
+              'MEDIA_FORMAT_UNSUPPORTED',
+              'Only JPEG, PNG, BMP and WebP images are supported.',
+            )
+          }
+          imported = true
+          return new Reply(201, source({ display_name: 'a.png' }))
+        },
+      },
+    ])
+
+    await user.click(await screen.findByRole('button', { name: 'Import images' }))
+
+    expect(await screen.findByRole('status', { name: 'Library notice' })).toHaveTextContent(
+      'Imported 1 image. 1 could not be imported (b.gif: Only JPEG, PNG, BMP and WebP images are supported.).',
+    )
+    const imports = calls.filter((c) => c.path === `${SOURCES}/import`)
+    expect(imports.map((c) => c.body)).toEqual([
+      { path: 'C:\\pictures\\a.png', storage_mode: 'MANAGED' },
+      { path: 'C:\\pictures\\b.gif', storage_mode: 'MANAGED' },
+    ])
+    await waitFor(() => expect(screen.getByText('a.png')).toBeInTheDocument())
+  })
+
+  it('reports a clean import without mentioning failures', async () => {
+    const user = userEvent.setup()
+    chooseImages.mockResolvedValue(['C:\\pictures\\a.png', 'C:\\pictures\\b.png'])
+    renderApp('/library', [
+      { path: SOURCES, respond: page([]) },
+      media,
+      {
+        method: 'POST',
+        path: `${SOURCES}/import`,
+        status: 201,
+        respond: source(),
+      },
+    ])
+
+    await user.click(await screen.findByRole('button', { name: 'Import images' }))
+
+    const notice = await screen.findByRole('status', {
+      name: 'Library notice',
+    })
+    expect(notice).toHaveTextContent(/^Imported 2 images\.$/)
+  })
+
+  it('does nothing when the user cancels the file dialog', async () => {
+    const user = userEvent.setup()
+    chooseImages.mockResolvedValue([])
+    const { calls } = renderApp('/library', [{ path: SOURCES, respond: page([]) }])
+
+    await user.click(await screen.findByRole('button', { name: 'Import images' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Import images' })).toBeEnabled())
+    expect(calls.some((c) => c.path.endsWith('/import'))).toBe(false)
+    expect(screen.queryByRole('status', { name: 'Library notice' })).toBeNull()
+  })
+})

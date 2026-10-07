@@ -28,6 +28,8 @@ export const endpoints = (api: ApiClient) => ({
     api.get<Page<ProcessingRun>>(`${V1}/sources/${id}/processing-runs`, { cursor, limit: 50 }),
   processSource: (id: string) => api.post<ProcessingRun>(`${V1}/sources/${id}/process`),
 
+  listRuns: (cursor?: string, limit = 50) =>
+    api.get<Page<ProcessingRun>>(`${V1}/processing-runs`, { cursor, limit }),
   getRun: (id: string) => api.get<ProcessingRun>(`${V1}/processing-runs/${id}`),
   cancelRun: (id: string) => api.post<ProcessingRun>(`${V1}/processing-runs/${id}/cancel`),
   retryRun: (id: string) => api.post<ProcessingRun>(`${V1}/processing-runs/${id}/retry`),
