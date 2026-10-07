@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-07 | [M4 W8: the end-to-end workflow, with a restart](2026-10-07-m4-end-to-end.md) | done; M4 definition of done met on the development profile |
 | 2026-10-07 | [M4 W7.4: the people and processing screens](2026-10-07-m4-frontend-people.md) | done; W7 complete |
 | 2026-10-07 | [M4 W7.3: the source screen](2026-10-07-m4-frontend-source.md) | partial; more screens follow |
 | 2026-10-07 | [M4 W7.2: the library screen, import and the policy notice](2026-10-07-m4-frontend-library.md) | partial; more screens follow |
