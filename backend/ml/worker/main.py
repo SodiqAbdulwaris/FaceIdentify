@@ -14,6 +14,7 @@ import uuid
 from multiprocessing.connection import Connection
 
 from backend.ml.contracts.protocol import MLOperation
+from backend.ml.worker import gpu_path
 from backend.ml.worker.loop import Handler, serve
 
 
@@ -28,6 +29,7 @@ def load_handlers(factory_path: str, config: str | None = None) -> dict[MLOperat
 def worker_entry(
     connection: Connection, factory_path: str, config: str | None = None
 ) -> None:  # pragma: no cover
+    gpu_path.activate()  # before the factory imports a model library
     try:
         handlers = load_handlers(factory_path, config)
     except Exception as error:
