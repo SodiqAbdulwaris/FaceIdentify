@@ -35,9 +35,12 @@ from backend.app.identities.models import (
     IdentityLineageKind,
     IdentityState,
 )
+from backend.app.identities.repository import OccurrenceRepository
 from backend.app.identities.use_cases import IdentityManagerError, StaleRevisionError
 from backend.app.memory.models import (
+    Observation,
     Occurrence,
+    OccurrenceKind,
     OccurrenceObservation,
     OccurrenceState,
     Representation,
@@ -235,6 +238,112 @@ def reassign_occurrence(
         target.updated_at = now
     session.flush()
     return target
+
+
+def resolve_representation(
+    session: Session,
+    representation_id: uuid.UUID,
+    to_identity_id: uuid.UUID | None,
+    *,
+    new_id: Callable[[], uuid.UUID],
+    clock: Callable[[], datetime],
+) -> Occurrence:
+    """Say who a face is that recognition declined to place (issue 79): an existing identity, or
+    (`to_identity_id` is None) a new unknown one. Returns the occurrence this creates.
+
+    An accepted ABSTAIN leaves an identity-less ACTIVE representation, no identity and no
+    occurrence, and `RECOGNITION_ABSTAINED` Evidence. Resolving it gives the representation its
+    identity and the face its occurrence, and adds one `USER_CORRECTION` Evidence row citing the
+    abstention; the abstention itself is never rewritten. The representation is already in the index
+    under its `ann_key`, so nothing in the index changes.
+    """
+    representation = session.get(Representation, representation_id, populate_existing=True)
+    if representation is None:
+        raise IdentityManagerError(f"representation {representation_id} does not exist")
+    if representation.state != RepresentationState.ACTIVE or representation.identity_id is not None:
+        raise IdentityManagerError(
+            f"representation {representation_id} is not an unresolved face"
+            f" (state {representation.state}, identity {representation.identity_id})"
+        )
+    observation = session.get(Observation, representation.observation_id)
+    assert observation is not None  # (a foreign key)
+    if session.scalar(
+        select(Occurrence.id).where(
+            Occurrence.representative_observation_id == observation.id,
+            Occurrence.state == OccurrenceState.ACTIVE,
+        )
+    ):
+        raise IdentityManagerError(
+            f"the face of representation {representation_id} has an occurrence"
+        )
+    now = clock()
+    target = (
+        None if to_identity_id is None else _identity(session, to_identity_id, "can receive a face")
+    )
+    created = target is None
+    if target is None:
+        target = Identity(
+            id=new_id(),
+            state=IdentityState.ACTIVE,
+            created_by_processing_run_id=None,
+            created_at=now,
+            activated_at=now,
+            updated_at=now,
+        )
+        session.add(target)
+        session.flush()
+    abstention = session.scalar(
+        select(Evidence.id)
+        .join(EvidenceRepresentation, EvidenceRepresentation.evidence_id == Evidence.id)
+        .where(
+            Evidence.kind == EvidenceKind.RECOGNITION_ABSTAINED,
+            EvidenceRepresentation.representation_id == representation.id,
+        )
+        .order_by(Evidence.created_at, Evidence.id)
+        .limit(1)
+    )
+    occurrence = Occurrence(
+        id=new_id(),
+        source_id=observation.source_id,
+        identity_id=target.id,
+        processing_run_id=representation.processing_run_id,
+        representative_observation_id=observation.id,
+        kind=OccurrenceKind.IMAGE,
+        state=OccurrenceState.ACTIVE,
+        created_at=now,
+        activated_at=now,
+    )
+    evidence = Evidence(
+        id=new_id(),
+        kind=EvidenceKind.USER_CORRECTION,
+        source_id=observation.source_id,
+        subject_identity_id=target.id,
+        payload_schema_version=1,
+        payload_json={
+            "action": "RESOLVE_NEW" if created else "RESOLVE",
+            "occurrence_id": str(occurrence.id),
+            "representation_ids": [str(representation.id)],
+            "to_identity_id": str(target.id),
+            "resolves_evidence_id": None if abstention is None else str(abstention),
+        },
+        created_at=now,
+    )
+    session.add(evidence)
+    session.flush()
+    session.add(
+        EvidenceRepresentation(
+            evidence_id=evidence.id,
+            representation_id=representation.id,
+            role=EvidenceRepresentationRole.SUBJECT,
+        )
+    )
+    OccurrenceRepository(session).add(occurrence, (observation.id,))
+    representation.identity_id = target.id
+    if target.representative_observation_id is None:
+        target.representative_observation_id = observation.id
+        target.updated_at = now
+    session.flush()
+    return occurrence
 
 
 def _refresh_representative(
