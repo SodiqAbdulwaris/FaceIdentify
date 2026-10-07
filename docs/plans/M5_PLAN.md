@@ -66,6 +66,10 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 > development profile; the *recognition-quality* claim is `BLOCKED` on issue #69 and is never reported
 > as met by the workflow test.
 
+> **Decision 2026-10-07:** **Correction to the note above.** The tracker records no passing TST-057
+> result. The verified development-profile workflow evidence is TST-052 and TST-053 (the end-to-end
+> run and the restart). TST-057 stays unpassed until real-model evidence exists.
+
 > **Decision 2026-10-07:** **Source reprocessing stays outside M5** and gets its own plan.
 
 > **Decision 2026-10-07:** **M5 is the first real recognition milestone.** M4 proved the application
@@ -250,8 +254,8 @@ consistent. It is a local run (the weights are not in CI), recorded in the track
 
 TST-054 (steps 1, 2), TST-058 (step 3), TST-059 and SEC-006 (step 4), TST-055, TST-056 and TST-057
 (step 5), and from track R: TST-038, TST-039 on the real path, TST-044, and issues #69, #80 and #137.
-**Done** when those rows are `PASSING` with TST-057 on real models, the real-world gate above has been
-run and recorded, the milestone gate holds ("identity-management workflows preserve current state and
+**Done** when the TST and SEC rows named are `PASSING` (TST-057 on real models), issues #69, #80 and
+#137 are closed with their stated evidence, the real-world gate above has been run and recorded, the milestone gate holds ("identity-management workflows preserve current state and
 historical evidence"), the full backend gate passes with 100% coverage, the desktop end-to-end test
 still passes on the development profile in CI, CI is green on `main`, and `CONTEXT.md`,
 `PROJECT_STATUS.md`, the implementation log and the tracker agree. Fake-profile tests stay valuable CI

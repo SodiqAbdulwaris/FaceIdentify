@@ -48,7 +48,7 @@ shell and the end-to-end test a real, honest path, labelled as what it is.
 > migration concern, not solved here. The thresholds are chosen only so identical and unrelated
 > pictures separate; they are not calibrated and not candidates for defaults.
 
-> **Decision 2026-10-07 (owner):** confirmed, **with a strong guard**. Persisting the catalog is
+> **Decision 2026-10-07:** Owner confirmed, **with a strong guard**. Persisting the catalog is
 > right because frozen run references must resolve across a restart. A kept or real library must be
 > refused when opened with `--development-profile` (and the reverse), enforced in code, not only
 > documented: development provenance is recorded explicitly on those catalog and runtime records and

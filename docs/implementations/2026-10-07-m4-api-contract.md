@@ -27,7 +27,7 @@
   peer ranges). The generator works with TypeScript 6 (its output type-checks), and the lockfile is
   honoured by `npm ci` without flags; the file records why and when to drop it.
 
-> **Decision 2026-10-07 (owner):** accepted as a temporary exception. The setting is repository-wide
+> **Decision 2026-10-07:** Owner accepted as a temporary exception. The setting is repository-wide
 > and makes npm ignore every peer conflict, not only this one, so it must stay explained: dependency
 > openapi-typescript 7.13, reason TypeScript 6 outside its `^5` peer range, removal condition
 > openapi-typescript officially supports the project's TypeScript major. `.npmrc` states all three.

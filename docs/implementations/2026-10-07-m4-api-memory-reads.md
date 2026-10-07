@@ -39,7 +39,7 @@ source's state, so today every `ACTIVE` occurrence is shown; the product decisio
 command that creates recycled sources, not here. Observation list/detail (`/observations`) and `/occurrences/{id}` are left out: the UI's
 M4 views are served by occurrences (each carries its representative observation) and identities.
 
-> **Decision 2026-10-07 (owner):** recycling a source hides it from normal library browsing and
+> **Decision 2026-10-07:** Owner decided that recycling a source hides it from normal library browsing and
 > navigation but does not remove or hide its Occurrences from identity history: identity counts keep
 > including them, and identity views show them marked as from a recycled source (thumbnails and
 > crops may show while the media is retained in the recycle bin). Restoring the source clears the
