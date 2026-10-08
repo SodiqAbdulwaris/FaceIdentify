@@ -59,6 +59,9 @@ class Reason(StrEnum):
     UNCERTAIN_SIMILARITY = "UNCERTAIN_SIMILARITY"
 
 
+MAX_SIMILARITY = 1.0  # a cosine similarity never exceeds this
+
+
 @dataclass(frozen=True, slots=True)
 class DecisionPolicy:
     version: str
@@ -68,6 +71,12 @@ class DecisionPolicy:
     match_threshold: float
     margin: float  # the least lead over the next group a match needs
     new_identity_ceiling: float  # below this similarity the nearest group is clearly not this face
+
+    @property
+    def automatic_matching(self) -> bool:
+        """Whether this policy can ever match a face to an existing identity. A threshold above 1 is
+        unreachable (similarities never exceed 1), which is how automatic matching is turned off."""
+        return self.match_threshold <= MAX_SIMILARITY
 
     def __post_init__(self) -> None:
         if not self.version:

@@ -79,8 +79,11 @@ class RetrievedCandidate:
 
     @property
     def similarity(self) -> float:
-        """The cosine similarity (the metric is `cos`, so the distance is 1 minus it)."""
-        return 1.0 - self.distance
+        """The cosine similarity (the metric is `cos`, so the distance is 1 minus it), held to the
+        range a cosine can have, -1 to 1: float rounding in an index can report a distance a hair
+        outside 0 to 2, and no score may ever exceed 1, which is what makes a policy threshold
+        above 1 a reliable way to turn automatic matching off."""
+        return max(-1.0, min(1.0, 1.0 - self.distance))
 
 
 @dataclass(frozen=True, slots=True)
