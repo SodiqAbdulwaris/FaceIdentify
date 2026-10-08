@@ -391,7 +391,12 @@ export interface paths {
         get: operations["get_source"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Recycle
+         * @description Logical recycle (API section 5.5): the Source leaves the library view, its bytes, memory and
+         *     history stay. A repeat is harmless. Refused while the Source is being processed.
+         */
+        delete: operations["recycle"];
         options?: never;
         head?: never;
         patch?: never;
@@ -459,6 +464,26 @@ export interface paths {
         get: operations["list_source_runs"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{source_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore
+         * @description Bring a recycled Source back (API section 5.6), where possible. A repeat is harmless.
+         */
+        post: operations["restore"];
         delete?: never;
         options?: never;
         head?: never;
@@ -735,6 +760,8 @@ export interface components {
             source_display_name: string;
             /** Source Id */
             source_id: string;
+            /** Source Recycled */
+            source_recycled: boolean;
         };
         /** PageInfo */
         PageInfo: {
@@ -1810,6 +1837,35 @@ export interface operations {
             };
         };
     };
+    recycle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     source_media: {
         parameters: {
             query?: never;
@@ -1929,6 +1985,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_ProcessingRunDetail_"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceDetail"];
                 };
             };
             /** @description The one error shape. */

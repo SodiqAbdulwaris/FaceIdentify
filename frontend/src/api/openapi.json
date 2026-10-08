@@ -610,6 +610,10 @@
           "source_id": {
             "title": "Source Id",
             "type": "string"
+          },
+          "source_recycled": {
+            "title": "Source Recycled",
+            "type": "boolean"
           }
         },
         "required": [
@@ -620,6 +624,7 @@
           "kind",
           "representative_observation",
           "person",
+          "source_recycled",
           "created_at"
         ],
         "title": "OccurrenceSummary",
@@ -2693,6 +2698,41 @@
       }
     },
     "/api/v1/sources/{source_id}": {
+      "delete": {
+        "description": "Logical recycle (API section 5.5): the Source leaves the library view, its bytes, memory and\nhistory stay. A repeat is harmless. Refused while the Source is being processed.",
+        "operationId": "recycle",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Recycle",
+        "tags": [
+          "sources"
+        ]
+      },
       "get": {
         "operationId": "get_source",
         "parameters": [
@@ -2976,6 +3016,50 @@
         "summary": "List Source Runs",
         "tags": [
           "processing"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}/restore": {
+      "post": {
+        "description": "Bring a recycled Source back (API section 5.6), where possible. A repeat is harmless.",
+        "operationId": "restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Restore",
+        "tags": [
+          "sources"
         ]
       }
     },

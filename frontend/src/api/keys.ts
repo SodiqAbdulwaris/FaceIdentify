@@ -3,6 +3,7 @@
 export const keys = {
   readiness: ['readiness'] as const,
   sources: ['sources'] as const,
+  recycledSources: ['sources', 'recycled'] as const, // under `sources`: one invalidation covers both
   source: (id: string) => ['source', id] as const,
   sourceRuns: (id: string) => ['source', id, 'runs'] as const,
   sourceUnresolved: (id: string) => ['source', id, 'unresolved'] as const,
