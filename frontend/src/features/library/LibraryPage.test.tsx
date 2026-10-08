@@ -339,4 +339,91 @@ describe('importing', () => {
     expect(calls.some((c) => c.path.endsWith('/import'))).toBe(false)
     expect(screen.queryByRole('status', { name: 'Library notice' })).toBeNull()
   })
+
+  it('moves an image to the recycle bin with one click and refreshes the library', async () => {
+    const user = userEvent.setup()
+    let recycled = false
+    const { calls } = renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: () => page(recycled ? [] : [source({ id: 's1', display_name: 'beach.png' })]),
+      },
+      {
+        method: 'DELETE',
+        path: `${SOURCES}/s1`,
+        status: 204,
+        respond: () => {
+          recycled = true
+          return null
+        },
+      },
+      media,
+    ])
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Move beach.png to the recycle bin' }),
+    )
+
+    expect(await screen.findByText('No images yet')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'DELETE' && c.path === `${SOURCES}/s1`)).toBe(true)
+  })
+
+  it('shows what was recycled in the recycle bin, where it can be restored, not processed', async () => {
+    const user = userEvent.setup()
+    let restored = false
+    const { calls } = renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: (call) =>
+          call.query.get('state') === 'RECYCLED'
+            ? page(restored ? [] : [source({ id: 's1', display_name: 'beach.png' })])
+            : page([]),
+      },
+      {
+        method: 'POST',
+        path: `${SOURCES}/s1/restore`,
+        respond: () => {
+          restored = true
+          return source({ id: 's1' })
+        },
+      },
+      media,
+    ])
+    await screen.findByText('No images yet')
+
+    await user.click(screen.getByRole('button', { name: 'Recycle bin' }))
+
+    expect(await screen.findByRole('heading', { name: 'Recycle bin' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Import images' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Process/ })).toBeNull()
+    await screen.findByRole('button', { name: 'Restore beach.png' })
+    expect(screen.queryByRole('button', { name: /to the recycle bin/ })).toBeNull() // already there
+    await user.click(screen.getByRole('button', { name: 'Restore beach.png' }))
+    expect(await screen.findByText('The recycle bin is empty')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST' && c.path === `${SOURCES}/s1/restore`)).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Library' }))
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument()
+  })
+
+  it('says why an image could not be recycled, and leaves it where it is', async () => {
+    const user = userEvent.setup()
+    renderApp('/library', [
+      { path: SOURCES, respond: page([source({ id: 's1', display_name: 'beach.png' })]) },
+      {
+        method: 'DELETE',
+        path: `${SOURCES}/s1`,
+        ...apiError('SOURCE_BUSY', 'The source is being processed; cancel that first.', 409),
+      },
+      media,
+    ])
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Move beach.png to the recycle bin' }),
+    )
+
+    expect(await screen.findByRole('status', { name: 'Library notice' })).toHaveTextContent(
+      'being processed',
+    )
+    expect(screen.getByRole('img', { name: 'beach.png' })).toBeInTheDocument()
+  })
 })

@@ -12,6 +12,7 @@ import { errorMessage } from '../library/messages'
 import { useRunActions } from '../processing/useRunActions'
 import { FaceCorrection } from './FaceCorrection'
 import { FaceOverlay } from './FaceOverlay'
+import { RecycleControl } from './RecycleControl'
 import { UnresolvedFaces } from './UnresolvedFaces'
 import { labelFaces } from './faces'
 
@@ -103,7 +104,7 @@ export function SourcePage() {
 
         <div className="flex flex-col gap-5">
           <div className="flex flex-wrap gap-2">
-            {canProcess(detail.processing_status) && !missing ? (
+            {canProcess(detail.processing_status) && !missing && detail.state === 'ACTIVE' ? (
               <Button disabled={actions.busy} onClick={() => actions.process.mutate(sourceId)}>
                 Process
               </Button>
@@ -123,6 +124,8 @@ export function SourcePage() {
               </Button>
             ) : null}
           </div>
+
+          <RecycleControl source={detail} onNotice={setNotice} />
 
           {latest && isActive(latest.state) ? (
             <p className="text-sm text-muted-foreground">

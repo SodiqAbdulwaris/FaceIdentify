@@ -106,6 +106,11 @@ export function IdentityPage() {
                   )}
                   <span className="min-w-0 break-words text-sm font-medium">
                     {occurrence.source_display_name}
+                    {occurrence.source_recycled ? (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        From an image in the recycle bin
+                      </span>
+                    ) : null}
                   </span>
                 </Link>
                 <div className="mt-1 flex flex-col gap-1">

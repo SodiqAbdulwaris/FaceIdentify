@@ -339,4 +339,41 @@ describe('a source', () => {
     await new Promise((resolve) => setTimeout(resolve, 200))
     expect(calls.filter((c) => c.path.endsWith('/processing-runs')).length).toBe(looked)
   })
+
+  it('offers to move an image to the recycle bin, and to bring it back when it is there', async () => {
+    const user = userEvent.setup()
+    let state = 'ACTIVE'
+    const { calls } = open([
+      { path: SOURCE, respond: () => detail({ state }) },
+      {
+        method: 'DELETE',
+        path: SOURCE,
+        status: 204,
+        respond: () => {
+          state = 'RECYCLED'
+          return null
+        },
+      },
+      {
+        method: 'POST',
+        path: `${SOURCE}/restore`,
+        respond: () => {
+          state = 'ACTIVE'
+          return detail({ state })
+        },
+      },
+      media,
+      noFaces,
+      noRuns,
+    ])
+
+    await user.click(await screen.findByRole('button', { name: 'Move to the recycle bin' }))
+
+    expect(await screen.findByRole('note')).toHaveTextContent('in the recycle bin')
+    expect(screen.queryByRole('button', { name: 'Process' })).toBeNull() // not processed from the bin
+    await user.click(screen.getByRole('button', { name: 'Restore from the recycle bin' }))
+    expect(await screen.findByRole('button', { name: 'Move to the recycle bin' })).toBeEnabled()
+    expect(screen.queryByRole('note')).toBeNull()
+    expect(calls.filter((c) => c.method !== 'GET').map((c) => c.method)).toEqual(['DELETE', 'POST'])
+  })
 })

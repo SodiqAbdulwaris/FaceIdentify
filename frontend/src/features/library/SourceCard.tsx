@@ -11,11 +11,13 @@ import { errorMessage } from './messages'
 
 interface Props {
   source: SourceSummary
+  /** The card is in the recycle bin: it offers Restore, and no processing. */
+  recycled?: boolean
   /** What to tell the person: a message when a request failed, null to clear it. */
   onNotice: (message: string | null) => void
 }
 
-export function SourceCard({ source, onNotice }: Props) {
+export function SourceCard({ source, recycled = false, onNotice }: Props) {
   const { endpoints } = useBackend()
   const queryClient = useQueryClient()
   const missing = source.availability !== 'AVAILABLE'
@@ -29,6 +31,20 @@ export function SourceCard({ source, onNotice }: Props) {
       Promise.all([
         queryClient.invalidateQueries({ queryKey: keys.sources }),
         queryClient.invalidateQueries({ queryKey: keys.runs }),
+      ]),
+  })
+
+  const move = useMutation({
+    mutationFn: async () => {
+      if (recycled) await endpoints.restoreSource(source.id)
+      else await endpoints.recycleSource(source.id)
+    },
+    onSuccess: () => onNotice(null),
+    onError: (error) => onNotice(errorMessage(error)),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.sources }),
+        queryClient.invalidateQueries({ queryKey: ['identity'] }),
       ]),
   })
 
@@ -53,7 +69,17 @@ export function SourceCard({ source, onNotice }: Props) {
         </Link>
         <div className="mt-auto flex items-center justify-between gap-2">
           <StatusBadge state={source.processing_status} />
-          {canProcess(source.processing_status) && !missing ? (
+          {recycled ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={move.isPending}
+              onClick={() => move.mutate()}
+              aria-label={`Restore ${source.display_name}`}
+            >
+              Restore
+            </Button>
+          ) : canProcess(source.processing_status) && !missing ? (
             <Button
               size="sm"
               variant="outline"
@@ -64,6 +90,17 @@ export function SourceCard({ source, onNotice }: Props) {
               Process
             </Button>
           ) : null}
+          {recycled ? null : (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={move.isPending}
+              onClick={() => move.mutate()}
+              aria-label={`Move ${source.display_name} to the recycle bin`}
+            >
+              Recycle
+            </Button>
+          )}
         </div>
       </div>
     </li>
