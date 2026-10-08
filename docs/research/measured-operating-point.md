@@ -50,8 +50,10 @@ threshold still produced false accepts.
 Rule (`--conservative`, predeclared before the run): thresholds only strictly above the
 floor, the owner's figure 0.326 (the different-person tail of the first run) or the 99.9th percentile of different-person pairs among the *selection* half's photographs if that is higher (it was not); the final half is never read for the floor (a review found the first version had read it); a margin is always required (0.02, 0.05,
 0.1); zero false accepts and at least 20 accepted queries on the selection half; then the highest
-recall; judged on the final half, which must show zero false accepts and a recall of at least 0.25
-(predeclared "useful" minimum), otherwise automatic acceptance is disabled. No new-identity ceiling:
+recall; judged on the final half, which must show zero false accepts and a recall of at least the
+usefulness target `--minimum-recall` (0.25 when this run was made; the owner set it to 0.5 on
+2026-10-08, which the result, 0.636, also meets), otherwise automatic acceptance is disabled. Missing
+the target never loosens a threshold. No new-identity ceiling:
 a face below the threshold abstains.
 
 - Chosen on the selection half: threshold 0.3544, margin 0.02, 40 accepted, 40 correct, recall 0.635.

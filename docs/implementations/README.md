@@ -41,6 +41,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 |---|---|---|
 | 2026-10-07 | [Test: the scheduler-degrade test no longer races its own retry](2026-10-07-scheduler-degrade-test-race.md) | done; flake diagnosed and hardened |
 | 2026-10-07 | [A licensing and commercialisation record](2026-10-07-licensing-record.md) | done; documentation |
+| 2026-10-08 | [M5: the abstain-only policy made visible, the owner's decisions built](2026-10-08-m5-abstain-only-policy.md) | done; regression tests |
 | 2026-10-08 | [A learning guide for the whole codebase](2026-10-08-codebase-learning-guide.md) | done; documentation |
 | 2026-10-07 | [M5 R4: the conservative operating point and its result](2026-10-07-m5-r4-conservative-operating-point.md) | measured; auto-accept disabled; TST-044 first baseline |
 | 2026-10-07 | [M5 R2: the CUDA runtime on the RTX 4070](2026-10-07-m5-r2-cuda-runtime.md) | done; CUDA agrees with the CPU (worst cosine 0.99995) |

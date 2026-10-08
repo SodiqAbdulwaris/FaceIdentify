@@ -10,7 +10,8 @@
 - `evaluation/measure_operating_point.py` gains `--conservative`, `--conservative-minimum-accepted`
   and `--write-policy`. The rule: only thresholds strictly above a floor, a margin always required, zero false accepts on the selection half, then highest
   recall; the floor is the owner's 0.326 or the selection half's own tail if higher; the final half
-  must show zero false accepts and recall of at least 0.25 or automatic acceptance is disabled. The report gains a `conservative` block (floor, point, final-half precision
+  must show zero false accepts and recall of at least the usefulness target (0.25 then; `--minimum-recall`, 0.5, from 2026-10-08) or
+  automatic acceptance is disabled. The report gains a `conservative` block (floor, point, final-half precision
   with Wilson interval, recall, false accepts split into unknown and known people, their scores,
   abstention rate, verdict, reason, and the `decision_policy` object). `--write-policy` writes that
   object to a file; the real host (next entry) reads it from `<local state root>/policies/`.

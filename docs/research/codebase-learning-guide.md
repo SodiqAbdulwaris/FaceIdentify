@@ -1723,6 +1723,12 @@ Identity** (best score per identity is that identity's score), and the reasoner 
 Reasons recorded with each decision: `LOW_QUALITY`, `RETRIEVAL_INCOMPLETE`, `NO_CANDIDATE`, `MATCHED`,
 `AMBIGUOUS_CANDIDATES`, `UNRESOLVED_NEIGHBOUR`, `NOT_SIMILAR`, `UNCERTAIN_SIMILARITY`.
 
+**Automatic matching can be switched off.** A policy whose `match_threshold` is above 1.0 can never
+match (a similarity never exceeds 1); the run then reports `automatic_matching: false` and the screen
+says "Automatic matching disabled". The first face of an empty library still creates an identity;
+after that, a face with candidates abstains and waits for you. Scores are called *similarity scores*
+in the interface because they are not probabilities of identity.
+
 **The measured real-model policy is abstain-only** (Part 4.6) but is *not yet active*: it takes effect
 when the real host profile reads it. Under it, with automatic matching off, every face that has
 candidates would abstain and wait for you, and only a face with nobody to compare with would create an
