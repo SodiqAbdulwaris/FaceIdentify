@@ -83,6 +83,8 @@ def final_with(accepted: int, correct: int, recall: float | None) -> dict[str, A
         ("nothing", "auto-accept-disabled", "no point met"),
         (final_with(40, 35, 0.6), "auto-accept-disabled", "5 false accepts"),
         (final_with(10, 10, 0.1), "auto-accept-disabled", "below the useful minimum"),
+        (final_with(10, 10, 0.49), "auto-accept-disabled", "below the useful minimum"),
+        (final_with(10, 10, 0.5), "provisional-conservative", "no false accept"),
         (final_with(40, 40, 0.6), "provisional-conservative", "no false accept"),
     ],
 )
@@ -92,7 +94,7 @@ def test_the_final_half_decides_whether_the_point_stands(
     if final == "nothing":
         final = {"match": "nothing accepted automatically"}
 
-    verdict, why = conservative_verdict(final)
+    verdict, why = conservative_verdict(final, 0.5)
 
     assert verdict == expected
     assert reason in why
@@ -112,3 +114,18 @@ def test_an_enabled_policy_carries_the_measured_point() -> None:
     assert (policy["match_threshold"], policy["margin"]) == (0.3544, 0.02)
     assert policy["new_identity_ceiling"] == -1.0  # below the threshold a face abstains
     assert policy["version"] == "buffalo-l-conservative-provisional-v1"
+
+
+def test_the_recall_target_is_configurable_and_never_relaxes_safety() -> None:
+    final = final_with(10, 10, 0.4)
+
+    assert conservative_verdict(final, 0.5)[0] == "auto-accept-disabled"
+    assert conservative_verdict(final, 0.3)[0] == "provisional-conservative"
+
+    # A missed target disables automatic acceptance. It never turns a false accept into a pass and
+    # changes no threshold: the disabled policy is the same whatever the target was.
+    unsafe = final_with(10, 9, 0.99)
+    assert conservative_verdict(unsafe, 0.0)[0] == "auto-accept-disabled"
+    assert decision_policy("auto-accept-disabled", None) == decision_policy(
+        "auto-accept-disabled", {"threshold": 0.4, "margin": 0.02}
+    )
