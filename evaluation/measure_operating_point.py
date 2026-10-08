@@ -24,11 +24,11 @@ Protocol (open set, leave-one-out, subject-disjoint):
   **reported on the final half**, which took no part in the choice, with a Wilson 95% interval.
 * `--conservative` (owner decision 2026-10-07, after the first run: the point chosen on the
   selection half reached 100% precision there and 78% on the final half) chooses differently:
-  only thresholds strictly above a floor, zero false
-  accepts on the
-  selection half, then the highest recall. The final half must show zero false accepts and a recall
-  of at least `USEFUL_RECALL`, or automatic acceptance is disabled (nothing is accepted; every
-  query abstains). No new-identity ceiling is used: a face below the threshold abstains.
+  only thresholds strictly above a floor, zero false accepts on the selection half, then the
+  highest recall. The final half must show zero false accepts and a recall of at least
+  `--minimum-recall` (a usefulness target, default 0.5, which never loosens a threshold), or
+  automatic acceptance is disabled (nothing is accepted; every query abstains). No new-identity
+  ceiling is used: a face below the threshold abstains.
 * The new-identity ceiling is chosen the same way: the highest observed best-score below which at
   least the target share of queries truly are unknown people (with at least `--minimum-below`).
 
@@ -63,7 +63,6 @@ POLICY = SupervisorPolicy(120, 120, 10, 10, 1, 600)
 DEVICES = {"CUDAExecutionProvider": "GPU", "CPUExecutionProvider": "CPU"}
 TARGET_PRECISION = 0.99
 MARGINS = (0.0, 0.02, 0.05, 0.1)
-USEFUL_RECALL = 0.25  # predeclared: below this share of known-person queries accepted, not useful
 TAIL_FLOOR = (
     0.326  # the owner's figure (2026-10-07): the different-person tail seen in the first run
 )
@@ -253,15 +252,18 @@ def tail_floor(selection_photos: list[Photo], owner_floor: float) -> float:
     return round(max(owner_floor, float(np.percentile(scores, 99.9)) if scores else owner_floor), 4)
 
 
-def conservative_verdict(final: dict[str, Any]) -> tuple[str, str]:
-    """Whether the point chosen on the selection half may stand, judged on the final half."""
+def conservative_verdict(final: dict[str, Any], minimum_recall: float) -> tuple[str, str]:
+    """Whether the point chosen on the selection half may stand, judged on the final half.
+
+    `minimum_recall` is a usefulness target, never a reason to loosen anything: missing it disables
+    automatic acceptance, it does not lower a threshold (owner decision 2026-10-08)."""
     match = final["match"]
     if not isinstance(match, dict):
         return "auto-accept-disabled", "no point met the rule on the selection half"
     false_accepts = match["accepted"] - match["correct"]
     if false_accepts:
         return "auto-accept-disabled", f"{false_accepts} false accepts on the final half"
-    if (match["recall"] or 0.0) < USEFUL_RECALL:
+    if (match["recall"] or 0.0) < minimum_recall:
         return "auto-accept-disabled", "recall on the final half is below the useful minimum"
     return "provisional-conservative", "no false accept on the final half"
 
@@ -377,7 +379,7 @@ def main() -> None:
             halves["selection"]["queries"], floor, arguments.conservative_minimum_accepted
         )
         final = evaluate_final(halves["final"]["queries"], point, None)
-        verdict, reason = conservative_verdict(final)
+        verdict, reason = conservative_verdict(final, arguments.minimum_recall)
         match = final["match"]
         if isinstance(match, dict):
             match["false_accepts"] = match["accepted"] - match["correct"]
@@ -401,7 +403,7 @@ def main() -> None:
             "threshold_floor": floor,
             "owner_floor": arguments.tail_floor,
             "minimum_accepted": arguments.conservative_minimum_accepted,
-            "useful_recall": USEFUL_RECALL,
+            "minimum_recall": arguments.minimum_recall,
             "chosen_on_selection_half": point,
             "reported_on_final_half": final,
             "verdict": verdict,
