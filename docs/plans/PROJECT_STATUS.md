@@ -13,6 +13,8 @@ real-model path in M5; the `buffalo_l` weights are chosen and run for real on CP
 to end on the development profile and survives a restart. Next is M5, the first real recognition
 milestone: [M5 plan](M5_PLAN.md).
 
+**New to the code?** Read [`docs/research/codebase-learning-guide.md`](../research/codebase-learning-guide.md): twelve parts from Python basics to this repository's design, with a walkthrough of one photograph.
+
 | Area | Status | What exists | More detail |
 |---|---|---|---|
 | **M0 Foundation** | Done | Repo, tooling, CI, branch rules, test harness | [M0 testing foundation](../implementations/2026-09-23-m0-testing-foundation.md), [repo structure](../implementations/2026-09-23-repo-structure-and-scaffolding.md) |

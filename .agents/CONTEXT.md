@@ -124,7 +124,7 @@ _Last updated: 2026-10-07 (the scheduler-degrade test no longer races its own re
 | `docs/plans/` | Implementation plans (agents put theirs here), roadmap, testing tracker, identity decision engine plan, and **`PROJECT_STATUS.md`**, the one-page overview of what is built and where we are |
 | `docs/strategy/` | Testing strategy, ML benchmark and evaluation protocol |
 | `docs/guides/` | How-tos, e.g. `TESTING_GUIDE.md` |
-| `docs/research/` | Stack research and `tech-stack.md` (the locked stack decisions) |
+| `docs/research/` | Stack research, `tech-stack.md` (the locked stack decisions), model selection, licensing, the measured operating point, and **`codebase-learning-guide.md`** (a twelve-part guide from Python basics to this codebase; start here to understand the project) |
 | `docs/archive/` | Superseded documents; do not treat as current |
 | `docs/implementations/` | Log of every implemented change (one entry per task) |
 | `backend/` | Python backend (`app/`, `infrastructure/`, `ml/`) |
