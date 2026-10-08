@@ -8,7 +8,6 @@ treated as gone.
 """
 
 import shutil
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +24,7 @@ from backend.app.runtime.registration import (
     RegisteredPackage,
     RegistrationError,
     mark_missing_installations,
+    missing_dependencies,
     register_package,
 )
 from backend.app.runtime.worker_config import (
@@ -34,8 +34,9 @@ from backend.app.runtime.worker_config import (
 from backend.app.sources.models import Artifact, ArtifactState
 from backend.infrastructure.db.engine import create_session_factory
 from backend.infrastructure.storage.layout import StorageRoots
+from tests.factories.models import ModelFactory
 from tests.fixtures.catalog_packages import manifest_dict, package_files
-from tests.fixtures.deterministic import SeededUUIDs
+from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 
 CPU = "CPUExecutionProvider"
 
@@ -57,7 +58,7 @@ class World:
         store: RuntimePackageStore,
         tmp_path: Path,
         new_id: SeededUUIDs,
-        clock: Callable[[], Any],
+        clock: FrozenClock,
     ) -> None:
         self.factory, self.store, self.tmp_path = factory, store, tmp_path
         self.new_id, self.clock = new_id, clock
@@ -104,7 +105,7 @@ def world(
     store: RuntimePackageStore,
     tmp_path: Path,
     new_id: SeededUUIDs,
-    clock: Callable[[], Any],
+    clock: FrozenClock,
 ) -> World:
     return World(factory, store, tmp_path, new_id, clock)
 
@@ -254,3 +255,143 @@ def test_registering_only_reinstates_a_missing_record_never_another_state(world:
         assert states == ["FAILED", INSTALLED]  # only MISSING is ever reinstated
         details = [r.failure_detail for r in session.scalars(select(InstalledModelExport))]
         assert "the copy was interrupted" in details
+
+
+def test_a_file_replacing_a_parent_folder_means_the_file_is_gone(world: World) -> None:
+    world.register()
+    shutil.rmtree(world.package.path / "models")
+    (world.package.path / "models").write_bytes(b"a file where the folder was")
+
+    assert world.sweep() == InstallationSweep(0, 2)  # nothing can be below a regular file
+
+
+def test_a_known_missing_artifact_is_swept_even_when_the_disk_cannot_be_examined(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world.register()
+    with world.factory() as session:  # startup recovery found the files gone; access then returned
+        for artifact in session.scalars(select(Artifact)):
+            artifact.state = ArtifactState.MISSING
+        session.commit()
+    original = Path.stat
+
+    def denied(self: Path, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "stat", denied)
+
+    assert world.sweep() == InstallationSweep(1, 2)  # the artifact already says it is not there
+    monkeypatch.setattr(Path, "stat", original)
+    world.register()  # verified: everything is back, artifacts included
+    assert world.states() == ([INSTALLED], [INSTALLED, INSTALLED])
+    with world.factory() as session:
+        assert {a.state for a in session.scalars(select(Artifact))} == {ArtifactState.AVAILABLE}
+
+
+# --- the packages a library depends on --------------------------------------------------------
+
+
+def hold_vectors(world: World, result: RegisteredPackage) -> None:
+    """The library holds an active vector made by this package's embedder."""
+    embedder = next(e for e in result.exports if e.component_key == "embedder")
+    with world.factory() as session:
+        build = ModelFactory(session, world.clock, world.new_id)
+        build.representation(
+            representation_space_id=embedder.representation_space_id, state="ACTIVE", ann_key=1
+        )
+        session.commit()
+
+
+def dependencies(world: World) -> list[str]:
+    with world.factory() as session:
+        return missing_dependencies(session)
+
+
+def test_a_library_with_no_vectors_depends_on_nothing(world: World) -> None:
+    world.register()
+    shutil.rmtree(world.package.path)
+    world.sweep()
+
+    assert dependencies(world) == []  # a package that made nothing is not a dependency
+
+
+def test_a_missing_package_that_made_the_librarys_vectors_is_reported_by_name_and_version(
+    world: World,
+) -> None:
+    result = world.register()
+    hold_vectors(world, result)
+    assert dependencies(world) == []  # installed: nothing is missing
+
+    shutil.rmtree(world.package.path)
+    world.sweep()
+
+    assert dependencies(world) == ["reference-cpu 1.0.0"]
+
+
+def test_another_package_does_not_stand_in_for_the_one_that_made_the_vectors(
+    world: World, tmp_path: Path
+) -> None:
+    result = world.register()
+    hold_vectors(world, result)
+    shutil.rmtree(world.package.path)
+    world.sweep()
+    different = manifest_dict("other-package", embedder=b"different weights")
+    world.package = world.store.install(package_files(tmp_path / "other", different), {})
+    world.register()  # a healthy package with other weights, hence another space
+
+    assert dependencies(world) == ["reference-cpu 1.0.0"]  # still needs its own
+
+
+def test_restoring_the_package_clears_the_dependency(world: World, tmp_path: Path) -> None:
+    result = world.register()
+    hold_vectors(world, result)
+    shutil.rmtree(world.package.path)
+    world.sweep()
+    assert dependencies(world) == ["reference-cpu 1.0.0"]
+
+    world.package = world.store.install(package_files(tmp_path / "again", manifest_dict()), {})
+    world.register()
+
+    assert dependencies(world) == []
+
+
+def test_a_space_without_a_known_package_is_named_by_its_key(world: World) -> None:
+    with world.factory() as session:
+        build = ModelFactory(session, world.clock, world.new_id)
+        space = build.representation_space(semantic_key="abcdef0123456789-unknown")
+        build.representation(representation_space_id=space.id, state="ACTIVE", ann_key=1)
+        session.commit()
+
+    assert dependencies(world) == ["representation space abcdef012345"]
+
+
+def test_not_a_directory_is_absence_whatever_the_platform_calls_it(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world.register()
+    original = Path.stat
+
+    def below_a_file(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self.name == "embedder.onnx":
+            raise NotADirectoryError(
+                "a path component is a file"
+            )  # (POSIX; Windows says not found)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", below_a_file)
+
+    assert world.sweep() == InstallationSweep(0, 1)
+
+
+@pytest.mark.parametrize("state", ["PENDING", "SUPERSEDED"])
+def test_only_active_vectors_make_a_dependency(world: World, state: str) -> None:
+    result = world.register()
+    embedder = next(e for e in result.exports if e.component_key == "embedder")
+    with world.factory() as session:
+        build = ModelFactory(session, world.clock, world.new_id)
+        build.representation(representation_space_id=embedder.representation_space_id, state=state)
+        session.commit()
+    shutil.rmtree(world.package.path)
+    world.sweep()
+
+    assert dependencies(world) == []  # private or retired vectors are not compared against
