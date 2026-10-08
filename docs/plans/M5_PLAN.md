@@ -15,6 +15,8 @@ M5; otherwise it stays in its own milestone.
 This plan sequences work; it changes no spec. Where it records a decision the affected spec and
 [`CONTEXT.md`](../../.agents/CONTEXT.md) carry the dated note.
 
+> The remaining work, in order, with what needs the owner: [`M5_REMAINING_WORK.md`](M5_REMAINING_WORK.md).
+
 ## 1. Where things stand (2026-10-07)
 
 M4's desktop workflow runs end to end on the development profile: import, process, see faces and the
