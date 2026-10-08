@@ -84,6 +84,11 @@ export class ApiClient {
     return (await this.send(path, init)).json() as Promise<T>
   }
 
+  /** A request with no answer body (a 204). */
+  async delete(path: string): Promise<void> {
+    await this.send(path, { method: 'DELETE' })
+  }
+
   /** A file the API serves (the browser cannot add the token to an `<img src>`). */
   async blob(path: string): Promise<Blob> {
     return (await this.send(path, { method: 'GET' })).blob()

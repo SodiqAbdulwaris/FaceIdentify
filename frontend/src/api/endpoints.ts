@@ -22,6 +22,8 @@ export const endpoints = (api: ApiClient) => ({
   listSources: (cursor?: string, state: 'ACTIVE' | 'RECYCLED' = 'ACTIVE') =>
     api.get<Page<SourceSummary>>(`${V1}/sources`, { state, cursor, limit: 50 }),
   getSource: (id: string) => api.get<SourceDetail>(`${V1}/sources/${id}`),
+  recycleSource: (id: string) => api.delete(`${V1}/sources/${id}`),
+  restoreSource: (id: string) => api.post<SourceDetail>(`${V1}/sources/${id}/restore`),
   importSource: (request: ImportRequest) => api.post<SourceDetail>(`${V1}/sources/import`, request),
   sourceMedia: (id: string) => api.blob(`${V1}/sources/${id}/media`),
   sourceOccurrences: (id: string, cursor?: string) =>

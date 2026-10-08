@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
+from backend.app.processing.models import ProcessingRun, ProcessingRunState
 from backend.app.sources.models import Artifact, ArtifactState, Source, SourceState
 from backend.infrastructure.db.optimistic import optimistic_locked_update
 
@@ -28,8 +29,24 @@ from backend.infrastructure.db.optimistic import optimistic_locked_update
 BYTES_GONE = {ArtifactState.DELETING, ArtifactState.DELETE_FAILED, ArtifactState.DELETED}
 
 
+# A run in one of these states is still working toward making its output authoritative.
+IN_FLIGHT = (
+    ProcessingRunState.PENDING,
+    ProcessingRunState.RUNNING,
+    ProcessingRunState.PAUSING,
+    ProcessingRunState.PAUSED,
+    ProcessingRunState.CANCELLING,
+    ProcessingRunState.FINALIZING,
+)
+
+
 class SourceLifecycleError(Exception):
     """A Source lifecycle change that is not valid for the Source's current state."""
+
+
+class SourceBusyError(SourceLifecycleError):
+    """The Source has processing in flight; recycling it now would make that work fail at the
+    end. Cancel it first."""
 
 
 class StaleSourceRevisionError(SourceLifecycleError):
@@ -96,7 +113,15 @@ def recycle_source(
     clock: Callable[[], datetime],
 ) -> Source:
     """Move an ACTIVE Source to the Recycle Bin. Touches nothing but the Source row. Refused, like a
-    restore, for a Source whose original is being or has been permanently deleted."""
+    restore, for a Source whose original is being or has been permanently deleted, and (with
+    `SourceBusyError`) while a processing run of it is still working: acceptance needs an ACTIVE
+    Source, so the run would fail at its end."""
+    if session.scalar(
+        select(ProcessingRun.id)
+        .where(ProcessingRun.source_id == source_id, ProcessingRun.state.in_(IN_FLIGHT))
+        .limit(1)
+    ):
+        raise SourceBusyError(f"source {source_id} has processing in flight")
     now = clock()
     return _move(
         session, source_id,

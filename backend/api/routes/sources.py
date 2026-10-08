@@ -16,7 +16,7 @@ database and file work in a worker thread and the event loop stays free.
 """
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, BinaryIO, Literal
@@ -45,7 +45,13 @@ from backend.app.sources.import_source import (
     ImportFileTooLargeError,
     ImportSourceUseCase,
 )
-from backend.app.sources.models import Artifact, ArtifactState, Source, StorageMode
+from backend.app.sources.lifecycle import (
+    SourceBusyError,
+    SourceLifecycleError,
+    recycle_source,
+    restore_source,
+)
+from backend.app.sources.models import Artifact, ArtifactState, Source, SourceState, StorageMode
 from backend.app.sources.repository import LibraryCursor, SourceRepository
 from backend.infrastructure.media.image import (
     CorruptImageError,
@@ -184,6 +190,32 @@ def _source_detail(session: Session, source_id: uuid.UUID) -> SourceDetail:
     return _detail(source, artifact, _latest_runs(session, [source_id]).get(source_id))
 
 
+_Move = Callable[..., Source]
+
+
+def _move_source(session: Session, backend: Backend, source_id: uuid.UUID, move: _Move) -> bool:
+    """Recycle or restore one Source inside the caller's write; False when it was already there."""
+    source = session.get(Source, source_id)
+    if source is None:
+        raise source_not_found(source_id)
+    target = SourceState.RECYCLED if move is recycle_source else SourceState.ACTIVE
+    if source.state == target:
+        return False
+    try:
+        move(session, source_id, expected_revision=source.revision, clock=backend.settings.clock)
+    except SourceBusyError:
+        raise ApiError(
+            409, "SOURCE_BUSY", "The source is being processed; cancel that first.",
+            details={"source_id": str(source_id)},
+        ) from None  # fmt: skip
+    except SourceLifecycleError:
+        raise ApiError(
+            409, "SOURCE_STATE_CONFLICT", "The source cannot be moved from its current state.",
+            details={"source_id": str(source_id), "state": source.state},
+        ) from None  # fmt: skip
+    return True
+
+
 def source_not_found(source_id: uuid.UUID) -> ApiError:
     return ApiError(
         404, "SOURCE_NOT_FOUND", "The requested source could not be found.",
@@ -288,6 +320,33 @@ def list_sources(
         )
 
     return library.unit_of_work.read(read)
+
+
+@router.delete("/{source_id}", status_code=204)
+def recycle(
+    source_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> Response:
+    """Logical recycle (API section 5.5): the Source leaves the library view, its bytes, memory and
+    history stay. A repeat is harmless. Refused while the Source is being processed."""
+    changed = library.unit_of_work.write(
+        lambda session: _move_source(session, backend, source_id, recycle_source)
+    )
+    if changed:
+        backend.announce("source.updated", "source", str(source_id))
+    return Response(status_code=204)
+
+
+@router.post("/{source_id}/restore")
+def restore(
+    source_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> SourceDetail:
+    """Bring a recycled Source back (API section 5.6), where possible. A repeat is harmless."""
+    changed = library.unit_of_work.write(
+        lambda session: _move_source(session, backend, source_id, restore_source)
+    )
+    if changed:
+        backend.announce("source.updated", "source", str(source_id))
+    return library.unit_of_work.read(lambda session: _source_detail(session, source_id))
 
 
 @router.get("/{source_id}")

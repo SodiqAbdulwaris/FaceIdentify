@@ -109,7 +109,8 @@ def test_recycling_and_restoring_move_no_bytes_and_change_nothing_else(
         new_id=build.new_id, clock=build.clock,
     )  # fmt: skip
     source = build.source(original_artifact_id=artifact_id)
-    source.current_processing_run_id = build.run(source_id=source.id).id
+    # A finished run: recycling is refused while one is still working (SourceBusyError).
+    source.current_processing_run_id = build.run(source_id=source.id, state="COMPLETED").id
     db_session.commit()
     source_id = source.id
     key = f"originals/{artifact_id.hex}"

@@ -30,7 +30,7 @@ from backend.api.routes.sources import MediaReference, source_not_found
 from backend.app.identities.models import Identity, IdentityState
 from backend.app.memory.models import Observation, ObservationState, Occurrence, OccurrenceState
 from backend.app.people.models import AssociationState, IdentityPersonAssociation, Person
-from backend.app.sources.models import Source
+from backend.app.sources.models import Source, SourceState
 
 router = APIRouter(tags=["memory"])
 
@@ -63,6 +63,8 @@ class OccurrenceSummary(BaseModel):
     kind: str
     representative_observation: ObservationBrief | None
     person: PersonReference | None
+    # The Source is in the Recycle Bin: its faces stay in memory, counts and search, marked.
+    source_recycled: bool
     created_at: datetime
 
 
@@ -126,6 +128,7 @@ def occurrence_summaries(
             kind=occ.kind,
             representative_observation=_brief(observations, occ.representative_observation_id),
             person=people.get(occ.identity_id),
+            source_recycled=source.state == SourceState.RECYCLED,
             created_at=occ.created_at,
         )
         for occ, source in rows
