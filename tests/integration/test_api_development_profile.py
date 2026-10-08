@@ -134,6 +134,7 @@ async def test_the_development_host_processes_images_and_remembers_them_across_a
             "calibration_mode": "UNCALIBRATED",
             "decision_policy_version": POLICY_VERSION,
             "calibrated": False,
+            "automatic_matching": True,
         }
         await process_and_wait(client, (await import_image(client, red_again))["id"])
         await process_and_wait(client, (await import_image(client, blue))["id"])
@@ -309,3 +310,97 @@ async def test_a_profile_that_cannot_register_leaves_the_backend_failed_not_half
         assert ready.get("capabilities", {}).get("scheduler") != "READY"
         alive = False
         await asyncio.wait_for(task, 30)
+
+
+# --- the abstain-only policy (owner decisions 2026-10-07 and 2026-10-08) ----------------------
+
+ABSTAIN_ONLY = {
+    "schema_version": 1,
+    "version": "abstain-only-regression-v1",
+    "min_detection_score": 0.1,
+    "new_identity_ceiling": -1.0,
+    "match_threshold": 2.0,  # above any similarity: nothing is ever matched automatically
+    "margin": 2.0,
+}
+
+
+def abstain_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the development host under the abstain-only decision policy."""
+
+    def request(session: Any) -> dict[str, Any]:
+        return {**development_request(session), "decision_policy": dict(ABSTAIN_ONLY)}
+
+    monkeypatch.setattr(development, "development_request", request)
+
+
+async def unresolved(client: httpx.AsyncClient, source_id: str) -> list[dict[str, Any]]:
+    response = await client.get(f"/api/v1/sources/{source_id}/unresolved-faces")
+    assert response.status_code == 200, response.text
+    items: list[dict[str, Any]] = response.json()["items"]
+    return items
+
+
+async def occurrence_count(client: httpx.AsyncClient, source_id: str) -> int:
+    page = (await client.get(f"/api/v1/sources/{source_id}/occurrences")).json()
+    return len(page["items"])
+
+
+async def test_under_abstain_only_the_first_face_creates_an_identity_and_no_later_face_is_matched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    abstain_only(monkeypatch)
+    folder = tmp_path / "pictures"
+    folder.mkdir()
+    red, red_again = picture(folder, "red.png", (200, 0, 0)), picture(folder, "r2.png", (200, 0, 0))
+    blue, red_third = (
+        picture(folder, "blue.png", (0, 0, 200)),
+        picture(folder, "r3.png", (200, 0, 0)),
+    )
+
+    async with host(tmp_path, development_profile=True) as client:
+        first = await import_image(client, red)
+        run = await process_and_wait(client, first["id"])
+        assert run["policy"]["automatic_matching"] is False  # what the UI says: matching disabled
+        assert run["policy"]["decision_policy_version"] == ABSTAIN_ONLY["version"]
+
+        # The first face has nobody to be compared with: a persistent, unnamed identity is created.
+        (identity,) = await identities(client)
+        assert identity["person"] is None
+        assert await occurrence_count(client, first["id"]) == 1
+        assert await unresolved(client, first["id"]) == []
+
+        # An identical picture is not matched to it, whatever the similarity: it waits for a person.
+        second = await import_image(client, red_again)
+        await process_and_wait(client, second["id"])
+        assert [i["id"] for i in await identities(client)] == [identity["id"]]  # nothing merged
+        assert await occurrence_count(client, second["id"]) == 0  # and nothing attached
+        (waiting,) = await unresolved(client, second["id"])
+        assert waiting["likely"][0]["identity_id"] == identity["id"]  # ranked, as a hint
+        assert waiting["likely"][0]["similarity"] <= 1.0  # a score, never above a cosine's range
+
+        # A different picture is not given an identity of its own automatically either.
+        third = await import_image(client, blue)
+        await process_and_wait(client, third["id"])
+        assert [i["id"] for i in await identities(client)] == [identity["id"]]
+        assert len(await unresolved(client, third["id"])) == 1
+
+    async with host(tmp_path, development_profile=True) as client:  # the application restarted
+        assert [i["id"] for i in await identities(client)] == [identity["id"]]  # it persisted
+        assert await occurrence_count(client, first["id"]) == 1
+        assert len(await unresolved(client, second["id"])) == 1  # so did the waiting faces
+
+        # After the restart the persisted identity is still never matched automatically.
+        fourth = await import_image(client, red_third)
+        await process_and_wait(client, fourth["id"])
+        assert [i["id"] for i in await identities(client)] == [identity["id"]]
+        assert await occurrence_count(client, fourth["id"]) == 0
+        (still_waiting,) = await unresolved(client, fourth["id"])
+
+        # Manual resolution still works: a person can say "this is someone new".
+        placed = await client.post(
+            f"/api/v1/representations/{still_waiting['representation_id']}/resolve",
+            json={"identity_id": None},
+        )
+        assert placed.status_code == 200, placed.text
+        assert len(await identities(client)) == 2
+        assert await unresolved(client, fourth["id"]) == []
