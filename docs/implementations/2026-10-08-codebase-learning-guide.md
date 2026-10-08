@@ -31,8 +31,16 @@ everything needed to understand the codebase, including Python basics, organised
   the tables against revision `0001`, the routes against `backend/api/routes/`, the storage layout
   against `docs/research/tech-stack.md` section 15, dependency lists against `pyproject.toml` and the
   front-end `package.json`). Markers show what is built, designed or only researched.
-- The documentation-only gate applies: no code changed; the text was reviewed independently (see the
-  PR).
+- An independent fact-check review (Codex, read-only) found seven major and seven moderate
+  inaccuracies, all fixed in a follow-up commit: the real ML worker is not yet wired into the host
+  (the debug shell runs the development profile; `backend/api/real.py` is not on `main`), the
+  abstain-only policy is evaluated but not active, 100% coverage is a working rule and not a CI
+  threshold, the identity-page controls exist, events carry small metadata, PyTorch is not a
+  dependency, not every status column has a CHECK, only collection routes paginate, a stylesheet
+  exists, the tracker has a `COMPLETE` status, and three language-precision points (tuples as keys,
+  namespace packages, Rust `panic!`).
+- `CONTEXT.md`'s front-end line was stale for the same reason (the M5 identity controls exist) and
+  is corrected.
 
 ## Open issues / follow-ups
 
