@@ -1605,6 +1605,10 @@ Models are **replaceable components**, not hard-wired. The vocabulary:
 - **Representation space**: identified by the weights digest, dimension, preprocessing contract,
   normalisation and a compatibility version. Two vectors are comparable only inside one space. A new
   model with different weights is a new space; old and new vectors are never compared.
+- **The sweep** keeps those records honest: at startup the real profile marks an installation
+  `MISSING` when its file is no longer on this machine (by existence alone), and only registering the
+  package again, which re-verifies every byte, brings it back. A missing package is reported, never
+  replaced by another.
 - **Planning** turns "the frozen snapshot" into "these exact files on this machine", and *refuses*
   to substitute a different export (the frozen choice is exact).
 
