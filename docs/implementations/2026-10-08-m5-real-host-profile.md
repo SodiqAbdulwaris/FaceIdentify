@@ -21,16 +21,37 @@
     PROCESSING_UNAVAILABLE`. Calibration is `UNCALIBRATED`: raw cosine scores, never probabilities.
   - Providers come from `FACEIDENTIFY_PROVIDERS` (a comma list, preferred first; CPU by default). More
     than one provider sets `allow_fallback`; an unknown or repeated name is an error, never a silent CPU.
+- **Hardening after the independent review** (nine findings, all answered on the PR):
+  - *Only an abstain-first policy is accepted* until a verified evaluation exists: a `match_threshold`
+    above 1 and a `new_identity_ceiling` of -1. A file that enables matching or creation is refused
+    (`503`) however plausible its numbers, because nothing binds a file to a measurement; a verified
+    policy will be admitted by a later explicit change (track R5).
+  - *A fresh client per job* over a supervisor kept for the process life, so the per-job record of
+    ruled-out providers never hides a later job's fallback.
+  - *`close` tries every worker*; one that will not stop stays in the pool for a retry and the first
+    failure is raised. *Shutdown* is nested `finally` blocks, so a scheduler that will not drain
+    still stops the workers and frees the library.
+  - *Readiness separates what it means*: `runtime_package`, `processing_policy` and `ml_worker` (the
+    supervisors' own state; `NOT_STARTED` until a job starts one). `ProcessingSettings.capabilities`
+    is evaluated on every `/readiness`.
+  - *No stale registrations*: `prepare` rebuilds what it knows, and every command re-checks that the
+    package is still installed. A damaged or conflicting package is skipped (the selected one makes
+    `runtime_package` `UNAVAILABLE`), never the whole library `FAILED`.
+  - *The e2e is isolated*: it installs a verified copy of the package and policy into a temporary
+    local state and never writes into `local-models/state`.
+  - `policy_path` accepts only a plain package key.
 - **`ProcessingSettings.close`** runs at shutdown after the scheduler has stopped (the pool stops its
   workers) and the library is closed in a `finally`, so a worker that will not stop can never leave the
   library lock held. `prepare` may return capability updates; a capability of `UNAVAILABLE` makes the
   app `DEGRADED`.
-- **Tests.** `tests/integration/test_real_profile.py` (18): providers, the policy file's failure modes,
-  the pool (one worker per plan, all stopped once), registration and request building against a real
-  library with a fixture package, and the whole application (readiness, a run under the abstain-only
-  policy, the unresolved face, workers stopped at shutdown, `503` without a policy, `DEGRADED` without
-  the package, a failing close). Two existing host tests changed because a host without the flag now
-  runs the real profile (`DEGRADED` with nothing installed). Five guards were mutation-tested.
+- **Tests.** `tests/integration/test_real_profile.py` (43): providers, the policy file's failure
+  modes and traversal, edited policies, the pool (one worker per plan, a fresh client per job, a
+  failing stop, worker state), registration and request building against a real library with a
+  fixture package, package removal and damage, and the whole application (readiness, a run under the
+  abstain-only policy, the unresolved face, workers stopped at shutdown, `503` without a policy,
+  `DEGRADED` without the package, a failing close, a scheduler that will not drain). Two existing host
+  tests changed because a host without the flag now runs the real profile. Every guard was
+  mutation-tested (nine mutations, each failing a test).
 - **`tests/e2e/test_real_host.py`** (local, `-m e2e`, never in CI): real photographs through the real
   host profile, on CPU and on CUDA-first with CPU fallback. First photograph: an identity is created;
   a second photograph of the same person is not matched (automatic matching is off) and waits, with
@@ -54,7 +75,9 @@
 
 - `uv run pytest -m e2e tests/e2e/test_real_host.py`: 1 passed on CPU, and 1 passed with
   `FACEIDENTIFY_ORT_GPU_DIR` and `FACEIDENTIFY_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider`.
-- Full gate results are in the PR.
+- `uv run pytest -m e2e tests/e2e/test_real_host.py` again after the hardening and the isolation: 1
+  passed on CPU, 1 passed CUDA-first; `local-models/state/indexes` is unchanged by the run.
+- Full gate: see the PR (ruff, `mypy` on both platforms, `pytest --cov`).
 
 ## Open issues / follow-ups
 
