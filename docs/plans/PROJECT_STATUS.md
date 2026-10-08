@@ -13,7 +13,7 @@ real-model path in M5; the `buffalo_l` weights are chosen and run for real on CP
 to end on the development profile and survives a restart. Next is M5, the first real recognition
 milestone: [M5 plan](M5_PLAN.md).
 
-**What is next:** [M5 remaining work](M5_REMAINING_WORK.md): real host wiring, then recycle and delete, forget, search, and the assisted cross-source recognition gate. The owner decided on 2026-10-08 that cross-source recognition is *assisted* (ranked matches plus confirmation, TST-057A); *automatic* recognition (TST-057B) stays blocked pending a verified calibration.
+**What is next:** [M5 remaining work](M5_REMAINING_WORK.md): the installation sweep (#80), then recycle and delete, forget, search, and the assisted cross-source recognition gate. The owner decided on 2026-10-08 that cross-source recognition is *assisted* (ranked matches plus confirmation, TST-057A); *automatic* recognition (TST-057B) stays blocked pending a verified calibration.
 
 **New to the code?** Read [`docs/research/codebase-learning-guide.md`](../research/codebase-learning-guide.md): twelve parts from Python basics to this repository's design, with a walkthrough of one photograph.
 
@@ -32,9 +32,10 @@ milestone: [M5 plan](M5_PLAN.md).
 | **M5 Corrections, search and memory** | In progress | M5 is the first real recognition milestone (owner, 2026-10-07): scope and order approved; two parallel tracks, identity management (naming, corrections, merge and split, recycle/delete/forget) and real models (#69 weights chosen by the owner, runtime, calibrated policy, #137), converging for search and cross-source recognition. Built so far: the library-profile guard (#137); naming and renaming people (step 1); confirming, moving and separating a face, placing unplaced faces (step 2), and merging identities and splitting faces off one (step 3); revision `0009` removed the unused `SPLIT` identity state ([entry](../implementations/2026-10-07-m5-revision-0009-drop-split-state.md)); `buffalo_l` (SCRFD and ArcFace) selected, installed as a runtime package and run for real on CPU (a local smoke test; the first measured policy (R4) was evaluated and says automatic acceptance stays off on the small evaluation set (it takes effect when the real host reads it); CUDA is verified on the RTX 4070 and agrees with the CPU ([entry](../implementations/2026-10-07-m5-r2-cuda-runtime.md)); the host wiring is next) | [M5 plan](M5_PLAN.md), [owner decisions](../implementations/2026-10-07-m4-owner-decisions-and-m5-plan.md) |
 | **M6 to M8** | Not started | Movies, cameras, packaging | [tracker](TESTING_IMPLEMENTATION_TRACKER.md) |
 
-**Not built yet (so you know what you cannot try):** the app host still runs on the development profile (the real
-model runs only in a local smoke test; the host wiring, GPU and the measured policy are in
-progress), no search (M5; naming, corrections, merge and split are built), no movies or cameras (M6, M7), no installer or packaged runtime (M8).
+**Not built yet (so you know what you cannot try):** a packaged real-model app (the host's real profile runs the installed `buffalo_l` model on CPU or
+CUDA under the abstain-only policy; a debug shell build still starts the development profile, and
+the model package and policy file are installed by hand), no search (M5; naming, corrections, merge
+and split are built), no movies or cameras (M6, M7), no installer or packaged runtime (M8).
 Run it with `npm run tauri dev` after `uv sync` and `npm install` (see the desktop entry).
 
 **Licences:** the application is personal-use only; the direct dependencies, the models, the data and the open licensing questions that would matter to a commercial release are recorded (transitive packages, the Rust crates and the build tools are not yet reviewed) in [`licensing-and-commercialization.md`](../research/licensing-and-commercialization.md) (the face weights are research-only, and the repository has no licence file yet).

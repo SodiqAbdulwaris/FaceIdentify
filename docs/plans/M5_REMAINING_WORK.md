@@ -9,8 +9,9 @@ _Written 2026-10-08, after the abstain-first decisions. This plan only orders wh
 Built and merged: library-profile guard (R0), model selection and installation (R1), real inference on
 CPU and CUDA (R3, R2), the measured operating point (R4, result: automatic matching disabled), naming,
 corrections, unplaced faces, merge and split, the `SPLIT` state removal, the codebase learning guide.
-In review: the abstain-only visibility work (notice, similarity-score wording, regression tests).
-Parked on a stash (`feat/real-host-wiring`): `backend/api/real.py` and its host wiring.
+Merged: the abstain-only visibility work (notice, similarity-score wording, regression tests). In
+review: the real host profile (`backend/api/real.py`; the installation sweep of issue #80 follows as
+its own change).
 
 ## 2. The order, with what each step needs
 

@@ -105,12 +105,13 @@ When you start the app, four different programs are involved. They are separate 
    networks. It is separate so that a crash inside native model code can never corrupt your data:
    the backend notices, restarts it and carries on.
 
-   **What runs today.** The worker, its supervisor and the real models are built and tested, and they
-   run in local smoke tests on your GPU. But the desktop host does not use them yet: a debug build of
-   the shell starts the backend in its *development profile*, where a fake in-process "perception"
-   stands in for the worker (Part 7.3), and a release build has no processing configured until the real
-   host profile is merged (an M5 task in progress). Wherever this guide says "the worker", it describes
-   the built architecture, not what the shell launches today.
+   **What runs today.** The worker, its supervisor and the real models are built and tested, and the
+   host now has a *real profile* that uses them (Part 7.3): it registers the installed model package,
+   keeps one worker per plan, and builds each run from the measured policy file. A **debug** build of
+   the shell still starts the backend in its *development profile*, where a fake in-process
+   "perception" stands in for the worker; a **release** build runs the real profile. The real profile
+   needs the model package installed and a measured policy file; without them the app reports the
+   worker unavailable (`DEGRADED`) and refuses to process (`503`) rather than guess.
 
 **Why a web page inside a desktop window?** Because building screens with web technology is faster
 and better supported than building them natively, and Tauri gives you a small, secure window to host
@@ -1494,10 +1495,11 @@ The FastAPI **lifespan** (`backend/api/startup.py`) is code that runs at start a
 
 - **development** (`--development-profile`): a fake catalog and fake perception under an uncalibrated
   demo policy, so the whole app can be exercised without models. Never a release setting.
-- **real** [designed, in progress]: installed runtime packages, real workers, a measured policy. The
-  host's code for it is not merged yet (Part 8.9). Today the shell passes the development profile in
-  debug builds (`desktop/src-tauri/src/config.rs`), and the host with no flag has no processing
-  configured (processing answers `503`).
+- **real** [built, `backend/api/real.py`]: installed runtime packages, real workers, a measured
+  policy (Part 8.9). It is the host's default without a flag; the shell passes the development
+  profile in debug builds (`desktop/src-tauri/src/config.rs`). Preferred providers come from
+  `FACEIDENTIFY_PROVIDERS` (CPU by default; `CUDAExecutionProvider,CPUExecutionProvider` tries the
+  GPU first, with the CPU as the planned fallback; an unknown name is an error).
 
 ## 7.4 The job and run lifecycle
 
@@ -1784,11 +1786,14 @@ the thresholds are raw cosine values, never probabilities.
 
 - `backend/api/development.py`: fake catalog, fake perception (one face in the middle of every image,
   a vector derived from the image's pixels, so identical images are the same person), demo thresholds.
-- The **real profile** [designed; code in progress, not yet on `main`]: it will register installed
-  packages, keep one persistent supervised worker per plan, and build the processing request from the
-  registered catalog plus a measured policy file, answering `503` until one exists. The policy file
-  holds only the `decision_policy` object (`version`, `min_detection_score`, `match_threshold`,
-  `margin`, `new_identity_ceiling`).
+- `backend/api/real.py` [built]: the **real profile**. At startup (`prepare`) it registers every
+  installed package in the catalog and reports the `ml_worker` capability (`READY`, or `UNAVAILABLE`
+  and the app `DEGRADED` when the package it runs is not installed). A `ClientPool` keeps one
+  supervised worker and client per plan for the life of the process and stops them at shutdown. The
+  processing request is built on every "process" command from the registered catalog plus the measured
+  policy file `<local state>/policies/<package>.json`, which holds only the `decision_policy` object
+  (`version`, `min_detection_score`, `match_threshold`, `margin`, `new_identity_ceiling`); with no
+  package or no usable policy it answers `503` and never invents numbers.
 
 ---
 # Part 9. The front end: what you see
