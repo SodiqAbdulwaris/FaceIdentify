@@ -35,9 +35,25 @@ describe('faces to place', () => {
     open([unresolved()])
 
     expect(await screen.findByRole('heading', { name: 'Faces to place' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'This is Person I7 (41% alike)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'This is Bob (38% alike)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'This is Person I7 (similarity score 0.41)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'This is Bob (similarity score 0.38)' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'This is someone new' })).toBeInTheDocument()
+  })
+
+  it('calls a score a similarity score, ranks the matches and never claims a probability', async () => {
+    open([unresolved()])
+
+    await screen.findByRole('heading', { name: 'Faces to place' })
+
+    expect(screen.getByText(/ranked by similarity score, highest first/)).toBeInTheDocument()
+    expect(screen.getByText(/not the probability that they are the same person/)).toBeInTheDocument()
+    expect(screen.getByText('Possible matches, highest similarity score first')).toBeInTheDocument()
+    expect(screen.queryByText(/alike|%/)).toBeNull()
+    const buttons = screen.getAllByRole('button', { name: /^This is (Person|Bob)/ })
+    expect(buttons.map((b) => b.textContent)).toEqual([
+      'This is Person I7 (similarity score 0.41)',
+      'This is Bob (similarity score 0.38)',
+    ])
   })
 
   it('says so when the list could not be loaded, instead of showing nothing', async () => {
@@ -64,9 +80,9 @@ describe('faces to place', () => {
     const user = userEvent.setup()
     const { calls } = open([unresolved()], [{ method: 'POST', path: RESOLVE, respond: occurrence() }])
 
-    await user.click(await screen.findByRole('button', { name: 'This is Bob (38% alike)' }))
+    await user.click(await screen.findByRole('button', { name: 'This is Bob (similarity score 0.38)' }))
 
-    await screen.findByRole('button', { name: 'This is Bob (38% alike)' })
+    await screen.findByRole('button', { name: 'This is Bob (similarity score 0.38)' })
     expect(calls.find((c) => c.path === RESOLVE)?.body).toEqual({ identity_id: 'i8' })
   })
 
