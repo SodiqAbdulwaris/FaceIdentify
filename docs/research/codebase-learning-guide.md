@@ -105,6 +105,13 @@ When you start the app, four different programs are involved. They are separate 
    networks. It is separate so that a crash inside native model code can never corrupt your data:
    the backend notices, restarts it and carries on.
 
+   **What runs today.** The worker, its supervisor and the real models are built and tested, and they
+   run in local smoke tests on your GPU. But the desktop host does not use them yet: a debug build of
+   the shell starts the backend in its *development profile*, where a fake in-process "perception"
+   stands in for the worker (Part 7.3), and a release build has no processing configured until the real
+   host profile is merged (an M5 task in progress). Wherever this guide says "the worker", it describes
+   the built architecture, not what the shell launches today.
+
 **Why a web page inside a desktop window?** Because building screens with web technology is faster
 and better supported than building them natively, and Tauri gives you a small, secure window to host
 them in. **Why Python for the real work?** Because the machine-learning ecosystem (ONNX Runtime,
@@ -159,7 +166,8 @@ You drop a photograph into the library screen and press "process". In outline:
    answers `202 Accepted`. Nothing has been recognised yet.
 3. The **scheduler** loop, a background task inside the backend, claims the job, and the
    **ProcessingRunner** executes it: decode the image, ask the worker to detect faces, write each face
-   as a *pending* **Observation**, ask the worker for each face's embedding, write *pending*
+   as a *pending* **Observation**, ask the worker (in the development profile, the fake stand-in)
+   for each face's embedding, write *pending*
    **Representations**, search the memory for similar ones, and let the **reasoner** decide.
 4. A final checkpoint is written. Then **acceptance** runs in one transaction: pending data becomes
    active, **Occurrences** and **Evidence** are written, new **Identities** are created, vectors are
@@ -172,7 +180,7 @@ Part 12 walks the same path again, naming the exact files, once you know the voc
 ---
 # Part 2. Python from zero
 
-The backend is about 9,300 executable statements of Python, every one measured by the tests (the project requires 100% coverage). This part
+The backend is about 9,300 executable statements of Python, measured by the tests (the project's working rule is 100% coverage, checked by the author before every merge; CI produces the report but does not enforce a number). This part
 teaches the language in the order you meet it. Every section ends with where the idea shows up in
 this repository. You can try any snippet: run `uv run python` in the project folder to get an
 interactive prompt (`>>>`), type a line, press Enter, see the result. Press Ctrl+Z then Enter (on
@@ -282,7 +290,7 @@ len(faces)                 # 3
 faces.sort(); sorted(faces)# sort in place / return a new sorted list
 ```
 
-**Tuple**: ordered, *unchangeable*, therefore safe to share and usable as a dictionary key. A
+**Tuple**: ordered, *unchangeable*, therefore safe to share, and usable as a dictionary key when all its items are themselves unchangeable (hashable). A
 function that returns two things returns a tuple: `return accepted, correct`.
 
 **Dict**: look things up by key.
@@ -387,7 +395,7 @@ unique  = {q.person for q in queries}               # set comprehension
 **Generator expressions** are the same in parentheses and produce items lazily:
 `sum(1 for q in queries if q.known)` counts without building a list. `any(...)` and `all(...)` ask
 whether some/every item satisfies a test. `next(x for x in items if ok(x))` takes the first match
-(in `backend/api/real.py`, the detector export is found this way).
+(a pattern you will meet whenever the code looks something up in a collection).
 
 ## 2.9 Functions
 
@@ -420,8 +428,8 @@ stamp(lambda: "frozen")      # lambda: a tiny one-expression function with no na
 
 **Scope and closures.** A name assigned inside a function is local to it. A function defined *inside*
 another can read the outer function's variables and keeps them alive: that is a **closure**.
-`real_processing()` in `backend/api/real.py` defines `prepare` and `request_for` inside itself so
-that both can see the `registered` dictionary.
+`development_processing()` in `backend/api/development.py` defines `prepare` inside itself so that it
+can see the `settings` argument.
 
 **Recursion** is a function calling itself; this codebase hardly uses it.
 
@@ -529,7 +537,7 @@ fit.
 
 ## 2.12 Modules, packages and imports
 
-A file `foo.py` is a **module**; a folder with `__init__.py` is a **package**. `import` makes names
+A file `foo.py` is a **module**; a folder with `__init__.py` is a **package** (Python also allows folders without one, "namespace packages"; this project uses `__init__.py`). `import` makes names
 from another module available.
 
 ```python
@@ -773,7 +781,7 @@ Concepts you will meet in the test files:
 - **Property-based tests** (`hypothesis`): instead of one hand-picked example, the library generates
   hundreds of random inputs (sequences of merges and splits, say) and checks that an *invariant*
   always holds. See `tests/property/`.
-- **Coverage** (`--cov`): which lines and branches the tests ran. This project requires **100%**, so a
+- **Coverage** (`--cov`): which lines and branches the tests ran. This project's working rule is **100%** (a rule followed by running it, not a number CI enforces), so a
   line that no test exercises is itself a failure.
 - **Mutation testing by hand**: after writing a guard, the author deliberately breaks the guard and
   confirms a test fails. A test that still passes when the code is broken is not testing anything.
@@ -785,7 +793,7 @@ Commands:
 uv run pytest -q                     # the fast default suite
 uv run pytest tests/unit -q          # just the unit tests
 uv run pytest -k reasoner            # only tests whose name contains "reasoner"
-uv run pytest --cov                  # with coverage (must be 100%)
+uv run pytest --cov                  # with coverage (the working rule is 100%)
 uv run pytest -m e2e tests/e2e       # the real-model test (needs the local weights)
 ```
 
@@ -1059,7 +1067,8 @@ Choosing numbers by feel is how systems fail, so the project measures them (`eva
 - **The result so far** (`docs/research/measured-operating-point.md`): the first rule overfitted
   (100% precision on selection, 78% on the held-out half), the owner's conservative rule still left five
   false accepts of 40, so **automatic acceptance is disabled** until a larger verified evaluation set
-  exists. A face with candidates then abstains and waits for you.
+  exists. Once the real host profile reads that policy, a face with candidates will abstain and wait
+  for you.
 - **Calibrated vs uncalibrated.** A *calibrated* score would be a true probability ("0.9 means right
   nine times out of ten"). Ours are raw cosines, never probabilities; "calibrated" in this project only
   means "the thresholds were measured". The mode stays `UNCALIBRATED`, and the screen says so.
@@ -1182,7 +1191,7 @@ The old list asked questions. Here are the answers the project has reached.
 | Tracking: ByteTrack, DeepSORT, StrongSORT, BoT-SORT? | open; M6/M7 |
 | Vector search: FAISS, HNSW, pgvector? Is an index even needed for thousands of identities? | **USearch (HNSW)**, kept rebuildable; FAISS/Voyager are documented alternatives. For thousands of vectors an exact scan would also work, but the index is built so the design scales and the rebuildable-index discipline is exercised early |
 | Video: FFmpeg, OpenCV, PyAV? | FFmpeg + PyAV; OpenCV not baseline |
-| Local GPU inference: PyTorch, ONNX Runtime, TensorRT, CUDA? | **ONNX Runtime** with CUDA on the RTX 4070 and CPU as fallback; PyTorch is for development only and is not shipped |
+| Local GPU inference: PyTorch, ONNX Runtime, TensorRT, CUDA? | **ONNX Runtime** with CUDA on the RTX 4070 and CPU as fallback; PyTorch is not a dependency of this repository; the stack decision allows it only for experimentation and export outside the shipped app and it is not shipped |
 | Storage: PostgreSQL or SQLite? | **SQLite in WAL mode**; PostgreSQL only if measured write contention demands it |
 | Desktop: web UI + local server, Electron, Tauri, native? | **Tauri** shell + React front end + a local FastAPI sidecar |
 | Clustering for unknown identities? | not built (Part 5.5) |
@@ -1232,8 +1241,8 @@ specs is much easier if you recognise `SELECT/WHERE/JOIN`.
 **Constraints** make the database refuse bad data, whatever the code does:
 
 - `NOT NULL`: a value is required. `UNIQUE`: no two rows may share the value(s).
-- **`CHECK (state IN ('ACTIVE','RECYCLED',...))`**: only listed values allowed. Every status column in
-  this project has one, generated from the Python enum.
+- **`CHECK (state IN ('ACTIVE','RECYCLED',...))`**: only listed values allowed. Status columns with a decided, finite vocabulary have one, generated from the Python enum (a few
+  runtime-catalog fields deliberately remain plain strings until their value sets are decided).
 - **Foreign key `ON DELETE RESTRICT`**: you may not delete a row something else still points at (the
   project uses it nearly everywhere so history cannot be orphaned); `SET NULL` clears the pointer.
 - **Indexes** (not the vector kind): a sorted structure that makes lookups on a column fast.
@@ -1454,7 +1463,7 @@ def get_source(source_id: uuid.UUID, backend: Backend = Depends(get_backend)):
 - **One error shape** for the whole API (`backend/api/errors.py`):
   `{"error": {"code", "message", "details", "retryable", "diagnostic_id"}}`. Unexpected errors return
   only a generic `INTERNAL_ERROR` and a diagnostic id, never a traceback or user data.
-- **Conventions** every route inherits: cursor pagination, library gating (routes answer `503` until
+- **Conventions** the routes share: cursor pagination on collection routes, library gating (routes answer `503` until
   the library has opened), `202` for work that happens later, ETags on media.
 
 ## 7.3 Starting up: the sidecar host and the lifespan
@@ -1485,7 +1494,10 @@ The FastAPI **lifespan** (`backend/api/startup.py`) is code that runs at start a
 
 - **development** (`--development-profile`): a fake catalog and fake perception under an uncalibrated
   demo policy, so the whole app can be exercised without models. Never a release setting.
-- **real**: installed runtime packages, real workers, a measured policy (Part 8.9).
+- **real** [designed, in progress]: installed runtime packages, real workers, a measured policy. The
+  host's code for it is not merged yet (Part 8.9). Today the shell passes the development profile in
+  debug builds (`desktop/src-tauri/src/config.rs`), and the host with no flag has no processing
+  configured (processing answers `503`).
 
 ## 7.4 The job and run lifecycle
 
@@ -1711,9 +1723,11 @@ Identity** (best score per identity is that identity's score), and the reasoner 
 Reasons recorded with each decision: `LOW_QUALITY`, `RETRIEVAL_INCOMPLETE`, `NO_CANDIDATE`, `MATCHED`,
 `AMBIGUOUS_CANDIDATES`, `UNRESOLVED_NEIGHBOUR`, `NOT_SIMILAR`, `UNCERTAIN_SIMILARITY`.
 
-**Today's measured policy is abstain-only** (Part 4.6): with automatic matching off, every face that
-has candidates abstains and waits for you; only a face with nobody to compare with creates an
-identity.
+**The measured real-model policy is abstain-only** (Part 4.6) but is *not yet active*: it takes effect
+when the real host profile reads it. Under it, with automatic matching off, every face that has
+candidates would abstain and wait for you, and only a face with nobody to compare with would create an
+identity. The policy the running development profile uses today is a demo one (threshold 0.9,
+ceiling 0.5), labelled uncalibrated.
 
 ## 8.5 What you can do to memory (the M5 identity-management features)
 
@@ -1764,11 +1778,11 @@ the thresholds are raw cosine values, never probabilities.
 
 - `backend/api/development.py`: fake catalog, fake perception (one face in the middle of every image,
   a vector derived from the image's pixels, so identical images are the same person), demo thresholds.
-- `backend/api/real.py` [in progress, parked]: registers installed packages, keeps one persistent
-  supervised worker per plan, and builds the processing request from the registered catalog plus the
-  measured policy file at `<local state>/policies/<package>.json` (and answers 503 until one exists).
-  The policy file holds only the `decision_policy` object (`version`, `min_detection_score`,
-  `match_threshold`, `margin`, `new_identity_ceiling`).
+- The **real profile** [designed; code in progress, not yet on `main`]: it will register installed
+  packages, keep one persistent supervised worker per plan, and build the processing request from the
+  registered catalog plus a measured policy file, answering `503` until one exists. The policy file
+  holds only the `decision_policy` object (`version`, `min_detection_score`, `match_threshold`,
+  `margin`, `new_identity_ceiling`).
 
 ---
 # Part 9. The front end: what you see
@@ -1933,8 +1947,9 @@ if (event.type.startsWith('processing_run.')) {
 }
 ```
 
-Events carry **ids, never state**: the screen always refetches from REST, so a lost or duplicated event
-cannot show wrong data. `EventsBridge` wires the two together.
+Events carry a resource id and a little metadata (a run event includes its state and source id), but
+the screen never treats that as the truth: it always refetches from REST, so a lost or duplicated
+event cannot show wrong data. `EventsBridge` wires the two together.
 
 ### Routing
 
@@ -1960,9 +1975,9 @@ connection's status. The rule (decision 5): server data lives only in the query 
 | Route | Screen | What it shows |
 |---|---|---|
 | `/library` | `LibraryPage` | your sources as cards; import through the native file picker; process |
-| `/library/source/:id` | `SourcePage` | the image with face boxes, processing history, people found, process/cancel/retry |
+| `/library/source/:id` | `SourcePage` | the image with face boxes, processing history, people found, process/cancel/retry, and the faces recognition declined to place (`UnresolvedFaces`) |
 | `/identities` | `IdentitiesPage` | everyone remembered, with counts |
-| `/identities/:id` | `IdentityPage` | one identity's faces (the naming, correction, merge and split routes exist in the backend; their screens are not built yet) |
+| `/identities/:id` | `IdentityPage` | one identity's faces, with a name form, merge and split controls (`NameForm`, `MergeControl`, `SplitControl`) and, per face, a correction control (`FaceCorrection`) |
 | `/processing/:runId` | `ProcessingPage` | one run's state, policy and outcome |
 | (layout) | `Layout` | navigation, and the **policy notice** about uncalibrated results |
 
@@ -1972,8 +1987,9 @@ connection's status. The rule (decision 5): server data lives only in the query 
 ## 9.7 Styling: Tailwind and shadcn/ui
 
 - **Tailwind CSS** styles by composing small utility classes directly in the markup:
-  `className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"`. There is no
-  separate stylesheet to keep in sync; the build removes unused classes. `dark:` prefixes give dark mode.
+  `className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"`. Component styling needs
+  no separate stylesheet to keep in sync (only shared global styles live in `frontend/src/index.css`);
+  the build removes unused classes. `dark:` prefixes give dark mode.
 - **shadcn/ui** is a collection of ready-made accessible components (buttons, dialogs, menus) that you
   *copy into your own code* rather than install as a library, so you can edit them. They are built on
   **Radix UI** primitives (behaviour and accessibility, no styling), with `class-variance-authority`
@@ -2037,8 +2053,9 @@ The ideas that make Rust different:
   Passing a value *moves* it; to let others look, you **borrow** it with `&value` (read-only) or
   `&mut value` (one writer). The compiler rejects programs that could use freed memory or race.
 - **`Option<T>`** replaces `None`/null: `Some(x)` or `None`. **`Result<T, E>`** replaces exceptions:
-  `Ok(value)` or `Err(error)`. The `?` operator returns early on an error. There is no unhandled
-  exception: you must deal with every `Result`.
+  `Ok(value)` or `Err(error)`. The `?` operator returns early on an error.
+  A recoverable failure is a value you must handle or pass on (the compiler warns about an ignored
+  `Result`); a `panic!` still exists for unrecoverable bugs.
 - **Traits** are interfaces (`impl fmt::Display for SidecarError`); **`#[derive(Debug, Clone,
   Serialize)]`** writes boilerplate for you; **crates** are packages (listed in `Cargo.toml`);
   `cargo build`, `cargo test`, `cargo fmt`, `cargo clippy` (lints).
@@ -2125,7 +2142,7 @@ work stops and the owner decides; the decision is recorded as a dated note
   `docs/research/licensing-and-commercialization.md`.
 - **Verify before claiming.** Run the checks and report real results; never weaken a test to get green.
   The gate for a backend change is `ruff format --check`, `ruff check`, `mypy` (both platforms),
-  `pytest --cov` at **100%** coverage; for the front end `npm run typecheck`, `oxlint --deny-warnings`,
+  `pytest --cov` reporting **100%** coverage (the working rule; no automatic threshold); for the front end `npm run typecheck`, `oxlint --deny-warnings`,
   `npm test`, `npm run build`.
 - **Ask when unsure.** A question is cheaper than a wrong assumption baked into the codebase.
 - **Independent review.** Every PR gets a read-only review by a different tool (Codex) in a disposable
@@ -2149,7 +2166,7 @@ work stops and the owner decides; the decision is recorded as a dated note
 ## 11.4 The test tracker
 
 `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md` lists every planned test as `TST-nnn` with a status
-(`PASSING`, `IN_PROGRESS`, `BLOCKED`). It is how the project knows what "done" means per feature.
+(for example `PASSING`, `COMPLETE`, `IN_PROGRESS`, `BLOCKED`). It is how the project knows what "done" means per feature.
 Examples: TST-040 candidate retrieval, TST-043 pipeline killed at each stage then recovered, TST-044
 initial ML evaluation, TST-058 merge/split.
 
