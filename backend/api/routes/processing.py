@@ -53,6 +53,7 @@ from backend.app.processing.process_source import (
     ProcessSourceUseCase,
 )
 from backend.app.processing.retry import RetryProcessingUseCase
+from backend.app.recognition.reasoner import MAX_SIMILARITY
 from backend.app.sources.models import Source
 
 router = APIRouter(tags=["processing"])
@@ -78,6 +79,8 @@ class PolicyProvenance(BaseModel):
     calibration_mode: str
     decision_policy_version: str | None
     calibrated: bool
+    # False when the frozen policy cannot match a face to an existing identity (threshold above 1).
+    automatic_matching: bool
 
 
 class ProcessingRunDetail(BaseModel):
@@ -131,6 +134,7 @@ def _policy(frozen: dict[str, Any]) -> PolicyProvenance:
         calibration_mode=mode,
         decision_policy_version=frozen["decision_policy"].get("version"),
         calibrated=mode != UNCALIBRATED,
+        automatic_matching=frozen["decision_policy"]["match_threshold"] <= MAX_SIMILARITY,
     )
 
 

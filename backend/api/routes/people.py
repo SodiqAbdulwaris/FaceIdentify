@@ -120,8 +120,10 @@ def _summaries(session: Session, people: list[Person]) -> list[PersonSummary]:
 
 
 def _announced(backend: Backend, summary: PersonSummary) -> PersonSummary:
-    """Tell connected screens a person changed (after the commit; they refetch by id)."""
-    backend.announce("person.updated", "person", summary.id)
+    """Tell connected screens a person changed (after the commit; they refetch by id). The event
+    carries the stable id and the new revision, never the name: REST stays authoritative (owner
+    decision 2026-10-08)."""
+    backend.announce("person.updated", "person", summary.id, {"revision": summary.revision})
     return summary
 
 

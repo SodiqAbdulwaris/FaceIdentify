@@ -4,6 +4,7 @@ The routes run on the real application and a real library; identities are create
 pipeline that makes them is tested elsewhere), so what is checked here is the people commands.
 """
 
+import json
 import uuid
 from typing import Any
 
@@ -210,3 +211,7 @@ async def test_every_change_to_a_person_is_announced_and_a_refusal_is_not(
     assert [(e["type"], e["resource"]) for e in events] == [
         ("person.updated", {"type": "person", "id": person["id"]})
     ] * 4
+    # An event names the entity and its revision, never what it is called (REST is authoritative).
+    assert all(set(e["data"]) == {"revision"} for e in events)
+    assert all(isinstance(e["data"]["revision"], int) for e in events)
+    assert "Late" not in json.dumps(events)
