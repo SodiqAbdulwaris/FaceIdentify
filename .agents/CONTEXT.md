@@ -112,7 +112,8 @@ _Last updated: 2026-10-07 (the scheduler-degrade test no longer races its own re
   packages are empty scaffolds from IMPLEMENTATION_ARCHITECTURE.md §8. Image source import (PR #82) and the ML worker and supervisor (PRs #76, #77) are built.
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) + Vitest,
   with React Router hash routes, TanStack Query and generated API types. Library, source, people and
-  processing screens are built (M4); naming, corrections, merge/split, recycle and search are M5.
+  processing screens are built (M4), and so are the M5 naming, correction, merge/split and
+  unplaced-face controls; recycle and search are not built.
 - **Desktop:** Tauri v2 in `desktop/src-tauri` starts the Python backend sidecar (token in the
   environment, validated handshake, clean stop) and owns the library root and its folder picker (M4).
 
