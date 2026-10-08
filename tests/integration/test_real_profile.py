@@ -31,6 +31,7 @@ from backend.api.real import (
     providers_from,
     real_processing,
 )
+from backend.api.scheduler import SchedulerService
 from backend.api.startup import (
     MediaLimits,
     ProcessingUnavailableError,
@@ -127,9 +128,13 @@ def variant(n: int, kind: str) -> PlannedVariant:
 @dataclass
 class FakeSupervisor:
     stopped: int = 0
+    state: str = "STOPPED"
+    refuses: bool = False
 
     def stop(self) -> None:
         self.stopped += 1
+        if self.refuses:
+            raise RuntimeError("will not stop")
 
 
 def plan(space: int, n: int) -> PerceptionPlan:
@@ -141,28 +146,92 @@ def plan(space: int, n: int) -> PerceptionPlan:
     )
 
 
-def test_one_worker_per_plan_is_kept_and_all_are_stopped_at_the_end() -> None:
+def supervised() -> tuple[list[FakeSupervisor], Any]:
     made: list[FakeSupervisor] = []
 
     def supervise(_plan: PerceptionPlan, _policy: Any) -> Any:
         made.append(FakeSupervisor())
         return made[-1]
 
-    pool = ClientPool(uuid.uuid4, supervise=supervise)
-    first = pool.client_for(plan(1, 1))
+    return made, supervise
 
-    assert pool.client_for(plan(1, 1)) is first  # the same plan: the same worker, not a new start
-    other = pool.client_for(plan(1, 5))  # other variants
-    third = pool.client_for(plan(2, 1))  # another space
-    assert len({id(first), id(other), id(third)}) == 3
-    assert len(made) == 3
+
+def test_one_worker_per_plan_is_kept_and_all_are_stopped_at_the_end() -> None:
+    made, supervise = supervised()
+    pool = ClientPool(uuid.uuid4, supervise=supervise)
+
+    first = pool.client_for(plan(1, 1))
+    again = pool.client_for(plan(1, 1))
+    pool.client_for(plan(1, 5))  # other variants
+    pool.client_for(plan(2, 1))  # another space
+
+    assert len(made) == 3  # the same plan reused its worker; the others started their own
+    assert first is not again  # but a client is never shared between jobs
+    assert first._supervisor is again._supervisor
 
     pool.close()
     assert [s.stopped for s in made] == [1, 1, 1]
-    pool.close()  # idempotent: nothing is stopped twice
+    pool.close()  # nothing left to stop
     assert [s.stopped for s in made] == [1, 1, 1]
-    assert pool.client_for(plan(1, 1)) is not first  # a pool used again starts afresh
+    pool.client_for(plan(1, 1))  # a pool used again starts afresh
     assert len(made) == 4
+
+
+def test_a_client_carries_nothing_from_one_job_to_the_next() -> None:
+    _, supervise = supervised()
+    pool = ClientPool(uuid.uuid4, supervise=supervise)
+
+    first = pool.client_for(plan(1, 1))
+    first._ruled_out[("FACE_DETECTOR", uuid.UUID(int=101))] = "CUDA would not start"
+    second = pool.client_for(plan(1, 1))
+
+    assert second._ruled_out == {}  # so it tries its preferred provider
+
+
+def test_a_worker_that_will_not_stop_does_not_keep_the_others_running_and_is_retried() -> None:
+    made, supervise = supervised()
+    pool = ClientPool(uuid.uuid4, supervise=supervise)
+    for space in (1, 2, 3):
+        pool.client_for(plan(space, 1))
+    made[0].refuses = True
+
+    with pytest.raises(RuntimeError, match="will not stop"):
+        pool.close()
+
+    assert [s.stopped for s in made] == [1, 1, 1]  # every worker got its turn
+    made[0].refuses = False
+    pool.close()  # the one that failed is tried again; the others are not stopped twice
+    assert [s.stopped for s in made] == [2, 1, 1]
+
+
+@pytest.mark.parametrize(
+    ("states", "expected"),
+    [
+        ([], "NOT_STARTED"),
+        (["STOPPED"], "NOT_STARTED"),
+        (["READY"], "READY"),
+        (["READY", "BUSY"], "READY"),
+        (["READY", "STARTING"], "STARTING"),
+        (["READY", "FAILED"], "FAILED"),
+        (["UNAVAILABLE", "READY"], "UNAVAILABLE"),
+    ],
+)
+def test_the_worker_state_reported_to_readiness_is_the_supervisors_own(
+    states: list[str], expected: str
+) -> None:
+    made, supervise = supervised()
+    pool = ClientPool(uuid.uuid4, supervise=supervise)
+    for space, state in enumerate(states, start=1):
+        pool.client_for(plan(space, 1))
+        made[-1].state = state
+
+    assert pool.worker_state() == expected
+
+
+@pytest.mark.parametrize("key", ["../x", "a/b", "a\\b", "", ".hidden", "a..b", "x y"])
+def test_a_package_key_names_a_file_never_a_path(key: str, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="not a package key"):
+        policy_path(tmp_path, key)
 
 
 # --- the profile against a real library -------------------------------------------------------
@@ -183,7 +252,7 @@ def world(tmp_path: Path, clock: FrozenClock, new_id: SeededUUIDs) -> World:
     return World(library_settings(tmp_path, clock, new_id), tmp_path / "pictures")
 
 
-def install_package(world: World, clock: FrozenClock, new_id: SeededUUIDs) -> None:
+def install_package(world: World, clock: FrozenClock, new_id: SeededUUIDs) -> Path:
     """Put the fixture package into the machine-local store, the way the installer does."""
     source = package_files(world.folder.parent / "source", manifest_dict(KEY))
     settings = world.settings
@@ -197,7 +266,7 @@ def install_package(world: World, clock: FrozenClock, new_id: SeededUUIDs) -> No
         index_batch=50,
         max_index_passes=5,
     ) as library:
-        library.packages.install(source, {})
+        return library.packages.install(source, {}).path
 
 
 def write_policy(world: World, policy: dict[str, Any] | None = None) -> None:
@@ -229,7 +298,7 @@ def test_the_profile_registers_the_package_and_builds_the_request_from_catalog_a
     processing = real_processing(world.settings, package_key=KEY)
     with opened(world, clock, new_id) as library:
         assert processing.prepare is not None
-        assert processing.prepare(library) == {"ml_worker": "READY"}
+        assert processing.prepare(library) == {"runtime_package": "READY"}
 
         request = library.unit_of_work.read(processing.request_for)
 
@@ -268,18 +337,99 @@ def test_without_the_package_or_a_valid_policy_nothing_is_decided(
     processing = real_processing(world.settings, package_key=KEY)
     assert processing.prepare is not None
     with opened(world, clock, new_id) as library:
-        assert processing.prepare(library) == {"ml_worker": "UNAVAILABLE"}  # nothing installed
+        assert processing.prepare(library) == {"runtime_package": "UNAVAILABLE"}  # nothing there
         with pytest.raises(ProcessingUnavailableError, match="is not installed"):
             library.unit_of_work.read(processing.request_for)
 
         source = package_files(world.folder.parent / "again", manifest_dict(KEY))
         library.packages.install(source, {})
-        assert processing.prepare(library) == {"ml_worker": "READY"}  # found now, registered
+        assert processing.prepare(library) == {"runtime_package": "READY"}  # found, registered
         with pytest.raises(ProcessingUnavailableError, match="no measured decision policy"):
             library.unit_of_work.read(processing.request_for)  # no policy file: still nothing
 
         write_policy(world, {**ABSTAIN_ONLY, "margin": 0.0})  # a margin must be above 0
         with pytest.raises(ProcessingUnavailableError, match="policy is invalid"):
+            library.unit_of_work.read(processing.request_for)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        {"match_threshold": 0.1, "margin": 0.01},  # plausible numbers that enable matching
+        {"match_threshold": 1.0},  # a cosine of 1 is reachable by an identical face
+        {"match_threshold": 0.9, "new_identity_ceiling": 0.5},  # the demo policy
+        {"new_identity_ceiling": 0.0},  # a weak score could create an identity
+        {"new_identity_ceiling": -0.99},
+    ],
+)
+def test_a_policy_file_that_enables_matching_or_creation_is_refused_whatever_its_numbers(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs, edit: dict[str, float]
+) -> None:
+    install_package(world, clock, new_id)
+    write_policy(world, {**ABSTAIN_ONLY, **edit})  # same version name, different numbers
+    processing = real_processing(world.settings, package_key=KEY)
+    assert processing.prepare is not None
+    assert processing.capabilities is not None
+    with opened(world, clock, new_id) as library:
+        processing.prepare(library)
+
+        with pytest.raises(ProcessingUnavailableError, match="not permitted"):
+            library.unit_of_work.read(processing.request_for)
+
+    assert processing.capabilities()["processing_policy"] == "UNAVAILABLE"  # and readiness says so
+
+
+def test_a_package_removed_after_start_is_not_used_and_prepare_forgets_it(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    installed = install_package(world, clock, new_id)
+    write_policy(world)
+    processing = real_processing(world.settings, package_key=KEY)
+    assert processing.prepare is not None
+    assert processing.capabilities is not None
+    with opened(world, clock, new_id) as library:
+        processing.prepare(library)
+        assert processing.capabilities()["runtime_package"] == "READY"
+
+        (installed / "manifest.json").unlink()
+
+        # No second prepare: the very next command still notices.
+        with pytest.raises(ProcessingUnavailableError, match="no longer installed"):
+            library.unit_of_work.read(processing.request_for)
+        assert processing.capabilities()["runtime_package"] == "UNAVAILABLE"
+        forgotten = processing.prepare(library)  # and a fresh start forgets it
+        assert forgotten == {"runtime_package": "UNAVAILABLE"}
+        with pytest.raises(ProcessingUnavailableError, match="is not installed"):
+            library.unit_of_work.read(processing.request_for)
+
+
+def test_a_damaged_package_that_is_not_the_one_we_run_does_not_take_the_library_down(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    install_package(world, clock, new_id)  # the healthy, selected one
+    write_policy(world)
+    processing = real_processing(world.settings, package_key=KEY)
+    assert processing.prepare is not None
+    with opened(world, clock, new_id) as library:
+        other = package_files(world.folder.parent / "other", manifest_dict("other-package"))
+        damaged = library.packages.install(other, {}).path
+        (damaged / "models" / "detector.onnx").write_bytes(b"swapped after the install")
+
+        assert processing.prepare(library) == {"runtime_package": "READY"}  # the library carries on
+        assert library.unit_of_work.read(processing.request_for)["schema_version"] == 1
+
+
+def test_the_selected_package_being_damaged_makes_it_unavailable_not_the_library_failed(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    installed = install_package(world, clock, new_id)
+    write_policy(world)
+    (installed / "models" / "detector.onnx").write_bytes(b"swapped after the install")
+    processing = real_processing(world.settings, package_key=KEY)
+    assert processing.prepare is not None
+    with opened(world, clock, new_id) as library:
+        assert processing.prepare(library) == {"runtime_package": "UNAVAILABLE"}
+        with pytest.raises(ProcessingUnavailableError, match="is not installed"):
             library.unit_of_work.read(processing.request_for)
 
 
@@ -364,7 +514,9 @@ async def test_the_real_profile_runs_the_abstain_only_policy_through_the_applica
     async with serving(app, secret, world.folder.parent / "files", clock) as api:
         ready = (await api.client.get("/readiness")).json()
         assert ready["state"] == "READY"
-        assert ready["capabilities"]["ml_worker"] == "READY"
+        assert ready["capabilities"]["runtime_package"] == "READY"
+        assert ready["capabilities"]["processing_policy"] == "READY"
+        assert ready["capabilities"]["ml_worker"] == "NOT_STARTED"  # no job has started one yet
         assert ready["capabilities"]["scheduler"] == "READY"
 
         first = await imported(api, path=picture(world.folder, "a.png"))
@@ -401,6 +553,9 @@ async def test_the_real_profile_without_a_policy_refuses_to_process_and_says_why
 
         assert refused.status_code == 503
         assert refused.json()["error"]["code"] == "PROCESSING_UNAVAILABLE"
+        ready = (await api.client.get("/readiness")).json()
+        assert ready["capabilities"]["runtime_package"] == "READY"
+        assert ready["capabilities"]["processing_policy"] == "UNAVAILABLE"  # and readiness says so
 
 
 async def test_the_real_profile_without_the_package_is_degraded_and_unavailable(
@@ -413,7 +568,8 @@ async def test_the_real_profile_without_the_package_is_degraded_and_unavailable(
         ready = (await api.client.get("/readiness")).json()
 
         assert ready["state"] == "DEGRADED"
-        assert ready["capabilities"]["ml_worker"] == "UNAVAILABLE"
+        assert ready["capabilities"]["runtime_package"] == "UNAVAILABLE"
+        assert ready["capabilities"]["processing_policy"] == "READY"  # the policy is not the gap
 
 
 async def test_a_failing_close_still_releases_the_library(
@@ -432,4 +588,25 @@ async def test_a_failing_close_still_releases_the_library(
             pass
 
     with opened(world, clock, new_id) as again:  # the library lock was released: it opens again
+        assert again.unit_of_work is not None
+
+
+async def test_a_scheduler_that_will_not_drain_still_stops_the_workers_and_frees_the_library(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def refuses(_self: Any) -> None:
+        raise RuntimeError("the drain failed")
+
+    monkeypatch.setattr(SchedulerService, "stop", refuses)
+    install_package(world, clock, new_id)
+    write_policy(world)
+    pool = RecordingPool()
+    app, secret = application(world, pool)
+
+    with pytest.raises(RuntimeError, match="the drain failed"):
+        async with serving(app, secret, world.folder.parent / "files", clock):
+            pass
+
+    assert pool.closed == 1  # the workers were still stopped
+    with opened(world, clock, new_id) as again:  # and the library lock was released
         assert again.unit_of_work is not None
