@@ -18,7 +18,7 @@ releases the library lock.
 import asyncio
 import threading
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import (
     AbstractAsyncContextManager,
     AbstractContextManager,
@@ -52,6 +52,7 @@ from backend.app.runtime.worker_config import PerceptionPlan, plan_perception
 from backend.infrastructure.db.unit_of_work import TransactionRetry
 
 NOT_CONFIGURED: Final = "NOT_CONFIGURED"
+UNAVAILABLE: Final = "UNAVAILABLE"  # a capability the library needs cannot be provided here
 
 
 class LifecycleState(StrEnum):
@@ -113,9 +114,12 @@ class ProcessingSettings:
     planner: PerceptionPlanner = plan_perception
     # Runs once the library has opened and recovery is done, before the scheduler starts (the
     # development profile registers its catalog here). A failure leaves the backend FAILED.
-    prepare: Callable[[OpenLibrary], None] | None = None
+    # It may return capability updates for `/readiness` (the real profile reports `ml_worker`).
+    prepare: Callable[[OpenLibrary], Mapping[str, str] | None] | None = None
     # The profile the library is opened as; a library of the other profile is refused (issue 137).
     profile: LibraryProfile = LibraryProfile.REAL
+    # Runs at shutdown, after the scheduler has stopped (the real profile stops its workers).
+    close: Callable[[], None] | None = None
 
 
 def capabilities_from(report: StartupReport) -> dict[str, str]:
@@ -262,7 +266,11 @@ class Backend:
         if self.scheduler is not None:
             await self.scheduler.stop()
         self.state = LifecycleState.SHUTTING_DOWN
-        await anyio.to_thread.run_sync(self._close)
+        try:
+            if self.processing is not None and self.processing.close is not None:
+                await anyio.to_thread.run_sync(self.processing.close)  # blocking: workers stop
+        finally:  # the library lock is released whatever the workers did
+            await anyio.to_thread.run_sync(self._close)
 
     def _open(self) -> None:
         """Open the library (blocking: migrations and recovery). Runs in a worker thread."""
@@ -290,13 +298,15 @@ class Backend:
                 claim_library_profile(library, profile, settings.clock)
                 self.capabilities = capabilities_from(library.startup)
                 if self.processing is not None and self.processing.prepare is not None:
-                    self.processing.prepare(library)
+                    self.capabilities.update(self.processing.prepare(library) or {})
             except Exception as error:  # noqa: BLE001 - an unreadable report or a profile that
                 # cannot register itself is FAILED, not a crash
                 self.failure = type(error).__name__
                 self.state = LifecycleState.FAILED
             else:
-                degraded = any(value == "DEGRADED" for value in self.capabilities.values())
+                degraded = any(
+                    value in ("DEGRADED", UNAVAILABLE) for value in self.capabilities.values()
+                )
                 self.state = LifecycleState.DEGRADED if degraded else LifecycleState.READY
         finally:
             self.settled.set()

@@ -37,6 +37,7 @@ import uvicorn
 
 from backend.api.app import WEBSOCKET_PROTOCOL, LaunchTokenError, validate_launch_token
 from backend.api.development import development_processing
+from backend.api.real import providers_from, real_processing
 from backend.api.startup import (
     PROVISIONAL_MAX_BYTES,
     PROVISIONAL_MAX_PIXELS,
@@ -219,7 +220,9 @@ async def serve(
     app = create_backend_app(
         token,
         library,
-        development_processing(library) if options.development_profile else None,
+        development_processing(library)
+        if options.development_profile
+        else real_processing(library, providers=providers_from(os.environ)),
         MediaLimits(PROVISIONAL_MAX_PIXELS, PROVISIONAL_MAX_BYTES),
     )
     listener = _loopback_listener()  # from here on, whatever happens, it is closed below
