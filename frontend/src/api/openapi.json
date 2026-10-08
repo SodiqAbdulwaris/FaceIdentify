@@ -836,6 +836,10 @@
       "PolicyProvenance": {
         "description": "What the run's frozen configuration says about its decision policy, so a screen can tell\nthe user when results come from an uncalibrated, non-release policy (plan decision 1).",
         "properties": {
+          "automatic_matching": {
+            "title": "Automatic Matching",
+            "type": "boolean"
+          },
           "calibrated": {
             "title": "Calibrated",
             "type": "boolean"
@@ -859,7 +863,8 @@
         "required": [
           "calibration_mode",
           "decision_policy_version",
-          "calibrated"
+          "calibrated",
+          "automatic_matching"
         ],
         "title": "PolicyProvenance",
         "type": "object"

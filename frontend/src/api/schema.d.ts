@@ -815,6 +815,8 @@ export interface components {
          *     the user when results come from an uncalibrated, non-release policy (plan decision 1).
          */
         PolicyProvenance: {
+            /** Automatic Matching */
+            automatic_matching: boolean;
             /** Calibrated */
             calibrated: boolean;
             /** Calibration Mode */

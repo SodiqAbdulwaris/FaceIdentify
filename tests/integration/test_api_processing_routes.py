@@ -9,6 +9,7 @@ import uuid
 from dataclasses import replace
 from typing import Any
 
+import pytest
 from sqlalchemy import update
 
 from backend.api.pagination import encode_cursor
@@ -79,6 +80,7 @@ async def test_processing_a_source_is_accepted_tracked_and_completed(processing_
         "calibration_mode": "UNCALIBRATED",
         "decision_policy_version": "m3-fixture-v1",
         "calibrated": False,
+        "automatic_matching": True,
     }
     run = await finished(api, accepted["id"])
     assert run["job"]["state"] == "COMPLETED"
@@ -270,7 +272,10 @@ async def test_a_run_frozen_with_a_calibrated_policy_is_not_marked_uncalibrated(
     assert api.backend.library is not None
     with api.backend.library.session_factory() as session:
         build = ModelFactory(session, clock, new_id)
-        frozen = {"calibration": {"mode": "CALIBRATED"}, "decision_policy": {}}
+        frozen = {
+            "calibration": {"mode": "CALIBRATED"},
+            "decision_policy": {"match_threshold": 0.5},
+        }
         snapshot = build.snapshot(canonical_json=frozen)
         run = build.run(
             source_id=uuid.UUID(source["id"]),
@@ -286,7 +291,35 @@ async def test_a_run_frozen_with_a_calibrated_policy_is_not_marked_uncalibrated(
         "calibration_mode": "CALIBRATED",
         "decision_policy_version": None,
         "calibrated": True,
+        "automatic_matching": True,
     }
+
+
+@pytest.mark.parametrize(("threshold", "enabled"), [(1.0, True), (1.01, False), (2.0, False)])
+async def test_a_run_says_whether_its_policy_can_match_automatically(
+    processing_api: Api, clock: FrozenClock, new_id: SeededUUIDs, threshold: float, enabled: bool
+) -> None:
+    api = processing_api
+    source = await imported(api, path=str(api.image()))
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        build = ModelFactory(session, clock, new_id)
+        frozen = {
+            "calibration": {"mode": "UNCALIBRATED"},
+            "decision_policy": {"match_threshold": threshold, "version": "abstain-only-v1"},
+        }
+        snapshot = build.snapshot(canonical_json=frozen)
+        run = build.run(
+            source_id=uuid.UUID(source["id"]),
+            configuration_snapshot_id=snapshot.id,
+            state="COMPLETED",
+        )
+        session.commit()
+        run_id = run.id
+
+    policy = (await api.client.get(f"{RUNS}/{run_id}")).json()["policy"]
+
+    assert policy["automatic_matching"] is enabled  # above 1 no similarity can reach it
 
 
 async def test_a_jobs_progress_is_reported_once_recorded(processing_api: Api) -> None:
