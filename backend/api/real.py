@@ -58,6 +58,7 @@ from backend.app.runtime.registration import (
     EMBEDDER,
     RegisteredPackage,
     RegistrationError,
+    mark_missing_installations,
     register_package,
 )
 from backend.app.runtime.worker_config import PerceptionPlan
@@ -212,6 +213,9 @@ def real_processing(
     def prepare(library: OpenLibrary) -> dict[str, str]:
         registered.clear()  # what is known is rebuilt from what is installed now
         store[:] = [library.packages]
+        # Installation records follow the disk before anything is registered: a package that left
+        # this machine is MISSING, and registering what is installed reinstates what came back.
+        library.unit_of_work.write(mark_missing_installations)
         for package in library.packages.installed():
             try:
                 registered[package.key] = _register(library, package, settings)
