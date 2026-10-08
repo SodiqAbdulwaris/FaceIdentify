@@ -92,6 +92,42 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 > stay raw cosine, so the mode stays `UNCALIBRATED` and the UI notice says what was measured and its
 > limits. No `CALIBRATED` mode is built.
 
+> **Decision 2026-10-08:** **Owner confirmations of the abstain-only agent designs** (recorded; the
+> policy choices stay versioned and their provenance is kept):
+>
+> 1. *First face.* An abstain-only policy disables automatic matching to **existing** identities, not
+>    automatic identity creation: the first face creates a persistent unnamed identity. No automatic
+>    merging and no assignment to an existing identity happens under the disabled policy. *Agent
+>    reading, flagged for the owner:* a later face that has candidates but is not matched **abstains**
+>    (reason `UNCERTAIN_SIMILARITY`) and waits for manual resolution, where "this is someone new" makes
+>    its own identity; the disabled policy's new-identity ceiling is -1.0, so a weak score never creates
+>    an identity by itself (the R4 text: scores below the threshold abstain). Creating an identity for
+>    every unmatched face would fragment one person into many; say if that is wanted instead.
+> 2. *Disabled matching* (conditionally approved): `match_threshold` above 1.0 stays the representation
+>    of "automatic matching disabled", on these conditions, now met: similarities are bounded centrally
+>    (`RetrievedCandidate.similarity` holds a cosine to -1..1, so nothing can reach a threshold above 1;
+>    the bound is the cosine's own range, -1 to 1, not 0 to 1, because a negative cosine is meaningful);
+>    enforcement is central (`DecisionPolicy` validation and `DecisionPolicy.automatic_matching`); the
+>    run's policy provenance reports `automatic_matching` and the interface shows "Automatic matching
+>    disabled". A separate `auto_match_enabled` setting is preferable long-term and is **not** built now.
+> 3. *REST routes:* approved in principle. The paths exist and are in the generated contract
+>    (`frontend/src/api/openapi.json`): corrections `POST /occurrences/{id}/confirm` and
+>    `/reassign`; unplaced faces `GET /sources/{id}/unresolved-faces` and `POST
+>    /representations/{id}/resolve`; `POST /identities/merge`; `POST /identities/{id}/split`; people
+>    `POST/GET /people`, `PATCH /people/{id}`, `POST /people/{id}/assign-identity` and
+>    `/remove-identity`. They are listed again for final confirmation in the pull request.
+> 4. *Rename events* carry the stable entity id and the new revision, never the name; REST stays
+>    authoritative (`person.updated` now has `data.revision`).
+> 5. *`--minimum-recall 0.5`* is a configurable evaluation usefulness target (it replaces the
+>    conservative rule's predeclared 0.25). Precision and false-accept safety outrank it, and missing
+>    it never relaxes a threshold: it only disables automatic acceptance.
+> 6. *Wording:* embedding similarity is never described as "% alike". The interface says "Similarity
+>    score", states that it is not a probability of identity, and shows ranked possible matches
+>    (highest score first) rather than implying certainty.
+>
+> Regression tests for the abstain-only behavior (first-face creation, later observations, restart
+> persistence) are in `tests/integration/test_api_development_profile.py`.
+
 > **Decision 2026-10-07:** **R4's operating point is conservative and provisional.** After the
 > first measurement (the point chosen on the selection half reached 100% precision there and 78.4% on
 > the held-out half), the owner decided: choose the threshold above the observed different-person tail
