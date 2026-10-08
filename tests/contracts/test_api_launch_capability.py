@@ -160,6 +160,19 @@ async def test_readiness_is_authenticated_and_uses_the_current_capability_only()
     assert response.json() == {"state": "DEGRADED"}
 
 
+async def test_readiness_names_the_packages_the_library_needs_when_any_are_missing() -> None:
+    token = _token()
+    ready = BackendReadiness("DEGRADED", missing_dependencies=("insightface-buffalo-l 1.0.0",))
+    app = create_app(token, readiness=lambda: ready)
+
+    response = await _request(app, "/readiness", {"Authorization": f"Bearer {token}"})
+
+    assert response.json() == {
+        "state": "DEGRADED",
+        "missing_dependencies": ["insightface-buffalo-l 1.0.0"],
+    }
+
+
 async def test_websocket_requires_the_same_capability_without_echoing_it() -> None:
     token = _token()
     app = create_app(token)

@@ -10,10 +10,12 @@ import asyncio
 import base64
 import json
 import secrets
+import shutil
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -34,16 +36,20 @@ from backend.api.real import (
 )
 from backend.api.scheduler import SchedulerService
 from backend.api.startup import (
+    Backend,
     MediaLimits,
+    ProcessingSettings,
     ProcessingUnavailableError,
     create_backend_app,
 )
 from backend.app.lifecycle import OpenLibrary, open_library
+from backend.app.memory.models import RepresentationSpace
 from backend.app.processing.configuration import ProcessingRequestV1
 from backend.app.runtime.models import RuntimePackageInstallation
 from backend.app.runtime.perception_client import Detected, FaceVector, Represented
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.ml.contracts.messages import Detection
+from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, imported, library_settings, serving
 from tests.fixtures.catalog_packages import manifest_dict, package_files
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
@@ -300,7 +306,10 @@ def test_the_profile_registers_the_package_and_builds_the_request_from_catalog_a
     processing = real_processing(world.settings, package_key=KEY)
     with opened(world, clock, new_id) as library:
         assert processing.prepare is not None
-        assert processing.prepare(library) == {"runtime_package": "READY"}
+        assert processing.prepare(library) == {
+            "runtime_package": "READY",
+            "library_packages": "READY",
+        }
 
         request = library.unit_of_work.read(processing.request_for)
 
@@ -339,13 +348,19 @@ def test_without_the_package_or_a_valid_policy_nothing_is_decided(
     processing = real_processing(world.settings, package_key=KEY)
     assert processing.prepare is not None
     with opened(world, clock, new_id) as library:
-        assert processing.prepare(library) == {"runtime_package": "UNAVAILABLE"}  # nothing there
+        assert processing.prepare(library) == {
+            "runtime_package": "UNAVAILABLE",
+            "library_packages": "READY",
+        }  # nothing there
         with pytest.raises(ProcessingUnavailableError, match="is not installed"):
             library.unit_of_work.read(processing.request_for)
 
         source = package_files(world.folder.parent / "again", manifest_dict(KEY))
         library.packages.install(source, {})
-        assert processing.prepare(library) == {"runtime_package": "READY"}  # found, registered
+        assert processing.prepare(library) == {
+            "runtime_package": "READY",
+            "library_packages": "READY",
+        }  # found, registered
         with pytest.raises(ProcessingUnavailableError, match="no measured decision policy"):
             library.unit_of_work.read(processing.request_for)  # no policy file: still nothing
 
@@ -400,7 +415,7 @@ def test_a_package_removed_after_start_is_not_used_and_prepare_forgets_it(
             library.unit_of_work.read(processing.request_for)
         assert processing.capabilities()["runtime_package"] == "UNAVAILABLE"
         forgotten = processing.prepare(library)  # and a fresh start forgets it
-        assert forgotten == {"runtime_package": "UNAVAILABLE"}
+        assert forgotten == {"runtime_package": "UNAVAILABLE", "library_packages": "READY"}
         # The catalog says so too: the package's installation record follows the disk.
         with library.session_factory() as session:
             states = [r.state for r in session.scalars(select(RuntimePackageInstallation))]
@@ -421,7 +436,10 @@ def test_a_damaged_package_that_is_not_the_one_we_run_does_not_take_the_library_
         damaged = library.packages.install(other, {}).path
         (damaged / "models" / "detector.onnx").write_bytes(b"swapped after the install")
 
-        assert processing.prepare(library) == {"runtime_package": "READY"}  # the library carries on
+        assert processing.prepare(library) == {
+            "runtime_package": "READY",
+            "library_packages": "READY",
+        }  # the library carries on
         assert library.unit_of_work.read(processing.request_for)["schema_version"] == 1
 
 
@@ -434,7 +452,10 @@ def test_the_selected_package_being_damaged_makes_it_unavailable_not_the_library
     processing = real_processing(world.settings, package_key=KEY)
     assert processing.prepare is not None
     with opened(world, clock, new_id) as library:
-        assert processing.prepare(library) == {"runtime_package": "UNAVAILABLE"}
+        assert processing.prepare(library) == {
+            "runtime_package": "UNAVAILABLE",
+            "library_packages": "READY",
+        }
         with pytest.raises(ProcessingUnavailableError, match="is not installed"):
             library.unit_of_work.read(processing.request_for)
 
@@ -616,3 +637,54 @@ async def test_a_scheduler_that_will_not_drain_still_stops_the_workers_and_frees
     assert pool.closed == 1  # the workers were still stopped
     with opened(world, clock, new_id) as again:  # and the library lock was released
         assert again.unit_of_work is not None
+
+
+def test_the_profile_reports_the_packages_the_librarys_own_vectors_need(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    installed = install_package(world, clock, new_id)
+    write_policy(world)
+    processing = real_processing(world.settings, package_key=KEY)
+    assert processing.prepare is not None
+    assert processing.capabilities is not None
+    assert processing.dependencies is not None
+    with opened(world, clock, new_id) as library:
+        assert processing.prepare(library) == {
+            "runtime_package": "READY",
+            "library_packages": "READY",
+        }
+        with library.session_factory() as session:
+            space = session.scalars(select(RepresentationSpace)).one()
+            build = ModelFactory(session, clock, new_id)
+            build.representation(representation_space_id=space.id, state="ACTIVE", ann_key=1)
+            session.commit()
+        assert processing.dependencies() == []
+
+        shutil.rmtree(installed)  # the package that made the vectors leaves this machine
+
+        # The next start sweeps the catalog and says so: the app opens DEGRADED, naming the package.
+        assert processing.prepare(library) == {
+            "runtime_package": "UNAVAILABLE",
+            "library_packages": "UNAVAILABLE",
+        }
+        assert processing.dependencies() == [f"{KEY} 1.0.0"]
+        assert processing.capabilities()["library_packages"] == "UNAVAILABLE"
+
+
+def test_the_backends_readiness_carries_the_dependencies_the_profile_reports(
+    world: World,
+) -> None:
+    processing = ProcessingSettings(
+        client_for=lambda _plan: None,
+        request_for=lambda _session: {},
+        max_pixels=1,
+        recognition_k=1,
+        lease_for=timedelta(minutes=1),
+        idle_seconds=1.0,
+        owner="test",
+        dependencies=lambda: [f"{KEY} 1.0.0"],
+    )
+    backend = Backend(world.settings, processing)
+
+    assert backend.readiness().missing_dependencies == (f"{KEY} 1.0.0",)
+    assert Backend(world.settings).readiness().missing_dependencies == ()  # nothing configured
