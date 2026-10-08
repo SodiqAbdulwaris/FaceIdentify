@@ -44,12 +44,20 @@ Registering the same package again (same key, same manifest, same place) finds w
 returns the same ids; a different manifest under the same key is refused. The same package at
 another place (the library opened on another machine) records that installation and shares every
 other row. One code path does both: nothing is "rebuilt".
+
+Installation records follow the disk (issue 80). `mark_missing_installations` moves an `INSTALLED`
+package or export record to `MISSING` when its file is no longer on this machine, by existence alone
+(one `stat` each, like the startup check of referenced originals); a package that was removed is
+reported, never replaced by another. Registering again is the only way back: it verifies every
+byte against the manifest and then reinstates a `MISSING` record (and its artifact), so a file that
+merely reappeared, or was swapped, is never trusted.
 """
 
 import hashlib
 import json
+import stat
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -85,6 +93,7 @@ DETECTOR = "FACE_DETECTOR"
 EMBEDDER = "FACE_REPRESENTATION"
 REGISTERED = "REGISTERED"
 INSTALLED = "INSTALLED"
+MISSING = "MISSING"
 DECLARED = "DECLARED"
 VALIDATED = "VALIDATED"  # (set by the later equivalence validation, never by registration)
 FINGERPRINT_SCHEME = "rs1"
@@ -214,6 +223,21 @@ class _Registrar:
         )
         return RegisteredPackage(row.id, installation.id, exports)
 
+    def _reinstate(self, record: RuntimePackageInstallation | InstalledModelExport) -> None:
+        """A `MISSING` record is installed again: registration has just verified the files."""
+        if record.state != MISSING:
+            return
+        record.state = INSTALLED
+        record.verified_at = self.now
+        record.failure_detail = None
+        artifact = self.session.get(Artifact, record.artifact_id)
+        if artifact is not None and artifact.state == ArtifactState.MISSING:
+            artifact.state = ArtifactState.AVAILABLE
+            artifact.failure_code = None
+            artifact.failure_detail = None
+            artifact.available_at = self.now
+        self.session.flush()
+
     def _installation(
         self, row: RuntimePackage, manifest_bytes: bytes
     ) -> RuntimePackageInstallation:
@@ -229,6 +253,7 @@ class _Registrar:
             .where(Artifact.external_path == path)
         )
         if found is not None:
+            self._reinstate(found)
             return found
         artifact = self._artifact(
             ArtifactKind.RUNTIME_PACKAGE,
@@ -343,7 +368,9 @@ class _Registrar:
             .join(Artifact, Artifact.id == InstalledModelExport.artifact_id)
             .where(Artifact.external_path == str(path))
         )
-        if installed is None:  # (this location is new: the weights may be known from another)
+        if installed is not None:
+            self._reinstate(installed)
+        else:  # (this location is new: the weights may be known from another)
             artifact = artifact or self._model_artifact(spec, path)
             installed = self.catalog.add(
                 InstalledModelExport(
@@ -434,6 +461,56 @@ class _Registrar:
         elif space.contract_json != record:
             raise RegistrationError(f"space {key} is registered with another identity record")
         return space.id
+
+
+@dataclass(frozen=True, slots=True)
+class InstallationSweep:
+    """What `mark_missing_installations` changed."""
+
+    packages: int  # package installations marked MISSING
+    exports: int  # model-export installations marked MISSING
+
+
+def mark_missing_installations(session: Session) -> InstallationSweep:
+    """Mark every `INSTALLED` package or export record whose file is gone `MISSING`.
+
+    By existence alone: no file is read. A file that is present but cannot be examined (denied, an
+    unreachable drive) is left alone, because that is not evidence it is gone. Nothing is deleted
+    and no record is ever moved back here: only `register_package` reinstates one, after verifying
+    the bytes. Runs in the caller's transaction (it flushes, it never commits).
+    """
+    return InstallationSweep(
+        _demote(session, session.scalars(_installed(RuntimePackageInstallation)).all(), "package"),
+        _demote(session, session.scalars(_installed(InstalledModelExport)).all(), "model file"),
+    )
+
+
+def _installed(model: type[RuntimePackageInstallation] | type[InstalledModelExport]) -> Any:
+    return select(model).where(model.state == INSTALLED).order_by(model.id)
+
+
+def _demote(
+    session: Session,
+    records: Sequence[RuntimePackageInstallation | InstalledModelExport],
+    what: str,
+) -> int:
+    demoted = 0
+    for record in records:
+        artifact = session.get(Artifact, record.artifact_id)
+        assert artifact is not None  # (a foreign key)
+        try:
+            present = stat.S_ISREG(Path(str(artifact.external_path)).stat().st_mode)
+        except FileNotFoundError:
+            present = False
+        except OSError:
+            continue  # cannot be examined: not evidence that it is gone
+        if present and artifact.state == ArtifactState.AVAILABLE:
+            continue
+        record.state = MISSING
+        record.failure_detail = f"the {what} is not on this machine"
+        demoted += 1
+    session.flush()
+    return demoted
 
 
 def register_package(
