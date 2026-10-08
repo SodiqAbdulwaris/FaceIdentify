@@ -94,6 +94,28 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 > stay raw cosine, so the mode stays `UNCALIBRATED` and the UI notice says what was measured and its
 > limits. No `CALIBRATED` mode is built.
 
+> **Decision 2026-10-08 (owner): assisted and automatic recognition are separate capabilities.**
+> 1. *Cross-source recognition now is assisted:* ranked possible matches plus manual confirmation
+>    (option 1 of `M5_REMAINING_WORK.md`). Option 2, earning automatic matching with verified evidence,
+>    is pursued in parallel. Automatic identity assignment stays disabled until a verified evaluation
+>    shows the conservative precision requirement is met.
+> 2. *TST-057 is split.* **TST-057A (assisted cross-source recognition)** is validated by ranked
+>    retrieval metrics (Recall@1, Recall@5, MRR) over real images from independent sources, plus manual
+>    confirmation, including persistence after a restart. **TST-057B (automatic cross-source
+>    recognition)** is `BLOCKED pending calibration` and is never claimed as passed while automatic
+>    matching is disabled. The original requirement is not weakened: it is kept as TST-057B.
+> 3. *Evaluation labels:* a lightweight local review utility for doubtful same-person/different-person
+>    pairs is built (track R, step R5). It preserves reviewed labels, reviewer decisions and evaluation
+>    provenance. Reviewed calibration examples are never reused as an untouched final test set. The
+>    agent asks the owner for the dataset requirements when that work begins.
+> 4. Steps 1 to 7 proceed as planned and do not wait on calibration.
+> 5. *Permanent deletion:* retained Evidence must not expose deleted biometric material or weaken the
+>    erasure guarantees; tests assert retained provenance against removed biometric payloads.
+> 6. *Face search:* ranking and retrieval settings are independent of the automatic-matching
+>    thresholds; a query-only search never persists biometric observations or identities.
+> 7. *M5 completion:* the assisted-recognition workflow may pass its own acceptance gate while
+>    automatic recognition remains explicitly disabled and unverified (TST-057B blocked).
+
 > **Decision 2026-10-08:** **Owner confirmations of the abstain-only agent designs** (recorded; the
 > policy choices stay versioned and their provenance is kept):
 >

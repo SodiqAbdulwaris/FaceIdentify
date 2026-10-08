@@ -23,13 +23,20 @@ Parked on a stash (`feat/real-host-wiring`): `backend/api/real.py` and its host 
 | 5 | **Step 4c: `ForgetIdentity` and "forget person"**: the only operation removing biometric memory; Person record and name kept; `IDENTITY_FORGOTTEN` Evidence kept; resurrection impossible after processing, index rebuild and restart | 4 | TST-059 and SEC-006 `PASSING` (byte-level) | no (decided 2026-10-07) |
 | 6 | **Step 5a: historical and name/person search** over authoritative data, recycled-source Occurrences included, marked and filterable | 3 | TST-055 `PASSING`; search screen | no (read `universal-search-and-retrieval-architecture-v1.md` first; ask only where it is silent) |
 | 7 | **Step 5b: face search** (query-only; never persists; ranked possible matches with similarity scores, no thresholds needed) | 2 | TST-056 `PASSING` including after a restart | no |
-| 8 | **Cross-source recognition and the M5 real-world gate** | 2, 5, 7 and the decision in section 3 | TST-057 and the gate recorded with evidence | **yes** (section 3) |
+| 8 | **Assisted cross-source recognition and the M5 real-world gate**: TST-057A (Recall@1, Recall@5, MRR on real independent-source images, manual confirmation, persistence after restart); the gate runs the assisted workflow with automatic matching explicitly disabled. TST-057B (automatic recognition) stays `BLOCKED pending calibration` and is not claimed | 2, 5, 7 | TST-057A `PASSING` and the gate recorded with evidence; TST-057B recorded as blocked | no |
+| R5 | **Label-review utility** (parallel, after 2): a lightweight local tool to review doubtful same-person/different-person pairs; keeps reviewed labels, reviewer decisions and evaluation provenance; reviewed calibration examples are never reused as the untouched final set; re-run the measurement on the reviewed set | 2 | tool + tests + a re-run; a policy that passes the conservative rule enables matching (TST-057B) | **yes: the agent asks for the dataset requirements when it starts** |
 
 Every step is its own branch and small PRs, mutation-tested guards, the full gate, an independent
 Codex review answered before merge, CI green on the exact head, and the usual documentation (entry,
 `CONTEXT.md`, `PROJECT_STATUS.md`, tracker, licensing row for anything new).
 
-## 3. The one real contradiction, for the owner
+## 3. The contradiction, and how the owner resolved it (2026-10-08)
+
+**Resolved:** option 1 now, option 2 in parallel; TST-057 is split into assisted (TST-057A) and
+automatic (TST-057B, blocked pending calibration). The text below is kept as the record of the
+question; the decision is in `M5_PLAN.md`.
+
+### The question as asked
 
 TST-057 and the M5 gate say real images of the same person from independent sources are "recognised
 under the initial calibrated policy". The measured result and the owner's rule leave **automatic
@@ -49,7 +56,9 @@ recognise anyone by itself. The two cannot both hold. Options, in the agent's or
 3. **Change the definition of done** for TST-057 by owner decision (not recommended: it weakens the
    row).
 
-Steps 1 to 7 do not depend on this; only step 8 does. Until it is decided the agent works steps 2 to 7.
+Steps 1 to 7 do not depend on calibration. Step 5's permanent-delete tests also assert that retained
+Evidence exposes no deleted biometric material, and step 7's face search keeps ranking independent of
+the matching thresholds and persists nothing.
 
 ## 4. Smaller follow-ups (no owner input needed)
 
@@ -70,6 +79,6 @@ Steps 1 to 7 do not depend on this; only step 8 does. Until it is decided the ag
 
 ## 6. Questions waiting for the owner (batched)
 
-1. Section 3: which option for cross-source recognition?
-2. If option 2: how many photographs, from where, and will you review the doubtful label pairs?
-3. Still unconfirmed agent designs: none outstanding from the 2026-10-08 confirmations.
+1. When R5 begins: the label-review dataset requirements (how many photographs, from where, who
+   reviews, the review rules). The agent asks then.
+2. Nothing else is outstanding.
