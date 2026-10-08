@@ -169,7 +169,11 @@ async def test_without_the_development_profile_importing_works_and_processing_is
         assert refused.status_code == 503
         assert refused.json()["error"]["code"] == "PROCESSING_UNAVAILABLE"
         ready = (await client.get("/readiness")).json()
-        assert ready["capabilities"]["scheduler"] == "NOT_CONFIGURED"
+        # The real profile with no package and no measured policy: the scheduler runs (there is
+        # nothing to claim) and the worker is reported unavailable, never substituted.
+        assert ready["capabilities"]["scheduler"] == "READY"
+        assert ready["capabilities"]["ml_worker"] == "UNAVAILABLE"
+        assert ready["state"] == "DEGRADED"
 
 
 def test_the_flag_is_off_by_default_and_on_when_asked(tmp_path: Path) -> None:
