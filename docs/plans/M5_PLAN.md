@@ -95,6 +95,11 @@ reassignment, merge and split exist (M1, `backend/app/identities/use_cases.py`,
 > **Decision 2026-10-08:** **Owner confirmations of the abstain-only agent designs** (recorded; the
 > policy choices stay versioned and their provenance is kept):
 >
+> **Final 2026-10-08:** items 1 to 3 below are settled without reopening: ABSTAIN does not mean NEW
+> IDENTITY (abstain-first once identities exist; no identity for every unmatched face), scores are
+> bounded to [-1, 1] so a threshold above 1.0 disables matching, and the eleven routes are approved
+> as listed. The paragraph that follows records the earlier agent reading, now the owner's rule.
+>
 > 1. *First face.* An abstain-only policy disables automatic matching to **existing** identities, not
 >    automatic identity creation: the first face creates a persistent unnamed identity. No automatic
 >    merging and no assignment to an existing identity happens under the disabled policy. *Agent

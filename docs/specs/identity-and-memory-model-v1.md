@@ -87,6 +87,23 @@ Unknown / no acceptable match
 
 Unknown rejection is a core requirement.
 
+> **Decision 2026-10-08 (owner): ABSTAIN does not mean NEW IDENTITY.** The first detected face in an
+> empty library (nothing retrievable to compare with) may automatically create an unnamed identity.
+> Once identities exist, a face that cannot be safely matched **abstains** rather than creating another
+> identity, however weak its best score: automatic identity creation never fills the gap that
+> automatic matching leaves, because that fragments one person into many. An unresolved face stays
+> available for manual resolution: confirm an existing identity, or "this is someone new". Manual
+> creation associates the face's observation and representation with the new identity, creates its
+> occurrence, and writes a `USER_CORRECTION` Evidence row (`RESOLVE_NEW`) that cites the earlier
+> `RECOGNITION_ABSTAINED` Evidence, which is never rewritten. No face is ever given an identity
+> automatically merely because it was unmatched.
+>
+> Raw cosine similarity is bounded to [-1, 1]. A `match_threshold` above 1.0 therefore cannot be
+> reached and **disables automatic matching** (the policy is still versioned and its provenance kept).
+> The interface shows "Automatic matching disabled" for such a run and never presents a threshold above
+> 1 as a similarity score. A separate `auto_match_enabled` setting is preferable long-term and is not
+> built now.
+
 ### 2.6 Evidence and corrections are authoritative; optimized machine state is derived
 
 Persistent evidence and explicit user corrections are the authoritative memory foundation.
