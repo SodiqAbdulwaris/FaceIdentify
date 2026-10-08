@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 import pytest
 from PIL import Image
+from sqlalchemy import select
 
 from backend.api.real import (
     PACKAGE_KEY,
@@ -39,6 +40,7 @@ from backend.api.startup import (
 )
 from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.processing.configuration import ProcessingRequestV1
+from backend.app.runtime.models import RuntimePackageInstallation
 from backend.app.runtime.perception_client import Detected, FaceVector, Represented
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.ml.contracts.messages import Detection
@@ -399,6 +401,10 @@ def test_a_package_removed_after_start_is_not_used_and_prepare_forgets_it(
         assert processing.capabilities()["runtime_package"] == "UNAVAILABLE"
         forgotten = processing.prepare(library)  # and a fresh start forgets it
         assert forgotten == {"runtime_package": "UNAVAILABLE"}
+        # The catalog says so too: the package's installation record follows the disk.
+        with library.session_factory() as session:
+            states = [r.state for r in session.scalars(select(RuntimePackageInstallation))]
+        assert states == ["MISSING"]
         with pytest.raises(ProcessingUnavailableError, match="is not installed"):
             library.unit_of_work.read(processing.request_for)
 
