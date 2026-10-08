@@ -116,6 +116,8 @@ class ProcessingSettings:
     # development profile registers its catalog here). A failure leaves the backend FAILED.
     # It may return capability updates for `/readiness` (the real profile reports `ml_worker`).
     prepare: Callable[[OpenLibrary], Mapping[str, str] | None] | None = None
+    # Live capabilities merged into every `/readiness` answer (the real profile's worker state).
+    capabilities: Callable[[], Mapping[str, str]] | None = None
     # The profile the library is opened as; a library of the other profile is refused (issue 137).
     profile: LibraryProfile = LibraryProfile.REAL
     # Runs at shutdown, after the scheduler has stopped (the real profile stops its workers).
@@ -172,6 +174,8 @@ class Backend:
 
     def readiness(self) -> BackendReadiness:
         capabilities = dict(self.capabilities)
+        if self.processing is not None and self.processing.capabilities is not None:
+            capabilities.update(self.processing.capabilities())
         scheduler = self.scheduler
         if scheduler is not None:
             if not scheduler.running:
@@ -263,12 +267,14 @@ class Backend:
         return run_once
 
     async def _shutdown(self) -> None:
-        if self.scheduler is not None:
-            await self.scheduler.stop()
         self.state = LifecycleState.SHUTTING_DOWN
         try:
-            if self.processing is not None and self.processing.close is not None:
-                await anyio.to_thread.run_sync(self.processing.close)  # blocking: workers stop
+            try:
+                if self.scheduler is not None:
+                    await self.scheduler.stop()
+            finally:  # the workers stop whatever the drain did
+                if self.processing is not None and self.processing.close is not None:
+                    await anyio.to_thread.run_sync(self.processing.close)  # blocking
         finally:  # the library lock is released whatever the workers did
             await anyio.to_thread.run_sync(self._close)
 
