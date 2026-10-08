@@ -26,7 +26,6 @@ import secrets
 import shutil
 import sqlite3
 import uuid
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -57,21 +56,23 @@ def needs_local_models() -> None:
         pytest.skip(f"no test pictures in {IMAGES}")
 
 
-@pytest.fixture(autouse=True)
-def clean_indexes() -> Iterator[None]:
-    """The vector indexes live in the machine-local state this test shares with the real models, so
-    the test removes the ones it made (and uses random ids: a seeded id would give every run's
-    library the same space id, and so the same index folder, and stale vectors would be found)."""
-    before = set((STATE / "indexes").glob("*")) if (STATE / "indexes").exists() else set()
-    yield
-    if (STATE / "indexes").exists():
-        for folder in set((STATE / "indexes").glob("*")) - before:
-            shutil.rmtree(folder, ignore_errors=True)
+def isolated_state(tmp_path: Path) -> Path:
+    """A private machine-local state for this test: a verified copy of the installed model package
+    and of the measured policy file. The test then never writes into the shared `local-models/state`
+    (its vector indexes, recovery and workspaces stay in the temporary folder)."""
+    state = tmp_path / "state"
+    installed = RuntimePackageStore(StorageRoots(Path(), STATE), new_id=uuid.uuid4).get(PACKAGE_KEY)
+    assert installed is not None
+    RuntimePackageStore(StorageRoots(Path(), state), new_id=uuid.uuid4).install(installed.path, {})
+    target = policy_path(state, PACKAGE_KEY)
+    target.parent.mkdir(parents=True)
+    shutil.copyfile(policy_path(STATE, PACKAGE_KEY), target)
+    return state
 
 
 def application(tmp_path: Path, clock: FrozenClock) -> tuple[Any, str]:
-    ids: Any = uuid.uuid4  # (random: see `clean_indexes`)
-    settings = replace(library_settings(tmp_path, clock, ids), local_state_root=STATE)
+    ids: Any = uuid.uuid4  # random ids, as in production
+    settings = replace(library_settings(tmp_path, clock, ids), local_state_root=tmp_path / "state")
     secret = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
     app = create_backend_app(
         secret,
@@ -106,15 +107,20 @@ async def test_real_photographs_through_the_real_host_rank_the_right_identity_fi
     tmp_path: Path, clock: FrozenClock
 ) -> None:
     needs_local_models()
+    isolated_state(tmp_path)
     app, secret = application(tmp_path, clock)
 
     async with serving(app, secret, tmp_path / "files-a", clock) as api:
         ready = (await api.client.get("/readiness")).json()
-        assert ready["capabilities"]["ml_worker"] == "READY"
+        assert ready["capabilities"]["runtime_package"] == "READY"
+        assert ready["capabilities"]["processing_policy"] == "READY"
+        assert ready["capabilities"]["ml_worker"] == "NOT_STARTED"  # a job starts it
 
         first = await imported(api, path=str(IMAGES / "collins1.jpg"))
         run = await process_and_wait(api, first["id"])
         assert run["policy"]["automatic_matching"] is False
+        ready = (await api.client.get("/readiness")).json()
+        assert ready["capabilities"]["ml_worker"] == "READY"  # started by the job, handshake done
         assert run["policy"]["decision_policy_version"] == "buffalo-l-abstain-only-v1"
         (identity,) = (await api.client.get("/api/v1/identities")).json()["items"]
         assert (await unresolved(api, first["id"])) == []  # the first face made the identity
