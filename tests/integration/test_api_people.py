@@ -196,11 +196,15 @@ async def test_every_change_to_a_person_is_announced_and_a_refusal_is_not(
     try:
         person = await named(api, first)
         url = f"{PEOPLE}/{person['id']}"
-        await api.client.patch(url, json={"display_name": "Alicia", "expected_revision": 1})
-        await api.client.post(f"{url}/assign-identity", json={"identity_id": second})
-        await api.client.post(f"{url}/remove-identity", json={"identity_id": second})
-        await api.client.patch(url, json={"display_name": "Late", "expected_revision": 1})  # stale
-        await api.client.post(PEOPLE, json={"display_name": "Again", "identity_id": first})  # named
+        renamed = await api.client.patch(
+            url, json={"display_name": "Alicia", "expected_revision": 1}
+        )
+        assigned = await api.client.post(f"{url}/assign-identity", json={"identity_id": second})
+        removed = await api.client.post(f"{url}/remove-identity", json={"identity_id": second})
+        stale = await api.client.patch(url, json={"display_name": "Late", "expected_revision": 1})
+        again = await api.client.post(PEOPLE, json={"display_name": "Again", "identity_id": first})
+        assert stale.status_code == 409  # refused: nothing is announced for it
+        assert again.status_code == 409  # already named: refused too
 
         events = []
         while not subscription.queue.empty():
@@ -213,5 +217,12 @@ async def test_every_change_to_a_person_is_announced_and_a_refusal_is_not(
     ] * 4
     # An event names the entity and its revision, never what it is called (REST is authoritative).
     assert all(set(e["data"]) == {"revision"} for e in events)
-    assert all(isinstance(e["data"]["revision"], int) for e in events)
+    # Each event's revision is the revision the successful REST response reported, in order.
+    assert [e["data"]["revision"] for e in events] == [
+        person["revision"],
+        renamed.json()["revision"],
+        assigned.json()["revision"],
+        removed.json()["revision"],
+    ]
+    assert renamed.json()["revision"] > person["revision"]  # a rename is a new revision
     assert "Late" not in json.dumps(events)

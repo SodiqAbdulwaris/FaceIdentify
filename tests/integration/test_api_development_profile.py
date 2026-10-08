@@ -346,6 +346,32 @@ async def occurrence_count(client: httpx.AsyncClient, source_id: str) -> int:
     return len(page["items"])
 
 
+def abstentions_on_record(tmp_path: Path) -> dict[str, tuple[str, str, list[str]]]:
+    """Every recorded abstention: id -> (payload, creation time, the representations it cites)."""
+    database = sqlite3.connect(tmp_path / "library" / "database" / "library.db")
+    try:
+        rows = database.execute(
+            "SELECT id, payload_json, created_at FROM evidence WHERE kind = 'RECOGNITION_ABSTAINED'"
+        ).fetchall()
+        return {
+            row[0]: (
+                row[1],
+                row[2],
+                sorted(
+                    r[0]
+                    for r in database.execute(
+                        "SELECT representation_id FROM evidence_representations"
+                        " WHERE evidence_id = ?",
+                        (row[0],),
+                    )
+                ),
+            )
+            for row in rows
+        }
+    finally:
+        database.close()
+
+
 async def test_under_abstain_only_the_first_face_creates_an_identity_and_no_later_face_is_matched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -398,38 +424,56 @@ async def test_under_abstain_only_the_first_face_creates_an_identity_and_no_late
         (still_waiting,) = await unresolved(client, fourth["id"])
 
         # Manual resolution still works: a person can say "this is someone new".
+        before = abstentions_on_record(tmp_path)
         placed = await client.post(
             f"/api/v1/representations/{still_waiting['representation_id']}/resolve",
             json={"identity_id": None},
         )
         assert placed.status_code == 200, placed.text
-        assert len(await identities(client)) == 2
+        everyone = await identities(client)
+        assert len(everyone) == 2
+        (new_identity,) = [i for i in everyone if i["id"] != identity["id"]]
         assert await unresolved(client, fourth["id"]) == []
         assert await occurrence_count(client, fourth["id"]) == 1  # the face now has its occurrence
 
-    # The evidence is preserved: no match was ever recorded, every abstention is still there
-    # (never rewritten), the first face made one identity, and the manual "someone new" is a
-    # user correction that cites the abstention it resolves.
+    # The evidence is preserved and exactly right. No match was ever recorded; the first face made
+    # one identity; every abstention is byte-for-byte what it was before the person resolved one;
+    # and the manual "someone new" is one user correction that cites the abstention of *this* face
+    # and ties this face's observation, representation and occurrence to the new identity.
+    after = abstentions_on_record(tmp_path)
+    assert after == before  # never rewritten, never removed, none added by the resolution
+    assert len(after) == 3  # the identical, the different, the third
     database = sqlite3.connect(tmp_path / "library" / "database" / "library.db")
     try:
         kinds = [row[0] for row in database.execute("SELECT kind FROM evidence")]
-        corrections = [
-            json.loads(row[0])
-            for row in database.execute(
-                "SELECT payload_json FROM evidence WHERE kind = 'USER_CORRECTION'"
-            )
-        ]
-        abstained = {
-            str(row[0]).replace("-", "")
-            for row in database.execute(
-                "SELECT id FROM evidence WHERE kind = 'RECOGNITION_ABSTAINED'"
-            )
-        }
+        ((correction_id, payload),) = database.execute(
+            "SELECT id, payload_json FROM evidence WHERE kind = 'USER_CORRECTION'"
+        ).fetchall()
+        face = still_waiting["representation_id"].replace("-", "")
+        cited = json.loads(payload)["resolves_evidence_id"].replace("-", "")
+        cited_face = database.execute(
+            "SELECT representation_id FROM evidence_representations WHERE evidence_id = ?", (cited,)
+        ).fetchall()
+        correction_faces = database.execute(
+            "SELECT representation_id, role FROM evidence_representations WHERE evidence_id = ?",
+            (correction_id,),
+        ).fetchall()
+        (representation_identity,) = database.execute(
+            "SELECT identity_id FROM representations WHERE id = ?", (face,)
+        ).fetchone()
+        ((occurrence_identity, occurrence_observation),) = database.execute(
+            "SELECT identity_id, representative_observation_id FROM occurrences"
+            " WHERE source_id = ?",
+            (fourth["id"].replace("-", ""),),
+        ).fetchall()
     finally:
         database.close()
     assert kinds.count("IDENTITY_MATCHED") == 0
     assert kinds.count("IDENTITY_CREATED") == 1
-    assert kinds.count("RECOGNITION_ABSTAINED") == 3  # the identical, the different, the third
-    (correction,) = corrections
-    assert correction["action"] == "RESOLVE_NEW"
-    assert correction["resolves_evidence_id"].replace("-", "") in abstained
+    assert json.loads(payload)["action"] == "RESOLVE_NEW"
+    assert cited_face == [(face,)]  # the abstention it cites is this face's own
+    assert correction_faces == [(face, "SUBJECT")]
+    new = new_identity["id"].replace("-", "")
+    assert representation_identity == new
+    assert occurrence_identity == new
+    assert occurrence_observation == still_waiting["observation_id"].replace("-", "")

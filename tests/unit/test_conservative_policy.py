@@ -1,14 +1,17 @@
 """The conservative operating-point rule of the evaluation script (owner decision 2026-10-07)."""
 
+import argparse
 from typing import Any
 
 import numpy as np
 import pytest
 
 from evaluation.measure_operating_point import (
+    bounded,
     choose_conservative,
     conservative_verdict,
     decision_policy,
+    fraction,
     tail_floor,
 )
 
@@ -129,3 +132,26 @@ def test_the_recall_target_is_configurable_and_never_relaxes_safety() -> None:
     assert decision_policy("auto-accept-disabled", None) == decision_policy(
         "auto-accept-disabled", {"threshold": 0.4, "margin": 0.02}
     )
+
+
+def test_evaluation_cosines_never_leave_the_range_of_a_cosine() -> None:
+    unit = np.array([0.6, 0.8], dtype=np.float32)
+    nearly = np.float32(1.0000001)  # what float32 dot products of unit vectors can produce
+
+    assert float(bounded(np.array([nearly, -nearly])[0])) == 1.0
+    assert float(bounded(np.array([nearly, -nearly])[1])) == -1.0
+    assert float(bounded(unit @ unit)) <= 1.0
+    assert bounded(np.array([0.25, -0.5])).tolist() == [0.25, -0.5]  # inside the range: unchanged
+
+
+@pytest.mark.parametrize("text", ["nan", "inf", "-inf", "-0.1", "1.01", "abc"])
+def test_a_recall_target_must_be_a_finite_share(text: str) -> None:
+    with pytest.raises((argparse.ArgumentTypeError, ValueError)):
+        fraction(text)
+
+
+def test_a_valid_recall_target_is_accepted() -> None:
+    assert fraction("0.5") == 0.5
+    assert fraction("0") == 0.0
+    assert fraction("1") == 1.0
+    assert fraction("-0.5", -1.0, 1.0) == -0.5

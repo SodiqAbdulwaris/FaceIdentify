@@ -151,6 +151,20 @@ def embed_dataset(
     return manifest, vectors, skipped, digest
 
 
+def bounded(scores: Any) -> Any:
+    """Cosine similarities held to the range a cosine can have. Float32 dot products of unit vectors
+    can come out a hair outside -1..1; no score used for ranking, calibration or a report may."""
+    return np.clip(scores, -1.0, 1.0)
+
+
+def fraction(text: str, low: float = 0.0, high: float = 1.0) -> float:
+    """An argument that is a finite number in `low..high` (a recall target is a share, 0 to 1)."""
+    value = float(text)
+    if not math.isfinite(value) or not low <= value <= high:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number from {low} to {high}")
+    return value
+
+
 def hashed(person: str, salt: str) -> int:
     return int(hashlib.sha256(f"{salt}:{person}".encode()).hexdigest(), 16)
 
@@ -177,7 +191,7 @@ def queries_of(photos: list[Photo], known: set[str]) -> tuple[list[Query], int]:
     queries: list[Query] = []
     set_aside = 0
     for person, file, vector in photos:
-        scores = matrix @ vector
+        scores = bounded(matrix @ vector)
         best: dict[str, float] = {}
         for (who, other, _), score in zip(gallery, scores, strict=True):
             if other != file:
@@ -244,7 +258,7 @@ def tail_floor(selection_photos: list[Photo], owner_floor: float) -> float:
     percentile of different-person pairs among the *selection* half's photographs if that is higher.
     Only the selection half is read, so nothing of the final half reaches the choice."""
     scores = [
-        float(a[2] @ b[2])
+        float(bounded(a[2] @ b[2]))
         for i, a in enumerate(selection_photos)
         for b in selection_photos[i + 1 :]
         if a[0] != b[0]
@@ -330,11 +344,13 @@ def main() -> None:
     parser.add_argument("--provider", default="CPUExecutionProvider")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--minimum-accepted", type=int, default=30)
-    parser.add_argument("--minimum-recall", type=float, default=0.5)
+    parser.add_argument("--minimum-recall", type=fraction, default=0.5)
     parser.add_argument("--minimum-below", type=int, default=20)
     parser.add_argument("--conservative", action="store_true", help="the owner's conservative rule")
     parser.add_argument("--conservative-minimum-accepted", type=int, default=20)
-    parser.add_argument("--tail-floor", type=float, default=TAIL_FLOOR)
+    parser.add_argument(
+        "--tail-floor", type=lambda text: fraction(text, -1.0, 1.0), default=TAIL_FLOOR
+    )
     parser.add_argument(
         "--write-policy", type=Path, default=None, help="write the decision policy (conservative)"
     )
@@ -369,8 +385,8 @@ def main() -> None:
     ceiling = choose_ceiling(halves["selection"]["queries"], arguments.minimum_below)
     everyone = [x for v in by_person.values() for x in v]
     pairs = [(a, b) for i, a in enumerate(everyone) for b in everyone[i + 1 :]]
-    genuine = [float(a[2] @ b[2]) for a, b in pairs if a[0] == b[0]]
-    impostor = [float(a[2] @ b[2]) for a, b in pairs if a[0] != b[0]]
+    genuine = [float(bounded(a[2] @ b[2])) for a, b in pairs if a[0] == b[0]]
+    impostor = [float(bounded(a[2] @ b[2])) for a, b in pairs if a[0] != b[0]]
     conservative: dict[str, Any] | None = None
     if arguments.conservative:
         selection_photos = [x for p in halves["selection"]["people"] for x in by_person[p]]

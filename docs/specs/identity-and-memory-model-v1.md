@@ -103,6 +103,16 @@ Unknown rejection is a core requirement.
 > The interface shows "Automatic matching disabled" for such a run and never presents a threshold above
 > 1 as a similarity score. A separate `auto_match_enabled` setting is preferable long-term and is not
 > built now.
+>
+> *Scope of the rule (clarified after review).* The abstain-first policy sets `new_identity_ceiling` to
+> -1.0, so a weak score never creates an identity, whatever the candidates; that is what the real host
+> will run. Creating an identity below a *measured* ceiling is the open-set mechanism of an **enabled**
+> policy; the evaluation found no ceiling that meets the owner's rule (`new_identity_ceiling: null`),
+> so no real policy sets one above -1.0, and the development profile's demo ceiling (0.5) is labelled
+> uncalibrated and is not a release setting. Several faces in the *first* image each create an
+> identity: faces in one photograph are different people and are not compared with each other. If the
+> owner wants ceiling-based creation removed for every policy, that is a one-line change plus a
+> validator; the agent recommends keeping the mechanism for a future measured policy.
 
 ### 2.6 Evidence and corrections are authoritative; optimized machine state is derived
 
