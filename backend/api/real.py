@@ -59,6 +59,7 @@ from backend.app.runtime.registration import (
     RegisteredPackage,
     RegistrationError,
     mark_missing_installations,
+    missing_dependencies,
     register_package,
 )
 from backend.app.runtime.worker_config import PerceptionPlan
@@ -206,6 +207,7 @@ def real_processing(
     clients = pool or ClientPool(settings.new_id)
     registered: dict[str, RegisteredPackage] = {}
     store: list[RuntimePackageStore] = []  # the library's package store, once it is open
+    opened: list[OpenLibrary] = []  # the open library, for the dependency report
 
     def installed() -> bool:
         return bool(store) and package_key in registered and store[0].get(package_key) is not None
@@ -213,6 +215,7 @@ def real_processing(
     def prepare(library: OpenLibrary) -> dict[str, str]:
         registered.clear()  # what is known is rebuilt from what is installed now
         store[:] = [library.packages]
+        opened[:] = [library]
         # Installation records follow the disk before anything is registered: a package that left
         # this machine is MISSING, and registering what is installed reinstates what came back.
         library.unit_of_work.write(mark_missing_installations)
@@ -221,7 +224,15 @@ def real_processing(
                 registered[package.key] = _register(library, package, settings)
             except RegistrationError:
                 continue  # a damaged or conflicting package is unavailable, not a dead library
-        return {"runtime_package": READY if installed() else UNAVAILABLE}
+        needed = dependencies()
+        return {
+            "runtime_package": READY if installed() else UNAVAILABLE,
+            "library_packages": UNAVAILABLE if needed else READY,
+        }
+
+    def dependencies() -> list[str]:
+        """The packages the library's own vectors need that are not installed on this machine."""
+        return opened[0].unit_of_work.read(missing_dependencies) if opened else []
 
     def request_for(session: Session) -> dict[str, Any]:
         package = registered.get(package_key)
@@ -244,6 +255,7 @@ def real_processing(
         return {
             "runtime_package": READY if installed() else UNAVAILABLE,
             "processing_policy": policy,
+            "library_packages": UNAVAILABLE if dependencies() else READY,
             "ml_worker": clients.worker_state(),
         }
 
@@ -259,6 +271,7 @@ def real_processing(
         profile=LibraryProfile.REAL,
         close=clients.close,
         capabilities=capabilities,
+        dependencies=dependencies,
     )
 
 

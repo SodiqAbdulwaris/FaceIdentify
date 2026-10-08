@@ -63,10 +63,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from backend.app.memory.models import RepresentationSpace
+from backend.app.memory.models import Representation, RepresentationSpace, RepresentationState
 from backend.app.runtime.manifest import (
     ComponentSpec,
     ExportSpec,
@@ -485,6 +485,57 @@ def mark_missing_installations(session: Session) -> InstallationSweep:
     )
 
 
+def missing_dependencies(session: Session) -> list[str]:
+    """The packages this library depends on that are not installed on this machine (issue 80).
+
+    A library depends on a package when its models produced vectors the library still holds
+    (`ACTIVE` representations in a space) and no `INSTALLED` export of that space remains. Vectors
+    of another space are never comparable, so a different package installed here does not stand in
+    for it: the dependency is reported ("key version") until a compatible package is installed or
+    restored. A space with no known package is named by its key. Read-only.
+    """
+    spaces = session.scalars(
+        select(RepresentationSpace)
+        .where(
+            exists().where(
+                Representation.representation_space_id == RepresentationSpace.id,
+                Representation.state == RepresentationState.ACTIVE,
+            )
+        )
+        .order_by(RepresentationSpace.id)
+    ).all()
+    packages = session.scalars(select(RuntimePackage).order_by(RuntimePackage.key)).all()
+    missing: set[str] = set()
+    for space in spaces:
+        exports = session.scalars(
+            select(ModelExport)
+            .join(RuntimeVariant, RuntimeVariant.model_export_id == ModelExport.id)
+            .join(
+                RuntimeVariantRepresentationSpace,
+                RuntimeVariantRepresentationSpace.runtime_variant_id == RuntimeVariant.id,
+            )
+            .where(RuntimeVariantRepresentationSpace.representation_space_id == space.id)
+        ).all()
+        if any(
+            session.scalar(
+                select(InstalledModelExport.id).where(
+                    InstalledModelExport.model_export_id == export.id,
+                    InstalledModelExport.state == INSTALLED,
+                )
+            )
+            for export in exports
+        ):
+            continue
+        digests = {export.sha256.hex() for export in exports}
+        labels = {
+            f"{package.manifest_json['key']} {package.manifest_json['version']}"
+            for package in packages
+            if digests & {e["sha256"] for e in package.manifest_json["exports"]}
+        }
+        missing |= labels or {f"representation space {space.semantic_key[:12]}"}
+    return sorted(missing)
+
+
 def _installed(model: type[RuntimePackageInstallation] | type[InstalledModelExport]) -> Any:
     return select(model).where(model.state == INSTALLED).order_by(model.id)
 
@@ -498,14 +549,17 @@ def _demote(
     for record in records:
         artifact = session.get(Artifact, record.artifact_id)
         assert artifact is not None  # (a foreign key)
-        try:
-            present = stat.S_ISREG(Path(str(artifact.external_path)).stat().st_mode)
-        except FileNotFoundError:
-            present = False
-        except OSError:
-            continue  # cannot be examined: not evidence that it is gone
-        if present and artifact.state == ArtifactState.AVAILABLE:
-            continue
+        if artifact.state == ArtifactState.AVAILABLE:
+            try:
+                present = stat.S_ISREG(Path(str(artifact.external_path)).stat().st_mode)
+            except (FileNotFoundError, NotADirectoryError):
+                present = False  # nothing can be there: the file, or a folder above it, is gone
+            except OSError:
+                continue  # cannot be examined: not evidence that it is gone
+            if present:
+                continue
+        # (an artifact already known not to be available needs no look at the disk: the startup
+        # check found it gone, and only a verified registration brings it back)
         record.state = MISSING
         record.failure_detail = f"the {what} is not on this machine"
         demoted += 1

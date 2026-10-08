@@ -18,7 +18,7 @@ releases the library lock.
 import asyncio
 import threading
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import (
     AbstractAsyncContextManager,
     AbstractContextManager,
@@ -118,6 +118,8 @@ class ProcessingSettings:
     prepare: Callable[[OpenLibrary], Mapping[str, str] | None] | None = None
     # Live capabilities merged into every `/readiness` answer (the real profile's worker state).
     capabilities: Callable[[], Mapping[str, str]] | None = None
+    # Packages the library needs that are not installed here, for `/readiness` (best effort).
+    dependencies: Callable[[], Sequence[str]] | None = None
     # The profile the library is opened as; a library of the other profile is refused (issue 137).
     profile: LibraryProfile = LibraryProfile.REAL
     # Runs at shutdown, after the scheduler has stopped (the real profile stops its workers).
@@ -182,7 +184,10 @@ class Backend:
                 capabilities["scheduler"] = "STOPPED"
             else:
                 capabilities["scheduler"] = "DEGRADED" if scheduler.last_error else "READY"
-        return BackendReadiness(self.state.value, capabilities, self.failure)
+        missing: tuple[str, ...] = ()
+        if self.processing is not None and self.processing.dependencies is not None:
+            missing = tuple(self.processing.dependencies())
+        return BackendReadiness(self.state.value, capabilities, self.failure, missing)
 
     def announce(
         self, type_: str, resource_type: str, resource_id: str, data: dict[str, Any] | None = None

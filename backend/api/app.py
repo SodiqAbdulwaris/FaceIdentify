@@ -42,6 +42,9 @@ class BackendReadiness:
     capabilities: Mapping[str, str] = field(default_factory=dict)
     # Why startup failed: an exception class name only, never a path or the launch capability.
     failure: str | None = None
+    # Packages the library's own vectors need that are not installed here ("key version"); empty
+    # when none. A different package never stands in for them (issue 80).
+    missing_dependencies: tuple[str, ...] = ()
 
 
 def operation_id(route: APIRoute) -> str:
@@ -111,6 +114,8 @@ def create_app(
             body["capabilities"] = dict(current.capabilities)
         if current.failure is not None:
             body["failure"] = current.failure
+        if current.missing_dependencies:
+            body["missing_dependencies"] = list(current.missing_dependencies)
         return body
 
     @app.websocket("/api/v1/events")
