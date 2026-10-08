@@ -108,6 +108,7 @@ function stubBackend(handlers: Handler[]) {
       if (answer instanceof Reply) {
         return new Response(JSON.stringify(answer.body), { status: answer.status })
       }
+      if (handler.status === 204) return new Response(null, { status: 204 }) // no body, as served
       return new Response(JSON.stringify(answer), { status: handler.status ?? 200 })
     }),
   )

@@ -40,6 +40,7 @@ export const occurrence = (over: Record<string, unknown> = {}) => ({
     face_crop: null,
   },
   person: null,
+  source_recycled: false,
   created_at: '2026-01-01T00:00:00Z',
   ...over,
 })

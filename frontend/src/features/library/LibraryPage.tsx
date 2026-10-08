@@ -11,10 +11,12 @@ export function LibraryPage() {
   const { endpoints } = useBackend()
   const queryClient = useQueryClient()
   const [notice, setNotice] = useState<string | null>(null)
+  const [view, setView] = useState<'library' | 'bin'>('library')
+  const bin = view === 'bin'
 
   const sources = useInfiniteQuery({
-    queryKey: keys.sources,
-    queryFn: ({ pageParam }) => endpoints.listSources(pageParam),
+    queryKey: bin ? keys.recycledSources : keys.sources,
+    queryFn: ({ pageParam }) => endpoints.listSources(pageParam, bin ? 'RECYCLED' : 'ACTIVE'),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.page.next_cursor ?? undefined,
   })
@@ -46,14 +48,34 @@ export function LibraryPage() {
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">Library</h1>
-        <Button
-          className="ml-auto"
-          disabled={importImages.isPending}
-          onClick={() => importImages.mutate()}
-        >
-          {importImages.isPending ? 'Importing…' : 'Import images'}
-        </Button>
+        <h1 className="text-xl font-semibold">{bin ? 'Recycle bin' : 'Library'}</h1>
+        <div role="group" aria-label="Library view" className="flex gap-1">
+          <Button
+            size="sm"
+            variant={bin ? 'outline' : 'secondary'}
+            aria-pressed={!bin}
+            onClick={() => setView('library')}
+          >
+            Library
+          </Button>
+          <Button
+            size="sm"
+            variant={bin ? 'secondary' : 'outline'}
+            aria-pressed={bin}
+            onClick={() => setView('bin')}
+          >
+            Recycle bin
+          </Button>
+        </div>
+        {bin ? null : (
+          <Button
+            className="ml-auto"
+            disabled={importImages.isPending}
+            onClick={() => importImages.mutate()}
+          >
+            {importImages.isPending ? 'Importing…' : 'Import images'}
+          </Button>
+        )}
       </div>
 
       {notice ? (
@@ -74,15 +96,24 @@ export function LibraryPage() {
       ) : null}
       {sources.isSuccess && items.length === 0 ? (
         <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
-          <p className="font-medium text-foreground">No images yet</p>
-          <p>Import images to find and group the people in them.</p>
+          {bin ? (
+            <>
+              <p className="font-medium text-foreground">The recycle bin is empty</p>
+              <p>Images you recycle wait here until you restore them.</p>
+            </>
+          ) : (
+            <>
+              <p className="font-medium text-foreground">No images yet</p>
+              <p>Import images to find and group the people in them.</p>
+            </>
+          )}
         </div>
       ) : null}
 
       {items.length > 0 ? (
         <ul className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-4">
           {items.map((source) => (
-            <SourceCard key={source.id} source={source} onNotice={setNotice} />
+            <SourceCard key={source.id} source={source} recycled={bin} onNotice={setNotice} />
           ))}
         </ul>
       ) : null}

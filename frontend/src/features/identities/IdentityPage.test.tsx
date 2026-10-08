@@ -121,4 +121,30 @@ describe('a person', () => {
       'The appearances could not be loaded: The library is not available.',
     )
   })
+
+  it('keeps the faces of a recycled image and says where they come from', async () => {
+    renderApp('/identities/i1', [
+      { path: PERSON, respond: identity({ occurrence_count: 2, source_count: 2 }) },
+      {
+        path: `${PERSON}/occurrences`,
+        respond: page([
+          occurrence({ id: 'o1', source_id: 's1', source_display_name: 'beach.png' }),
+          occurrence({
+            id: 'o2',
+            source_id: 's2',
+            source_display_name: 'party.jpg',
+            source_recycled: true,
+          }),
+        ]),
+      },
+      media,
+    ])
+
+    const party = await screen.findByRole('link', { name: /party\.jpg/ })
+    const beach = screen.getByRole('link', { name: /beach\.png/ })
+
+    expect(within(party).getByText('From an image in the recycle bin')).toBeInTheDocument()
+    expect(within(beach).queryByText(/recycle bin/)).toBeNull()
+    expect(screen.getByText(/Appears 2 times in 2 images\./)).toBeInTheDocument() // still counted
+  })
 })
