@@ -1608,7 +1608,9 @@ Models are **replaceable components**, not hard-wired. The vocabulary:
 - **The sweep** keeps those records honest: at startup the real profile marks an installation
   `MISSING` when its file is no longer on this machine (by existence alone), and only registering the
   package again, which re-verifies every byte, brings it back. A missing package is reported, never
-  replaced by another.
+  replaced by another, and so is a package the *library's own vectors* need: `/readiness` then lists
+  `missing_dependencies` ("key version") and the app opens `DEGRADED`, because vectors of one model
+  are never compared with another's.
 - **Planning** turns "the frozen snapshot" into "these exact files on this machine", and *refuses*
   to substitute a different export (the frozen choice is exact).
 

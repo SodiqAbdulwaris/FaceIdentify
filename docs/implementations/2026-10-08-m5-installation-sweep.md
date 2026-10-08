@@ -26,9 +26,21 @@
   installation and the old one stays `MISSING` (a library opened elsewhere reports the dependency,
   as the owner decided in issue #80).
 
+- **The library's own dependencies are reported** (found by the independent review; issue #80 asks for
+  it): `missing_dependencies(session)` names, as "key version", every package whose models produced
+  `ACTIVE` vectors the library still holds and that has no `INSTALLED` export on this machine. A
+  different package installed here never stands in for it (vectors of another space are never
+  compared); a space with no known package is named by its key. The real profile reports it as the
+  `library_packages` capability (so the app opens `DEGRADED`) and `/readiness` gains an optional
+  `missing_dependencies` list, present only when something is missing.
+- **Two sweep corrections from the same review:** an artifact already known not to be `AVAILABLE`
+  (the startup check found it gone) is swept without looking at the disk, so a denied `stat` cannot
+  leave a record `INSTALLED` that registration then cannot reinstate; and `NotADirectoryError` (a
+  folder above the file became a file) counts as absence like `FileNotFoundError`.
+
 ## Tests
 
-`tests/integration/test_runtime_sweep.py` (10): nothing changes while the files are present; one
+`tests/integration/test_runtime_sweep.py` (20): nothing changes while the files are present; one
 missing model file marks only its record and the planner refuses; a missing package marks everything
 under it; the sweep repeats harmlessly; registering the restored package reinstates every record and
 artifact and the planner offers it again; a swapped file is refused and stays `MISSING`; an artifact
@@ -45,7 +57,5 @@ pass were closed by new tests).
 
 ## Open issues / follow-ups
 
-- Which packages a *library* requires (those that produced its embeddings) is not yet reported
-  separately from the one this host profile runs; a library with vectors from a package that is not
-  installed here simply cannot compare against them (spaces are never mixed). A "required packages"
-  readiness item can follow if it proves needed.
+- The shell does not yet show `missing_dependencies` to the user; a screen for "restore this
+  package" belongs with the installer (M8).
