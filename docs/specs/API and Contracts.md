@@ -281,6 +281,14 @@ A successful request may return:
 204 No Content
 ```
 
+> **Agent design 2026-10-08 (awaiting the owner's confirmation; built):** a repeat on an already
+> recycled Source is harmless (`204`, no event); a Source with processing in flight (a run `PENDING`,
+> `RUNNING`, `PAUSING`, `PAUSED`, `CANCELLING` or `FINALIZING`) is refused with `409 SOURCE_BUSY`
+> because acceptance needs an `ACTIVE` Source and the run would fail at its end; a Source whose
+> original is being or has been deleted, or that is in no state that can be recycled, is refused with
+> `409 SOURCE_STATE_CONFLICT`. A change is announced as `source.updated`. Occurrences of a recycled
+> Source stay in identity views, counts and (later) search, each carrying `source_recycled: true`.
+
 ---
 
 ## 5.6 Restore
@@ -289,7 +297,10 @@ A successful request may return:
 POST /api/v1/sources/{source_id}/restore
 ```
 
-Restores a logically recycled Source where possible.
+Restores a logically recycled Source where possible. It answers `200` with the Source, a repeat on an
+`ACTIVE` Source is harmless, and a Source that cannot be restored (its original is being or has been
+deleted) is `409 SOURCE_STATE_CONFLICT`. Restoring never reprocesses: the faces, identities and history
+were never touched.
 
 ---
 

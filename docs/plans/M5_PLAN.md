@@ -297,6 +297,8 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
 
 ### Step 4. Lifecycle: recycle, restore, permanent delete, forget (TST-059, SEC-006)
 
+**4a (recycle and restore) built 2026-10-08** ([entry](../implementations/2026-10-08-m5-recycle-restore.md)): `DELETE /sources/{id}` and `POST /sources/{id}/restore`, the recycle bin view, and the recycled marker on occurrences. 4b (permanent delete) and 4c (forget) follow.
+
 - Recycle and restore routes over `recycle_source` and `restore_source` (built). Normal library
   browsing hides a recycled Source; identity views, counts and historical search keep its Occurrences,
   marked as recycled.
