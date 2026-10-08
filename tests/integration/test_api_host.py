@@ -197,7 +197,8 @@ async def test_the_host_serves_loopback_prints_one_handshake_and_stops_when_the_
                     await asyncio.sleep(0.05)
 
         await readiness_settled()
-        assert ready["state"] == "READY"
+        # The real profile with nothing installed: usable but honestly degraded (no package).
+        assert ready["state"] == "DEGRADED"
         assert not lock_is_free(options.library_root)  # the host holds the library while it runs
 
     parent_is_alive = False  # the shell went away
