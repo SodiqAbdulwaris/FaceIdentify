@@ -110,8 +110,11 @@ When you start the app, four different programs are involved. They are separate 
    keeps one worker per plan, and builds each run from the measured policy file. A **debug** build of
    the shell still starts the backend in its *development profile*, where a fake in-process
    "perception" stands in for the worker; a **release** build runs the real profile. The real profile
-   needs the model package installed and a measured policy file; without them the app reports the
-   worker unavailable (`DEGRADED`) and refuses to process (`503`) rather than guess.
+   needs the model package installed and a measured policy file: with no package the app is
+   `DEGRADED` (`runtime_package: UNAVAILABLE`), and with no usable policy it reports
+   `processing_policy: UNAVAILABLE`; either way it refuses to process (`503`) rather than guess.
+   Until a verified evaluation exists it also refuses any policy that could match or create an
+   identity from a score, whatever the file says.
 
 **Why a web page inside a desktop window?** Because building screens with web technology is faster
 and better supported than building them natively, and Tauri gives you a small, secure window to host
@@ -1787,9 +1790,12 @@ the thresholds are raw cosine values, never probabilities.
 - `backend/api/development.py`: fake catalog, fake perception (one face in the middle of every image,
   a vector derived from the image's pixels, so identical images are the same person), demo thresholds.
 - `backend/api/real.py` [built]: the **real profile**. At startup (`prepare`) it registers every
-  installed package in the catalog and reports the `ml_worker` capability (`READY`, or `UNAVAILABLE`
-  and the app `DEGRADED` when the package it runs is not installed). A `ClientPool` keeps one
-  supervised worker and client per plan for the life of the process and stops them at shutdown. The
+  installed package in the catalog (a damaged package is skipped, not fatal) and reports three
+  capabilities in `/readiness`: `runtime_package` (the package it runs is installed and registered;
+  the app is `DEGRADED` when not), `processing_policy` (a usable, abstain-first policy file exists)
+  and `ml_worker` (the supervisors' own state, `NOT_STARTED` until a job starts one). A `ClientPool`
+  keeps one supervised worker per plan for the life of the process, gives each job a fresh client
+  (so every job records its own fallbacks), and stops all workers at shutdown. The
   processing request is built on every "process" command from the registered catalog plus the measured
   policy file `<local state>/policies/<package>.json`, which holds only the `decision_policy` object
   (`version`, `min_detection_score`, `match_threshold`, `margin`, `new_identity_ceiling`); with no
