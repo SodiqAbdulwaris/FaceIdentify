@@ -13,6 +13,7 @@ import io
 import json
 import os
 import secrets
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -404,3 +405,31 @@ async def test_under_abstain_only_the_first_face_creates_an_identity_and_no_late
         assert placed.status_code == 200, placed.text
         assert len(await identities(client)) == 2
         assert await unresolved(client, fourth["id"]) == []
+        assert await occurrence_count(client, fourth["id"]) == 1  # the face now has its occurrence
+
+    # The evidence is preserved: no match was ever recorded, every abstention is still there
+    # (never rewritten), the first face made one identity, and the manual "someone new" is a
+    # user correction that cites the abstention it resolves.
+    database = sqlite3.connect(tmp_path / "library" / "database" / "library.db")
+    try:
+        kinds = [row[0] for row in database.execute("SELECT kind FROM evidence")]
+        corrections = [
+            json.loads(row[0])
+            for row in database.execute(
+                "SELECT payload_json FROM evidence WHERE kind = 'USER_CORRECTION'"
+            )
+        ]
+        abstained = {
+            str(row[0]).replace("-", "")
+            for row in database.execute(
+                "SELECT id FROM evidence WHERE kind = 'RECOGNITION_ABSTAINED'"
+            )
+        }
+    finally:
+        database.close()
+    assert kinds.count("IDENTITY_MATCHED") == 0
+    assert kinds.count("IDENTITY_CREATED") == 1
+    assert kinds.count("RECOGNITION_ABSTAINED") == 3  # the identical, the different, the third
+    (correction,) = corrections
+    assert correction["action"] == "RESOLVE_NEW"
+    assert correction["resolves_evidence_id"].replace("-", "") in abstained

@@ -405,6 +405,20 @@ def test_a_policy_with_matching_off_never_matches_and_never_creates_from_a_weak_
     assert decision.reason is Reason.UNCERTAIN_SIMILARITY
 
 
+@pytest.mark.parametrize("similarity", [-1.0, -0.5, 0.0, 0.2, 0.9, 1.0])
+def test_abstain_does_not_mean_new_identity_once_there_is_anyone_to_compare_with(
+    similarity: float,
+) -> None:
+    candidates = retrieval(candidate(1, similarity, identity=7))
+
+    decision = IdentityReasoner(OFF).decide(assess(candidates, GOOD))
+
+    assert (
+        decision.outcome is RecognitionOutcome.ABSTAIN
+    )  # never CREATE_NEW, however weak the score
+    assert decision.identity_id is None
+
+
 def test_a_policy_with_matching_off_still_starts_an_identity_when_there_is_nobody_to_compare() -> (
     None
 ):
