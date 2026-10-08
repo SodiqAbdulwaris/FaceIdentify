@@ -172,7 +172,8 @@ async def test_without_the_development_profile_importing_works_and_processing_is
         # The real profile with no package and no measured policy: the scheduler runs (there is
         # nothing to claim) and the worker is reported unavailable, never substituted.
         assert ready["capabilities"]["scheduler"] == "READY"
-        assert ready["capabilities"]["ml_worker"] == "UNAVAILABLE"
+        assert ready["capabilities"]["runtime_package"] == "UNAVAILABLE"
+        assert ready["capabilities"]["ml_worker"] == "NOT_STARTED"
         assert ready["state"] == "DEGRADED"
 
 
