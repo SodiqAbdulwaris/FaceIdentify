@@ -62,4 +62,9 @@ enforced by tests (below).
 
 - The real host profile (parked) will read the measured policy file; until then the application runs
   on the development profile, whose demo policy can match.
-- The owner may wish to confirm the open reading above.
+- Review (Codex) found six points, handled in follow-up commits: the creation-scope clarification above
+  (documented, not a behavior change; see the identity spec note), evaluation cosines now bounded,
+  `--minimum-recall` validated as a finite share, the regression test now asserts the cited
+  abstention is the resolved face's own and that every abstention is unchanged by the resolution,
+  the rename-event test compares revisions with the REST responses, and the status documents are
+  updated. The creation-scope reading is the one point the owner may want to confirm.
