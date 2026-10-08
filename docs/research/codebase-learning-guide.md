@@ -1771,7 +1771,10 @@ query), cross-source recognition on real models, and the M5 real-world gate.
 
 A common source of confusion. The project distinguishes:
 
-- **Recycle** a source: it leaves your library view but its bytes and its memory stay; restorable.
+- **Recycle** a source (`DELETE /sources/{id}`, built): it leaves your library view and appears in the
+  Recycle bin view, while its bytes and its memory stay and its faces remain in the people it was
+  recognised in, marked as coming from a recycled image; `POST /sources/{id}/restore` brings it
+  back without reprocessing. A source being processed cannot be recycled until that ends.
 - **Delete** a source permanently: removes its files and runs; *evidence and named people stay*
   (an unnamed identity left with nothing becomes `DELETED`).
 - **Forget** an identity: the only thing that erases its biometric vectors (Part 6.6 erasure).
