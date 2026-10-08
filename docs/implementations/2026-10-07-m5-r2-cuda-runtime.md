@@ -44,7 +44,7 @@ path of `local-models/ort-gpu` before starting the worker or a script that start
   of the smoke test agree to 0.001.
 - `uv run pytest -m e2e tests/e2e/test_real_models.py` with `FACEIDENTIFY_PROVIDER=CUDAExecutionProvider`:
   1 passed.
-- Gate on Windows: `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform linux` clean (269 source files); `uv run pytest --cov`: 2670 passed, 100% line and branch coverage (12 min 34 s). CI runs the Linux static job.
+- Gate on Windows: `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform linux` clean (269 source files); `uv run pytest --cov`: 2671 passed, 100% line and branch coverage (12 min 32 s). CI runs the Linux static job.
 
 ## Licences
 
