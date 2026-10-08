@@ -177,6 +177,7 @@ export const run = (over: Record<string, unknown> = {}) => ({
     calibration_mode: 'UNCALIBRATED',
     decision_policy_version: 'development-uncalibrated-v1',
     calibrated: false,
+    automatic_matching: true,
   },
   job: {
     id: 'j1',

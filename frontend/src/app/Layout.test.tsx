@@ -20,9 +20,49 @@ describe('the layout', () => {
     expect(notice).toHaveTextContent('not for real decisions')
   })
 
+  it('says so when the policy cannot match a face to an existing person', async () => {
+    const disabled = run({
+      policy: {
+        calibration_mode: 'UNCALIBRATED',
+        decision_policy_version: 'buffalo-l-abstain-only-v1',
+        calibrated: false,
+        automatic_matching: false,
+      },
+    })
+    renderApp('/library', [library, media, { path: RUNS, respond: page([disabled]) }])
+
+    const notice = await screen.findByRole('note')
+
+    expect(notice).toHaveTextContent('Automatic matching disabled.')
+    expect(notice).toHaveTextContent('never matched to an existing person automatically')
+    expect(notice).toHaveTextContent('Similarity scores are not probabilities')
+  })
+
+  it('shows only the matching notice when the policy is calibrated but cannot match', async () => {
+    const disabled = run({
+      policy: {
+        calibration_mode: 'CALIBRATED',
+        decision_policy_version: 'v2',
+        calibrated: true,
+        automatic_matching: false,
+      },
+    })
+    renderApp('/library', [library, media, { path: RUNS, respond: page([disabled]) }])
+
+    const notice = await screen.findByRole('note')
+
+    expect(notice).toHaveTextContent('Automatic matching disabled.')
+    expect(notice).not.toHaveTextContent('Uncalibrated results.')
+  })
+
   it('shows no notice for a calibrated policy', async () => {
     const calibrated = run({
-      policy: { calibration_mode: 'CALIBRATED', decision_policy_version: 'v1', calibrated: true },
+      policy: {
+        calibration_mode: 'CALIBRATED',
+        decision_policy_version: 'v1',
+        calibrated: true,
+        automatic_matching: true,
+      },
     })
     renderApp('/library', [library, media, { path: RUNS, respond: page([calibrated]) }])
 

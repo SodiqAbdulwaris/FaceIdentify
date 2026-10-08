@@ -33,7 +33,9 @@ export function UnresolvedFaces({ sourceId }: { sourceId: string }) {
     <div>
       <h2 className="mb-1 font-medium">Faces to place</h2>
       <p className="mb-2 text-sm text-muted-foreground">
-        These faces were not matched to anyone with enough confidence. Say who they are.
+        These faces were not matched to anyone automatically. Possible matches are ranked by
+        similarity score, highest first. A similarity score says how close two faces look to the
+        model; it is not the probability that they are the same person.
       </p>
       <ul className="flex flex-col gap-3">
         {items.map((face) => (
@@ -70,6 +72,11 @@ function Unresolved({ sourceId, face }: { sourceId: string; face: UnresolvedFace
       <div className="flex items-center gap-3">
         <FaceCrop sourceId={sourceId} box={face.bounding_box} label="A face to place" />
         <div className="flex flex-col gap-1">
+          {face.likely.length > 0 ? (
+            <span className="text-xs text-muted-foreground">
+              Possible matches, highest similarity score first
+            </span>
+          ) : null}
           {face.likely.map((likely) => {
             const label = personLabel(likely.identity_id, likely.person)
             return (
@@ -80,7 +87,7 @@ function Unresolved({ sourceId, face }: { sourceId: string; face: UnresolvedFace
                 disabled={resolve.isPending}
                 onClick={() => resolve.mutate(likely.identity_id)}
               >
-                This is {label} ({Math.round(likely.similarity * 100)}% alike)
+                This is {label} (similarity score {likely.similarity.toFixed(2)})
               </Button>
             )
           })}
