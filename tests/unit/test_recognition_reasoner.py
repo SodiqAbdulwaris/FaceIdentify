@@ -448,3 +448,32 @@ def test_a_candidate_distance_that_is_not_a_number_is_refused() -> None:
     for distance in (float("nan"), float("inf")):
         with pytest.raises(ValueError, match="finite"):
             RetrievedCandidate(Pool.GLOBAL, uuid.UUID(int=1), None, distance)
+
+
+@pytest.mark.parametrize(
+    ("distance", "similarity"),
+    [(0.0, 1.0), (1.0, 0.0), (2.0, -1.0), (-1e-7, 1.0), (2.0000001, -1.0)],
+)
+def test_a_similarity_is_held_to_the_range_of_a_cosine(distance: float, similarity: float) -> None:
+    found = RetrievedCandidate(Pool.GLOBAL, uuid.UUID(int=1), None, distance)
+
+    assert (
+        found.similarity == similarity
+    )  # float rounding in an index never leaks above 1 or below -1
+
+
+@pytest.mark.parametrize(
+    ("threshold", "enabled"), [(0.5, True), (1.0, True), (1.01, False), (2.0, False)]
+)
+def test_a_policy_reports_whether_it_can_match_automatically(
+    threshold: float, enabled: bool
+) -> None:
+    policy = DecisionPolicy(
+        version="v",
+        min_detection_score=0.5,
+        match_threshold=threshold,
+        margin=0.1,
+        new_identity_ceiling=-1.0,
+    )
+
+    assert policy.automatic_matching is enabled
