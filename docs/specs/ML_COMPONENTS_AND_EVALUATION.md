@@ -89,6 +89,14 @@ embedding generation → representation validation → compatible ANN retrieval
 
 The estimator must distinguish: a supported existing candidate (`MATCH`); no adequately supported retrieved candidate (`UNKNOWN`); several competing plausible candidates (`AMBIGUOUS`); and unusable or unsupported evidence (`ABSTAIN`). `UNKNOWN` is not permission to create an identity. A failed ANN query, incomplete migration, invalid vector, or unsupported runtime is not evidence that a person is unseen.
 
+> **Decision 2026-10-08 (owner):** `ABSTAIN` does not mean `NEW IDENTITY`. With automatic matching
+> disabled (a `match_threshold` above 1.0, since raw cosine similarity lies in [-1, 1]) the estimator
+> still returns `UNKNOWN` (create) only when nothing is retrievable to compare with, and otherwise
+> abstains, so one person is not fragmented into many identities. The full rule is in
+> `identity-and-memory-model-v1.md` section 2.5. The evaluation's `--minimum-recall` (default 0.5) is a
+> usefulness target only: precision and false-accept safety outrank it and it never relaxes a threshold.
+> Embedding similarity is shown as a "Similarity score", never as "% alike" and never as a probability.
+
 ## 2.4 Evolution
 
 V1 uses a transparent deterministic estimator behind a stable interface. It may later be compared with regularized numerical models and then, only if justified, a small joint-candidate model. Any replacement consumes the same versioned evidence contract and produces the same result contract.

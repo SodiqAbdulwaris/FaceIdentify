@@ -33,15 +33,19 @@
   manual "someone new" resolution still works.
 - Owner decisions recorded as a dated note in `docs/plans/M5_PLAN.md` and `CONTEXT.md`.
 
-## Decisions and the one open reading
+## Decisions (final: the owner settled the open reading on 2026-10-08)
+
+The owner ruled that **ABSTAIN does not mean NEW IDENTITY**: the first face of an empty library may
+create an unnamed identity; once identities exist an unmatched face abstains and waits for manual
+resolution; no identity is created for every unmatched face. The sections below are therefore the
+rule, not an open question. Recorded in the identity and ML specs, `CONTEXT.md` and the plan, and
+enforced by tests (below).
 
 - The owner's decision 1 says automatic identity creation continues. The agent keeps it for the first
   face (nothing to compare with) and, after that, lets a face that has candidates **abstain** (ceiling
   -1.0), because the same owner text for R4 says scores below the threshold abstain rather than force
   an assignment, and creating an identity for every unmatched photograph would split one person into
-  many. Manual "this is someone new" creates it. **Flagged for the owner:** say if every unmatched
-  face should create its own identity automatically instead (a one-line policy change: raise the
-  ceiling).
+  many. Manual "this is someone new" creates it (confirmed).
 - The condition "scores bounded to [0, 1]" is met as the cosine's own range, -1 to 1 (a negative cosine
   is meaningful and the validators and evidence already allow it); nothing can exceed 1.
 - A separate `auto_match_enabled` policy field is not built now, as the owner said.
