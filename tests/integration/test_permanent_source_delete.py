@@ -883,3 +883,133 @@ def test_a_retry_that_changes_nothing_is_not_reported_as_a_change(
         third = deletion(lib).delete(source_id)
 
         assert (first.changed, second.changed, third.changed) == (True, False, True)
+
+
+# --- what the second review found ----------------------------------------------------------------
+
+
+def test_an_ordinary_removal_that_left_the_vector_in_the_index_is_not_trusted(
+    opened: Any,
+) -> None:
+    """A representation marked DELETED may carry a REMOVE that only took its key out of the live
+    index; the file still holds the bytes, so erasure must queue and apply its own."""
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        with Session(lib.lib.engine) as session:
+            [representation] = session.scalars(select(Representation))
+            representation.state = "DELETED"
+            ModelFactory(session, lib.clock, lib.new_id).index_operation(
+                representation, operation="REMOVE", state="APPLIED", applied_at=lib.clock()
+            )
+            session.commit()
+        assert files_containing(lib, C)
+        recycle(lib, source_id)
+
+        assert deletion(lib).delete(source_id).complete
+
+        assert files_containing(lib, C) == []
+
+
+def test_a_staged_file_that_cannot_be_removed_keeps_the_deletion_unfinished(
+    opened: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Startup recovery marks an artifact DELETED before it tries to remove its staged file; a
+    locked one must not let permanent deletion report completion."""
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        crop = add_face_crop(lib, source_id)
+        [crop_key] = only(lib, select(Artifact.storage_key).where(Artifact.id == crop))
+        staged = lib.lib.store.staging_path(crop_key)
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_bytes(b"half a crop")
+        with Session(lib.lib.engine) as session:
+            session.execute(update(Artifact).where(Artifact.id == crop).values(state="DELETED"))
+            session.commit()
+        recycle(lib, source_id)
+        real = Path.unlink
+
+        def locked(self: Path, *args: Any, **kwargs: Any) -> None:
+            if self.suffix == ".part":
+                raise PermissionError("in use")
+            real(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", locked)
+
+        stuck = deletion(lib).delete(source_id)
+
+        assert not stuck.complete
+        assert "staged file" in stuck.outstanding[0]
+        assert only(lib, select(Source.state)) == ["DELETING"]
+        monkeypatch.undo()
+
+        assert deletion(lib).resume()[0].complete
+        assert not staged.exists()
+
+
+def test_a_failure_after_the_other_request_finished_is_not_an_error(
+    opened: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        crop = add_face_crop(lib, source_id)
+        recycle(lib, source_id)
+        steps = deletion(lib)
+        lib.lib.unit_of_work.write(lambda s: steps._begin(s, source_id, lib.clock()))
+        store = lib.lib.store
+        raced: list[int] = []
+
+        def other_finishes_then_this_fails(_key: str) -> None:
+            if not raced:
+                raced.append(1)
+                with Session(lib.lib.engine) as session:  # the other request marks it done
+                    session.execute(
+                        update(Artifact).where(Artifact.id == crop).values(state="DELETED")
+                    )
+                    session.commit()
+            raise PermissionError("in use")
+
+        monkeypatch.setattr(store, "delete", other_finishes_then_this_fails)
+
+        complete_artifact_deletion(lib.lib.session_factory, store, crop, clock=lib.clock)
+
+        assert {a.id: a.state for a in only(lib, select(Artifact))}[crop] == "DELETED"
+
+
+def test_only_the_request_that_finalizes_reports_a_change(opened: Any) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        recycle(lib, source_id)
+        slow, fast = deletion(lib), deletion(lib)
+        lib.lib.unit_of_work.write(lambda s: slow._begin(s, source_id, lib.clock()))
+        lib.lib.unit_of_work.write(lambda s: fast._begin(s, source_id, lib.clock()))
+
+        first = fast._carry_on(source_id)  # finalizes
+        late = slow._carry_on(source_id)  # finds it done
+
+        assert (first.complete, first.changed) == (True, True)
+        assert (late.complete, late.changed) == (True, False)
+
+
+def test_a_request_beaten_to_the_finalizing_transaction_reports_no_change(opened: Any) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        recycle(lib, source_id)
+        slow, fast = deletion(lib), deletion(lib)
+        lib.lib.unit_of_work.write(lambda s: slow._begin(s, source_id, lib.clock()))
+        real = slow._uow
+        beaten: list[Any] = []
+
+        class Racing:
+            """The other request finishes just before this one's finalizing write."""
+
+            def write(self, work: Any) -> Any:
+                if not beaten:
+                    beaten.append(fast._carry_on(source_id))
+                return real.write(work)
+
+        slow._uow = Racing()  # type: ignore[assignment]
+
+        report = slow._carry_on(source_id)
+
+        assert beaten[0].changed  # the other request did it
+        assert (report.complete, report.changed) == (True, False)
