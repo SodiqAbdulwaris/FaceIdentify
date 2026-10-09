@@ -84,6 +84,16 @@ export class ApiClient {
     return (await this.send(path, init)).json() as Promise<T>
   }
 
+  /** A request whose body is a file's own bytes (a picture to search with), answered in JSON. */
+  async upload<T>(path: string, file: Blob): Promise<T> {
+    const init: RequestInit = {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    }
+    return (await this.send(path, init)).json() as Promise<T>
+  }
+
   /** A command whose answer is `204` (no body) or carries a body (for example a `202`). */
   async command<T>(path: string, request?: unknown): Promise<{ status: number; body: T | null }> {
     const init: RequestInit =

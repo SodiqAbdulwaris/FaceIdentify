@@ -20,6 +20,21 @@ export function FaceCrop({
   label: string
 }) {
   const { url } = useSourceImage(sourceId)
+  return <CroppedImage url={url} box={box} size={size} label={label} />
+}
+
+/** The same tile for a picture that is not in the library (the one a face search was made with). */
+export function CroppedImage({
+  url,
+  box,
+  size = 96,
+  label,
+}: {
+  url: string | undefined
+  box: BoundingBox
+  size?: number
+  label: string
+}) {
   const [measured, setMeasured] = useState<{ url: string; width: number; height: number } | null>(
     null,
   )

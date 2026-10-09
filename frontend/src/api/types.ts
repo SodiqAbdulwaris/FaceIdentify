@@ -19,6 +19,8 @@ export type OccurrenceSummary = Schemas['OccurrenceSummary']
 export type ObservationBrief = Schemas['ObservationBrief']
 export type BoundingBox = Schemas['BoundingBox']
 export type SearchResponse = Schemas['SearchResponse']
+export type FaceSearchResponse = Schemas['FaceSearchResponse']
+export type FaceAnswer = Schemas['FaceAnswer']
 export type ImportRequest = Schemas['ImportRequest']
 
 export interface Page<T> {

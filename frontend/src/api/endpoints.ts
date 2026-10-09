@@ -8,6 +8,7 @@ import type {
   ImportRequest,
   OccurrenceSummary,
   Page,
+  FaceSearchResponse,
   SearchResponse,
   UnresolvedFace,
   PersonSummary,
@@ -39,6 +40,8 @@ export const endpoints = (api: ApiClient) => ({
 
   search: (q: string, recycled: 'include' | 'exclude' = 'exclude') =>
     api.get<SearchResponse>(`${V1}/search`, { q, recycled }),
+
+  searchFace: (picture: Blob) => api.upload<FaceSearchResponse>(`${V1}/search/face`, picture),
 
   listRuns: (cursor?: string, limit = 50) =>
     api.get<Page<ProcessingRun>>(`${V1}/processing-runs`, { cursor, limit }),
