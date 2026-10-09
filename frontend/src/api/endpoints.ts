@@ -2,6 +2,7 @@
 
 import type { ApiClient } from './client'
 import type {
+  DeletionPending,
   IdentitySummary,
   ImportRequest,
   OccurrenceSummary,
@@ -24,6 +25,8 @@ export const endpoints = (api: ApiClient) => ({
   getSource: (id: string) => api.get<SourceDetail>(`${V1}/sources/${id}`),
   recycleSource: (id: string) => api.delete(`${V1}/sources/${id}`),
   restoreSource: (id: string) => api.post<SourceDetail>(`${V1}/sources/${id}/restore`),
+  deleteSourcePermanently: (id: string) =>
+    api.command<DeletionPending>(`${V1}/sources/${id}/permanent-delete`),
   importSource: (request: ImportRequest) => api.post<SourceDetail>(`${V1}/sources/import`, request),
   sourceMedia: (id: string) => api.blob(`${V1}/sources/${id}/media`),
   sourceOccurrences: (id: string, cursor?: string) =>

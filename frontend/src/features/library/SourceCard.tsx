@@ -7,6 +7,7 @@ import type { SourceSummary } from '@/api/types'
 import { StatusBadge } from '../StatusBadge'
 import { canProcess } from '../status'
 import { useSourceImage } from '../useSourceImage'
+import { PermanentDelete } from '../source/PermanentDelete'
 import { errorMessage } from './messages'
 
 interface Props {
@@ -68,6 +69,14 @@ export function SourceCard({ source, recycled = false, onNotice }: Props) {
         >
           {source.display_name}
         </Link>
+        {recycled ? (
+          <PermanentDelete
+            sourceId={source.id}
+            name={source.display_name}
+            onNotice={onNotice}
+            compact
+          />
+        ) : null}
         <div className="mt-auto flex items-center justify-between gap-2">
           <StatusBadge state={source.processing_status} />
           {recycled ? (

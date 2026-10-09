@@ -84,6 +84,13 @@ export class ApiClient {
     return (await this.send(path, init)).json() as Promise<T>
   }
 
+  /** A command whose answer is `204` (no body) or carries a body (for example a `202`). */
+  async command<T>(path: string): Promise<{ status: number; body: T | null }> {
+    const response = await this.send(path, { method: 'POST' })
+    const body = response.status === 204 ? null : ((await response.json()) as T)
+    return { status: response.status, body }
+  }
+
   /** A request with no answer body (a 204). */
   async delete(path: string): Promise<void> {
     await this.send(path, { method: 'DELETE' })
