@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { FaceCrop } from '../FaceCrop'
 import { FaceCorrection } from '../source/FaceCorrection'
 import { errorMessage } from '../library/messages'
+import { ForgetControl } from './ForgetControl'
 import { MergeControl } from './MergeControl'
 import { NameForm } from './NameForm'
 import { SplitControl } from './SplitControl'
@@ -66,6 +67,7 @@ export function IdentityPage() {
       </p>
       <NameForm identityId={identityId} person={person.data.person ?? null} />
       <MergeControl identity={person.data} />
+      <ForgetControl identity={person.data} />
 
       <h2 className="font-medium">Where this person appears</h2>
       {appearances.isPending ? <p className="text-sm text-muted-foreground">Loading…</p> : null}

@@ -37,6 +37,7 @@ export function FaceCorrection({ face }: { face: Face }) {
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: keys.identities }),
+        queryClient.invalidateQueries({ queryKey: keys.people }),
         queryClient.invalidateQueries({ queryKey: ['identity'] }),
         queryClient.invalidateQueries({ queryKey: ['source'] }),
       ]),

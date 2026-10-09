@@ -3,6 +3,7 @@
 import type { ApiClient } from './client'
 import type {
   DeletionPending,
+  ForgetPending,
   IdentitySummary,
   ImportRequest,
   OccurrenceSummary,
@@ -63,6 +64,11 @@ export const endpoints = (api: ApiClient) => ({
       occurrence_ids: occurrenceIds,
       expected_revision: identity.revision,
     }),
+  forgetIdentity: (identity: IdentitySummary) =>
+    api.command<ForgetPending>(`${V1}/identities/${identity.id}/forget`, {
+      expected_revision: identity.revision,
+    }),
+  forgetPerson: (personId: string) => api.command<ForgetPending>(`${V1}/people/${personId}/forget`),
   confirmFace: (occurrenceId: string, expectedIdentityId: string) =>
     api.post<OccurrenceSummary>(`${V1}/occurrences/${occurrenceId}/confirm`, {
       expected_identity_id: expectedIdentityId,
@@ -72,6 +78,8 @@ export const endpoints = (api: ApiClient) => ({
       expected_identity_id: expectedIdentityId,
       identity_id: identityId,
     }),
+  listPeople: (cursor?: string) =>
+    api.get<Page<PersonSummary>>(`${V1}/people`, { cursor, limit: 50 }),
   nameIdentity: (identityId: string, displayName: string) =>
     api.post<PersonSummary>(`${V1}/people`, { display_name: displayName, identity_id: identityId }),
   renamePerson: (personId: string, displayName: string, expectedRevision: number) =>

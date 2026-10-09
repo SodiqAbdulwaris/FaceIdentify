@@ -13,6 +13,7 @@ export const keys = {
   runs: ['runs'] as const,
   latestRun: ['runs', 'latest'] as const,
   identities: ['identities'] as const,
+  people: ['people'] as const,
   identity: (id: string) => ['identity', id] as const,
   identityOccurrences: (id: string) => ['identity', id, 'occurrences'] as const,
 }
