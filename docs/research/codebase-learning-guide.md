@@ -1762,8 +1762,7 @@ that records Evidence and bumps revisions.
 | **Assign / remove** a person link | `POST /people/{id}/assign-identity`, `.../remove-identity` | |
 | **Read** | `GET /identities`, `/people`, `/sources/{id}/occurrences`, `/identities/{id}/occurrences` | authoritative (`ACTIVE`) data only |
 
-**Not built yet [designed]:** recycle and restore a source in the UI, permanent source deletion,
-`ForgetIdentity` (the *only* operation that removes biometric memory; "forget person" runs it for each
+**Not built yet [designed]:** `ForgetIdentity` (the *only* operation that removes biometric memory; "forget person" runs it for each
 of a Person's identities), historical and name search, face search (query-only; never stores the
 query), cross-source recognition on real models, and the M5 real-world gate.
 
@@ -1775,8 +1774,9 @@ A common source of confusion. The project distinguishes:
   Recycle bin view, while its bytes and its memory stay and its faces remain in the people it was
   recognised in, marked as coming from a recycled image; `POST /sources/{id}/restore` brings it
   back without reprocessing. A source being processed cannot be recycled until that ends.
-- **Delete** a source permanently: removes its files and runs; *evidence and named people stay*
-  (an unnamed identity left with nothing becomes `DELETED`).
+- **Delete** a source permanently ([built], `POST /sources/{id}/permanent-delete`, only from the bin): removes its
+  files, faces, vectors and runs; *evidence and named people stay* (an unnamed identity left with nothing
+  becomes `DELETED`). It records its intent first, so a crash is finished at the next start.
 - **Forget** an identity: the only thing that erases its biometric vectors (Part 6.6 erasure).
 - **Occurrences from a recycled source** keep showing in identity views, marked as recycled.
 

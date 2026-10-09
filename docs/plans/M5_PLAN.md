@@ -297,7 +297,7 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
 
 ### Step 4. Lifecycle: recycle, restore, permanent delete, forget (TST-059, SEC-006)
 
-**4a (recycle and restore) built 2026-10-08** ([entry](../implementations/2026-10-08-m5-recycle-restore.md)): `DELETE /sources/{id}` and `POST /sources/{id}/restore`, the recycle bin view, and the recycled marker on occurrences. 4b (permanent delete) and 4c (forget) follow.
+**4a (recycle and restore) built 2026-10-08** ([entry](../implementations/2026-10-08-m5-recycle-restore.md)): `DELETE /sources/{id}` and `POST /sources/{id}/restore`, the recycle bin view, and the recycled marker on occurrences. **4b (permanent delete) built 2026-10-09** ([entry](../implementations/2026-10-09-m5-permanent-source-delete.md)): `POST /sources/{id}/permanent-delete`, intent then bytes then vectors then one finalizing transaction, Evidence kept but detached, restart-proof. 4c (forget) follows.
 
 - Recycle and restore routes over `recycle_source` and `restore_source` (built). Normal library
   browsing hides a recycled Source; identity views, counts and historical search keep its Occurrences,
@@ -305,8 +305,8 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
 - Permanent delete of a Source: deletes its runs and then their now-unreferenced snapshots (CONTEXT
   question 29), deletes managed artifacts through the Storage Manager's conservative cleanup, and
   defines what happens to the Source's observations, representations (erasure, built), Occurrences and
-  Evidence. **Ask before building:** the fate of Evidence and of an identity that loses its last
-  Source; I will propose from Identity model section 60 ("Delete Media vs Forget Person").
+  Evidence (built 2026-10-09; the owner decided on 2026-10-07 that Evidence and named people stay, and
+  the entry records the agent designs that remain to confirm).
 - **Forget: the meaning is fixed before any code (gate; confirmed by the owner 2026-10-07).** The API spec's operation is
   `POST /identities/{identity_id}/forget` (section 8.3), an Identity-level memory operation, while the
   Identity model speaks of "Forget Person" and says user-authored Person metadata survives. Proposed

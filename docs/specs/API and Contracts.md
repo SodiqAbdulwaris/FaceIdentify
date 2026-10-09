@@ -314,6 +314,13 @@ Permanent deletion removes application-owned managed artifacts according to rete
 
 For REFERENCED media, the external original is never physically deleted.
 
+> **Agent design 2026-10-09 (awaiting the owner's confirmation; built):** only a Source in the Recycle Bin
+> can be deleted (`409 SOURCE_NOT_RECYCLED` otherwise, `409 SOURCE_BUSY` while a run is in flight). The
+> answer is `204` when only the tombstone remains and `202` with `{state: DELETING, outstanding: [...]}`
+> when part could not finish (retried at the next start); a repeat is harmless and announces nothing, a
+> change is announced as `source.updated`. Afterwards `GET /sources/{id}` is `404`. Evidence and named
+> people stay; the Source row stays as a `DELETED` tombstone so retained Evidence still resolves it.
+
 ---
 
 # 6. Processing Runs
