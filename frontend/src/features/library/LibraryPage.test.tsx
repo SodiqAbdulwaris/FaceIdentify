@@ -451,6 +451,35 @@ describe('importing', () => {
       expect(calls.filter((c) => c.path.endsWith('/permanent-delete'))).toHaveLength(1)
     })
 
+    it('moves focus to the safe answer, and gives it back on Escape', async () => {
+      const user = userEvent.setup()
+      inTheBin({ status: 204 })
+      await user.click(await screen.findByRole('button', { name: 'Recycle bin' }))
+
+      await user.click(await screen.findByRole('button', { name: 'Delete beach.png permanently' }))
+
+      expect(screen.getByRole('button', { name: 'Keep it' })).toHaveFocus()
+      expect(screen.getByRole('alertdialog')).toHaveAccessibleDescription(/cannot be brought back/)
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+      expect(screen.getByRole('button', { name: 'Delete beach.png permanently' })).toHaveFocus()
+    })
+
+    it('forgets everything it had fetched for the image, bytes included', async () => {
+      const user = userEvent.setup()
+      const { queryClient } = inTheBin({ status: 204 })
+      await user.click(await screen.findByRole('button', { name: 'Recycle bin' }))
+      queryClient.setQueryData(['source', 's1', 'media'], new Blob(['pixels']))
+      queryClient.setQueryData(['runs'], [])
+
+      await user.click(await screen.findByRole('button', { name: 'Delete beach.png permanently' }))
+      await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
+
+      expect(await screen.findByText('The recycle bin is empty')).toBeInTheDocument()
+      expect(queryClient.getQueryData(['source', 's1', 'media'])).toBeUndefined()
+      expect(queryClient.getQueryState(['runs'])?.isInvalidated).toBe(true)
+    })
+
     it('says so when part of the deletion could not finish yet', async () => {
       const user = userEvent.setup()
       inTheBin({ status: 202 })

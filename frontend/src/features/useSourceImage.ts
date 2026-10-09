@@ -36,5 +36,6 @@ export function useSourceImage(sourceId: string, enabled = true) {
     enabled,
     retry: false,
   })
-  return { url: useObjectUrl(media.data), isLoading: media.isLoading, isError: media.isError }
+  // Disabled means the image is not to be shown (missing, or deleted): cached bytes stay hidden.
+  return { url: useObjectUrl(enabled ? media.data : undefined), isLoading: media.isLoading, isError: media.isError }
 }
