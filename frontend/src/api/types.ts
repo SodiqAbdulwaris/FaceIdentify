@@ -6,6 +6,7 @@ type Schemas = components['schemas']
 
 export type SourceSummary = Schemas['SourceSummary']
 export type SourceDetail = Schemas['SourceDetail']
+export type DeletionPending = Schemas['DeletionPending']
 export type ProcessingRun = Schemas['ProcessingRunDetail']
 export type JobBrief = Schemas['JobBrief']
 export type PolicyProvenance = Schemas['PolicyProvenance']

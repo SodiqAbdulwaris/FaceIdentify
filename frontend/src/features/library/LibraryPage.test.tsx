@@ -361,9 +361,9 @@ describe('importing', () => {
     ])
 
     queryClient.setQueryData(['source', 's1'], { state: 'ACTIVE' }) // as if its page was visited
-    await user.click(
-      await screen.findByRole('button', { name: 'Move beach.png to the recycle bin' }),
-    )
+    await screen.findByRole('button', { name: 'Move beach.png to the recycle bin' })
+    expect(screen.queryByRole('button', { name: /permanently/ })).toBeNull() // only from the bin
+    await user.click(screen.getByRole('button', { name: 'Move beach.png to the recycle bin' }))
 
     expect(await screen.findByText('No images yet')).toBeInTheDocument()
     expect(calls.some((c) => c.method === 'DELETE' && c.path === `${SOURCES}/s1`)).toBe(true)
@@ -406,6 +406,91 @@ describe('importing', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === `${SOURCES}/s1/restore`)).toBe(true)
     await user.click(screen.getByRole('button', { name: 'Library' }))
     expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument()
+  })
+
+  describe('deleting an image in the recycle bin for good', () => {
+    const inTheBin = (permanent: Record<string, unknown>) => {
+      let gone = false
+      return renderApp('/library', [
+        {
+          path: SOURCES,
+          respond: (call) =>
+            call.query.get('state') === 'RECYCLED'
+              ? page(gone ? [] : [source({ id: 's1', display_name: 'beach.png' })])
+              : page([]),
+        },
+        {
+          method: 'POST',
+          path: `${SOURCES}/s1/permanent-delete`,
+          ...permanent,
+          respond: () => {
+            gone = permanent.status === 204
+            return permanent.status === 204 ? null : { state: 'DELETING', outstanding: ['x'] }
+          },
+        },
+        media,
+      ])
+    }
+
+    it('asks first, can be cancelled, and then removes the image', async () => {
+      const user = userEvent.setup()
+      const { calls } = inTheBin({ status: 204 })
+      await user.click(await screen.findByRole('button', { name: 'Recycle bin' }))
+      const open = () => screen.findByRole('button', { name: 'Delete beach.png permanently' })
+
+      await user.click(await open())
+      expect(screen.getByRole('alertdialog')).toHaveTextContent('cannot be brought back')
+      await user.click(screen.getByRole('button', { name: 'Keep it' }))
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+      expect(calls.some((c) => c.path.endsWith('/permanent-delete'))).toBe(false) // nothing sent yet
+
+      await user.click(await open())
+      await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
+
+      expect(await screen.findByText('The recycle bin is empty')).toBeInTheDocument()
+      expect(calls.filter((c) => c.path.endsWith('/permanent-delete'))).toHaveLength(1)
+    })
+
+    it('says so when part of the deletion could not finish yet', async () => {
+      const user = userEvent.setup()
+      inTheBin({ status: 202 })
+      await user.click(await screen.findByRole('button', { name: 'Recycle bin' }))
+
+      await user.click(await screen.findByRole('button', { name: 'Delete beach.png permanently' }))
+      await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
+
+      expect(await screen.findByRole('status', { name: 'Library notice' })).toHaveTextContent(
+        'tried again the next time the app starts',
+      )
+    })
+
+    it('says why it was refused and leaves the image where it is', async () => {
+      const user = userEvent.setup()
+      renderApp('/library', [
+        {
+          path: SOURCES,
+          respond: (call) =>
+            call.query.get('state') === 'RECYCLED'
+              ? page([source({ id: 's1', display_name: 'beach.png' })])
+              : page([]),
+        },
+        {
+          method: 'POST',
+          path: `${SOURCES}/s1/permanent-delete`,
+          ...apiError('SOURCE_BUSY', 'The source is being processed; cancel that first.', 409),
+        },
+        media,
+      ])
+      await user.click(await screen.findByRole('button', { name: 'Recycle bin' }))
+
+      await user.click(await screen.findByRole('button', { name: 'Delete beach.png permanently' }))
+      await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
+
+      expect(await screen.findByRole('status', { name: 'Library notice' })).toHaveTextContent(
+        'being processed',
+      )
+      expect(screen.getByRole('img', { name: 'beach.png' })).toBeInTheDocument()
+    })
   })
 
   it('says why an image could not be recycled, and leaves it where it is', async () => {

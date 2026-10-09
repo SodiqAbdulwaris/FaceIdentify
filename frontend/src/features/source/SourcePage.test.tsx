@@ -389,4 +389,42 @@ describe('a source', () => {
     expect(screen.queryByRole('note')).toBeNull()
     expect(calls.filter((c) => c.method !== 'GET').map((c) => c.method)).toEqual(['DELETE', 'POST'])
   })
+
+  it('offers to delete an image for good only while it is in the recycle bin', async () => {
+    const user = userEvent.setup()
+    let state = 'ACTIVE'
+    const { calls } = open([
+      { path: SOURCE, respond: () => detail({ state }) },
+      {
+        method: 'DELETE',
+        path: SOURCE,
+        status: 204,
+        respond: () => {
+          state = 'RECYCLED'
+          return null
+        },
+      },
+      {
+        method: 'POST',
+        path: `${SOURCE}/permanent-delete`,
+        status: 204,
+        respond: () => null,
+      },
+      media,
+      noFaces,
+      noRuns,
+    ])
+    await screen.findByRole('button', { name: 'Move to the recycle bin' })
+    expect(screen.queryByRole('button', { name: /permanently/ })).toBeNull() // not from the library
+
+    await user.click(screen.getByRole('button', { name: 'Move to the recycle bin' }))
+    await user.click(await screen.findByRole('button', { name: 'Delete beach.png permanently' }))
+    await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.path === `${SOURCE}/permanent-delete`)).toBe(
+        true,
+      ),
+    )
+  })
 })

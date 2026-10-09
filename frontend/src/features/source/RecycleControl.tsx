@@ -4,6 +4,7 @@ import type { SourceDetail } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '../library/messages'
+import { PermanentDelete } from './PermanentDelete'
 
 /**
  * Move an image to the recycle bin and back. Recycling only hides it from the library: its faces
@@ -45,6 +46,9 @@ export function RecycleControl({
       <Button variant="outline" disabled={move.isPending} onClick={() => move.mutate()}>
         {recycled ? 'Restore from the recycle bin' : 'Move to the recycle bin'}
       </Button>
+      {recycled ? (
+        <PermanentDelete sourceId={source.id} name={source.display_name} onNotice={onNotice} />
+      ) : null}
     </div>
   )
 }
