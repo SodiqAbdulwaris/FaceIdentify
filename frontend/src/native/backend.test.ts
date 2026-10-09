@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { NO_SHELL_MESSAGE, backendStatus, chooseImages, inShell, libraryRoot } from './backend'
+import {
+  NO_SHELL_MESSAGE,
+  backendStatus,
+  chooseImages,
+  choosePicture,
+  inShell,
+  libraryRoot,
+} from './backend'
 
 const invoke = vi.hoisted(() => vi.fn())
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
@@ -14,6 +21,7 @@ describe('outside the desktop shell', () => {
   it('has no shell, no files to pick and no library folder', async () => {
     expect(inShell()).toBe(false)
     expect(await chooseImages()).toEqual([])
+    expect(await choosePicture()).toBeNull()
     expect(await libraryRoot()).toBe('')
   })
 
