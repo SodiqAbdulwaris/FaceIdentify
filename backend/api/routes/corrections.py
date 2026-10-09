@@ -7,7 +7,7 @@ refused, and return the occurrence as it now is. Each is one use case with one E
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -184,13 +184,33 @@ class Resolve(BaseModel):
     identity_id: uuid.UUID | None  # None: a new unknown identity
 
 
+_SUPPORTING = (
+    RepresentationState.ACTIVE,
+    RepresentationState.PENDING,
+    RepresentationState.SUPERSEDED,
+)
+
+
+def _members(details: dict[str, Any]) -> dict[uuid.UUID, float]:
+    """The faces a recorded candidate was made of, with the similarity each one had."""
+    return {
+        uuid.UUID(member["representation_id"]): float(member["similarity"])
+        for member in details.get("members", [])
+    }
+
+
 def _likely(session: Session, representation_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[Likely]]:
-    """For each face, the identities its abstention compared it with, best similarity first."""
+    """For each face, the identities its abstention compared it with, best similarity first.
+
+    The abstention is history; the hint is live. A candidate counts only through the faces it was
+    compared with that still exist (one whose image was deleted, or whose memory was erased, no
+    longer supports it), and its score is the best of those."""
     rows = session.execute(
         select(
             EvidenceRepresentation.representation_id,
             EvidenceCandidate.identity_id,
             EvidenceCandidate.raw_similarity,
+            EvidenceCandidate.details_json,
         )
         .join(Evidence, Evidence.id == EvidenceRepresentation.evidence_id)
         .join(EvidenceCandidate, EvidenceCandidate.evidence_id == Evidence.id)
@@ -202,10 +222,25 @@ def _likely(session: Session, representation_ids: list[uuid.UUID]) -> dict[uuid.
         )
         .order_by(EvidenceCandidate.raw_similarity.desc(), EvidenceCandidate.rank)
     ).tuples()
+    compared = [
+        (representation_id, identity_id, similarity, _members(details))
+        for representation_id, identity_id, similarity, details in rows.all()
+    ]
+    alive = set(
+        session.scalars(
+            select(Representation.id).where(
+                Representation.id.in_({m for *_, members in compared for m in members}),
+                Representation.state.in_(_SUPPORTING),
+            )
+        )
+    )
     best: dict[uuid.UUID, dict[uuid.UUID, float]] = {}
-    for representation_id, identity_id, similarity in rows:
+    for representation_id, identity_id, _similarity, members in compared:
         assert identity_id is not None  # (filtered above)
-        best.setdefault(representation_id, {}).setdefault(identity_id, similarity)
+        supported = [score for member, score in members.items() if member in alive]
+        if supported:
+            per = best.setdefault(representation_id, {})
+            per[identity_id] = max(per.get(identity_id, -2.0), max(supported))
     identities = {i for per in best.values() for i in per}
     active = set(
         session.scalars(
@@ -218,7 +253,7 @@ def _likely(session: Session, representation_ids: list[uuid.UUID]) -> dict[uuid.
     return {
         representation_id: [
             Likely(identity_id=str(i), person=people.get(i), similarity=score)
-            for i, score in per.items()
+            for i, score in sorted(per.items(), key=lambda item: -item[1])
             if i in active
         ][:LIKELY_PEOPLE]
         for representation_id, per in best.items()

@@ -8,12 +8,14 @@ announce a change only when one was made.
 import sqlite3
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import event, select
+from sqlalchemy import event, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import Evidence, EvidenceCandidate, EvidenceRepresentation
+from backend.app.memory.models import Representation
 from backend.app.processing.models import ProcessingRun
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, error
@@ -270,6 +272,10 @@ def unresolved(api: Api, new_id: SeededUUIDs) -> Unresolved:
                 evidence_id=abstention.id, representation_id=representation.id, role="SUBJECT"
             )
         )
+        old = build.observation(
+            session.get(ProcessingRun, observation.processing_run_id), state="SUPERSEDED"
+        )
+        support = build.representation(old, state="ACTIVE", ann_key=2, identity_id=None)
         others = [build.identity().id for _ in range(3)]
         hidden = build.identity(state="PENDING").id  # not a person anyone can be told it is
         ranked = (
@@ -280,7 +286,7 @@ def unresolved(api: Api, new_id: SeededUUIDs) -> Unresolved:
             build.add(
                 EvidenceCandidate(
                     evidence_id=abstention.id, rank=rank, identity_id=who, raw_similarity=score,
-                    decision="CANDIDATE", details_json={},
+                    decision="CANDIDATE", details_json=compared_with(support.id, score),
                 )
             )  # fmt: skip
         stray = build.evidence(kind="RECOGNITION_ABSTAINED")  # cites this face only as a candidate
@@ -295,15 +301,16 @@ def unresolved(api: Api, new_id: SeededUUIDs) -> Unresolved:
                 raw_similarity=0.99, decision="CANDIDATE", details_json={},
             )
         )  # fmt: skip
-        old = build.observation(
-            session.get(ProcessingRun, observation.processing_run_id), state="SUPERSEDED"
-        )
-        build.representation(old, state="ACTIVE", ann_key=2, identity_id=None)
         session.commit()
         return Unresolved(
             str(observation.source_id), str(representation.id), str(observation.id),
             str(alice.id), str(bob.id),
         )  # fmt: skip
+
+
+def compared_with(representation_id: uuid.UUID, similarity: float) -> dict[str, Any]:
+    """What a recorded candidate keeps of the face it was compared with."""
+    return {"members": [{"representation_id": str(representation_id), "similarity": similarity}]}
 
 
 async def test_unresolved_faces_are_listed_with_who_they_resembled(
@@ -327,6 +334,83 @@ async def test_unresolved_faces_are_listed_with_who_they_resembled(
         404,
         "SOURCE_NOT_FOUND",
     )
+
+
+async def likely_after_changing_alices_evidence(
+    api: Api, u: Unresolved, members: list[tuple[str, float]], *, erase_support: bool = False
+) -> list[tuple[str, float]]:
+    """Alice's recorded candidate is made of `members` (`support` and `self` are faces that
+    exist, `gone` one that does not; `erase_support` erases `support`'s memory); what the
+    unresolved-face list then says she resembled."""
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        [support] = session.scalars(select(Representation.id).where(Representation.ann_key == 2))
+        if erase_support:
+            session.execute(
+                update(Representation)
+                .where(Representation.id == support)
+                .values(state="ERASED", vector=None, ann_key=None)
+            )
+        for candidate in session.scalars(
+            select(EvidenceCandidate).where(EvidenceCandidate.identity_id == uuid.UUID(u.alice))
+        ):
+            candidate.details_json = {
+                "members": [
+                    {
+                        "representation_id": str(
+                            {
+                                "support": support,
+                                "self": uuid.UUID(u.representation),
+                                "gone": uuid.uuid4(),
+                            }[which]
+                        ),
+                        "similarity": score,
+                    }
+                    for which, score in members
+                ]
+            }
+        session.commit()
+    [face] = (await api.client.get(f"/api/v1/sources/{u.source}/unresolved-faces")).json()["items"]
+    return [(p["identity_id"], p["similarity"]) for p in face["likely"]]
+
+
+async def test_a_hint_needs_a_face_that_still_exists(api: Api, new_id: SeededUUIDs) -> None:
+    u = unresolved(api, new_id)
+    seen = await likely_after_changing_alices_evidence(api, u, [("gone", 0.9)])
+
+    assert u.alice not in [who for who, _ in seen]  # the only face that supported her was deleted
+    assert u.bob in [who for who, _ in seen]
+
+
+async def test_a_hint_is_not_supported_by_a_face_whose_memory_was_erased(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    u = unresolved(api, new_id)
+
+    seen = await likely_after_changing_alices_evidence(
+        api, u, [("support", 0.4)], erase_support=True
+    )
+
+    assert u.alice not in [who for who, _ in seen]
+
+
+async def test_a_hint_takes_the_best_of_the_faces_that_remain(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    u = unresolved(api, new_id)
+
+    seen = await likely_after_changing_alices_evidence(
+        api, u, [("support", 0.30), ("self", 0.35), ("gone", 0.99)]
+    )
+
+    assert [score for _, score in seen][:2] == [0.38, 0.35]
+
+
+async def test_a_hint_is_scored_by_the_faces_that_remain(api: Api, new_id: SeededUUIDs) -> None:
+    u = unresolved(api, new_id)
+    seen = await likely_after_changing_alices_evidence(api, u, [("gone", 0.99), ("support", 0.30)])
+
+    assert [score for _, score in seen][:2] == [0.38, 0.30]  # not her old 0.99, so Bob is first
 
 
 async def test_an_unresolved_face_becomes_an_occurrence_and_leaves_the_list(
