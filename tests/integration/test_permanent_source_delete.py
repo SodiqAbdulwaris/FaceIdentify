@@ -37,6 +37,7 @@ from backend.app.processing.models import (
     ProcessingConfigurationSnapshot,
     ProcessingRun,
 )
+from backend.app.settings.app_state import WAL_TRUNCATION_OWED, AppStateRepository
 from backend.app.sources.artifact_storage import (
     ArtifactStateError,
     complete_artifact_deletion,
@@ -50,6 +51,7 @@ from backend.app.sources.permanent_delete import (
     SourceMissingError,
     SourceNotRecycledError,
 )
+from backend.infrastructure.db.engine import truncate_wal
 from backend.infrastructure.db.unit_of_work import TransactionRetry
 from tests.factories.models import ModelFactory
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
@@ -132,6 +134,11 @@ def recycle(lib: Pipeline, source_id: uuid.UUID) -> None:
         recycle_source(session, source_id, expected_revision=source.revision, clock=lib.clock)
 
     lib.lib.unit_of_work.write(work)
+
+
+def owed_marker(lib: Pipeline) -> str | None:
+    with lib.lib.session_factory() as session:
+        return AppStateRepository(session).get(WAL_TRUNCATION_OWED)
 
 
 def deletion(lib: Pipeline) -> PermanentSourceDeletion:
@@ -600,3 +607,279 @@ def test_bytes_are_only_removed_for_an_artifact_whose_deletion_was_recorded(open
             )
 
         assert lib.lib.store.digest(key) is not None
+
+
+# --- what the review of PR 156 found ------------------------------------------------------------
+
+
+def test_the_landmarks_and_quality_data_of_deleted_faces_are_not_left_in_the_database_files(
+    opened: Any,
+) -> None:
+    marker = "LANDMARKS-OF-A-DELETED-FACE-0123456789"
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        with Session(lib.lib.engine) as session:
+            session.execute(
+                update(Observation).values(
+                    landmarks_json={"eye": marker}, quality_json={"note": marker + "-quality"}
+                )
+            )
+            session.commit()
+        database = Path(str(lib.lib.engine.url.database))
+        assert (
+            marker.encode()
+            in database.read_bytes() + database.with_name(database.name + "-wal").read_bytes()
+        )
+        recycle(lib, source_id)
+
+        report = deletion(lib).delete(source_id)
+
+        assert report.complete
+        leftovers = [
+            path.name
+            for path in (database, database.with_name(database.name + "-wal"))
+            if path.exists() and marker.encode() in path.read_bytes()
+        ]
+        assert leftovers == []
+
+
+def test_a_log_that_cannot_be_truncated_keeps_the_deletion_unfinished_until_it_is(
+    opened: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    truncating = "backend.app.memory.erasure.truncate_wal"
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        recycle(lib, source_id)
+        monkeypatch.setattr(truncating, lambda *_a, **_k: False)
+
+        blocked = deletion(lib).delete(source_id)  # the vectors' own cleanup cannot finish
+
+        assert not blocked.complete
+        assert only(lib, select(Source.state)) == ["DELETING"]
+        # Now only the log of the rows' deletion is owed: the first call (the vectors') succeeds.
+        calls: list[int] = []
+
+        def once(engine: Any, **kwargs: Any) -> bool:
+            calls.append(1)
+            return len(calls) == 1 and truncate_wal(engine, **kwargs)
+
+        monkeypatch.setattr(truncating, once)
+
+        owed = deletion(lib).delete(source_id)
+
+        assert not owed.complete
+        assert any("write-ahead log" in item for item in owed.outstanding)
+        assert only(lib, select(Source.state)) == ["DELETED"]  # the rows are gone; the log is owed
+
+        assert owed_marker(lib) is not None
+        monkeypatch.undo()
+
+        again = deletion(lib).delete(source_id)  # a repeat settles the log
+
+        assert again.complete
+        assert not again.changed
+        assert owed_marker(lib) is None
+
+
+def test_a_write_that_never_finished_is_removed_too(opened: Any) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        crop = add_face_crop(lib, source_id)
+        [crop_key] = only(lib, select(Artifact.storage_key).where(Artifact.id == crop))
+        staged = lib.lib.store.staging_path(crop_key)
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_bytes(b"half a crop")
+        with Session(lib.lib.engine) as session:
+            session.execute(update(Artifact).where(Artifact.id == crop).values(state="PENDING"))
+            session.commit()
+        recycle(lib, source_id)
+
+        report = deletion(lib).delete(source_id)
+
+        assert report.complete
+        assert lib.lib.store.digest(crop_key) is None
+        assert not staged.exists()
+        assert {a.id: a.state for a in only(lib, select(Artifact))}[crop] == "DELETED"
+
+
+def test_an_artifact_nobody_is_deleting_blocks_completion(opened: Any) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        crop = add_face_crop(lib, source_id)
+        recycle(lib, source_id)
+        steps = deletion(lib)
+        lib.lib.unit_of_work.write(lambda s: steps._begin(s, source_id, lib.clock()))
+        with Session(lib.lib.engine) as session:  # it fell back to a state no step handles
+            session.execute(update(Artifact).where(Artifact.id == crop).values(state="PENDING"))
+            session.commit()
+
+        report = steps._carry_on(source_id)
+
+        assert not report.complete
+        assert report.outstanding == [f"artifact {crop} is not deleted"]
+        assert only(lib, select(Source.state)) == ["DELETING"]
+        assert len(only(lib, select(Observation))) == 1
+
+
+def test_a_representation_marked_deleted_still_loses_its_vector(opened: Any) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        assert files_containing(lib, C)
+        with Session(lib.lib.engine) as session:
+            session.execute(update(Representation).values(state="DELETED"))
+            session.commit()
+        recycle(lib, source_id)
+
+        report = deletion(lib).delete(source_id)
+
+        assert report.complete
+        assert files_containing(lib, C) == []  # not in the database, the log or any index file
+
+
+def test_a_source_being_deleted_is_out_of_recognition_and_every_reader_at_once(
+    opened: Any,
+) -> None:
+    with opened() as lib:
+        first, _ = process(lib, A)
+        recycle(lib, first)
+        steps = deletion(lib)
+        lib.lib.unit_of_work.write(lambda s: steps._begin(s, first, lib.clock()))  # intent only
+
+        assert {r.state for r in only(lib, select(Representation))} == {"ERASING"}
+        assert {o.state for o in only(lib, select(Occurrence))} == {"DELETED"}
+        assert {o.state for o in only(lib, select(Observation))} == {"DELETED"}
+        second, _ = process(lib, unit(0.99, 0.05, 0, 0))  # a face just like the one being deleted
+
+        kinds = sorted(only(lib, select(Evidence.kind)))
+        assert kinds == ["IDENTITY_CREATED", "RECOGNITION_ABSTAINED"]  # not IDENTITY_MATCHED
+        assert only(lib, select(Occurrence.identity_id).where(Occurrence.source_id == second)) == []
+
+
+def test_two_requests_at_once_do_not_trip_over_each_other(opened: Any) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        crop = add_face_crop(lib, source_id)
+        recycle(lib, source_id)
+        slow, fast = deletion(lib), deletion(lib)
+        lib.lib.unit_of_work.write(lambda s: slow._begin(s, source_id, lib.clock()))
+        assert fast.delete(source_id).complete  # the other request finishes first
+
+        # The slow one wakes up late and finds everything done.
+        complete_artifact_deletion(lib.lib.session_factory, lib.lib.store, crop, clock=lib.clock)
+        lib.lib.unit_of_work.write(lambda s: slow._finalize(s, source_id, lib.clock()))
+        report = slow._carry_on(source_id)
+
+        assert report.complete
+        assert only(lib, select(Source.state)) == ["DELETED"]
+
+
+def test_the_other_request_finishing_an_artifact_midway_is_not_an_error(
+    opened: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        crop = add_face_crop(lib, source_id)
+        recycle(lib, source_id)
+        steps = deletion(lib)
+        lib.lib.unit_of_work.write(lambda s: steps._begin(s, source_id, lib.clock()))
+        store = lib.lib.store
+        real = store.delete
+        raced: list[str] = []
+
+        def racing(key: str) -> None:
+            real(key)
+            if not raced:  # while this one removes the bytes, the other request finishes the job
+                raced.append(key)
+                complete_artifact_deletion(lib.lib.session_factory, store, crop, clock=lib.clock)
+
+        monkeypatch.setattr(store, "delete", racing)
+
+        complete_artifact_deletion(lib.lib.session_factory, store, crop, clock=lib.clock)
+
+        assert {a.id: a.state for a in only(lib, select(Artifact))}[crop] == "DELETED"
+
+
+def test_a_long_history_is_deleted_in_bounded_statements(
+    opened: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy import event
+
+    from backend.app.sources import permanent_delete
+
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        for _ in range(2):  # two more runs of the same image
+            lib.accept(lib.execute(source_id), apply_index=True)
+        recycle(lib, source_id)
+        monkeypatch.setattr(permanent_delete, "CHUNK", 1)
+        statements: list[str] = []
+        event.listen(
+            lib.lib.engine,
+            "before_cursor_execute",
+            lambda _c, _cur, statement, *_rest: statements.append(statement),
+        )
+
+        assert deletion(lib).delete(source_id).complete
+
+        snapshot_deletes = [s for s in statements if s.startswith("DELETE FROM processing_config")]
+        assert len(snapshot_deletes) == 3  # one per run, never one statement for all of them
+
+
+def test_a_person_still_seen_elsewhere_keeps_a_face_to_show(opened: Any) -> None:
+    with opened() as lib:
+        first, _ = process(lib, A)
+        second, _ = process(lib, B)  # the same identity
+        [identity] = only(lib, select(Identity))
+        [second_face] = only(lib, select(Observation.id).where(Observation.source_id == second))
+        [first_face] = only(lib, select(Observation.id).where(Observation.source_id == first))
+        with Session(lib.lib.engine) as session:
+            session.execute(update(Identity).values(representative_observation_id=first_face))
+            session.commit()
+        revision = identity.revision
+        recycle(lib, first)
+
+        assert deletion(lib).delete(first).complete
+
+        [after] = only(lib, select(Identity))
+        assert after.state == "ACTIVE"
+        assert after.representative_observation_id == second_face
+        assert after.revision == revision + 1
+
+
+def test_what_describes_a_deleted_file_goes_with_it(opened: Any) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        [original] = only(lib, select(Source.original_artifact_id))
+        with Session(lib.lib.engine) as session:
+            session.execute(
+                update(Artifact)
+                .where(Artifact.id == original)
+                .values(original_filename="Ada-holiday.jpg", mime_type="image/jpeg")
+            )
+            session.commit()
+        recycle(lib, source_id)
+
+        assert deletion(lib).delete(source_id).complete
+
+        [artifact] = only(lib, select(Artifact).where(Artifact.id == original))
+        assert (artifact.original_filename, artifact.mime_type) == (None, None)
+        assert (artifact.sha256, artifact.size_bytes) == (None, None)
+
+
+def test_a_retry_that_changes_nothing_is_not_reported_as_a_change(
+    opened: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        recycle(lib, source_id)
+
+        def locked(_key: str) -> None:
+            raise PermissionError("in use")
+
+        monkeypatch.setattr(lib.lib.store, "delete", locked)
+        first = deletion(lib).delete(source_id)
+        second = deletion(lib).delete(source_id)
+        monkeypatch.undo()
+        third = deletion(lib).delete(source_id)
+
+        assert (first.changed, second.changed, third.changed) == (True, False, True)
