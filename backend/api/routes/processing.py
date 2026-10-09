@@ -15,6 +15,7 @@ and 6; M4 W3.3).
 """
 
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -198,6 +199,12 @@ def _require_source(session: Session, source_id: uuid.UUID) -> None:
     require_visible_source(session, source_id)
 
 
+def _still_there(library: Library, check: Callable[[Session], object]) -> None:
+    """A command was refused: if what it was about was deleted in the meantime (after the check
+    that let it start), the honest answer is the same `404` as before, not the refusal."""
+    library.unit_of_work.read(check)
+
+
 # --- routes ---------------------------------------------------------------------------------
 
 
@@ -228,6 +235,7 @@ def process_source(
             created_by_user_action=None,
         )
     except ProcessSourceError as error:
+        _still_there(library, lambda session: _require_source(session, source_id))
         raise ApiError(
             409, "SOURCE_NOT_PROCESSABLE", "The source cannot be processed now.",
             details={"reason": str(error)},
@@ -244,11 +252,14 @@ def _listing(
     *,
     source_id: uuid.UUID | None,
     state: ProcessingRunState | None,
+    of_a_visible_source: bool = False,
 ) -> Page[ProcessingRunDetail]:
     context = f"runs:{source_id}:{state}"
     after = created_cursor(page.cursor, context)
 
     def read(session: Session) -> Page[ProcessingRunDetail]:
+        if of_a_visible_source and source_id is not None:
+            _require_source(session, source_id)  # (same snapshot as the runs below)
         query = select(ProcessingRun).where(ProcessingRun.source_id.not_in(gone_sources()))
         if source_id is not None:
             query = query.where(ProcessingRun.source_id == source_id)
@@ -289,8 +300,7 @@ def list_runs(
 def list_source_runs(
     source_id: uuid.UUID, library: Library, page: PageQuery
 ) -> Page[ProcessingRunDetail]:
-    library.unit_of_work.read(lambda session: _require_source(session, source_id))
-    return _listing(library, page, source_id=source_id, state=None)
+    return _listing(library, page, source_id=source_id, state=None, of_a_visible_source=True)
 
 
 @router.get("/processing-runs/{run_id}")
@@ -308,6 +318,7 @@ def cancel_command(library: Library, backend: Backend, run_id: uuid.UUID) -> Pro
     except RunNotFoundError:
         raise run_not_found(run_id) from None
     except CancelError as error:
+        _still_there(library, lambda session: visible_run(session, run_id))
         raise ApiError(
             409, "RUN_NOT_CANCELLABLE", "The processing run cannot be cancelled now.",
             details={"reason": str(error)},
@@ -347,6 +358,7 @@ def retry_run(
             wake_scheduler=backend.wake_scheduler,
         ).retry(job_id)
     except ProcessSourceError as error:
+        _still_there(library, lambda session: visible_run(session, run_id))
         raise ApiError(
             409, "RUN_NOT_RETRYABLE", "The processing run cannot be retried.",
             details={"reason": str(error)},

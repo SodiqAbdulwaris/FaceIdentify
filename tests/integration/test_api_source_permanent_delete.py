@@ -318,3 +318,49 @@ async def test_a_run_deleted_while_it_is_being_cancelled_is_not_found(
     error(
         await api.client.post(f"/api/v1/processing-runs/{run['id']}/cancel"), 404, "RUN_NOT_FOUND"
     )
+
+
+def begin_deleting(api: Api, source_id: str) -> None:
+    """Commit the intent to delete a recycled source, as a deletion request does first."""
+    assert api.backend.library is not None
+    lib = api.backend.library
+    steps = PermanentSourceDeletion(
+        lib.session_factory, lib.unit_of_work, lib.eraser, lib.store,
+        clock=api.backend.settings.clock,
+    )  # fmt: skip
+    lib.unit_of_work.write(
+        lambda session: steps._begin(session, uuid.UUID(source_id), api.backend.settings.clock())
+    )
+
+
+@pytest.mark.parametrize("command", ["cancel", "retry", "process"])
+async def test_a_command_refused_because_its_source_was_deleted_meanwhile_is_not_found(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    """The deletion begins after the route's visibility check and before the command's own write:
+    the command's refusal (it names the run's state) must become the same 404 as everywhere else."""
+    from backend.app.processing.cancel import CancelProcessingUseCase
+    from backend.app.processing.process_source import ProcessSourceUseCase
+    from backend.app.processing.retry import RetryProcessingUseCase
+
+    api = processing_api
+    source = await processed(api, "alice.png")
+    [run] = (await api.client.get("/api/v1/processing-runs")).json()["items"]
+    await api.client.delete(f"{SOURCES}/{source['id']}")
+    runs = "/api/v1/processing-runs"
+    cases = {
+        "cancel": (CancelProcessingUseCase, f"{runs}/{run['id']}/cancel", "RUN_NOT_FOUND"),
+        "retry": (RetryProcessingUseCase, f"{runs}/{run['id']}/retry", "RUN_NOT_FOUND"),
+        "process": (ProcessSourceUseCase, f"{SOURCES}/{source['id']}/process", "SOURCE_NOT_FOUND"),
+    }
+    use_case, path, code = cases[command]
+    method = command
+    real = getattr(use_case, method)
+
+    def deletion_begins_first(self: Any, *args: Any, **kwargs: Any) -> Any:
+        begin_deleting(api, source["id"])
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(use_case, method, deletion_begins_first)
+
+    error(await api.client.post(path), 404, code)
