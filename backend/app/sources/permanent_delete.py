@@ -234,6 +234,19 @@ class PermanentSourceDeletion:
             execution_options=no_sync,
         )
         self._eraser.queue_in(session, list(session.scalars(self._representation_ids(source_id))))
+        # Whoever relied on these faces sees a different identity from now on: a merge or split
+        # that was prepared against the old one must be refused (optimistic locking).
+        session.execute(
+            update(Identity)
+            .where(
+                Identity.id.in_(
+                    select(Occurrence.identity_id).where(Occurrence.source_id == source_id)
+                ),
+                Identity.state == IdentityState.ACTIVE,
+            )
+            .values(revision=Identity.revision + 1, updated_at=now),
+            execution_options=no_sync,
+        )
         session.execute(
             update(Occurrence)
             .where(Occurrence.source_id == source_id)
@@ -308,9 +321,7 @@ class PermanentSourceDeletion:
         outstanding: list[str] = []
         for artifact_id in owed_bytes:
             try:
-                complete_artifact_deletion(
-                    self._sessions, self._store, artifact_id, clock=self._clock
-                )
+                complete_artifact_deletion(self._uow, self._store, artifact_id, clock=self._clock)
             except (OSError, UnsafeStorageKeyError) as error:
                 outstanding.append(f"artifact {artifact_id}: {type(error).__name__}: {error}")
         for key in staged_keys:  # a half-written file belongs to the artifact, whatever its state

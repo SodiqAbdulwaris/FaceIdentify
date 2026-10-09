@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.sources.artifact_references import unreferenced_artifacts
 from backend.app.sources.models import Artifact, ArtifactKind, ArtifactState, StorageMode
+from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.storage.files import ManagedFileStore, StoredBytes
 from backend.infrastructure.storage.layout import UnsafeStorageKeyError
 
@@ -300,14 +301,8 @@ def delete_managed_artifact(
         session.commit()
 
 
-def _is_deleted(session_factory: sessionmaker[Session], artifact_id: uuid.UUID) -> bool:
-    with session_factory() as session:
-        artifact = session.get(Artifact, artifact_id)
-        return artifact is not None and artifact.state == ArtifactState.DELETED
-
-
 def complete_artifact_deletion(
-    session_factory: sessionmaker[Session],
+    unit_of_work: UnitOfWork,
     store: ManagedFileStore,
     artifact_id: uuid.UUID,
     *,
@@ -315,12 +310,14 @@ def complete_artifact_deletion(
 ) -> None:
     """Steps 2 and 3 for an artifact whose intent is already recorded (`DELETING`, or
     `DELETE_FAILED` from an earlier try): remove the bytes, then finalize. A filesystem failure
-    leaves `DELETE_FAILED` (which recovery retries) and re-raises. Safe to repeat, and to run twice
-    at once: an artifact someone else finished is left alone, whichever step notices."""
-    with session_factory() as session:
+    leaves `DELETE_FAILED` (which recovery retries) and re-raises. Both settlements run in the unit
+    of work, so a busy database is retried; and as they decide inside the write lock, an artifact
+    another request finished is simply left as it is, whichever step notices."""
+
+    def intent(session: Session) -> str | None:
         artifact = session.get(Artifact, artifact_id)
         if artifact is not None and artifact.state == ArtifactState.DELETED:
-            return
+            return None
         if (
             artifact is None
             or artifact.storage_mode != StorageMode.MANAGED
@@ -328,26 +325,30 @@ def complete_artifact_deletion(
             or artifact.storage_key is None
         ):
             raise ArtifactStateError(f"artifact {artifact_id} has no deletion intent to complete")
-        storage_key = artifact.storage_key
+        return artifact.storage_key
+
+    def settle(session: Session, failure: str | None) -> bool:
+        """False when the other request had already finished it: nothing is left to record."""
+        artifact = session.get(Artifact, artifact_id, populate_existing=True)
+        if artifact is None or artifact.state == ArtifactState.DELETED:
+            return False
+        if failure is None:
+            finalize_artifact_deletion(session, artifact_id, clock=clock)
+        else:
+            _record_delete_failure(session, artifact_id, failure)
+        return True
+
+    storage_key = unit_of_work.read(intent)
+    if storage_key is None:
+        return
     try:
         store.delete(storage_key)
     except OSError as error:
-        try:
-            with session_factory() as session:
-                _record_delete_failure(session, artifact_id, f"{type(error).__name__}: {error}")
-                session.commit()
-        except ArtifactStateError:
-            if _is_deleted(session_factory, artifact_id):
-                return  # the other request finished it
+        detail = f"{type(error).__name__}: {error}"
+        if unit_of_work.write(lambda session: settle(session, detail)):
             raise
-        raise
-    try:
-        with session_factory() as session:
-            finalize_artifact_deletion(session, artifact_id, clock=clock)
-            session.commit()
-    except ArtifactStateError:
-        if not _is_deleted(session_factory, artifact_id):
-            raise
+        return  # the failure no longer matters: the other request finished the job
+    unit_of_work.write(lambda session: settle(session, None))
 
 
 # --- integrity --------------------------------------------------------------------------------
