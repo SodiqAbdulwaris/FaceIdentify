@@ -86,6 +86,16 @@ A second review (same reviewer) found more, and these were fixed too:
   prove it (the earlier test only covered the snapshot statements).
 - Focus returns to the button after a refused deletion.
 
+A third review found five more, also fixed:
+
+- The deleted card in the Recycle bin hides itself at once (its picture is released), whatever the list
+  refetch does; a `202` warning from the source page travels to the library with the navigation.
+- Settling an artifact (failure or finish) runs in the unit of work, so a busy database is retried; the
+  decision is made inside the write lock.
+- Beginning a deletion bumps the revision of every active identity that loses a face, so a merge or
+  split prepared earlier is refused.
+- The hint-support query is chunked like the others (a test lowers SQLite's variable limit).
+
 Not changed, and why: a referenced original's `external_path` stays on the tombstone because the
 artifact `location` CHECK requires it (see the question below). The 820-line test commit is one new
 module for one use case.
@@ -107,7 +117,7 @@ module for one use case.
 
 ## Tests
 
-- `tests/integration/test_permanent_source_delete.py` (34), on a real library (SQLite, USearch, managed
+- `tests/integration/test_permanent_source_delete.py` (36), on a real library (SQLite, USearch, managed
   files, restarts): only a recycled Source; busy; bytes, crop, thumbnail, faces, vectors, runs, jobs,
   snapshots gone, the other image untouched, and the vector's bytes found in no database, log or
   index file; repeat; referenced originals (available and missing) untouched; shared and lone
@@ -121,15 +131,15 @@ module for one use case.
   after); every survivor (a redundant `continue`, an untested thumbnail clear, an untested artifact-state
   guard, a state set that only AVAILABLE exercised, a redundant representation delete, an untested
   settle of an owed log, a race guard, two hint rules) was removed or closed by a test.
-- Front end (9 new, 159 total): ask first and cancel, focus and Escape, forgetting what was fetched, the
+- Front end (11 new, 161 total): ask first and cancel, focus and Escape, forgetting what was fetched, the
   partial notice, the refusal, cached bytes of an unavailable image, and the source page; thirteen
   mutations, one survivor (the card offering it outside the bin) closed by an assertion.
-- `test_api_corrections.py` gains six tests for the live hints; `test_index_operation_repository.py`
+- `test_api_corrections.py` gains seven tests for the live hints; `test_index_operation_repository.py`
   one for the bounded query.
 
 ## Verification
 
-- Front end: `npm run typecheck`, `npx oxlint --deny-warnings`, `npm test` (159 passed), `npm run build`.
+- Front end: `npm run typecheck`, `npx oxlint --deny-warnings`, `npm test` (161 passed), `npm run build`.
 - Backend gate: see the PR.
 
 ## Open issues / follow-ups
