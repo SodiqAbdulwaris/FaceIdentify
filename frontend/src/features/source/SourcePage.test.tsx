@@ -390,6 +390,19 @@ describe('a source', () => {
     expect(calls.filter((c) => c.method !== 'GET').map((c) => c.method)).toEqual(['DELETE', 'POST'])
   })
 
+  it('never shows cached bytes of an image that is no longer available', async () => {
+    const { queryClient } = open([
+      { path: SOURCE, respond: detail({ state: 'DELETING', availability: 'DELETING' }) },
+      noFaces,
+      noRuns,
+    ])
+    queryClient.setQueryData(['source', 's1', 'media'], new Blob(['pixels']))
+
+    await screen.findByRole('heading', { name: 'beach.png' })
+
+    expect(screen.queryByRole('img', { name: 'beach.png' })).toBeNull()
+  })
+
   it('offers to delete an image for good only while it is in the recycle bin', async () => {
     const user = userEvent.setup()
     let state = 'ACTIVE'
