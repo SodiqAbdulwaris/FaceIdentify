@@ -55,6 +55,9 @@ class DueOperation:
     kind: str
 
 
+ATTEMPT_COUNT_CHUNK = 500
+
+
 class IndexOperationRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -144,14 +147,18 @@ class IndexOperationRepository:
         )
 
     def attempt_counts(self, operation_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, int]:
-        return {
-            row[0]: row[1]
-            for row in self._session.execute(
-                select(IndexOperation.id, IndexOperation.attempt_count).where(
-                    IndexOperation.id.in_(list(operation_ids))
+        ids = list(operation_ids)
+        counts: dict[uuid.UUID, int] = {}
+        for start in range(0, len(ids), ATTEMPT_COUNT_CHUNK):  # (bound parameters per statement)
+            counts |= {
+                row[0]: row[1]
+                for row in self._session.execute(
+                    select(IndexOperation.id, IndexOperation.attempt_count).where(
+                        IndexOperation.id.in_(ids[start : start + ATTEMPT_COUNT_CHUNK])
+                    )
                 )
-            )
-        }
+            }
+        return counts
 
     def requeue(self, operation_id: uuid.UUID, *, now: datetime) -> bool:
         """Put a `FAILED` operation back to `PENDING`, due now, with a fresh attempt count; its

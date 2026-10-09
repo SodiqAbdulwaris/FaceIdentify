@@ -300,6 +300,12 @@ def delete_managed_artifact(
         session.commit()
 
 
+def _is_deleted(session_factory: sessionmaker[Session], artifact_id: uuid.UUID) -> bool:
+    with session_factory() as session:
+        artifact = session.get(Artifact, artifact_id)
+        return artifact is not None and artifact.state == ArtifactState.DELETED
+
+
 def complete_artifact_deletion(
     session_factory: sessionmaker[Session],
     store: ManagedFileStore,
@@ -308,9 +314,9 @@ def complete_artifact_deletion(
     clock: Callable[[], datetime],
 ) -> None:
     """Steps 2 and 3 for an artifact whose intent is already recorded (`DELETING`, or
-    `DELETE_FAILED` from an earlier try): remove the bytes (and a write that never finished), then
-    finalize. A filesystem failure leaves `DELETE_FAILED` (which recovery retries) and re-raises.
-    Safe to repeat, and to run twice at once: an artifact someone else finished is left alone."""
+    `DELETE_FAILED` from an earlier try): remove the bytes, then finalize. A filesystem failure
+    leaves `DELETE_FAILED` (which recovery retries) and re-raises. Safe to repeat, and to run twice
+    at once: an artifact someone else finished is left alone, whichever step notices."""
     with session_factory() as session:
         artifact = session.get(Artifact, artifact_id)
         if artifact is not None and artifact.state == ArtifactState.DELETED:
@@ -325,17 +331,23 @@ def complete_artifact_deletion(
         storage_key = artifact.storage_key
     try:
         store.delete(storage_key)
-        store.staging_path(storage_key).unlink(missing_ok=True)
     except OSError as error:
-        with session_factory() as session:
-            _record_delete_failure(session, artifact_id, f"{type(error).__name__}: {error}")
-            session.commit()
+        try:
+            with session_factory() as session:
+                _record_delete_failure(session, artifact_id, f"{type(error).__name__}: {error}")
+                session.commit()
+        except ArtifactStateError:
+            if _is_deleted(session_factory, artifact_id):
+                return  # the other request finished it
+            raise
         raise
-    with session_factory() as session:
-        current = session.get(Artifact, artifact_id, populate_existing=True)
-        if current is not None and current.state != ArtifactState.DELETED:
+    try:
+        with session_factory() as session:
             finalize_artifact_deletion(session, artifact_id, clock=clock)
             session.commit()
+    except ArtifactStateError:
+        if not _is_deleted(session_factory, artifact_id):
+            raise
 
 
 # --- integrity --------------------------------------------------------------------------------

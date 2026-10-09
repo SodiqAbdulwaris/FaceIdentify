@@ -45,6 +45,7 @@ from backend.app.jobs.models import Job
 from backend.app.memory.erasure import CHUNK, RepresentationEraser
 from backend.app.memory.models import (
     IndexOperation,
+    IndexOperationKind,
     Observation,
     ObservationState,
     Occurrence,
@@ -105,8 +106,9 @@ class DeletionReport:
     complete: bool
     # What is still owed (a locked file, an erasure that could not finish); startup retries it.
     outstanding: list[str] = field(default_factory=list)
-    # False for a repeat on a Source that was already `DELETED`: nothing happened to announce.
-    changed: bool = True
+    # True when this call changed the Source (began its deletion, or finalized it): a repeat that
+    # only found it stuck, or already done, has nothing to announce.
+    changed: bool = False
 
 
 def _chunks(ids: list[uuid.UUID]) -> list[list[uuid.UUID]]:
@@ -137,9 +139,7 @@ class PermanentSourceDeletion:
         before = self._uow.write(lambda session: self._begin(session, source_id, now))
         report = self._carry_on(source_id)
         # A repeat that changed nothing (already gone, or still stuck the same way) is not news.
-        report.changed = before == SourceState.RECYCLED or (
-            before == SourceState.DELETING and report.complete
-        )
+        report.changed = report.changed or before == SourceState.RECYCLED
         return report
 
     def resume(self) -> list[DeletionReport]:
@@ -213,12 +213,23 @@ class PermanentSourceDeletion:
         # and the occurrences and observations stop being authoritative.
         observations = select(Observation.id).where(Observation.source_id == source_id)
         no_sync = {"synchronize_session": False}
+        # A DELETED row keeps its vector and may carry an ordinary REMOVE that only took the key
+        # out of the live index (the file keeps the bytes): forget every REMOVE it had, so erasure
+        # queues its own, which is applied by a rebuild.
+        deleted_vectors = select(Representation.id).where(
+            Representation.observation_id.in_(observations),
+            Representation.state == RepresentationState.DELETED,
+        )
+        session.execute(
+            delete(IndexOperation).where(
+                IndexOperation.representation_id.in_(deleted_vectors),
+                IndexOperation.operation == IndexOperationKind.REMOVE,
+            ),
+            execution_options=no_sync,
+        )
         session.execute(
             update(Representation)
-            .where(
-                Representation.observation_id.in_(observations),
-                Representation.state == RepresentationState.DELETED,
-            )
+            .where(Representation.id.in_(deleted_vectors))
             .values(state=RepresentationState.ERASING),
             execution_options=no_sync,
         )
@@ -275,6 +286,16 @@ class PermanentSourceDeletion:
                 )
             )
             vectors = list(session.scalars(self._representation_ids(source_id)))
+            staged_keys = list(
+                key
+                for key in session.scalars(
+                    select(Artifact.storage_key).where(
+                        Artifact.id.in_(self._artifact_ids(source_id)),
+                        Artifact.storage_mode == StorageMode.MANAGED,
+                    )
+                )
+                if key is not None
+            )
             unfinished = list(
                 session.scalars(
                     select(Artifact.id).where(
@@ -292,6 +313,12 @@ class PermanentSourceDeletion:
                 )
             except (OSError, UnsafeStorageKeyError) as error:
                 outstanding.append(f"artifact {artifact_id}: {type(error).__name__}: {error}")
+        for key in staged_keys:  # a half-written file belongs to the artifact, whatever its state
+            staged = self._store.staging_path(key)
+            try:
+                staged.unlink(missing_ok=True)
+            except OSError as error:
+                outstanding.append(f"staged file of {key}: {type(error).__name__}: {error}")
         # Whatever owns bytes must be gone before the rows that name it are: an artifact that is
         # neither deleted nor being deleted (a state nobody handles) blocks.
         outstanding += [
@@ -304,11 +331,11 @@ class PermanentSourceDeletion:
         if outstanding:
             return DeletionReport(source_id, False, outstanding)
         now = self._clock()
-        self._uow.write(lambda session: self._finalize(session, source_id, now))
+        finalized = self._uow.write(lambda session: self._finalize(session, source_id, now))
         # The rows that held landmarks, quality data and payloads were just deleted: the log may
         # still hold their earlier pages, so it is truncated before this is reported done.
         owed = self._eraser.settle_log()
-        return DeletionReport(source_id, not owed, owed)
+        return DeletionReport(source_id, not owed, owed, changed=finalized)
 
     @staticmethod
     def _representation_ids(source_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
@@ -320,12 +347,13 @@ class PermanentSourceDeletion:
 
     # --- step four: finalization ----------------------------------------------------------
 
-    def _finalize(self, session: Session, source_id: uuid.UUID, now: datetime) -> None:
+    def _finalize(self, session: Session, source_id: uuid.UUID, now: datetime) -> bool:
+        """Delete what is left; True if this call did it (False: another request already had)."""
         source = session.get(Source, source_id, populate_existing=True)
         if source is None:
             raise SourceMissingError(f"source {source_id} does not exist")
         if source.state == SourceState.DELETED:
-            return  # another request finished it
+            return False  # another request finished it
         if source.state != SourceState.DELETING:
             raise SourceLifecycleError(f"source {source_id} is {source.state}, not DELETING")
         observations = select(Observation.id).where(Observation.source_id == source_id)
@@ -485,3 +513,4 @@ class PermanentSourceDeletion:
                 "updated_at": now,
             },
         )
+        return True
