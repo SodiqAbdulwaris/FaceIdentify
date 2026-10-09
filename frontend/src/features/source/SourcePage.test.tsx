@@ -408,7 +408,9 @@ describe('a source', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/library'))
     expect(screen.queryByRole('img', { name: 'beach.png' })).toBeNull()
-    expect(vi.mocked(URL.revokeObjectURL).mock.calls.map((c) => c[0])).toContain(made.at(-1))
+    await waitFor(() =>
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls.map((c) => c[0])).toContain(made.at(-1)),
+    )
     expect(unexpected).toEqual([])
   })
 
