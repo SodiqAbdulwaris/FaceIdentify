@@ -389,7 +389,7 @@ def permanent_delete(
     A repeat is harmless."""
     deletion = PermanentSourceDeletion(
         library.session_factory, library.unit_of_work, library.eraser, library.store,
-        clock=backend.settings.clock,
+        clock=backend.settings.clock, new_id=backend.settings.new_id,
     )  # fmt: skip
     try:
         report = deletion.delete(source_id)
