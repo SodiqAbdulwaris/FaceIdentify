@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from backend.api.dependencies import Library
 from backend.api.errors import ApiError
 from backend.api.routes.memory import OccurrenceSummary, occurrence_summaries
-from backend.app.identities.models import Identity, IdentityState
+from backend.app.identities.models import Evidence, EvidenceKind, Identity, IdentityState
 from backend.app.memory.models import Occurrence, OccurrenceState
 from backend.app.people.models import (
     AssociationState,
@@ -182,16 +182,18 @@ def _people(
     ):
         linked[person_id].append(identity_id)
     everyone = [identity for ids in linked.values() for identity in ids]
+    # Forgotten on purpose: the forget itself recorded this Person (a history link alone proves
+    # nothing: the identity may have been theirs once, before it was given to someone else).
     forgotten = set(
         session.scalars(
-            select(IdentityPersonAssociation.person_id)
-            .join(Identity, Identity.id == IdentityPersonAssociation.identity_id)
-            .where(
-                IdentityPersonAssociation.person_id.in_(list(linked)),
-                Identity.state == IdentityState.FORGOTTEN,
+            select(Evidence.subject_person_id).where(
+                Evidence.kind == EvidenceKind.IDENTITY_FORGOTTEN,
+                Evidence.subject_person_id.in_(list(linked)),
             )
         )
     )
+    # Recognition memory does not depend on this search's filter: a recycled image keeps it.
+    support = _counts(session, everyone, (SourceState.ACTIVE, SourceState.RECYCLED))
     counts = _counts(session, everyone, states)
     hits = []
     for person in people:
@@ -206,7 +208,9 @@ def _people(
                 occurrence_count=appearances,
                 # (images, not appearances: one image may show two of the person's identities)
                 source_count=_distinct_sources(session, linked[person.id], states),
-                visual_support=appearances > 0,
+                visual_support=any(
+                    support.get(identity, (0, 0))[0] for identity in linked[person.id]
+                ),
                 biometric_memory_forgotten=person.id in forgotten and not linked[person.id],
             )
         )
