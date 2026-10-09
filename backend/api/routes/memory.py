@@ -26,7 +26,7 @@ from backend.api.pagination import (
     older_than,
     paginate,
 )
-from backend.api.routes.sources import MediaReference, source_not_found
+from backend.api.routes.sources import MediaReference, require_visible_source
 from backend.app.identities.models import Identity, IdentityState
 from backend.app.memory.models import Observation, ObservationState, Occurrence, OccurrenceState
 from backend.app.people.models import AssociationState, IdentityPersonAssociation, Person
@@ -170,8 +170,7 @@ def source_occurrences(
     source_id: uuid.UUID, library: Library, page: PageQuery
 ) -> Page[OccurrenceSummary]:
     def read(session: Session) -> Page[OccurrenceSummary]:
-        if session.get(Source, source_id) is None:
-            raise source_not_found(source_id)
+        require_visible_source(session, source_id)
         return _occurrence_page(
             session,
             _occurrences().where(Occurrence.source_id == source_id),

@@ -20,7 +20,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import Library, get_backend
@@ -33,7 +33,7 @@ from backend.api.pagination import (
     older_than,
     paginate,
 )
-from backend.api.routes.sources import source_not_found
+from backend.api.routes.sources import gone_sources, require_visible_source
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
 from backend.app.jobs.models import Job, JobPriority, JobType
 from backend.app.processing.cancel import (
@@ -54,7 +54,6 @@ from backend.app.processing.process_source import (
 )
 from backend.app.processing.retry import RetryProcessingUseCase
 from backend.app.recognition.reasoner import MAX_SIMILARITY
-from backend.app.sources.models import Source
 
 router = APIRouter(tags=["processing"])
 
@@ -176,16 +175,27 @@ def _details(session: Session, runs: list[ProcessingRun]) -> list[ProcessingRunD
     ]
 
 
-def _run_detail(session: Session, run_id: uuid.UUID) -> ProcessingRunDetail:
+def gone_runs() -> Select[tuple[uuid.UUID]]:
+    """The ids of runs whose Source is being or was deleted: no route serves them."""
+    return select(ProcessingRun.id).where(ProcessingRun.source_id.in_(gone_sources()))
+
+
+def visible_run(session: Session, run_id: uuid.UUID) -> ProcessingRun:
+    """The run, or `404 RUN_NOT_FOUND` if it is unknown or its Source is being or was deleted."""
     run = session.get(ProcessingRun, run_id, populate_existing=True)
-    if run is None:
+    if run is None or session.scalar(
+        select(gone_runs().where(ProcessingRun.id == run_id).exists())
+    ):
         raise run_not_found(run_id)
-    return _details(session, [run])[0]
+    return run
+
+
+def _run_detail(session: Session, run_id: uuid.UUID) -> ProcessingRunDetail:
+    return _details(session, [visible_run(session, run_id)])[0]
 
 
 def _require_source(session: Session, source_id: uuid.UUID) -> None:
-    if session.get(Source, source_id) is None:
-        raise source_not_found(source_id)
+    require_visible_source(session, source_id)
 
 
 # --- routes ---------------------------------------------------------------------------------
@@ -196,9 +206,9 @@ def process_source(
     source_id: uuid.UUID,
     library: Library,
     backend: Annotated[Backend, Depends(get_backend)],
-    settings: Annotated[ProcessingSettings, Depends(processing_settings)],
 ) -> ProcessingRunDetail:
     library.unit_of_work.read(lambda session: _require_source(session, source_id))
+    settings = processing_settings(backend)  # (after the Source: a gone one is 404, not 503)
     try:
         request = library.unit_of_work.read(settings.request_for)
     except ProcessingUnavailableError:
@@ -239,7 +249,7 @@ def _listing(
     after = created_cursor(page.cursor, context)
 
     def read(session: Session) -> Page[ProcessingRunDetail]:
-        query = select(ProcessingRun)
+        query = select(ProcessingRun).where(ProcessingRun.source_id.not_in(gone_sources()))
         if source_id is not None:
             query = query.where(ProcessingRun.source_id == source_id)
         if state is not None:
@@ -290,6 +300,7 @@ def get_run(run_id: uuid.UUID, library: Library) -> ProcessingRunDetail:
 
 def cancel_command(library: Library, backend: Backend, run_id: uuid.UUID) -> ProcessingRunDetail:
     """Shared by the run and job cancel routes: write the request, then show the run."""
+    library.unit_of_work.read(lambda session: visible_run(session, run_id))
     try:
         result = CancelProcessingUseCase(library.unit_of_work, clock=backend.settings.clock).cancel(
             run_id
@@ -318,8 +329,7 @@ def retry_run(
     run_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
 ) -> ProcessingRunDetail:
     def find_job(session: Session) -> uuid.UUID | None:
-        if session.get(ProcessingRun, run_id) is None:
-            raise run_not_found(run_id)
+        visible_run(session, run_id)
         return session.scalar(
             select(Job.id).where(
                 Job.processing_run_id == run_id, Job.type == JobType.PROCESS_SOURCE

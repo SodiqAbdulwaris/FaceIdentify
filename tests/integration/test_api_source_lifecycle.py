@@ -145,18 +145,15 @@ async def test_a_source_whose_original_is_being_deleted_cannot_be_moved(api: Api
     assert await ids(api) == [source["id"]]
 
 
-async def test_a_source_that_is_not_recycled_or_active_cannot_be_restored(api: Api) -> None:
+async def test_a_source_being_deleted_cannot_be_restored_and_is_not_found(api: Api) -> None:
     source = await imported(api, path=str(api.image()))
     assert api.backend.library is not None
     with api.backend.library.session_factory() as session:
         session.execute(update(Source).values(state="DELETING"))
         session.commit()
 
-    body = error(
-        await api.client.post(f"{SOURCES}/{source['id']}/restore"), 409, "SOURCE_STATE_CONFLICT"
-    )
-
-    assert body["details"]["state"] == "DELETING"
+    error(await api.client.post(f"{SOURCES}/{source['id']}/restore"), 404, "SOURCE_NOT_FOUND")
+    error(await api.client.delete(f"{SOURCES}/{source['id']}"), 404, "SOURCE_NOT_FOUND")
 
 
 async def test_a_recycled_source_cannot_be_processed(processing_api: Api) -> None:

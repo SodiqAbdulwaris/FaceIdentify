@@ -17,6 +17,7 @@ from sqlalchemy import select, update
 
 from backend.api.startup import MediaLimits, create_backend_app
 from backend.app.lifecycle import open_library
+from backend.app.memory.models import Representation
 from backend.app.processing.models import ProcessingRun
 from backend.app.sources.models import Artifact, ArtifactState, Source
 from backend.app.sources.permanent_delete import PermanentSourceDeletion
@@ -48,6 +49,23 @@ async def recycled(api: Api, **body: Any) -> dict[str, Any]:
 async def listed(api: Api, **query: str) -> list[str]:
     response = await api.client.get(SOURCES, params=query)
     return [item["id"] for item in response.json()["items"]]
+
+
+async def assert_gone_from_every_route(api: Api, source_id: str) -> None:
+    """A source whose deletion is pending (or done) is found by no route that serves sources."""
+    base = f"{SOURCES}/{source_id}"
+    for response in (
+        await api.client.get(base),
+        await api.client.get(f"{base}/media"),
+        await api.client.get(f"{base}/occurrences"),
+        await api.client.get(f"{base}/unresolved-faces"),
+        await api.client.get(f"{base}/processing-runs"),
+        await api.client.delete(base),
+        await api.client.post(f"{base}/restore"),
+    ):
+        error(response, 404, "SOURCE_NOT_FOUND")
+    assert source_id not in await listed(api)
+    assert source_id not in await listed(api, state="RECYCLED")
 
 
 async def test_a_recycled_source_is_deleted_for_good_and_announced_once(api: Api) -> None:
@@ -142,7 +160,9 @@ async def test_bytes_that_cannot_be_removed_leave_the_deletion_pending(
     assert pending.status_code == 202
     assert pending.json()["state"] == "DELETING"
     assert "PermissionError" in pending.json()["outstanding"][0]
-    assert (await api.client.get(f"{SOURCES}/{source['id']}")).json()["state"] == "DELETING"
+    await assert_gone_from_every_route(api, source["id"])
+    readiness = (await api.client.get("/readiness")).json()
+    assert readiness["capabilities"]["recovery"] == "DEGRADED"  # the owed work stays visible
     monkeypatch.undo()
 
     assert (await api.client.post(f"{SOURCES}/{source['id']}/{DELETE}")).status_code == 204
@@ -215,4 +235,86 @@ async def test_a_deletion_still_owed_at_start_is_reported_as_degraded_recovery(
             (source_id, False)
         ]
         assert running.backend.capabilities["recovery"] == "DEGRADED"
-        assert (await running.client.get(f"{SOURCES}/{source_id}")).json()["state"] == "DELETING"
+        await assert_gone_from_every_route(running, str(source_id))
+
+
+async def assert_runs_and_jobs_are_gone(api: Api, source_id: str, run_id: str, job_id: str) -> None:
+    runs = (await api.client.get("/api/v1/processing-runs")).json()["items"]
+    assert run_id not in [run["id"] for run in runs]
+    filtered = await api.client.get("/api/v1/processing-runs", params={"source_id": source_id})
+    assert filtered.json()["items"] == []
+    jobs = (await api.client.get("/api/v1/jobs")).json()["items"]
+    assert job_id not in [job["id"] for job in jobs]
+    error(await api.client.get(f"/api/v1/processing-runs/{run_id}"), 404, "RUN_NOT_FOUND")
+    error(await api.client.post(f"/api/v1/processing-runs/{run_id}/retry"), 404, "RUN_NOT_FOUND")
+    error(await api.client.post(f"/api/v1/processing-runs/{run_id}/cancel"), 404, "RUN_NOT_FOUND")
+    error(await api.client.get(f"/api/v1/jobs/{job_id}"), 404, "JOB_NOT_FOUND")
+    error(await api.client.post(f"/api/v1/jobs/{job_id}/cancel"), 404, "JOB_NOT_FOUND")
+    error(await api.client.post(f"{SOURCES}/{source_id}/process"), 404, "SOURCE_NOT_FOUND")
+
+
+async def test_the_runs_jobs_and_faces_of_a_pending_deletion_are_gone_too(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = processing_api
+    source = await processed(api, "alice.png")
+    [run] = (await api.client.get("/api/v1/processing-runs")).json()["items"]
+    [job] = (await api.client.get("/api/v1/jobs")).json()["items"]
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        [face] = session.scalars(select(Representation.id))
+    await api.client.delete(f"{SOURCES}/{source['id']}")
+
+    def locked(_key: str) -> None:
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(api.backend.library.store, "delete", locked)
+    pending = await api.client.post(f"{SOURCES}/{source['id']}/{DELETE}")
+
+    assert pending.status_code == 202
+    await assert_runs_and_jobs_are_gone(api, source["id"], run["id"], job["id"])
+    error(
+        await api.client.post(
+            f"/api/v1/representations/{face}/resolve", json={"identity_id": None}
+        ),
+        404,
+        "FACE_NOT_FOUND",
+    )
+    monkeypatch.undo()
+
+    assert (await api.client.post(f"{SOURCES}/{source['id']}/{DELETE}")).status_code == 204
+    await assert_runs_and_jobs_are_gone(api, source["id"], run["id"], job["id"])
+
+
+async def test_a_source_that_is_gone_is_not_found_even_when_processing_is_not_configured(
+    api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = await recycled(api)
+    assert api.backend.library is not None
+
+    def locked(_key: str) -> None:
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(api.backend.library.store, "delete", locked)
+    assert (await api.client.post(f"{SOURCES}/{source['id']}/{DELETE}")).status_code == 202
+
+    error(await api.client.post(f"{SOURCES}/{source['id']}/process"), 404, "SOURCE_NOT_FOUND")
+
+
+async def test_a_run_deleted_while_it_is_being_cancelled_is_not_found(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.app.processing.cancel import CancelProcessingUseCase, RunNotFoundError
+
+    api = processing_api
+    await processed(api, "alice.png")
+    [run] = (await api.client.get("/api/v1/processing-runs")).json()["items"]
+
+    def vanished(_self: object, run_id: uuid.UUID) -> None:
+        raise RunNotFoundError(f"run {run_id} does not exist")  # deleted after the check
+
+    monkeypatch.setattr(CancelProcessingUseCase, "cancel", vanished)
+
+    error(
+        await api.client.post(f"/api/v1/processing-runs/{run['id']}/cancel"), 404, "RUN_NOT_FOUND"
+    )
