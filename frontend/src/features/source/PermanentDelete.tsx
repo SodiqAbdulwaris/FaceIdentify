@@ -24,7 +24,7 @@ export function PermanentDelete({
   onNotice: (message: string | null) => void
   compact?: boolean
   /** The image is gone (or going): leave any screen that still shows it. */
-  onGone?: () => void
+  onGone?: (notice: string | null) => void
 }) {
   const { endpoints } = useBackend()
   const queryClient = useQueryClient()
@@ -39,12 +39,12 @@ export function PermanentDelete({
       // Nothing of the image may stay on screen: drop what was fetched for it (its bytes included).
       await queryClient.cancelQueries({ queryKey: keys.source(sourceId) })
       queryClient.removeQueries({ queryKey: keys.source(sourceId) })
-      onGone?.() // a mounted page still holds what it had loaded, so it has to go
-      onNotice(
+      const notice =
         result.status === 202
           ? 'Part of the deletion could not finish yet. It is tried again the next time the app starts.'
-          : null,
-      )
+          : null
+      onNotice(notice)
+      onGone?.(notice) // (the screen that showed it may be about to go, so it is told too)
     },
     onError: (error) => {
       cancelled.current = true // the question closes: focus goes back to its button

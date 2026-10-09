@@ -412,6 +412,29 @@ describe('a source', () => {
     expect(unexpected).toEqual([])
   })
 
+  it('carries the warning about unfinished cleanup to the library it returns to', async () => {
+    const user = userEvent.setup()
+    open([
+      { path: SOURCE, respond: detail({ state: 'RECYCLED' }) },
+      {
+        method: 'POST',
+        path: `${SOURCE}/permanent-delete`,
+        status: 202,
+        respond: () => ({ state: 'DELETING', outstanding: ['the write-ahead log'] }),
+      },
+      { path: '/api/v1/sources', respond: page([]) },
+      media,
+      noFaces,
+      noRuns,
+    ])
+    await user.click(await screen.findByRole('button', { name: 'Delete beach.png permanently' }))
+    await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
+
+    expect(await screen.findByRole('status', { name: 'Library notice' })).toHaveTextContent(
+      'tried again the next time the app starts',
+    )
+  })
+
   it('never shows cached bytes of an image that is no longer available', async () => {
     const { queryClient } = open([
       { path: SOURCE, respond: detail({ state: 'DELETING', availability: 'DELETING' }) },

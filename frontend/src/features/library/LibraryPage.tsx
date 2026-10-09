@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { useLocation } from 'react-router'
 import { keys } from '@/api/keys'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
@@ -10,7 +11,9 @@ import { errorMessage, importSummary, type ImportOutcome } from './messages'
 export function LibraryPage() {
   const { endpoints } = useBackend()
   const queryClient = useQueryClient()
-  const [notice, setNotice] = useState<string | null>(null)
+  // A screen that sent us here (a deleted image's page) may have something to tell.
+  const arrived = (useLocation().state as { notice?: string | null } | null)?.notice ?? null
+  const [notice, setNotice] = useState<string | null>(arrived)
   const [view, setView] = useState<'library' | 'bin'>('library')
   const bin = view === 'bin'
 
