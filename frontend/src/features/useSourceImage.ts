@@ -4,7 +4,7 @@ import { keys } from '@/api/keys'
 import { useBackend } from '@/app/useBackend'
 
 /** A short-lived address for a blob (revoked when the blob changes or the component goes away). */
-function useObjectUrl(blob: Blob | undefined): string | undefined {
+export function useObjectUrl(blob: Blob | undefined): string | undefined {
   const [url, setUrl] = useState<string>()
   // An object URL is a registration in the browser (an external system) that has to be undone,
   // so it is made and revoked in an effect, and its address is state.

@@ -7,6 +7,7 @@ import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import { FaceCrop } from '../FaceCrop'
 import { errorMessage } from '../library/messages'
+import { FaceSearch } from './FaceSearch'
 import { personLabel } from '../identities/label'
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
@@ -73,6 +74,8 @@ export function SearchPage() {
           Search
         </Button>
       </form>
+
+      <FaceSearch />
 
       {found.isFetching && !found.data ? <p className="text-muted-foreground">Searching…</p> : null}
       {found.isError ? (
