@@ -24,7 +24,7 @@ from typing import Annotated, Any, BinaryIO, Literal
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import Library, get_backend
@@ -194,7 +194,7 @@ def _source_detail(session: Session, source_id: uuid.UUID) -> SourceDetail:
     row = session.execute(
         select(Source, Artifact)
         .join(Artifact, Artifact.id == Source.original_artifact_id)
-        .where(Source.id == source_id, Source.state != SourceState.DELETED)
+        .where(Source.id == source_id, Source.state.not_in(GONE))
     ).one_or_none()
     if row is None:  # a permanently deleted Source is gone; only a tombstone remains
         raise source_not_found(source_id)
@@ -207,9 +207,7 @@ _Move = Callable[..., Source]
 
 def _move_source(session: Session, backend: Backend, source_id: uuid.UUID, move: _Move) -> bool:
     """Recycle or restore one Source inside the caller's write; False when it was already there."""
-    source = session.get(Source, source_id)
-    if source is None:
-        raise source_not_found(source_id)
+    source = require_visible_source(session, source_id)
     target = SourceState.RECYCLED if move is recycle_source else SourceState.ACTIVE
     if source.state == target:
         return False
@@ -226,6 +224,24 @@ def _move_source(session: Session, backend: Backend, source_id: uuid.UUID, move:
             details={"source_id": str(source_id), "state": source.state},
         ) from None  # fmt: skip
     return True
+
+
+# A Source in either state is not served by any route: while its deletion is pending it is already
+# gone for every reader (the delete route itself reports what is still owed).
+GONE = (SourceState.DELETING, SourceState.DELETED)
+
+
+def gone_sources() -> Select[tuple[uuid.UUID]]:
+    """The ids of Sources that no route serves (a subquery for readers of their runs and jobs)."""
+    return select(Source.id).where(Source.state.in_(GONE))
+
+
+def require_visible_source(session: Session, source_id: uuid.UUID) -> Source:
+    """The Source, or `404 SOURCE_NOT_FOUND` if it does not exist or is being or was deleted."""
+    source = session.get(Source, source_id)
+    if source is None or source.state in GONE:
+        raise source_not_found(source_id)
+    return source
 
 
 def source_not_found(source_id: uuid.UUID) -> ApiError:
@@ -393,6 +409,7 @@ def permanent_delete(
         backend.announce("source.updated", "source", str(source_id))
     if report.complete:
         return Response(status_code=204)
+    backend.capabilities["recovery"] = "DEGRADED"  # visible in /readiness until the next start
     pending = DeletionPending(state=SourceState.DELETING, outstanding=report.outstanding)
     return JSONResponse(pending.model_dump(), status_code=202)
 
@@ -412,7 +429,7 @@ def source_media(
         artifact = session.execute(
             select(Artifact)
             .join(Source, Source.original_artifact_id == Artifact.id)
-            .where(Source.id == source_id)
+            .where(Source.id == source_id, Source.state.not_in(GONE))
         ).scalar_one_or_none()
         if artifact is None:
             raise source_not_found(source_id)

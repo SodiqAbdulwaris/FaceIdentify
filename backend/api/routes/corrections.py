@@ -24,6 +24,7 @@ from backend.api.routes.memory import (
     occurrence_summaries,
     person_references,
 )
+from backend.api.routes.sources import gone_sources, require_visible_source
 from backend.api.startup import Backend
 from backend.app.identities.corrections import (
     confirm_occurrence,
@@ -270,11 +271,7 @@ def _likely(session: Session, representation_ids: list[uuid.UUID]) -> dict[uuid.
 @router.get("/sources/{source_id}/unresolved-faces")
 def unresolved_faces(source_id: uuid.UUID, library: Library) -> UnresolvedFaces:
     def read(session: Session) -> UnresolvedFaces:
-        if session.get(Source, source_id) is None:
-            raise ApiError(
-                404, "SOURCE_NOT_FOUND", "The requested source could not be found.",
-                details={"source_id": str(source_id)},
-            )  # fmt: skip
+        require_visible_source(session, source_id)
         rows = session.execute(
             select(Representation, Observation)
             .join(Observation, Observation.id == Representation.observation_id)
@@ -315,7 +312,12 @@ def resolve(
     settings = backend.settings
 
     def write(session: Session) -> OccurrenceSummary:
-        if session.get(Representation, representation_id) is None:
+        if session.get(Representation, representation_id) is None or session.scalar(
+            select(Source.id)
+            .join(Observation, Observation.source_id == Source.id)
+            .join(Representation, Representation.observation_id == Observation.id)
+            .where(Representation.id == representation_id, Source.id.in_(gone_sources()))
+        ):
             raise ApiError(
                 404, "FACE_NOT_FOUND", "The requested face could not be found.",
                 details={"representation_id": str(representation_id)},

@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import Library, get_backend
@@ -27,10 +27,12 @@ from backend.api.routes.processing import (
     JobBrief,
     ProcessingRunDetail,
     cancel_command,
+    gone_runs,
     job_brief,
 )
 from backend.api.startup import Backend
 from backend.app.jobs.models import Job, JobState, JobType
+from backend.app.processing.models import ProcessingRun
 
 router = APIRouter(tags=["jobs"])
 
@@ -76,7 +78,9 @@ def list_jobs(
     after = created_cursor(page.cursor, context)
 
     def read(session: Session) -> Page[JobDetail]:
-        query = select(Job)
+        query = select(Job).where(  # (a job with no run belongs to no Source)
+            or_(Job.processing_run_id.is_(None), Job.processing_run_id.not_in(gone_runs()))
+        )
         if state is not None:
             query = query.where(Job.state == state)
         if type is not None:
@@ -103,7 +107,12 @@ def list_jobs(
 
 def _get(session: Session, job_id: uuid.UUID) -> Job:
     job = session.get(Job, job_id, populate_existing=True)
-    if job is None:
+    if job is None or (
+        job.processing_run_id is not None
+        and session.scalar(
+            select(gone_runs().where(ProcessingRun.id == job.processing_run_id).exists())
+        )
+    ):
         raise job_not_found(job_id)
     return job
 
