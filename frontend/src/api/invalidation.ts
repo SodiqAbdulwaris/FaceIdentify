@@ -7,7 +7,7 @@ import { keys } from './keys'
 export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
   if (event.type.startsWith('source.')) {
     // ['identity']: a face of a recycled image carries a marker on every open person page
-    return [keys.sources, keys.source(event.resource.id), ['identity']]
+    return [keys.sources, keys.source(event.resource.id), ['identity'], ['search']]
   }
   if (event.type.startsWith('processing_run.')) {
     const sourceId = event.data.source_id
@@ -19,6 +19,7 @@ export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
       keys.identities, // an accepted run creates and grows identities
       keys.people, // a person's identity count follows
       ['identity'], // every open identity page (their counts and faces change)
+      ['search'], // a search shows the same names, faces and images
     ]
   }
   if (
@@ -27,7 +28,7 @@ export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
     event.type.startsWith('identity.')
   ) {
     // A name or a corrected face shows on the people list, every person page and every source.
-    return [keys.identities, keys.people, ['identity'], ['source']]
+    return [keys.identities, keys.people, ['identity'], ['source'], ['search']]
   }
   return []
 }

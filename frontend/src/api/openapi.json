@@ -43,6 +43,30 @@
         "title": "Confirm",
         "type": "object"
       },
+      "Coverage": {
+        "description": "How much of the library a search could see: unprocessed images have no faces to find.",
+        "properties": {
+          "not_processed": {
+            "title": "Not Processed",
+            "type": "integer"
+          },
+          "processed": {
+            "title": "Processed",
+            "type": "integer"
+          },
+          "sources": {
+            "title": "Sources",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sources",
+          "processed",
+          "not_processed"
+        ],
+        "title": "Coverage",
+        "type": "object"
+      },
       "DeletionPending": {
         "description": "Permanent deletion began but is not finished: what is owed is retried at the next start.",
         "properties": {
@@ -154,6 +178,44 @@
           "outstanding"
         ],
         "title": "ForgetPending",
+        "type": "object"
+      },
+      "IdentityHit": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "match": {
+            "enum": [
+              "EXACT",
+              "PREFIX",
+              "CONTAINS"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "occurrence_count": {
+            "title": "Occurrence Count",
+            "type": "integer"
+          },
+          "source_count": {
+            "title": "Source Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "match",
+          "occurrence_count",
+          "source_count"
+        ],
+        "title": "IdentityHit",
         "type": "object"
       },
       "IdentityLink": {
@@ -827,6 +889,57 @@
         "title": "Page[SourceSummary]",
         "type": "object"
       },
+      "PersonHit": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "identity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Identity Ids",
+            "type": "array"
+          },
+          "match": {
+            "enum": [
+              "EXACT",
+              "PREFIX",
+              "CONTAINS"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "occurrence_count": {
+            "title": "Occurrence Count",
+            "type": "integer"
+          },
+          "source_count": {
+            "title": "Source Count",
+            "type": "integer"
+          },
+          "visual_support": {
+            "title": "Visual Support",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "match",
+          "identity_ids",
+          "occurrence_count",
+          "source_count",
+          "visual_support"
+        ],
+        "title": "PersonHit",
+        "type": "object"
+      },
       "PersonReference": {
         "properties": {
           "display_name": {
@@ -1093,6 +1206,42 @@
         "title": "Progress",
         "type": "object"
       },
+      "Ranking": {
+        "properties": {
+          "plan": {
+            "title": "Plan",
+            "type": "string"
+          },
+          "ranker": {
+            "title": "Ranker",
+            "type": "string"
+          },
+          "recycled": {
+            "enum": [
+              "include",
+              "exclude",
+              "only"
+            ],
+            "title": "Recycled",
+            "type": "string"
+          },
+          "types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "plan",
+          "ranker",
+          "recycled",
+          "types"
+        ],
+        "title": "Ranking",
+        "type": "object"
+      },
       "Reassign": {
         "properties": {
           "expected_identity_id": {
@@ -1159,6 +1308,71 @@
           "identity_id"
         ],
         "title": "Resolve",
+        "type": "object"
+      },
+      "Results": {
+        "properties": {
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityHit"
+            },
+            "title": "Identities",
+            "type": "array"
+          },
+          "occurrences": {
+            "items": {
+              "$ref": "#/components/schemas/OccurrenceSummary"
+            },
+            "title": "Occurrences",
+            "type": "array"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/PersonHit"
+            },
+            "title": "People",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceHit"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "people",
+          "identities",
+          "sources",
+          "occurrences"
+        ],
+        "title": "Results",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "ranking": {
+            "$ref": "#/components/schemas/Ranking"
+          },
+          "results": {
+            "$ref": "#/components/schemas/Results"
+          }
+        },
+        "required": [
+          "query",
+          "results",
+          "coverage",
+          "ranking"
+        ],
+        "title": "SearchResponse",
         "type": "object"
       },
       "SourceDetail": {
@@ -1320,6 +1534,49 @@
           "recycled_at"
         ],
         "title": "SourceDetail",
+        "type": "object"
+      },
+      "SourceHit": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "match": {
+            "enum": [
+              "EXACT",
+              "PREFIX",
+              "CONTAINS"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "processed": {
+            "title": "Processed",
+            "type": "boolean"
+          },
+          "source_recycled": {
+            "title": "Source Recycled",
+            "type": "boolean"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "match",
+          "state",
+          "source_recycled",
+          "processed"
+        ],
+        "title": "SourceHit",
         "type": "object"
       },
       "SourceSummary": {
@@ -2733,6 +2990,89 @@
         "summary": "Resolve",
         "tags": [
           "corrections"
+        ]
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "operationId": "search",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recycled",
+            "required": false,
+            "schema": {
+              "default": "include",
+              "enum": [
+                "include",
+                "exclude",
+                "only"
+              ],
+              "title": "Recycled",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated: people,identities,sources,occurrences",
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "default": "people,identities,sources,occurrences",
+              "description": "Comma-separated: people,identities,sources,occurrences",
+              "title": "Types",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "search"
         ]
       }
     },
