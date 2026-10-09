@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import { keys } from '@/api/keys'
 import type { SourceDetail } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
@@ -20,6 +21,7 @@ export function RecycleControl({
 }) {
   const { endpoints } = useBackend()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const recycled = source.state === 'RECYCLED'
   const move = useMutation({
     mutationFn: async () => {
@@ -47,7 +49,12 @@ export function RecycleControl({
         {recycled ? 'Restore from the recycle bin' : 'Move to the recycle bin'}
       </Button>
       {recycled ? (
-        <PermanentDelete sourceId={source.id} name={source.display_name} onNotice={onNotice} />
+        <PermanentDelete
+          sourceId={source.id}
+          name={source.display_name}
+          onNotice={onNotice}
+          onGone={() => void navigate('/library')}
+        />
       ) : null}
     </div>
   )

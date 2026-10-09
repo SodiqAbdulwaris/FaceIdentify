@@ -390,6 +390,28 @@ describe('a source', () => {
     expect(calls.filter((c) => c.method !== 'GET').map((c) => c.method)).toEqual(['DELETE', 'POST'])
   })
 
+  it('leaves the page, and lets go of the picture, when its image is deleted for good', async () => {
+    const user = userEvent.setup()
+    const { router, unexpected } = open([
+      { path: SOURCE, respond: detail({ state: 'RECYCLED' }) },
+      { method: 'POST', path: `${SOURCE}/permanent-delete`, status: 204, respond: () => null },
+      { path: '/api/v1/sources', respond: page([]) },
+      media,
+      noFaces,
+      noRuns,
+    ])
+    await screen.findByRole('img', { name: 'beach.png' }) // the pixels are loaded and shown
+    const made = vi.mocked(URL.createObjectURL).mock.results.map((r) => r.value as string)
+
+    await user.click(screen.getByRole('button', { name: 'Delete beach.png permanently' }))
+    await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'))
+    expect(screen.queryByRole('img', { name: 'beach.png' })).toBeNull()
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.map((c) => c[0])).toContain(made.at(-1))
+    expect(unexpected).toEqual([])
+  })
+
   it('never shows cached bytes of an image that is no longer available', async () => {
     const { queryClient } = open([
       { path: SOURCE, respond: detail({ state: 'DELETING', availability: 'DELETING' }) },
