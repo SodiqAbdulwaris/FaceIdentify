@@ -28,6 +28,7 @@ const ada = {
   occurrence_count: 2,
   source_count: 2,
   visual_support: true,
+  biometric_memory_forgotten: false,
 }
 
 describe('search', () => {
@@ -93,43 +94,30 @@ describe('search', () => {
     expect(calls.find((call) => call.path === SEARCH)?.query.get('q')).toBe('ada')
   })
 
-  it('comes back with the same search from the address, and passes the place to look in', async () => {
-    const { calls } = renderApp('/search?q=ada&recycled=only', [
+  it('excludes recycled images unless asked, and the address keeps the choice', async () => {
+    const { calls } = renderApp('/search?q=ada&recycled=include', [
       { path: SEARCH, respond: answer() },
     ])
 
     expect(await screen.findByText(/Nothing found for/)).toBeInTheDocument()
     const call = calls.find((c) => c.path === SEARCH)
-    expect([call?.query.get('q'), call?.query.get('recycled')]).toEqual(['ada', 'only'])
-    expect(screen.getByRole('combobox', { name: 'Where' })).toHaveValue('only')
+    expect([call?.query.get('q'), call?.query.get('recycled')]).toEqual(['ada', 'include'])
+    expect(screen.getByRole('checkbox', { name: 'Include recycled images' })).toBeChecked()
   })
 
-  it('searches again, in another place, when the place is changed', async () => {
+  it('does not include recycled images by default, and searches again when the box is ticked', async () => {
     const user = userEvent.setup()
-    const { calls } = renderApp('/search?q=ada', [
-      {
-        path: SEARCH,
-        respond: answer({
-          results: {
-            people: [ada],
-            identities: [],
-            sources: [],
-            occurrences: [],
-          },
-        }),
-      },
-    ])
-    await screen.findByRole('region', { name: 'People found' })
+    const { calls } = renderApp('/search?q=ada', [{ path: SEARCH, respond: answer() }])
+    await screen.findByText(/Nothing found for/)
+    const box = screen.getByRole('checkbox', { name: 'Include recycled images' })
+    expect(box).not.toBeChecked()
+    expect(calls.find((c) => c.path === SEARCH)?.query.get('recycled')).toBe('exclude')
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Where' }), 'exclude')
+    await user.click(box)
 
-    await screen.findByRole('region', { name: 'People found' })
-    expect(
-      calls
-        .filter((c) => c.path === SEARCH)
-        .at(-1)
-        ?.query.get('recycled'),
-    ).toBe('exclude')
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === SEARCH).at(-1)?.query.get('recycled')).toBe('include'),
+    )
   })
 
   it('says when nobody can be recognised and when images were not processed', async () => {
@@ -185,6 +173,36 @@ describe('search', () => {
     await router.navigate(-1)
 
     await waitFor(() => expect(box).toHaveValue('ada'))
+  })
+
+  it('labels a person whose biometric memory was forgotten, who is still found by name', async () => {
+    renderApp('/search?q=ada', [
+      {
+        path: SEARCH,
+        respond: answer({
+          results: {
+            people: [
+              {
+                ...ada,
+                identity_ids: [],
+                occurrence_count: 0,
+                source_count: 0,
+                visual_support: false,
+                biometric_memory_forgotten: true,
+              },
+            ],
+            identities: [],
+            sources: [],
+            occurrences: [],
+          },
+        }),
+      },
+    ])
+
+    const people = await screen.findByRole('region', { name: 'People found' })
+
+    expect(within(people).getByText(/Biometric memory forgotten/)).toBeInTheDocument()
+    expect(within(people).queryByText(/not recognisable/)).toBeNull()
   })
 
   it('shows the plain reason when the search fails', async () => {

@@ -588,13 +588,14 @@ Search may return heterogeneous results such as:
 - Occurrence
 - visual match
 
-> **Agent design 2026-10-09 (awaiting the owner's confirmation; built, 5a):** `q` is one text (1 to 200
+> **Decision 2026-10-09 (owner confirmed the defaults below; built, 5a):** `q` is one text (1 to 200
 > characters), matched case-insensitively as a whole against Person names, unnamed Identity labels
-> (`Person A1B2C3`), Source file names and, through them, Occurrences. `recycled` is `include` (the
-> default; recycled images are marked `source_recycled`), `exclude` or `only`; `types` narrows the result
+> (`Person A1B2C3`), Source file names and, through them, Occurrences. `recycled` is `exclude` (the
+> default), `include` (recycled images are marked `source_recycled`) or `only`; `types` narrows the result
 > kinds; `limit` is 1 to 50. Results are grouped by kind and ranked inside each (exact, prefix, contains),
 > never fused; the response carries `coverage` (images looked through and not yet processed) and `ranking`
-> (`NAME_LOOKUP`, `rule-v1`). A Person with nothing left to see is found with `visual_support: false`.
+> (`NAME_LOOKUP`, `rule-v1`). A Person with nothing left to see is found with `visual_support: false`; one whose biometric memory was forgotten
+> carries `biometric_memory_forgotten: true` and stays findable by name.
 > Sources being or already deleted never appear. Face search is section 12.2.
 
 ---
