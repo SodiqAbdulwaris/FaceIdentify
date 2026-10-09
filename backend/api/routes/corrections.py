@@ -184,6 +184,7 @@ class Resolve(BaseModel):
     identity_id: uuid.UUID | None  # None: a new unknown identity
 
 
+HINT_CHUNK = 500
 _SUPPORTING = (
     RepresentationState.ACTIVE,
     RepresentationState.PENDING,
@@ -228,15 +229,18 @@ def _likely(session: Session, representation_ids: list[uuid.UUID]) -> dict[uuid.
     ]
     # A face supports a hint only while it exists, still holds its vector, and still belongs to
     # the person the candidate was for (a correction or a split may have moved it since).
-    alive = {
-        face: identity
-        for face, identity in session.execute(
-            select(Representation.id, Representation.identity_id).where(
-                Representation.id.in_({m for *_, members in compared for m in members}),
-                Representation.state.in_(_SUPPORTING),
-            )
-        ).tuples()
-    }
+    faces = list({m for *_, members in compared for m in members})
+    alive: dict[uuid.UUID, uuid.UUID | None] = {}
+    for start in range(0, len(faces), HINT_CHUNK):  # (bound parameters per statement)
+        alive |= {
+            face: identity
+            for face, identity in session.execute(
+                select(Representation.id, Representation.identity_id).where(
+                    Representation.id.in_(faces[start : start + HINT_CHUNK]),
+                    Representation.state.in_(_SUPPORTING),
+                )
+            ).tuples()
+        }
     best: dict[uuid.UUID, dict[uuid.UUID, float]] = {}
     for representation_id, identity_id, _similarity, members in compared:
         assert identity_id is not None  # (filtered above)

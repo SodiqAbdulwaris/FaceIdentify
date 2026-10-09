@@ -10,6 +10,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
 from sqlalchemy import event, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -528,3 +529,36 @@ async def test_a_busy_database_retries_a_resolution_once(api: Api, new_id: Seede
     occurrences = (await api.client.get(f"/api/v1/sources/{u.source}/occurrences")).json()
     assert len(occurrences["items"]) == 1
     assert announced == 1
+
+
+async def test_the_hints_for_many_unplaced_faces_are_read_in_bounded_statements(
+    api: Api, new_id: SeededUUIDs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.api.routes import corrections
+
+    u = unresolved(api, new_id)
+    assert api.backend.library is not None
+    engine = api.backend.library.engine
+    with api.backend.library.session_factory() as session:
+        for candidate in session.scalars(select(EvidenceCandidate)):
+            candidate.details_json = {  # a long history: each candidate was made of many faces
+                "members": [
+                    {"representation_id": str(uuid.uuid4()), "similarity": 0.1} for _ in range(40)
+                ]
+            }
+        session.commit()
+    monkeypatch.setattr(corrections, "HINT_CHUNK", 5)
+
+    @event.listens_for(engine, "connect")
+    def lower_the_limit(connection: sqlite3.Connection, _record: object) -> None:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 30)
+
+    engine.dispose()  # new connections get the lower limit
+    try:
+        response = await api.client.get(f"/api/v1/sources/{u.source}/unresolved-faces")
+    finally:
+        event.remove(engine, "connect", lower_the_limit)
+        engine.dispose()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["likely"] == []  # none of those faces still exists
