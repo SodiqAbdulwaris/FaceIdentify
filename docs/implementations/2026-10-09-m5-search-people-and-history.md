@@ -9,7 +9,7 @@
 
 - **Route** `GET /api/v1/search` (`backend/api/routes/search.py`), read-only, over authoritative data
   (SQLite) only. No index is used and nothing is written: a query is not an ingest. Parameters: `q` (1 to
-  200 characters, case- and spacing-insensitive), `recycled` (`include` the default, `exclude`, `only`),
+  200 characters, case- and spacing-insensitive), `recycled` (`exclude` the default, `include`, `only`),
   `types` (comma list of `people`, `identities`, `sources`, `occurrences`) and `limit` (1 to 50, default
   20). A bad `types` or an empty word is `422 INVALID_SEARCH`.
 - **What is found.** People by name (exact, then prefix, then contains); unnamed identities by their
@@ -33,20 +33,19 @@
 
 The search spec leaves these open (its section 11), so they were chosen here:
 
-- `recycled=include` is the default and marks recycled images (the owner's M5 plan, step 5:
-  "recycled-source Occurrences stay in historical views and search"); the identity model section 39 says
-  a normal search excludes recycled media, which the `exclude` filter gives on request. Images being or
-  already permanently deleted never appear, tombstone included.
+- **Decided by the owner, 2026-10-09:** recycled images are excluded from search by default
+  (`recycled=exclude`); `include` (the screen's "Include recycled images" box) adds them, marked as
+  recycled, and `only` shows just those. A restored image is back in normal results at once. A person's
+  page keeps showing the retained appearances from recycled images, marked: search and identity history are
+  different views of the same data. Images being or already permanently deleted never appear.
 - No fused "top result" list and no aliases (none exist). Lower-casing for file names is the database's,
   so it is ASCII-only for them; names use full case folding.
-- **Open question for the owner (found by the review): should a forgotten Person stay findable by
-  name?** Identity model section 46 lists "active name/alias search mapping for that remembered Person"
-  among what Forget removes or inactivates, while the owner's 4c decision keeps the Person, their name
-  and their People entry. As built, search finds them by name with `visual_support: false`, matching the
-  "Known by name only" list. Recommendation: keep it (the name is the owner's own label and Forget is
-  about biometric memory; hiding the name from search while listing it in People would be inconsistent).
-  If the owner prefers section 46 literally, clear `normalized_name` on a whole-person forget and hide
-  such people from both screens.
+- **Decided by the owner, 2026-10-09:** a forgotten person stays findable by name and is labelled
+  "Biometric memory forgotten" (`PersonHit.biometric_memory_forgotten`: one of their identities was
+  forgotten and none remain). They take no part in recognition or face matching (the forget guarantees
+  of step 4c: vectors erased, no match after a restart or an index rebuild). Deleting the Person record is
+  a separate operation. The flag is read from durable rows only, so it survives a restart. A person whose
+  images were all deleted is not labelled forgotten: they just have no visual support.
 - Face search (5b) is a separate route (`POST /search/face`), not part of this one.
 
 ## Tests
@@ -67,3 +66,10 @@ The search spec leaves these open (its section 11), so they were chosen here:
   are returned); people are ranked and limited in SQL; file names are matched with the query's own folding.
 - The generated contract now lands in the same commit as the route.
 - Not changed: see the open question above (forgotten people stay findable by name).
+
+## Owner decisions applied (2026-10-09)
+
+The two open questions were answered and built: recycled images are left out of search by default, and
+forgotten people are found and labelled. Tests: `test_a_recycled_image_is_marked_and_can_be_filtered_out_or_asked_for`
+(now checks the default), `test_a_forgotten_person_stays_findable_and_says_so`, and the Search screen tests for
+the checkbox and the label.

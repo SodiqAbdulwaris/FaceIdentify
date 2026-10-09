@@ -37,7 +37,7 @@ export const endpoints = (api: ApiClient) => ({
     api.get<Page<ProcessingRun>>(`${V1}/sources/${id}/processing-runs`, { cursor, limit: 50 }),
   processSource: (id: string) => api.post<ProcessingRun>(`${V1}/sources/${id}/process`),
 
-  search: (q: string, recycled: 'include' | 'exclude' | 'only' = 'include') =>
+  search: (q: string, recycled: 'include' | 'exclude' = 'exclude') =>
     api.get<SearchResponse>(`${V1}/search`, { q, recycled }),
 
   listRuns: (cursor?: string, limit = 50) =>

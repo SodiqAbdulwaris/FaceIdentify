@@ -10,13 +10,7 @@ import { errorMessage } from '../library/messages'
 import { personLabel } from '../identities/label'
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
-const PLACES = {
-  include: 'Everywhere',
-  exclude: 'Not in the Recycle bin',
-  only: 'Only the Recycle bin',
-} as const
-type Recycled = keyof typeof PLACES
-const PLACE_KEYS = Object.keys(PLACES) as Recycled[]
+type Recycled = 'include' | 'exclude'
 
 /**
  * Find people, images and appearances by name. The word is kept in the address (`#/search?q=`),
@@ -27,7 +21,7 @@ export function SearchPage() {
   const { endpoints } = useBackend()
   const [params, setParams] = useSearchParams()
   const q = params.get('q') ?? ''
-  const recycled = PLACE_KEYS.find((r) => r === params.get('recycled')) ?? 'include'
+  const recycled = params.get('recycled') === 'include' ? 'include' : 'exclude'
   const [typed, setTyped] = useState(q)
   // Back and forward change the address; the box follows it (adjusted while rendering).
   const [shown, setShown] = useState(q)
@@ -42,7 +36,7 @@ export function SearchPage() {
   })
 
   const go = (word: string, place: Recycled) =>
-    setParams({ q: word, ...(place === 'include' ? {} : { recycled: place }) })
+    setParams({ q: word, ...(place === 'include' ? { recycled: place } : {}) })
   const submit = (event: FormEvent) => {
     event.preventDefault()
     go(typed.trim(), recycled)
@@ -67,18 +61,14 @@ export function SearchPage() {
           placeholder="A name, or an image file name"
           className="min-w-0 flex-1 basis-48 rounded-md border bg-background px-3 py-1.5 text-sm"
         />
-        <select
-          aria-label="Where"
-          value={recycled}
-          onChange={(event) => go(q, event.target.value as Recycled)}
-          className="rounded-md border bg-background px-2 py-1.5 text-sm"
-        >
-          {PLACE_KEYS.map((r) => (
-            <option key={r} value={r}>
-              {PLACES[r]}
-            </option>
-          ))}
-        </select>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={recycled === 'include'}
+            onChange={(event) => go(q, event.target.checked ? 'include' : 'exclude')}
+          />
+          Include recycled images
+        </label>
         <Button type="submit" disabled={typed.trim() === ''}>
           Search
         </Button>
@@ -116,7 +106,11 @@ export function SearchPage() {
                   <span className="text-sm text-muted-foreground">
                     {plural(person.occurrence_count, 'appearance', 'appearances')} in{' '}
                     {plural(person.source_count, 'image', 'images')}
-                    {person.visual_support ? '' : ' · no remembered face, so not recognisable'}
+                    {person.biometric_memory_forgotten
+                      ? ' · Biometric memory forgotten'
+                      : person.visual_support
+                        ? ''
+                        : ' · no remembered face, so not recognisable'}
                   </span>
                 </>
               )

@@ -99,7 +99,7 @@ async def test_people_are_found_by_name_best_match_first_with_their_appearances(
     assert found["ranking"] == {
         "plan": "NAME_LOOKUP",
         "ranker": "rule-v1",
-        "recycled": "include",
+        "recycled": "exclude",
         "types": ["people", "identities", "sources", "occurrences"],
     }
 
@@ -204,15 +204,17 @@ async def test_a_recycled_image_is_marked_and_can_be_filtered_out_or_asked_for(
     await name_identity(api, gone, "Adam")
     await api.client.delete(f"{SOURCES}/{gone['id']}")
 
-    everything = await ask(api, "ada")
+    everything = await ask(api, "ada", recycled="include")
     without = await ask(api, "ada", recycled="exclude")
     just_bin = await ask(api, "ada", recycled="only")
-    by_file = await ask(api, "bin")
+    by_file = await ask(api, "bin", recycled="include")
+    by_default = await ask(api, "ada")
 
     marked = {
         o["source_display_name"]: o["source_recycled"] for o in everything["results"]["occurrences"]
     }
-    assert marked == {"kept.png": False, "bin.png": True}  # included by default, and marked
+    assert marked == {"kept.png": False, "bin.png": True}  # included on request, and marked
+    assert by_default == without  # the default leaves recycled images out
     assert {o["source_display_name"] for o in without["results"]["occurrences"]} == {"kept.png"}
     assert {o["source_display_name"] for o in just_bin["results"]["occurrences"]} == {"bin.png"}
     adam = next(p for p in without["results"]["people"] if p["display_name"] == "Adam")
@@ -357,3 +359,27 @@ async def test_file_names_match_with_the_same_folding_as_the_query(processing_ap
     assert [s["display_name"] for s in spaced["results"]["sources"]] == ["family  holiday.png"]
     assert [s["display_name"] for s in accent["results"]["sources"]] == ["École.png"]
     assert [s["display_name"] for s in sharp["results"]["sources"]] == ["Straße.png"]
+
+
+async def test_a_forgotten_person_stays_findable_and_says_so(processing_api: Api) -> None:
+    api = processing_api
+    forgotten = await name_identity(api, await face(api, "f.png", 0), "Ada Forgotten")
+    await name_identity(api, await face(api, "k.png", 1), "Ada Kept")
+    await name_identity(api, await face(api, "d.png", 2), "Ada Deleted")
+    deleted = (await api.client.get(SOURCES)).json()["items"]
+    gone = next(s for s in deleted if s["display_name"] == "d.png")
+    await api.client.delete(f"{SOURCES}/{gone['id']}")
+    assert (await api.client.post(f"{SOURCES}/{gone['id']}/permanent-delete")).status_code == 204
+    assert (await api.client.post(f"{PEOPLE}/{forgotten['id']}/forget")).status_code == 204
+
+    people = {p["display_name"]: p for p in (await ask(api, "ada"))["results"]["people"]}
+
+    mark = {name: p["biometric_memory_forgotten"] for name, p in people.items()}
+    assert mark == {"Ada Forgotten": True, "Ada Kept": False, "Ada Deleted": False}
+    assert people["Ada Forgotten"]["identity_ids"] == []  # nothing left to recognise them by
+    assert people["Ada Deleted"]["visual_support"] is False  # no image left is not "forgotten"
+    # a later image of the same face is a new person and is not tied to the forgotten one
+    await face(api, "again.png", 0)
+    again = {p["display_name"]: p for p in (await ask(api, "ada"))["results"]["people"]}
+    assert again["Ada Forgotten"]["identity_ids"] == []
+    assert again["Ada Forgotten"]["occurrence_count"] == 0

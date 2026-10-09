@@ -56,6 +56,8 @@ class PersonHit(BaseModel):
     source_count: int
     # False once nothing visual is left to recognise them by (images deleted, faces forgotten).
     visual_support: bool
+    # Their faces were forgotten on purpose and none remain; the name stays (owner, 2026-10-09).
+    biometric_memory_forgotten: bool
 
 
 class IdentityHit(BaseModel):
@@ -180,6 +182,16 @@ def _people(
     ):
         linked[person_id].append(identity_id)
     everyone = [identity for ids in linked.values() for identity in ids]
+    forgotten = set(
+        session.scalars(
+            select(IdentityPersonAssociation.person_id)
+            .join(Identity, Identity.id == IdentityPersonAssociation.identity_id)
+            .where(
+                IdentityPersonAssociation.person_id.in_(list(linked)),
+                Identity.state == IdentityState.FORGOTTEN,
+            )
+        )
+    )
     counts = _counts(session, everyone, states)
     hits = []
     for person in people:
@@ -195,6 +207,7 @@ def _people(
                 # (images, not appearances: one image may show two of the person's identities)
                 source_count=_distinct_sources(session, linked[person.id], states),
                 visual_support=appearances > 0,
+                biometric_memory_forgotten=person.id in forgotten and not linked[person.id],
             )
         )
     return hits, everyone
@@ -321,7 +334,7 @@ def _coverage(session: Session, states: tuple[str, ...]) -> Coverage:
 def search(
     library: Library,
     q: Annotated[str, Query(min_length=1, max_length=200)],
-    recycled: Recycled = "include",
+    recycled: Recycled = "exclude",
     types: Annotated[
         str, Query(description="Comma-separated: people,identities,sources,occurrences")
     ] = ",".join(KINDS),

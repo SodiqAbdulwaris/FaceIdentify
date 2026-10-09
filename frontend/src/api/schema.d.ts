@@ -942,6 +942,8 @@ export interface components {
         };
         /** PersonHit */
         PersonHit: {
+            /** Biometric Memory Forgotten */
+            biometric_memory_forgotten: boolean;
             /** Display Name */
             display_name: string;
             /** Id */

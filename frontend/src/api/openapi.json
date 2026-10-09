@@ -891,6 +891,10 @@
       },
       "PersonHit": {
         "properties": {
+          "biometric_memory_forgotten": {
+            "title": "Biometric Memory Forgotten",
+            "type": "boolean"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
@@ -935,7 +939,8 @@
           "identity_ids",
           "occurrence_count",
           "source_count",
-          "visual_support"
+          "visual_support",
+          "biometric_memory_forgotten"
         ],
         "title": "PersonHit",
         "type": "object"
@@ -3013,7 +3018,7 @@
             "name": "recycled",
             "required": false,
             "schema": {
-              "default": "include",
+              "default": "exclude",
               "enum": [
                 "include",
                 "exclude",
