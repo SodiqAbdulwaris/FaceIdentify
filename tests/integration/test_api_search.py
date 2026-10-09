@@ -218,7 +218,10 @@ async def test_a_recycled_image_is_marked_and_can_be_filtered_out_or_asked_for(
     assert {o["source_display_name"] for o in without["results"]["occurrences"]} == {"kept.png"}
     assert {o["source_display_name"] for o in just_bin["results"]["occurrences"]} == {"bin.png"}
     adam = next(p for p in without["results"]["people"] if p["display_name"] == "Adam")
-    assert (adam["occurrence_count"], adam["visual_support"]) == (0, False)  # none outside the bin
+    assert (adam["occurrence_count"], adam["visual_support"]) == (
+        0,
+        True,
+    )  # the bin keeps them known
     assert [(s["display_name"], s["source_recycled"]) for s in by_file["results"]["sources"]] == [
         ("bin.png", True)
     ]
@@ -383,3 +386,39 @@ async def test_a_forgotten_person_stays_findable_and_says_so(processing_api: Api
     again = {p["display_name"]: p for p in (await ask(api, "ada"))["results"]["people"]}
     assert again["Ada Forgotten"]["identity_ids"] == []
     assert again["Ada Forgotten"]["occurrence_count"] == 0
+
+
+async def test_a_reassigned_identity_does_not_mark_its_old_person_as_forgotten(
+    processing_api: Api,
+) -> None:
+    api = processing_api
+    ada = await name_identity(api, await face(api, "a.png", 0), "Ada Old")
+    [identity_id] = (await ask(api, "ada old"))["results"]["people"][0]["identity_ids"]
+    bob = await name_identity(api, await face(api, "b.png", 1), "Bob New")
+    moved = await api.client.post(
+        f"{PEOPLE}/{bob['id']}/assign-identity", json={"identity_id": identity_id}
+    )
+    assert moved.status_code == 200, moved.text
+    assert (await api.client.post(f"{PEOPLE}/{bob['id']}/forget")).status_code == 204
+
+    people = {p["display_name"]: p for p in (await ask(api, "o"))["results"]["people"]}
+
+    assert people["Bob New"]["biometric_memory_forgotten"] is True
+    assert people["Ada Old"]["biometric_memory_forgotten"] is False  # only a past owner
+    assert ada["display_name"] == "Ada Old"
+
+
+async def test_images_in_the_bin_keep_a_person_recognisable_in_the_default_search(
+    processing_api: Api,
+) -> None:
+    api = processing_api
+    source = await face(api, "only.png", 0)
+    await name_identity(api, source, "Ada")
+    await api.client.delete(f"{SOURCES}/{source['id']}")
+
+    default = (await ask(api, "ada"))["results"]["people"][0]
+    included = (await ask(api, "ada", recycled="include"))["results"]["people"][0]
+
+    assert (default["occurrence_count"], default["visual_support"]) == (0, True)
+    assert default["biometric_memory_forgotten"] is False
+    assert included["occurrence_count"] == 1

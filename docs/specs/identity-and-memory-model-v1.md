@@ -1586,7 +1586,7 @@ Forget should remove/inactivate, as appropriate:
 - active recognition memory,
 - identity-specific derived representations,
 - global recognition eligibility,
-- active name/alias search mapping for that remembered Person,
+- active name/alias search mapping for that remembered Person (superseded for the name: see the decision at section 49),
 - Person-level occurrence resolution.
 
 Underlying source media remains.
@@ -1648,6 +1648,12 @@ Forget should invalidate appropriate:
 - derived Person-level ranking features.
 
 Underlying media remains searchable through its own metadata and through other active identities.
+
+> **Decision 2026-10-09 (owner): a forgotten Person stays findable by name (sections 46 and 49).** The
+> user-authored Person record and name survive Forget and remain in name search, marked "Biometric memory
+> forgotten"; what is invalidated is everything biometric: recognition associations and memory, face-index
+> entries, occurrence mappings and ranking features. Deleting the Person record is a separate explicit
+> operation.
 
 ---
 

@@ -65,7 +65,10 @@ The search spec leaves these open (its section 11), so they were chosen here:
 - `types=occurrences` alone now works (the people and identities are looked up first, then only the asked-for groups
   are returned); people are ranked and limited in SQL; file names are matched with the query's own folding.
 - The generated contract now lands in the same commit as the route.
-- Not changed: see the open question above (forgotten people stay findable by name).
+- After the owner's decisions, a second review found: the forgotten label now comes from the forget's own
+  Evidence record, so a person who only once owned a forgotten identity is not labelled; `visual_support` no
+  longer depends on the recycled filter (the bin keeps recognition memory); and the identity model got dated
+  notes at sections 46 and 49.
 
 ## Owner decisions applied (2026-10-09)
 
