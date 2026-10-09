@@ -471,12 +471,14 @@ describe('importing', () => {
       await user.click(await screen.findByRole('button', { name: 'Recycle bin' }))
       queryClient.setQueryData(['source', 's1', 'media'], new Blob(['pixels']))
       queryClient.setQueryData(['runs'], [])
+      queryClient.setQueryData(['search', 'beach', 'include'], { query: 'beach' })
 
       await user.click(await screen.findByRole('button', { name: 'Delete beach.png permanently' }))
       await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
 
       expect(await screen.findByText('The recycle bin is empty')).toBeInTheDocument()
       expect(queryClient.getQueryData(['source', 's1', 'media'])).toBeUndefined()
+      expect(queryClient.getQueryData(['search', 'beach', 'include'])).toBeUndefined()
       expect(queryClient.getQueryState(['runs'])?.isInvalidated).toBe(true)
     })
 

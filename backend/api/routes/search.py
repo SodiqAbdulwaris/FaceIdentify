@@ -20,7 +20,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from sqlalchemy import String, cast, func, select
+from sqlalchemy import String, case, cast, func, select
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import Library
@@ -152,19 +152,22 @@ def _counts(
 def _people(
     session: Session, query: str, states: tuple[str, ...], limit: int
 ) -> tuple[list[PersonHit], list[uuid.UUID]]:
-    people = [
-        person
-        for person in session.scalars(
-            select(Person).where(
+    rank = case(
+        (Person.normalized_name == query, 0),
+        (Person.normalized_name.startswith(query, autoescape=True), 1),
+        else_=2,
+    )
+    people = list(
+        session.scalars(
+            select(Person)
+            .where(
                 Person.state == PersonState.ACTIVE,
                 Person.normalized_name.contains(query, autoescape=True),
             )
+            .order_by(rank, Person.normalized_name, Person.id)
+            .limit(limit)
         )
-    ]
-    people.sort(
-        key=lambda p: (_RANK[_match(p.normalized_name or "", query)], p.normalized_name, str(p.id))
     )
-    people = people[:limit]
     linked: dict[uuid.UUID, list[uuid.UUID]] = {person.id: [] for person in people}
     for person_id, identity_id in session.execute(
         select(IdentityPersonAssociation.person_id, IdentityPersonAssociation.identity_id)
@@ -253,13 +256,13 @@ def _identities(
 
 
 def _sources(session: Session, query: str, states: tuple[str, ...], limit: int) -> list[SourceHit]:
+    # File names are matched in Python so they get the query's own normalisation (case folding,
+    # collapsed spaces); SQLite's lower() is ASCII-only. ponytail: reads every visible name; push
+    # into SQL (a stored normalised name) if libraries grow to hundreds of thousands of images.
     rows = session.execute(
         select(Source, ProcessingRun.state)
         .outerjoin(ProcessingRun, ProcessingRun.id == Source.current_processing_run_id)
-        .where(
-            Source.state.in_(states),
-            func.lower(Source.display_name).contains(query, autoescape=True),
-        )
+        .where(Source.state.in_(states))
     ).tuples()
     hits = [
         SourceHit(
@@ -271,6 +274,7 @@ def _sources(session: Session, query: str, states: tuple[str, ...], limit: int) 
             processed=run_state == ProcessingRunState.COMPLETED,
         )
         for source, run_state in rows
+        if query in _normal(source.display_name)
     ]
     hits.sort(key=lambda h: (_RANK[h.match], h.display_name.casefold(), h.id))
     return hits[:limit]
@@ -333,12 +337,10 @@ def search(
     states = _states(recycled)
 
     def read(session: Session) -> SearchResponse:
-        people, person_identities = (
-            _people(session, query, states, limit) if "people" in wanted else ([], [])
-        )
-        identities, unnamed = (
-            _identities(session, query, states, limit) if "identities" in wanted else ([], [])
-        )
+        # Appearances come from the people and identities found, so those are looked up whenever
+        # any of the three is asked for; only the asked-for groups are returned.
+        people, person_identities = _people(session, query, states, limit)
+        identities, unnamed = _identities(session, query, states, limit)
         sources = _sources(session, query, states, limit) if "sources" in wanted else []
         appearances = (
             _appearances(session, [*person_identities, *unnamed], states, limit)
@@ -348,7 +350,10 @@ def search(
         return SearchResponse(
             query=query,
             results=Results(
-                people=people, identities=identities, sources=sources, occurrences=appearances
+                people=people if "people" in wanted else [],
+                identities=identities if "identities" in wanted else [],
+                sources=sources,
+                occurrences=appearances,
             ),
             coverage=_coverage(session, states),
             ranking=Ranking(plan="NAME_LOOKUP", ranker="rule-v1", recycled=recycled, types=wanted),

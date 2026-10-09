@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { apiError, renderApp } from '@/test/harness'
@@ -172,6 +172,19 @@ describe('search', () => {
     expect(screen.getByRole('status', { name: 'Search coverage' })).toHaveTextContent(
       '1 image has not been processed yet, so any faces in it cannot be found.',
     )
+  })
+
+  it('follows the address when going back, so the box shows what the results are for', async () => {
+    const user = userEvent.setup()
+    const { router } = renderApp('/search?q=ada', [{ path: SEARCH, respond: answer() }])
+    const box = await screen.findByRole('searchbox', { name: 'Search for' })
+
+    await user.clear(box)
+    await user.type(box, 'bob{Enter}')
+    await waitFor(() => expect(router.state.location.search).toBe('?q=bob'))
+    await router.navigate(-1)
+
+    await waitFor(() => expect(box).toHaveValue('ada'))
   })
 
   it('shows the plain reason when the search fails', async () => {

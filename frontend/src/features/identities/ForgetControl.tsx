@@ -44,6 +44,7 @@ export function ForgetControl({ identity }: { identity: IdentitySummary }) {
       const faces = (query: { queryKey: readonly unknown[] }) =>
         query.queryKey[0] === 'identity' ||
         query.queryKey[0] === 'identities' ||
+        query.queryKey[0] === 'search' ||
         (query.queryKey[0] === 'source' && query.queryKey[2] === 'occurrences')
       await queryClient.cancelQueries({ predicate: faces })
       queryClient.removeQueries({ predicate: faces })

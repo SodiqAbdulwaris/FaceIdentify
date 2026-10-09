@@ -29,6 +29,12 @@ export function SearchPage() {
   const q = params.get('q') ?? ''
   const recycled = PLACE_KEYS.find((r) => r === params.get('recycled')) ?? 'include'
   const [typed, setTyped] = useState(q)
+  // Back and forward change the address; the box follows it (adjusted while rendering).
+  const [shown, setShown] = useState(q)
+  if (shown !== q) {
+    setShown(q)
+    setTyped(q)
+  }
   const found = useQuery({
     queryKey: keys.search(q, recycled),
     queryFn: () => endpoints.search(q, recycled),
@@ -59,7 +65,7 @@ export function SearchPage() {
           value={typed}
           onChange={(event) => setTyped(event.target.value)}
           placeholder="A name, or an image file name"
-          className="min-w-64 flex-1 rounded-md border bg-background px-3 py-1.5 text-sm"
+          className="min-w-0 flex-1 basis-48 rounded-md border bg-background px-3 py-1.5 text-sm"
         />
         <select
           aria-label="Where"
@@ -169,7 +175,7 @@ export function SearchPage() {
       {results?.occurrences.length ? (
         <section aria-label="Appearances found" className="flex flex-col gap-2">
           <h2 className="font-medium">Where they appear</h2>
-          <ul className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3">
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-3">
             {results.occurrences.map((occurrence) => (
               <Appearance key={occurrence.id} occurrence={occurrence} />
             ))}
@@ -194,7 +200,7 @@ function Appearance({ occurrence }: { occurrence: OccurrenceSummary }) {
         ) : (
           <div className="size-24 shrink-0 rounded-md bg-muted" aria-hidden="true" />
         )}
-        <span className="flex flex-col">
+        <span className="flex min-w-0 flex-col break-words">
           <span className="font-medium">{who}</span>
           <span className="text-sm text-muted-foreground">
             in {occurrence.source_display_name}
