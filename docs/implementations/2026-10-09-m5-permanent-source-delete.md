@@ -131,9 +131,11 @@ was approved to be built with step 4c.
   identities; a named person survives; retained Evidence keeps provenance and exposes no deleted
   representation; crashes before finalization and during erasure finished by the next start; bytes
   that cannot be removed, reported and retried; guard edges.
-- `tests/integration/test_api_source_permanent_delete.py` (8): the route, its refusals, a face's
-  identity disappearing, `202`, the next start finishing a cut-short deletion, and a deletion still
-  owed at start being reported as degraded recovery.
+- `tests/integration/test_api_source_permanent_delete.py` (14 after the visibility work of PR 157): the
+  route, its refusals, a face's identity disappearing, `202`, the next start finishing a cut-short
+  deletion, a deletion still owed at start being reported as degraded recovery, a source with a pending
+  deletion gone from every source, run, job and face route (and `/readiness` degraded), and commands
+  that lose a race with the deletion's first transaction answering `404`, not their own refusal.
 - Mutations (backend): 47 guards and statements were broken one at a time (26 before the review, 21
   after); every survivor (a redundant `continue`, an untested thumbnail clear, an untested artifact-state
   guard, a state set that only AVAILABLE exercised, a redundant representation delete, an untested
