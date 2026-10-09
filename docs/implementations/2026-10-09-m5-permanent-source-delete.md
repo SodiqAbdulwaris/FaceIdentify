@@ -111,13 +111,11 @@ was approved to be built with step 4c.
 - Only a *recycled* Source can be deleted for good (identity model §39: media first goes to the bin).
 - Evidence rows are kept but detached (links and run id removed) rather than deleted; the run and
   snapshot are deleted as decided on 2026-10-01. `Evidence.source_id` keeps pointing at the tombstone.
-- A `SOURCE_PERMANENTLY_DELETED` history entry is not written yet: the owner approved it (2026-10-09),
-  and it comes with revision `0010` in step 4c.
+- A `SOURCE_PERMANENTLY_DELETED` history entry is written by the finalizing transaction (approved by
+  the owner on 2026-10-09; built with revision `0010`, see its entry).
 - The tombstone keeps its row, so a `DELETED` Source's id stays resolvable; its name is replaced.
-- The path of a *referenced* original stays on its artifact row for now, because the `location` CHECK
-  demands an `external_path` for every referenced artifact. The owner approved revision `0010`
-  (2026-10-09), which lets a `DELETED` artifact have none; it is built with step 4c. Managed artifacts
-  keep only their id-derived storage key.
+- The path of a *referenced* original is cleared by revision `0010` (owner-approved, 2026-10-09), which
+  lets a `DELETED` artifact have none. Managed artifacts keep only their id-derived storage key.
 - A deleted face is never presented while the deletion is pending: its observations and occurrences are
   already marked `DELETED` (every reader shows only `ACTIVE`), and every source, run, job and face route
   answers `404` for a pending or finished deletion.
