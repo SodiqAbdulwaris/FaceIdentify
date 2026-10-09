@@ -119,7 +119,9 @@ _Last updated: 2026-10-07 (the scheduler-degrade test no longer races its own re
 - **Frontend:** Vite + React 19 + TS + Tailwind v4 + shadcn/ui (Nova preset, radix base) + Vitest,
   with React Router hash routes, TanStack Query and generated API types. Library, source, people and
   processing screens are built (M4), and so are the M5 naming, correction, merge/split and
-  unplaced-face controls; recycle and search are not built.
+  unplaced-face controls and the recycle bin (step 4a, built 2026-10-08: `DELETE /sources/{id}` and `POST /sources/{id}/restore`,
+  idempotent, `409 SOURCE_BUSY` while a run is in flight, `OccurrenceSummary.source_recycled`, a Library / Recycle bin switch and a
+  "from an image in the recycle bin" marker); permanent delete, forget and search are not built.
 - **Desktop:** Tauri v2 in `desktop/src-tauri` starts the Python backend sidecar (token in the
   environment, validated handshake, clean stop) and owns the library root and its folder picker (M4).
 
