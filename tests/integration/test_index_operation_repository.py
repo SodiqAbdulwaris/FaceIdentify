@@ -6,15 +6,17 @@ caller's behalf, a duplicate pending operation is skipped rather than an error, 
 change is decided by the database.
 """
 
+import sqlite3
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from backend.app.memory import index_operation_repository as repository
 from backend.app.memory.index_operation_repository import (
     DueOperation,
     IndexOperationRepository,
@@ -439,3 +441,32 @@ def test_settle_records_the_outcome_only_while_the_operation_is_pending(
     assert (by_id[pending.id].state, by_id[pending.id].attempt_count) == ("APPLIED", 1)
     assert (by_id[pending.id].last_attempt_at, by_id[pending.id].applied_at) == (now, now)
     assert (by_id[applied.id].state, by_id[applied.id].failure_code) == ("APPLIED", None)
+
+
+def test_attempt_counts_are_read_in_bounded_statements(
+    sqlite_engine: Engine,
+    factory: sessionmaker[Session],
+    db_session: Session,
+    build: ModelFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A long history settles many operations at once; one statement per operation id would
+    exceed SQLite's variable limit (checked here by lowering it)."""
+    operations = [build.index_operation(build.representation(ann_key=n + 1)) for n in range(30)]
+    db_session.commit()
+    ids = [operation.id for operation in operations]
+    monkeypatch.setattr(repository, "ATTEMPT_COUNT_CHUNK", 5)  # (500 in production)
+
+    @event.listens_for(sqlite_engine, "connect")
+    def lower_the_limit(connection: sqlite3.Connection, _record: object) -> None:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 10)
+
+    sqlite_engine.dispose()  # new connections get the lower limit
+    try:
+        with factory() as session:
+            counts = IndexOperationRepository(session).attempt_counts(ids)
+    finally:
+        event.remove(sqlite_engine, "connect", lower_the_limit)
+        sqlite_engine.dispose()
+
+    assert counts == dict.fromkeys(ids, 0)
