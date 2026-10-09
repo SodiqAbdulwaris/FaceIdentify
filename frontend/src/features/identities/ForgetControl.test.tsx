@@ -61,6 +61,7 @@ describe('forgetting a person', () => {
     queryClient.setQueryData(['identity', 'i2'], identity({ id: 'i2' }))
     queryClient.setQueryData(['identity', 'i2', 'occurrences'], { pages: [] })
     queryClient.setQueryData(['source', 's1', 'occurrences'], { items: [] })
+    queryClient.setQueryData(['search', 'ada', 'include'], { query: 'ada' })
     queryClient.setQueryData(['identities'], {
       pages: [{ items: [{ id: 'forgotten-i2' }], page: { next_cursor: null } }],
       pageParams: [undefined],
@@ -72,6 +73,7 @@ describe('forgetting a person', () => {
     expect(queryClient.getQueryData(['identity', 'i2'])).toBeUndefined()
     expect(queryClient.getQueryData(['identity', 'i2', 'occurrences'])).toBeUndefined()
     expect(queryClient.getQueryData(['source', 's1', 'occurrences'])).toBeUndefined()
+    expect(queryClient.getQueryData(['search', 'ada', 'include'])).toBeUndefined()
     // the list of people is dropped and fetched anew: the forgotten entry is not carried over
     expect(JSON.stringify(queryClient.getQueryData(['identities']) ?? {})).not.toContain('forgotten-i2')
   })

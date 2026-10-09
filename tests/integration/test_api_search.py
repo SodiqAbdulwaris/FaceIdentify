@@ -323,3 +323,37 @@ async def test_only_active_things_are_found(processing_api: Api) -> None:
     assert "Ada Recycled" not in by_name
     assert {o["source_display_name"] for o in found["results"]["occurrences"]} == {"0.png"}
     assert found["coverage"]["processed"] == 0  # no run has completed any more
+
+
+async def test_occurrences_can_be_asked_for_alone_and_a_limit_keeps_the_best(
+    processing_api: Api,
+) -> None:
+    api = processing_api
+    for index, name in enumerate(["Adam", "Ada", "Adaline"]):
+        await name_identity(api, await face(api, f"p{index}.png", index), name)
+    unnamed = (await api.client.get(IDENTITIES)).json()["items"]
+
+    only = await ask(api, "ada", types="occurrences")
+    best = await ask(api, "ada", types="people", limit="1")
+
+    assert only["results"]["people"] == []
+    assert len(only["results"]["occurrences"]) == 3  # the appearances of everyone found
+    assert [p["display_name"] for p in best["results"]["people"]] == ["Ada"]  # exact, cut by SQL
+    label = unnamed[0]["id"].replace("-", "")[:6]
+    assert (await ask(api, label, types="occurrences"))["results"]["occurrences"] == []  # named
+
+
+async def test_file_names_match_with_the_same_folding_as_the_query(processing_api: Api) -> None:
+    from tests.fixtures.api import imported
+
+    api = processing_api
+    for name in ["family  holiday.png", "École.png", "Straße.png"]:
+        await imported(api, path=str(api.image(name)), display_name=name)
+
+    spaced = await ask(api, "family  holiday.png")
+    accent = await ask(api, "ÉCOLE")
+    sharp = await ask(api, "strasse")
+
+    assert [s["display_name"] for s in spaced["results"]["sources"]] == ["family  holiday.png"]
+    assert [s["display_name"] for s in accent["results"]["sources"]] == ["École.png"]
+    assert [s["display_name"] for s in sharp["results"]["sources"]] == ["Straße.png"]

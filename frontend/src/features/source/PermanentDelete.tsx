@@ -39,6 +39,9 @@ export function PermanentDelete({
       // Nothing of the image may stay on screen: drop what was fetched for it (its bytes included).
       await queryClient.cancelQueries({ queryKey: keys.source(sourceId) })
       queryClient.removeQueries({ queryKey: keys.source(sourceId) })
+      // (a search may have shown its name and faces)
+      await queryClient.cancelQueries({ queryKey: ['search'] })
+      queryClient.removeQueries({ queryKey: ['search'] })
       const notice =
         result.status === 202
           ? 'Part of the deletion could not finish yet. It is tried again the next time the app starts.'

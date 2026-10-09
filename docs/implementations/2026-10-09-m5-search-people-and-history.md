@@ -39,12 +39,31 @@ The search spec leaves these open (its section 11), so they were chosen here:
   already permanently deleted never appear, tombstone included.
 - No fused "top result" list and no aliases (none exist). Lower-casing for file names is the database's,
   so it is ASCII-only for them; names use full case folding.
+- **Open question for the owner (found by the review): should a forgotten Person stay findable by
+  name?** Identity model section 46 lists "active name/alias search mapping for that remembered Person"
+  among what Forget removes or inactivates, while the owner's 4c decision keeps the Person, their name
+  and their People entry. As built, search finds them by name with `visual_support: false`, matching the
+  "Known by name only" list. Recommendation: keep it (the name is the owner's own label and Forget is
+  about biometric memory; hiding the name from search while listing it in People would be inconsistent).
+  If the owner prefers section 46 literally, clear `normalized_name` on a whole-person forget and hide
+  such people from both screens.
 - Face search (5b) is a separate route (`POST /search/face`), not part of this one.
 
 ## Tests
 
-- `tests/integration/test_api_search.py` (11), on a real library with planted perception: ranking
+- `tests/integration/test_api_search.py` (13), on a real library with planted perception: ranking
   exact, prefix, contains; kinds and limit; label and file-name lookup; a named person is not listed as
   unnamed; merge then rename; recycled marked, excluded, only, and restored; permanent delete and forget
-  (the person stays findable, without visual support); coverage; searching writes nothing.
-- `frontend/src/features/search/SearchPage.test.tsx` (5) and the invalidation test.
+  (the person stays findable, without visual support); coverage; searching writes nothing; states
+  the API cannot reach; occurrences asked for alone; a limit cut in SQL; file names with repeated
+  spaces and non-ASCII letters.
+- `frontend/src/features/search/SearchPage.test.tsx` (6) and the invalidation test.
+
+## Changes after the independent review
+
+- A search no longer stays in the cache after a forget or a permanent delete (both scrub it); the box
+  follows the address on Back; the layout reflows at narrow widths and large text.
+- `types=occurrences` alone now works (the people and identities are looked up first, then only the asked-for groups
+  are returned); people are ranked and limited in SQL; file names are matched with the query's own folding.
+- The generated contract now lands in the same commit as the route.
+- Not changed: see the open question above (forgotten people stay findable by name).
