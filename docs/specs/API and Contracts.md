@@ -635,6 +635,15 @@ Persistence requires an explicit later command such as import/save/use-as-eviden
 
 Repeating the same face search must not grow memory.
 
+> **Decision 2026-10-10 (owner chose the input and presentation; built, 5b):** the body is either the image
+> bytes (any image content type) or JSON `{"path": "<a file on this computer>"}`; the same size and pixel
+> limits as import apply; only JPEG, PNG, BMP and WebP are accepted (PDF is not). The answer has one entry per
+> detected face (`bounding_box`, `detection_score`, `status` of `IDENTITY_ANSWER`, `POSSIBLE_PEOPLE` or
+> `UNKNOWN`, the policy `reason`, `possible_people` with `similarity` and `matching_faces`, and
+> `retrieval_complete`); `ranking.similarity` is `COSINE_UNCALIBRATED`. A picture with no face is `200` with
+> `faces: []`. Errors: `400 QUERY_IMAGE_UNREADABLE`, `413`, `415`, `422`, `503 PROCESSING_UNAVAILABLE`,
+> `503 PERCEPTION_UNAVAILABLE`.
+
 ---
 
 # 13. Jobs
