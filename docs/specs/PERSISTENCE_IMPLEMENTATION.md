@@ -86,6 +86,11 @@ Do not add a generic `metadata JSON` field. A versioned JSON payload is permitte
 
 Constraints: exactly one location form is valid: `MANAGED` requires `storage_key` and forbids `external_path`; `REFERENCED` requires `external_path` and forbids `storage_key`. `AVAILABLE` managed artifacts require `sha256` and `size_bytes`. The database cannot prove physical existence; `MISSING` records a verified failure to resolve bytes.
 
+> **Decision 2026-10-09 (owner; revision `0010`):** an artifact in the `DELETED` state is exempt from the
+> one-location rule: permanently deleting a Source that referenced a user's file clears its `external_path`
+> (and the name, type, hash and size), so nothing recoverable about the file is kept. The upgrade clears the
+> same values on an original an earlier revision had already deleted, and owes a log truncation for them.
+
 Managed creation is a three-step protocol: commit a `PENDING` row; write to a temporary file, hash/verify, then atomically rename; commit `AVAILABLE` plus the final key/hash/size. If the second commit is lost, recovery verifies the expected final key and completes or rolls back the row. Deletion is symmetrical: commit deletion intent, remove the managed bytes, then finalize the row. A referenced file is never physically deleted by this application.
 
 ### 4.2 `sources`
@@ -242,7 +247,7 @@ A Person may have many active identities. Assignment is an explicit use case: lo
 
 Evidence records a durable reason for an authoritative memory decision. It is immutable and append-only; it does not claim that the decision is still current.
 
-`evidence` columns: `id`; `kind` (`IDENTITY_CREATED`, `IDENTITY_MATCHED`, `RECOGNITION_ABSTAINED`, `IDENTITY_ASSIGNED_TO_PERSON`, `IDENTITY_REMOVED_FROM_PERSON`, `IDENTITY_MERGED`, `IDENTITY_SPLIT`, `IDENTITY_FORGOTTEN`, `USER_CORRECTION`); nullable `processing_run_id`; nullable `source_id`; nullable `subject_identity_id`; nullable `subject_person_id`; nullable `calibration_profile_id`; `payload_schema_version`; non-null `payload_json`; `created_at`; and nullable `superseded_at` only as an explanatory marker, not mutation of payload.
+`evidence` columns: `id`; `kind` (`IDENTITY_CREATED`, `IDENTITY_MATCHED`, `RECOGNITION_ABSTAINED`, `IDENTITY_ASSIGNED_TO_PERSON`, `IDENTITY_REMOVED_FROM_PERSON`, `IDENTITY_MERGED`, `IDENTITY_SPLIT`, `IDENTITY_FORGOTTEN`, `USER_CORRECTION`; later additions `RECOGNITION_ABSTAINED`, `PERSON_RENAMED` and, by revision `0010` (**Decision 2026-10-09, owner:** a non-biometric history entry that a Source was permanently deleted), `SOURCE_PERMANENTLY_DELETED`); nullable `processing_run_id`; nullable `source_id`; nullable `subject_identity_id`; nullable `subject_person_id`; nullable `calibration_profile_id`; `payload_schema_version`; non-null `payload_json`; `created_at`; and nullable `superseded_at` only as an explanatory marker, not mutation of payload.
 
 `evidence_representations` is a role-bearing association: `evidence_id`, `representation_id`, `role` (`SUBJECT`, `SELECTED_CANDIDATE`, `CANDIDATE`, `SUPPORTING`), primary key `(evidence_id, representation_id, role)`. `evidence_candidates` stores bounded recognition candidates in their original order: `evidence_id`, `rank`, nullable `representation_id`, nullable `identity_id`, `raw_similarity`, nullable `calibrated_confidence`, `decision`, and `details_json`, with primary key `(evidence_id, rank)`.
 
