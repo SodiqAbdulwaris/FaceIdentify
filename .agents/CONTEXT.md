@@ -71,6 +71,11 @@ _Last updated: 2026-10-07 (the scheduler-degrade test no longer races its own re
   the live job ids; deletes only marked directories it made, never follows a link), and `backend/app/sources/lifecycle.py` (`recycle_source` /
   `restore_source`: revision-guarded `ACTIVE` ⇄ `RECYCLED` changes that touch only the `sources`
   row; neither move is made once permanent deletion of the original has begun), and
+  `backend/app/sources/permanent_delete.py` (`PermanentSourceDeletion`, M5 step 4b: a `RECYCLED` Source becomes `DELETING` with the
+  deletion intent of its managed artifacts, their bytes go, its face vectors go through `RepresentationEraser`, then one transaction
+  deletes its occurrences, observations, runs and their snapshots while Evidence is kept but detached from the deleted
+  representations and run, an unnamed identity left with nothing becomes `DELETED`, and the Source stays as a `DELETED`
+  tombstone; `resume()` at startup finishes a deletion a crash cut short), and
   `backend/app/sources/storage_cleanup.py` (deletes only `AVAILABLE` managed artifacts that no row
   references, past a caller-supplied cutoff; the references are read from the schema in
   `artifact_references.py`, and the check is part of the deletion-intent `UPDATE`; stray files are
@@ -121,7 +126,7 @@ _Last updated: 2026-10-07 (the scheduler-degrade test no longer races its own re
   processing screens are built (M4), and so are the M5 naming, correction, merge/split and
   unplaced-face controls and the recycle bin (step 4a, built 2026-10-08: `DELETE /sources/{id}` and `POST /sources/{id}/restore`,
   idempotent, `409 SOURCE_BUSY` while a run is in flight, `OccurrenceSummary.source_recycled`, a Library / Recycle bin switch and a
-  "from an image in the recycle bin" marker); permanent delete, forget and search are not built.
+  "from an image in the recycle bin" marker); permanent delete is built (step 4b: Delete permanently in the bin, with a confirmation); forget and search are not.
 - **Desktop:** Tauri v2 in `desktop/src-tauri` starts the Python backend sidecar (token in the
   environment, validated handshake, clean stop) and owns the library root and its folder picker (M4).
 

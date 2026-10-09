@@ -41,6 +41,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 |---|---|---|
 | 2026-10-07 | [Test: the scheduler-degrade test no longer races its own retry](2026-10-07-scheduler-degrade-test-race.md) | done; flake diagnosed and hardened |
 | 2026-10-07 | [A licensing and commercialisation record](2026-10-07-licensing-record.md) | done; documentation |
+| 2026-10-09 | [M5 step 4b: permanent deletion of a source](2026-10-09-m5-permanent-source-delete.md) | done; TST-059 second part |
 | 2026-10-08 | [M5 step 4a: recycle and restore a source](2026-10-08-m5-recycle-restore.md) | done; TST-059 first part |
 | 2026-10-08 | [M5 issue 80: installation records follow the disk](2026-10-08-m5-installation-sweep.md) | done; issue #80 |
 | 2026-10-08 | [M5 R2/R3: the real host profile and the real models through the host](2026-10-08-m5-real-host-profile.md) | done; TST-038/039 real path via the host (local) |
