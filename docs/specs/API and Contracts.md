@@ -281,12 +281,14 @@ A successful request may return:
 204 No Content
 ```
 
-> **Agent design 2026-10-08 (awaiting the owner's confirmation; built):** a repeat on an already
+> **Decision 2026-10-09 (owner confirmed the agent design of 2026-10-08; built):** a repeat on an already
 > recycled Source is harmless (`204`, no event); a Source with processing in flight (a run `PENDING`,
 > `RUNNING`, `PAUSING`, `PAUSED`, `CANCELLING` or `FINALIZING`) is refused with `409 SOURCE_BUSY`
 > because acceptance needs an `ACTIVE` Source and the run would fail at its end; a Source whose
 > original is being or has been deleted, or that is in no state that can be recycled, is refused with
-> `409 SOURCE_STATE_CONFLICT`. A change is announced as `source.updated`. Occurrences of a recycled
+> `409 SOURCE_STATE_CONFLICT`. (Clarified 2026-10-09: a Source whose deletion is pending or done is hidden,
+> so recycle and restore answer `404 SOURCE_NOT_FOUND` for it; `409 SOURCE_STATE_CONFLICT` remains for a
+> visible Source whose original is unavailable.) A change is announced as `source.updated`. Occurrences of a recycled
 > Source stay in identity views, counts and (later) search, each carrying `source_recycled: true`.
 
 ---
@@ -314,12 +316,19 @@ Permanent deletion removes application-owned managed artifacts according to rete
 
 For REFERENCED media, the external original is never physically deleted.
 
-> **Agent design 2026-10-09 (awaiting the owner's confirmation; built):** only a Source in the Recycle Bin
-> can be deleted (`409 SOURCE_NOT_RECYCLED` otherwise, `409 SOURCE_BUSY` while a run is in flight). The
+> **Decision 2026-10-09 (owner confirmed the agent design; built; the safeguards below are the owner's):** only a Source
+> in the Recycle Bin can be deleted (`409 SOURCE_NOT_RECYCLED` otherwise, `409 SOURCE_BUSY` while a run is in flight). The
 > answer is `204` when only the tombstone remains and `202` with `{state: DELETING, outstanding: [...]}`
 > when part could not finish (retried at the next start); a repeat is harmless and announces nothing, a
 > change is announced as `source.updated`. Afterwards `GET /sources/{id}` is `404`. Evidence and named
 > people stay; the Source row stays as a `DELETED` tombstone so retained Evidence still resolves it.
+> Retained records keep decision types, ids, timestamps and similarity scores, and lose every reference
+> to deleted representations, crops, runs and other biometric artifacts; the tombstone holds no
+> recoverable file name, path or sensitive metadata (revision `0010` clears a referenced original's
+> path). `202` means the deletion is durably scheduled or partly done and the rest is guaranteed to
+> resume after a restart; it is never presented as fully deleted. While it is pending the Source is
+> already unreachable through every library, search, occurrence, run and media route (`404`), a retry
+> is idempotent, and what is owed stays visible (the `202` body and `/readiness`).
 
 ---
 

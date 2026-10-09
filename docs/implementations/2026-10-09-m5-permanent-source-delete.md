@@ -100,20 +100,27 @@ Not changed, and why: a referenced original's `external_path` stays on the tombs
 artifact `location` CHECK requires it (see the question below). The 820-line test commit is one new
 module for one use case.
 
-## Agent designs awaiting the owner (recorded, not blocking)
+## Agent designs (confirmed by the owner on 2026-10-09, with safeguards)
+
+The owner confirmed all of these on 2026-10-09: delete only from the Recycle bin, the detached audit
+log, and the `204` / `202` / `409` answers, with the clarification that a pending (`202`) Source is
+unreachable through every route, retries are idempotent and what is owed stays visible. Revision `0010`
+(clear a deleted referenced original's path; a non-biometric `SOURCE_PERMANENTLY_DELETED` history entry)
+was approved to be built with step 4c.
 
 - Only a *recycled* Source can be deleted for good (identity model §39: media first goes to the bin).
 - Evidence rows are kept but detached (links and run id removed) rather than deleted; the run and
   snapshot are deleted as decided on 2026-10-01. `Evidence.source_id` keeps pointing at the tombstone.
-- No `SOURCE_PERMANENTLY_DELETED` event row is written: the Evidence kinds are a closed set, so adding
-  one needs a migration. Say if you want it.
+- A `SOURCE_PERMANENTLY_DELETED` history entry is not written yet: the owner approved it (2026-10-09),
+  and it comes with revision `0010` in step 4c.
 - The tombstone keeps its row, so a `DELETED` Source's id stays resolvable; its name is replaced.
-- **Question:** the path of a *referenced* original stays on its artifact row, because the `location`
-  CHECK demands an `external_path` for every referenced artifact. Clearing it needs a revision `0010`
-  that lets a `DELETED` artifact have none. Recommended: do it with step 4c, which touches the same
-  tables. Managed artifacts keep only their id-derived storage key.
-- A representative face shown for an identity during the short `DELETING` window may still be the
-  deleted one; it is replaced in the finalizing transaction.
+- The path of a *referenced* original stays on its artifact row for now, because the `location` CHECK
+  demands an `external_path` for every referenced artifact. The owner approved revision `0010`
+  (2026-10-09), which lets a `DELETED` artifact have none; it is built with step 4c. Managed artifacts
+  keep only their id-derived storage key.
+- A deleted face is never presented while the deletion is pending: its observations and occurrences are
+  already marked `DELETED` (every reader shows only `ACTIVE`), and every source, run, job and face route
+  answers `404` for a pending or finished deletion.
 
 ## Tests
 
