@@ -3,6 +3,7 @@ import { IdentitiesPage } from '@/features/identities/IdentitiesPage'
 import { IdentityPage } from '@/features/identities/IdentityPage'
 import { ProcessingPage } from '@/features/processing/ProcessingPage'
 import { LibraryPage } from '@/features/library/LibraryPage'
+import { SearchPage } from '@/features/search/SearchPage'
 import { SourcePage } from '@/features/source/SourcePage'
 import { Layout } from './Layout'
 
@@ -18,6 +19,7 @@ export const routes: RouteObject[] = [
       { path: 'library/source/:sourceId', element: <SourcePage /> },
       { path: 'identities', element: <IdentitiesPage /> },
       { path: 'identities/:identityId', element: <IdentityPage /> },
+      { path: 'search', element: <SearchPage /> },
       { path: 'processing/:runId', element: <ProcessingPage /> },
     ],
   },

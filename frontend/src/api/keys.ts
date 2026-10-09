@@ -14,6 +14,7 @@ export const keys = {
   latestRun: ['runs', 'latest'] as const,
   identities: ['identities'] as const,
   people: ['people'] as const,
+  search: (q: string, recycled: string) => ['search', q, recycled] as const,
   identity: (id: string) => ['identity', id] as const,
   identityOccurrences: (id: string) => ['identity', id, 'occurrences'] as const,
 }

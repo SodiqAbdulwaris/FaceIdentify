@@ -389,6 +389,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search */
+        get: operations["search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources": {
         parameters: {
             query?: never;
@@ -631,6 +648,18 @@ export interface components {
             expected_identity_id: string;
         };
         /**
+         * Coverage
+         * @description How much of the library a search could see: unprocessed images have no faces to find.
+         */
+        Coverage: {
+            /** Not Processed */
+            not_processed: number;
+            /** Processed */
+            processed: number;
+            /** Sources */
+            sources: number;
+        };
+        /**
          * DeletionPending
          * @description Permanent deletion began but is not finished: what is owed is retried at the next start.
          */
@@ -674,6 +703,22 @@ export interface components {
         ForgetPending: {
             /** Outstanding */
             outstanding: string[];
+        };
+        /** IdentityHit */
+        IdentityHit: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Match
+             * @enum {string}
+             */
+            match: "EXACT" | "PREFIX" | "CONTAINS";
+            /** Occurrence Count */
+            occurrence_count: number;
+            /** Source Count */
+            source_count: number;
         };
         /** IdentityLink */
         IdentityLink: {
@@ -895,6 +940,26 @@ export interface components {
             items: components["schemas"]["SourceSummary"][];
             page: components["schemas"]["PageInfo"];
         };
+        /** PersonHit */
+        PersonHit: {
+            /** Display Name */
+            display_name: string;
+            /** Id */
+            id: string;
+            /** Identity Ids */
+            identity_ids: string[];
+            /**
+             * Match
+             * @enum {string}
+             */
+            match: "EXACT" | "PREFIX" | "CONTAINS";
+            /** Occurrence Count */
+            occurrence_count: number;
+            /** Source Count */
+            source_count: number;
+            /** Visual Support */
+            visual_support: boolean;
+        };
         /** PersonReference */
         PersonReference: {
             /** Display Name */
@@ -985,6 +1050,20 @@ export interface components {
             /** Total */
             total: number | null;
         };
+        /** Ranking */
+        Ranking: {
+            /** Plan */
+            plan: string;
+            /** Ranker */
+            ranker: string;
+            /**
+             * Recycled
+             * @enum {string}
+             */
+            recycled: "include" | "exclude" | "only";
+            /** Types */
+            types: string[];
+        };
         /** Reassign */
         Reassign: {
             /**
@@ -1006,6 +1085,25 @@ export interface components {
         Resolve: {
             /** Identity Id */
             identity_id: string | null;
+        };
+        /** Results */
+        Results: {
+            /** Identities */
+            identities: components["schemas"]["IdentityHit"][];
+            /** Occurrences */
+            occurrences: components["schemas"]["OccurrenceSummary"][];
+            /** People */
+            people: components["schemas"]["PersonHit"][];
+            /** Sources */
+            sources: components["schemas"]["SourceHit"][];
+        };
+        /** SearchResponse */
+        SearchResponse: {
+            coverage: components["schemas"]["Coverage"];
+            /** Query */
+            query: string;
+            ranking: components["schemas"]["Ranking"];
+            results: components["schemas"]["Results"];
         };
         /** SourceDetail */
         SourceDetail: {
@@ -1048,6 +1146,24 @@ export interface components {
             updated_at: string;
             /** Width */
             width: number | null;
+        };
+        /** SourceHit */
+        SourceHit: {
+            /** Display Name */
+            display_name: string;
+            /** Id */
+            id: string;
+            /**
+             * Match
+             * @enum {string}
+             */
+            match: "EXACT" | "PREFIX" | "CONTAINS";
+            /** Processed */
+            processed: boolean;
+            /** Source Recycled */
+            source_recycled: boolean;
+            /** State */
+            state: string;
         };
         /** SourceSummary */
         SourceSummary: {
@@ -1896,6 +2012,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OccurrenceSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    search: {
+        parameters: {
+            query: {
+                q: string;
+                recycled?: "include" | "exclude" | "only";
+                /** @description Comma-separated: people,identities,sources,occurrences */
+                types?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
                 };
             };
             /** @description The one error shape. */

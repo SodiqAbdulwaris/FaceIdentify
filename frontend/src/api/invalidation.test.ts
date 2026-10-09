@@ -19,6 +19,7 @@ describe('staleBecauseOf', () => {
       keys.sources,
       keys.source('s1'),
       ['identity'],
+      ['search'],
     ])
   })
 
@@ -35,6 +36,7 @@ describe('staleBecauseOf', () => {
       keys.identities,
       keys.people,
       ['identity'],
+      ['search'],
     ])
   })
 
@@ -45,6 +47,7 @@ describe('staleBecauseOf', () => {
         keys.people,
         ['identity'],
         ['source'],
+        ['search'],
       ])
     }
   })
@@ -57,6 +60,7 @@ describe('staleBecauseOf', () => {
       keys.identities,
       keys.people,
       ['identity'],
+      ['search'],
     ])
   })
 

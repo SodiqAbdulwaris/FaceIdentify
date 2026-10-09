@@ -29,6 +29,9 @@ export function Layout() {
           <NavLink to="/identities" className={link}>
             People
           </NavLink>
+          <NavLink to="/search" className={link}>
+            Search
+          </NavLink>
         </nav>
         <span className="ml-auto text-xs text-muted-foreground" role="status" aria-label="Live updates">
           {eventsStatus === 'open' ? 'Live' : 'Reconnecting…'}
