@@ -153,6 +153,18 @@ class RepresentationEraser:
         ids = list(representation_ids)
         self._uow.write(lambda session: self._queue(session, ids, now))
 
+    def queue_in(self, session: Session, representation_ids: Sequence[uuid.UUID]) -> None:
+        """`queue`, inside the caller's transaction: for a use case that must exclude the vectors
+        from retrieval in the same commit as its own change (permanent Source deletion)."""
+        self._queue(session, list(representation_ids), self._clock())
+
+    def settle_log(self) -> list[str]:
+        """Truncate the write-ahead log if a truncation is owed; what is still owed, by name (empty
+        when the log is clean). For a use case that deleted rows holding biometric payload."""
+        report = ErasureReport()
+        self._truncate(report)
+        return report.outstanding_cleanup
+
     def _queue(self, session: Session, ids: list[uuid.UUID], now: datetime) -> None:
         operations: list[NewOperation] = []
         for chunk in _chunks(ids):

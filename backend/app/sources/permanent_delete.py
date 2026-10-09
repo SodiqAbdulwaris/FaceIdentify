@@ -42,10 +42,11 @@ from backend.app.identities.models import (
     IdentityState,
 )
 from backend.app.jobs.models import Job
-from backend.app.memory.erasure import RepresentationEraser
+from backend.app.memory.erasure import CHUNK, RepresentationEraser
 from backend.app.memory.models import (
     IndexOperation,
     Observation,
+    ObservationState,
     Occurrence,
     OccurrenceState,
     Representation,
@@ -58,6 +59,7 @@ from backend.app.processing.models import (
     ProcessingConfigurationSnapshot,
     ProcessingRun,
 )
+from backend.app.settings.app_state import WAL_TRUNCATION_OWED, AppStateRepository
 from backend.app.sources.artifact_storage import (
     DELETABLE_STATES,
     complete_artifact_deletion,
@@ -76,6 +78,7 @@ DELETED_DISPLAY_NAME = "Deleted image"
 
 # Representations that still hold a vector in some form. Finalization refuses while one is left.
 _HOLDS_VECTOR = (
+    RepresentationState.DELETED,  # (a DELETED row keeps its vector; intent moves it to ERASING)
     RepresentationState.ACTIVE,
     RepresentationState.PENDING,
     RepresentationState.SUPERSEDED,
@@ -106,6 +109,11 @@ class DeletionReport:
     changed: bool = True
 
 
+def _chunks(ids: list[uuid.UUID]) -> list[list[uuid.UUID]]:
+    """Bound parameters per statement stay under the database limit however long the history."""
+    return [ids[start : start + CHUNK] for start in range(0, len(ids), CHUNK)]
+
+
 class PermanentSourceDeletion:
     def __init__(
         self,
@@ -128,7 +136,10 @@ class PermanentSourceDeletion:
         now = self._clock()
         before = self._uow.write(lambda session: self._begin(session, source_id, now))
         report = self._carry_on(source_id)
-        report.changed = before != SourceState.DELETED
+        # A repeat that changed nothing (already gone, or still stuck the same way) is not news.
+        report.changed = before == SourceState.RECYCLED or (
+            before == SourceState.DELETING and report.complete
+        )
         return report
 
     def resume(self) -> list[DeletionReport]:
@@ -187,8 +198,43 @@ class PermanentSourceDeletion:
                     {"state": ArtifactState.DELETED, "deleted_at": now},
                     storage_mode=StorageMode.REFERENCED,
                 )
+            elif artifact.state == ArtifactState.PENDING:
+                # A write that never finished: its bytes (final or staged) still have to go.
+                transition_artifact(
+                    session,
+                    artifact.id,
+                    {ArtifactState.PENDING},
+                    {"state": ArtifactState.DELETING, "delete_requested_at": now},
+                )
             elif artifact.state in DELETABLE_STATES:
                 request_artifact_deletion(session, artifact.id, clock=lambda: now)
+        # The faces leave recognition, search and every reader in this same commit: the vectors
+        # are queued for erasure (a DELETED row, which the eraser ignores, is made erasable first),
+        # and the occurrences and observations stop being authoritative.
+        observations = select(Observation.id).where(Observation.source_id == source_id)
+        no_sync = {"synchronize_session": False}
+        session.execute(
+            update(Representation)
+            .where(
+                Representation.observation_id.in_(observations),
+                Representation.state == RepresentationState.DELETED,
+            )
+            .values(state=RepresentationState.ERASING),
+            execution_options=no_sync,
+        )
+        self._eraser.queue_in(session, list(session.scalars(self._representation_ids(source_id))))
+        session.execute(
+            update(Occurrence)
+            .where(Occurrence.source_id == source_id)
+            .values(state=OccurrenceState.DELETED),
+            execution_options=no_sync,
+        )
+        session.execute(
+            update(Observation)
+            .where(Observation.source_id == source_id)
+            .values(state=ObservationState.DELETED),
+            execution_options=no_sync,
+        )
         return SourceState.RECYCLED
 
     @staticmethod
@@ -212,10 +258,13 @@ class PermanentSourceDeletion:
             source = session.get(Source, source_id)
             if source is None:
                 raise SourceMissingError(f"source {source_id} does not exist")
-            if source.state == SourceState.DELETED:
-                return DeletionReport(source_id, True)
-            if source.state != SourceState.DELETING:
-                raise SourceNotRecycledError(f"source {source_id} is {source.state}")
+            state = source.state
+        if state == SourceState.DELETED:
+            owed = self._eraser.settle_log()  # (still owed from the first try?) after the read ends
+            return DeletionReport(source_id, not owed, owed)
+        if state != SourceState.DELETING:
+            raise SourceNotRecycledError(f"source {source_id} is {state}")
+        with self._sessions() as session:
             owed_bytes = list(
                 session.scalars(
                     select(Artifact.id).where(
@@ -226,6 +275,14 @@ class PermanentSourceDeletion:
                 )
             )
             vectors = list(session.scalars(self._representation_ids(source_id)))
+            unfinished = list(
+                session.scalars(
+                    select(Artifact.id).where(
+                        Artifact.id.in_(self._artifact_ids(source_id)),
+                        Artifact.state != ArtifactState.DELETED,
+                    )
+                )
+            )
 
         outstanding: list[str] = []
         for artifact_id in owed_bytes:
@@ -235,13 +292,23 @@ class PermanentSourceDeletion:
                 )
             except (OSError, UnsafeStorageKeyError) as error:
                 outstanding.append(f"artifact {artifact_id}: {type(error).__name__}: {error}")
+        # Whatever owns bytes must be gone before the rows that name it are: an artifact that is
+        # neither deleted nor being deleted (a state nobody handles) blocks.
+        outstanding += [
+            f"artifact {artifact_id} is not deleted"
+            for artifact_id in unfinished
+            if artifact_id not in owed_bytes
+        ]
         if vectors:
             outstanding += self._eraser.erase(vectors).outstanding_cleanup
         if outstanding:
             return DeletionReport(source_id, False, outstanding)
         now = self._clock()
         self._uow.write(lambda session: self._finalize(session, source_id, now))
-        return DeletionReport(source_id, True)
+        # The rows that held landmarks, quality data and payloads were just deleted: the log may
+        # still hold their earlier pages, so it is truncated before this is reported done.
+        owed = self._eraser.settle_log()
+        return DeletionReport(source_id, not owed, owed)
 
     @staticmethod
     def _representation_ids(source_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
@@ -257,6 +324,8 @@ class PermanentSourceDeletion:
         source = session.get(Source, source_id, populate_existing=True)
         if source is None:
             raise SourceMissingError(f"source {source_id} does not exist")
+        if source.state == SourceState.DELETED:
+            return  # another request finished it
         if source.state != SourceState.DELETING:
             raise SourceLifecycleError(f"source {source_id} is {source.state}, not DELETING")
         observations = select(Observation.id).where(Observation.source_id == source_id)
@@ -273,15 +342,20 @@ class PermanentSourceDeletion:
         ):
             raise ErasureIncompleteError(f"source {source_id} still has a face vector")
 
+        # The log will hold the earlier pages of what is deleted below: owe a truncation, durably.
+        AppStateRepository(session).set(WAL_TRUNCATION_OWED, uuid.uuid4().hex, now=now)
+        owned = [i for i in session.scalars(select(self._artifact_ids(source_id).subquery())) if i]
+
         # The identities that lose something, read before the rows go.
-        affected = set(
+        affected: set[uuid.UUID] = set(
             session.scalars(select(Occurrence.identity_id).where(Occurrence.source_id == source_id))
-        ) | set(
-            session.scalars(
-                select(Representation.identity_id).where(
-                    Representation.id.in_(representations), Representation.identity_id.is_not(None)
-                )
+        )
+        affected.update(
+            identity_id
+            for identity_id in session.scalars(
+                select(Representation.identity_id).where(Representation.id.in_(representations))
             )
+            if identity_id is not None
         )
 
         def run(statement: Executable) -> None:
@@ -332,29 +406,66 @@ class PermanentSourceDeletion:
         )
         run(update(Source).where(Source.id == source_id).values(current_processing_run_id=None))
         run(delete(ProcessingRun).where(ProcessingRun.source_id == source_id))
-        run(
-            delete(ProcessingConfigurationSnapshot).where(
-                ProcessingConfigurationSnapshot.id.in_(snapshots)
+        for chunk in _chunks(snapshots):
+            run(
+                delete(ProcessingConfigurationSnapshot).where(
+                    ProcessingConfigurationSnapshot.id.in_(chunk)
+                )
             )
+        # What describes the deleted files goes with them (the id and storage key stay).
+        for chunk in _chunks(owned):
+            run(
+                update(Artifact)
+                .where(Artifact.id.in_(chunk))
+                .values(original_filename=None, mime_type=None, sha256=None, size_bytes=None)
+            )
+
+        # An identity that keeps other faces needs a face to show; the deleted one cannot be it.
+        survivor = (
+            select(Occurrence.representative_observation_id)
+            .where(
+                Occurrence.identity_id == Identity.id,
+                Occurrence.state == OccurrenceState.ACTIVE,
+                Occurrence.representative_observation_id.is_not(None),
+            )
+            .order_by(Occurrence.created_at, Occurrence.id)
+            .limit(1)
+            .scalar_subquery()
         )
+        for chunk in _chunks(list(affected)):
+            run(
+                update(Identity)
+                .where(
+                    Identity.id.in_(chunk),
+                    Identity.state == IdentityState.ACTIVE,
+                    Identity.representative_observation_id.is_(None),
+                    survivor.is_not(None),
+                )
+                .values(
+                    representative_observation_id=survivor,
+                    revision=Identity.revision + 1,
+                    updated_at=now,
+                )
+            )
 
         # An unnamed identity with nothing left has no reason to exist; a named one stays.
-        run(
-            update(Identity)
-            .where(
-                Identity.id.in_(affected),
-                Identity.state == IdentityState.ACTIVE,
-                ~exists().where(
-                    Occurrence.identity_id == Identity.id,
-                    Occurrence.state.in_((OccurrenceState.ACTIVE, OccurrenceState.PENDING)),
-                ),
-                ~exists().where(
-                    IdentityPersonAssociation.identity_id == Identity.id,
-                    IdentityPersonAssociation.state == AssociationState.ACTIVE,
-                ),
+        for chunk in _chunks(list(affected)):
+            run(
+                update(Identity)
+                .where(
+                    Identity.id.in_(chunk),
+                    Identity.state == IdentityState.ACTIVE,
+                    ~exists().where(
+                        Occurrence.identity_id == Identity.id,
+                        Occurrence.state.in_((OccurrenceState.ACTIVE, OccurrenceState.PENDING)),
+                    ),
+                    ~exists().where(
+                        IdentityPersonAssociation.identity_id == Identity.id,
+                        IdentityPersonAssociation.state == AssociationState.ACTIVE,
+                    ),
+                )
+                .values(state=IdentityState.DELETED, revision=Identity.revision + 1, updated_at=now)
             )
-            .values(state=IdentityState.DELETED, revision=Identity.revision + 1, updated_at=now)
-        )
 
         optimistic_locked_update(
             session,
