@@ -37,24 +37,55 @@
 Input may be a path, an upload or an attached/pasted picture; the answer is given for each face, grouped by
 face; people are shown as "Possible people" with their similarity.
 
+## Changes after the independent review
+
+- Validation, reasoning and the response are built in **one read transaction** (`FaceQuery.search` takes the
+  presenter), so a forget, delete or merge that commits later cannot leak into an answer; the index is opened
+  under the coordinator's lock, so a pass cannot publish or clean up the generation being loaded.
+- The body is counted as it arrives (the import limit; 8 KiB for the JSON form), a path is read through one
+  handle and never past the limit (`413`), network (UNC/device) paths are refused, one search decodes and
+  perceives at a time, and the request body forms are in the OpenAPI contract.
+- A failed worker and an unusable index are plain `503`s (`PERCEPTION_UNAVAILABLE`,
+  `SEARCH_INDEX_UNAVAILABLE`).
+- The screen keeps the picture in the component (not the query cache), asks again when an event changes a
+  face, a name or an image, hiding the old answer meanwhile, and announces progress and the number of
+  faces in a polite status line.
+- The no-write test now compares every row of every authoritative table and the hash of every library file;
+  tests for several faces, a merged person, limits, unavailable states and concurrent searches were added.
+- **Known limitation, not changed:** a query and a processing run share the perception worker. If a run
+  crashes the worker while a query is still copying its output, the query fails with a retryable `503`
+  (`PERCEPTION_UNAVAILABLE`); a lease covering execute-copy-release across both is a follow-up in the
+  supervisor, not part of this step.
+
+## Decisions (owner, 2026-10-10)
+
+- **PDF queries are deferred.** Picture-only search is enough for M5. A future enhancement needs separate
+  decisions about page selection, several faces, rendering, licensing and query behaviour; no renderer or
+  dependency is added now.
+- **A native Windows file picker is approved as a separate small PR after this one.** It keeps the browser
+  file input, drop and paste, reuses this same query-only pipeline, adds no second backend path and saves
+  no query image.
+- **Real-model behaviour stays unverified until the step 8 gate.** The gate starts from the public-domain
+  photo set; unverified identity labels are not ground truth.
+- **Owner-controlled cleanup stays pending:** `local-models/state/indexes/f0fd4e92c8c8492097e2307e82000af9`
+  is a leftover index directory from an earlier profile that agents must not delete (the owner removes it
+  by hand).
+- **R5 (label-review utility) stays pending** until the dataset and review requirements are agreed.
+
 ## For the owner (not blocking)
 
-- **PDF queries are not built.** The owner said to try PDFs "if necessary". Reading a PDF needs a renderer (a
-  new dependency and licence) and a rule for which page and which faces; face search over a picture does not
-  need it, so it was left out (scope rule). Say if you want it.
-- **The desktop app's native file picker is not used**: the web file input gives the app the picture's
-  bytes, so the path form of the API is for scripts and the future. Say if a native picker is wanted.
+- Nothing blocks. PDF queries and the native file picker are decided above.
 - **Similarity numbers are raw cosine values** until a calibration exists (the initial policy is
   abstain-only, so no match is ever accepted and every answer is `POSSIBLE_PEOPLE` or `UNKNOWN`). The screen
   says so.
 
 ## Tests
 
-- `tests/integration/test_api_face_search.py` (12), on a real library with planted perception: a known face
+- `tests/integration/test_api_face_search.py` (17), on a real library with planted perception: a known face
   finds its person nearest first with similarity; a stranger is not named; no face; a search writes no row
   and no file (every table count and every library file compared before and after, repeated, from a path
   and from bytes); path and bytes give the same answer; unreadable, unsupported, corrupt and oversized
   pictures; forgotten, deleted and recycled people; perception and configuration failures; poor detection
   and an empty library; a person seen twice; and the same answer after restarting the application.
-- `frontend/src/features/search/FaceSearch.test.tsx` (7).
+- `frontend/src/features/search/FaceSearch.test.tsx` (9).
 - `tests/fixtures/api.py` gained `processing_app`, so a test can restart the application on one library.

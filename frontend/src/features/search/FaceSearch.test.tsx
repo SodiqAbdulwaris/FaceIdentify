@@ -97,8 +97,10 @@ describe('face search', () => {
 
     await choose(picture())
 
-    expect(await screen.findByRole('status', { name: 'Face search result' })).toHaveTextContent(
-      'No face was found in this picture.',
+    await waitFor(() =>
+      expect(screen.getByRole('status', { name: 'Face search status' })).toHaveTextContent(
+        'No face was found in this picture.',
+      ),
     )
   })
 
@@ -119,6 +121,38 @@ describe('face search', () => {
     await choose(picture())
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Not just now.')
+  })
+
+  it('asks again when something changes, hiding the old answer so a forgotten person never stays', async () => {
+    let forgotten = false
+    const { queryClient } = renderApp('/search', [
+      {
+        method: 'POST',
+        path: FACE,
+        respond: () => answer([face({ possible_people: forgotten ? [] : face().possible_people })]),
+      },
+    ])
+    await choose(picture())
+    expect(await screen.findByRole('link', { name: /Ada/ })).toBeInTheDocument()
+
+    forgotten = true
+    await queryClient.invalidateQueries({ queryKey: ['search'] })
+
+    await waitFor(() => expect(screen.queryByRole('link', { name: /Ada/ })).toBeNull())
+  })
+
+  it('keeps neither the picture nor the answer once the screen is left', async () => {
+    const { queryClient, router } = renderApp('/search', [
+      { method: 'POST', path: FACE, respond: answer([face()]) },
+    ])
+    await choose(picture())
+    await screen.findByRole('region', { name: 'Face 1 of the picture' })
+
+    await router.navigate('/library')
+
+    await waitFor(() =>
+      expect(queryClient.getQueryCache().findAll({ queryKey: ['search', 'face'] })).toHaveLength(0),
+    )
   })
 
   it('takes a dropped picture and a pasted one', async () => {
