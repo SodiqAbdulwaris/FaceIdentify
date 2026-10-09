@@ -49,6 +49,7 @@ from backend.app.processing.runner import ProcessingRunner, RunOutcome
 from backend.app.processing.scheduler import ProcessingScheduler
 from backend.app.recovery.startup import StartupReport
 from backend.app.runtime.worker_config import PerceptionPlan, plan_perception
+from backend.app.sources.permanent_delete import DeletionReport, PermanentSourceDeletion
 from backend.infrastructure.db.unit_of_work import TransactionRetry
 
 NOT_CONFIGURED: Final = "NOT_CONFIGURED"
@@ -165,6 +166,8 @@ class Backend:
     library: OpenLibrary | None = None
     failure: str | None = None
     capabilities: dict[str, str] = field(default_factory=dict)
+    # Permanent deletions a crash interrupted that startup carried on (finished or still owed).
+    deletions: list[DeletionReport] = field(default_factory=list)
     # Set once startup has finished, whether it opened the library or failed. Thread-safe, so a
     # test can wait for it instead of sleeping.
     settled: threading.Event = field(default_factory=threading.Event)
@@ -308,6 +311,13 @@ class Backend:
                 profile = self.processing.profile if self.processing else LibraryProfile.REAL
                 claim_library_profile(library, profile, settings.clock)
                 self.capabilities = capabilities_from(library.startup)
+                # A deletion a crash interrupted finishes now, before any request sees it.
+                self.deletions = PermanentSourceDeletion(
+                    library.session_factory, library.unit_of_work, library.eraser,
+                    library.store, clock=settings.clock,
+                ).resume()  # fmt: skip
+                if not all(report.complete for report in self.deletions):
+                    self.capabilities["recovery"] = "DEGRADED"  # owed work, retried next start
                 if self.processing is not None and self.processing.prepare is not None:
                     self.capabilities.update(self.processing.prepare(library) or {})
             except Exception as error:  # noqa: BLE001 - an unreadable report or a profile that

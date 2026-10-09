@@ -43,6 +43,28 @@
         "title": "Confirm",
         "type": "object"
       },
+      "DeletionPending": {
+        "description": "Permanent deletion began but is not finished: what is owed is retried at the next start.",
+        "properties": {
+          "outstanding": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Outstanding",
+            "type": "array"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "outstanding"
+        ],
+        "title": "DeletionPending",
+        "type": "object"
+      },
       "ErrorBody": {
         "properties": {
           "code": {
@@ -2901,6 +2923,53 @@
         "summary": "Source Occurrences",
         "tags": [
           "memory"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}/permanent-delete": {
+      "post": {
+        "description": "Delete a recycled Source for good (API section 5.7): its bytes, faces, vectors and runs go;\nthe Evidence and the people the user named stay. `204` when nothing but the tombstone is left;\n`202` when part of it could not finish yet (a locked file), which is retried at the next start.\nA repeat is harmless.",
+        "operationId": "permanent_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionPending"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Permanent Delete",
+        "tags": [
+          "sources"
         ]
       }
     },

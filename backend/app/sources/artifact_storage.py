@@ -300,6 +300,38 @@ def delete_managed_artifact(
         session.commit()
 
 
+def complete_artifact_deletion(
+    session_factory: sessionmaker[Session],
+    store: ManagedFileStore,
+    artifact_id: uuid.UUID,
+    *,
+    clock: Callable[[], datetime],
+) -> None:
+    """Steps 2 and 3 for an artifact whose intent is already recorded (`DELETING`, or
+    `DELETE_FAILED` from an earlier try): remove the bytes, then finalize. A filesystem failure
+    leaves `DELETE_FAILED` (which recovery retries) and re-raises. Safe to repeat."""
+    with session_factory() as session:
+        artifact = session.get(Artifact, artifact_id)
+        if (
+            artifact is None
+            or artifact.storage_mode != StorageMode.MANAGED
+            or artifact.state not in {ArtifactState.DELETING, ArtifactState.DELETE_FAILED}
+            or artifact.storage_key is None
+        ):
+            raise ArtifactStateError(f"artifact {artifact_id} has no deletion intent to complete")
+        storage_key = artifact.storage_key
+    try:
+        store.delete(storage_key)
+    except OSError as error:
+        with session_factory() as session:
+            _record_delete_failure(session, artifact_id, f"{type(error).__name__}: {error}")
+            session.commit()
+        raise
+    with session_factory() as session:
+        finalize_artifact_deletion(session, artifact_id, clock=clock)
+        session.commit()
+
+
 # --- integrity --------------------------------------------------------------------------------
 
 

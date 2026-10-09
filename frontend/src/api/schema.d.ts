@@ -436,6 +436,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{source_id}/permanent-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Permanent Delete
+         * @description Delete a recycled Source for good (API section 5.7): its bytes, faces, vectors and runs go;
+         *     the Evidence and the people the user named stay. `204` when nothing but the tombstone is left;
+         *     `202` when part of it could not finish yet (a locked file), which is retried at the next start.
+         *     A repeat is harmless.
+         */
+        post: operations["permanent_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{source_id}/process": {
         parameters: {
             query?: never;
@@ -563,6 +586,16 @@ export interface components {
              * Format: uuid
              */
             expected_identity_id: string;
+        };
+        /**
+         * DeletionPending
+         * @description Permanent deletion began but is not finished: what is owed is retried at the next start.
+         */
+        DeletionPending: {
+            /** Outstanding */
+            outstanding: string[];
+            /** State */
+            state: string;
         };
         /** ErrorBody */
         ErrorBody: {
@@ -1921,6 +1954,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Page_OccurrenceSummary_"];
                 };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletionPending"];
+                };
+            };
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description The one error shape. */
             default: {
