@@ -70,6 +70,23 @@ async fn choose_library(app: AppHandle) -> Result<Option<String>, String> {
     Ok(Some(root.display().to_string()))
 }
 
+/// Let the user pick one picture to search with. Like `choose_images`, only the path crosses to the
+/// web view: the backend reads the file itself, once, and saves nothing.
+#[tauri::command]
+async fn choose_picture(app: AppHandle) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Images", config::IMAGE_EXTENSIONS)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(picked
+        .and_then(|file| file.into_path().ok())
+        .map(|path| path.display().to_string()))
+}
+
 /// Let the user pick images to import. The backend reads the files itself (it is on the same
 /// machine), so only their paths cross to the web view.
 #[tauri::command]
@@ -157,7 +174,8 @@ pub fn run() {
             backend_status,
             library_info,
             choose_library,
-            choose_images
+            choose_images,
+            choose_picture
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

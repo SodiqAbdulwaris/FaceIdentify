@@ -47,6 +47,11 @@ export async function chooseImages(): Promise<string[]> {
   return inShell() ? invoke<string[]>('choose_images') : []
 }
 
+/** The one picture the user picks in the native dialog to search with (null if they cancel). */
+export async function choosePicture(): Promise<string | null> {
+  return inShell() ? invoke<string | null>('choose_picture') : null
+}
+
 /** Where the library is kept (empty outside the shell). */
 export async function libraryRoot(): Promise<string> {
   if (!inShell()) return ''

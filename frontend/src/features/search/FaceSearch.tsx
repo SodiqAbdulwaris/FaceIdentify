@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { keys } from '@/api/keys'
 import type { FaceAnswer } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
+import { choosePicture, inShell } from '@/native/backend'
 import { Button } from '@/components/ui/button'
 import { CroppedImage } from '../FaceCrop'
 import { personLabel } from '../identities/label'
@@ -22,7 +23,8 @@ const NOT_SUPPORTED = 'Only JPEG, PNG, BMP and WebP pictures can be searched wit
 export function FaceSearch() {
   const { endpoints } = useBackend()
   // The picture lives here, not in the query cache: leaving the screen drops it.
-  const [picture, setPicture] = useState<{ id: number; file: File } | null>(null)
+  // (a picture chosen in the native dialog is only a path: the backend reads it, once)
+  const [picture, setPicture] = useState<{ id: number; file?: File; path?: string } | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const chooser = useRef<HTMLInputElement>(null)
@@ -31,7 +33,8 @@ export function FaceSearch() {
   // is hidden while it is asked again, so a forgotten or deleted person is never left on screen.
   const search = useQuery({
     queryKey: keys.faceSearch(picture?.id ?? 0),
-    queryFn: () => endpoints.searchFace((picture as { file: File }).file),
+    queryFn: () =>
+      picture?.file ? endpoints.searchFace(picture.file) : endpoints.searchFaceByPath(picture?.path ?? ''),
     enabled: picture !== null,
     gcTime: 0,
     staleTime: Infinity,
@@ -39,6 +42,17 @@ export function FaceSearch() {
     refetchOnWindowFocus: false,
   })
   const answer = search.isFetching || search.isError ? undefined : search.data
+
+  const choose = async () => {
+    if (!inShell()) {
+      chooser.current?.click()
+      return
+    }
+    const path = await choosePicture()
+    if (path === null) return // the dialog was cancelled
+    setProblem(null)
+    setPicture((previous) => ({ id: (previous?.id ?? 0) + 1, path }))
+  }
 
   const take = (file: File | undefined) => {
     if (!file) return
@@ -94,7 +108,7 @@ export function FaceSearch() {
             event.target.value = '' // (the same picture can be chosen again)
           }}
         />
-        <Button type="button" variant="outline" onClick={() => chooser.current?.click()}>
+        <Button type="button" variant="outline" onClick={() => void choose()}>
           Choose a picture
         </Button>
         <p className="min-w-0 text-sm text-muted-foreground">
