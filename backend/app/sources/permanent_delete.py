@@ -37,6 +37,7 @@ from sqlalchemy.sql import Executable
 from backend.app.identities.models import (
     Evidence,
     EvidenceCandidate,
+    EvidenceKind,
     EvidenceRepresentation,
     Identity,
     IdentityState,
@@ -125,12 +126,14 @@ class PermanentSourceDeletion:
         store: ManagedFileStore,
         *,
         clock: Callable[[], datetime],
+        new_id: Callable[[], uuid.UUID],
     ) -> None:
         self._sessions = session_factory
         self._uow = unit_of_work
         self._eraser = eraser
         self._store = store
         self._clock = clock
+        self._new_id = new_id
 
     def delete(self, source_id: uuid.UUID) -> DeletionReport:
         """Delete a recycled Source for good. Safe to repeat: a `DELETING` one is carried on, a
@@ -195,7 +198,12 @@ class PermanentSourceDeletion:
                     session,
                     artifact.id,
                     set(ArtifactState),
-                    {"state": ArtifactState.DELETED, "deleted_at": now},
+                    {
+                        "state": ArtifactState.DELETED,
+                        "deleted_at": now,
+                        # nothing recoverable about the user's file is kept (revision 0010)
+                        "external_path": None,
+                    },
                     storage_mode=StorageMode.REFERENCED,
                 )
             elif artifact.state == ArtifactState.PENDING:
@@ -506,6 +514,18 @@ class PermanentSourceDeletion:
                 .values(state=IdentityState.DELETED, revision=Identity.revision + 1, updated_at=now)
             )
 
+        # The one entry history keeps of it: that it happened, and whose memory it touched. No
+        # face, crop, vector, name or path (identity model section 41).
+        session.add(
+            Evidence(
+                id=self._new_id(),
+                kind=EvidenceKind.SOURCE_PERMANENTLY_DELETED,
+                source_id=source_id,
+                payload_schema_version=1,
+                payload_json={"affected_identity_ids": sorted(str(i) for i in affected)},
+                created_at=now,
+            )
+        )
         optimistic_locked_update(
             session,
             Source,

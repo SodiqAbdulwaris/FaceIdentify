@@ -105,6 +105,8 @@ class EvidenceKind(StrEnum):
     IDENTITY_FORGOTTEN = "IDENTITY_FORGOTTEN"
     USER_CORRECTION = "USER_CORRECTION"
     PERSON_RENAMED = "PERSON_RENAMED"
+    # A Source was permanently deleted: a non-biometric historical entry (identity model §41).
+    SOURCE_PERMANENTLY_DELETED = "SOURCE_PERMANENTLY_DELETED"
 
 
 class Evidence(Base):

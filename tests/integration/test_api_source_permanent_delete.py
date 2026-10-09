@@ -190,7 +190,7 @@ def cut_short(
             lambda session: session.execute(update(Source).values(state="RECYCLED"))
         )
         deletion = PermanentSourceDeletion(
-            lib.session_factory, lib.unit_of_work, lib.eraser, lib.store, clock=clock
+            lib.session_factory, lib.unit_of_work, lib.eraser, lib.store, clock=clock, new_id=new_id
         )
         lib.unit_of_work.write(lambda session: deletion._begin(session, source_id, clock()))
         assert isinstance(lib.store, ManagedFileStore)
@@ -326,7 +326,7 @@ def begin_deleting(api: Api, source_id: str) -> None:
     lib = api.backend.library
     steps = PermanentSourceDeletion(
         lib.session_factory, lib.unit_of_work, lib.eraser, lib.store,
-        clock=api.backend.settings.clock,
+        clock=api.backend.settings.clock, new_id=api.backend.settings.new_id,
     )  # fmt: skip
     lib.unit_of_work.write(
         lambda session: steps._begin(session, uuid.UUID(source_id), api.backend.settings.clock())

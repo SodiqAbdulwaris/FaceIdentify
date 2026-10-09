@@ -145,7 +145,7 @@ def owed_marker(lib: Pipeline) -> str | None:
 def deletion(lib: Pipeline) -> PermanentSourceDeletion:
     return PermanentSourceDeletion(
         lib.lib.session_factory, lib.lib.unit_of_work, lib.lib.eraser, lib.lib.store,
-        clock=lib.clock,
+        clock=lib.clock, new_id=lib.new_id,
     )  # fmt: skip
 
 
@@ -315,7 +315,14 @@ def test_a_referenced_original_is_never_touched(opened: Any, tmp_path: Path, sta
         assert deletion(lib).delete(source_id).complete
 
         assert mine.read_bytes() == b"the user's own file"
-        assert {a.id: a.state for a in only(lib, select(Artifact))}[original_id] == "DELETED"
+        [artifact] = only(lib, select(Artifact).where(Artifact.id == original_id))
+        assert artifact.state == "DELETED"
+        assert (artifact.external_path, artifact.original_filename) == (None, None)
+        assert str(mine) not in "".join(
+            str(value)
+            for artifact in only(lib, select(Artifact))
+            for value in vars(artifact).values()
+        )
 
 
 # --- identities, people and Evidence -----------------------------------------------------------
@@ -389,20 +396,21 @@ def test_retained_evidence_keeps_its_provenance_but_exposes_no_biometric_materia
         links = only(lib, select(EvidenceRepresentation))
         candidates = only(lib, select(EvidenceCandidate))
 
-        # Nothing of the history is lost: every decision, its kind, source, scores and ids stay.
-        assert set(after) == set(before)
-        for evidence_id, evidence in after.items():
-            assert (evidence.kind, evidence.source_id) == (
-                before[evidence_id].kind,
-                before[evidence_id].source_id,
-            )
-            assert evidence.payload_json == before[evidence_id].payload_json
+        # Nothing of the history is lost: every decision, its kind, source, scores and ids stay,
+        # and the deletion itself is added as one more entry.
+        [entry] = [after[i] for i in set(after) - set(before)]
+        assert (entry.kind, entry.source_id) == ("SOURCE_PERMANENTLY_DELETED", first)
+        assert set(before) <= set(after)
+        for evidence_id, kept in before.items():
+            evidence = after[evidence_id]
+            assert (evidence.kind, evidence.source_id) == (kept.kind, kept.source_id)
+            assert evidence.payload_json == kept.payload_json
         assert candidates  # the second image's decision still lists who it was compared with
         assert all(c.raw_similarity is not None for c in candidates)
         # ... but nothing points at a deleted face any more, and the run it came from is gone.
         assert first_representation not in {link.representation_id for link in links}
         assert first_representation not in {c.representation_id for c in candidates}
-        assert [e.processing_run_id for e in after.values() if e.source_id == first] == [None]
+        assert [e.processing_run_id for e in after.values() if e.source_id == first] == [None, None]
         assert (
             only(lib, select(Representation).where(Representation.id == first_representation)) == []
         )
@@ -417,7 +425,7 @@ def test_retained_evidence_keeps_its_provenance_but_exposes_no_biometric_materia
         )
         # No vector is left anywhere: not in a row, not in the log, not in an index file.
         assert files_containing(lib, A) == []
-        assert [e.source_id for e in only(lib, select(Evidence))].count(first) == 1
+        assert [e.source_id for e in only(lib, select(Evidence))].count(first) == 2  # + the entry
         # The tombstone still resolves the Source id the Evidence names.
         assert only(lib, select(Source.state).where(Source.id == first)) == ["DELETED"]
 
@@ -1064,3 +1072,27 @@ def test_beginning_a_deletion_changes_the_revision_of_every_identity_that_loses_
 
         [after] = only(lib, select(Identity))
         assert after.revision == identity.revision + 1  # a merge prepared before is now stale
+
+
+def test_the_history_entry_of_a_deletion_names_no_face_file_or_person(opened: Any) -> None:
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        [identity] = only(lib, select(Identity.id))
+        with Session(lib.lib.engine) as session:
+            session.execute(
+                update(Source).where(Source.id == source_id).values(display_name="Ada-holiday.jpg")
+            )
+            session.commit()
+        recycle(lib, source_id)
+
+        assert deletion(lib).delete(source_id).complete
+
+        [entry] = only(lib, select(Evidence).where(Evidence.kind == "SOURCE_PERMANENTLY_DELETED"))
+        assert entry.payload_json == {"affected_identity_ids": [str(identity)]}
+        assert (entry.processing_run_id, entry.subject_identity_id, entry.subject_person_id) == (
+            None,
+            None,
+            None,
+        )
+        dumped = repr(only(lib, select(Source))[0].__dict__) + repr(entry.__dict__)
+        assert "Ada" not in dumped

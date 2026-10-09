@@ -314,7 +314,7 @@ class Backend:
                 # A deletion a crash interrupted finishes now, before any request sees it.
                 self.deletions = PermanentSourceDeletion(
                     library.session_factory, library.unit_of_work, library.eraser,
-                    library.store, clock=settings.clock,
+                    library.store, clock=settings.clock, new_id=settings.new_id,
                 ).resume()  # fmt: skip
                 if not all(report.complete for report in self.deletions):
                     self.capabilities["recovery"] = "DEGRADED"  # owed work, retried next start

@@ -50,11 +50,14 @@ class Artifact(Base):
         enum_check("kind", ArtifactKind),
         enum_check("storage_mode", StorageMode),
         enum_check("state", ArtifactState),
-        # Exactly one location form: MANAGED has a logical key, REFERENCED an external path.
+        # Exactly one location form: MANAGED has a logical key, REFERENCED an external path. A
+        # DELETED artifact is exempt (revision 0010): permanently deleting a Source that referenced
+        # the user's file clears the path, so nothing recoverable about it is kept.
         CheckConstraint(
             "(storage_mode = 'MANAGED' AND storage_key IS NOT NULL AND external_path IS NULL)"
             " OR (storage_mode = 'REFERENCED' AND external_path IS NOT NULL"
-            " AND storage_key IS NULL)",
+            " AND storage_key IS NULL)"
+            " OR state = 'DELETED'",
             name="location",
         ),
         # Verified managed content must carry its hash and size.
