@@ -11,6 +11,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,11 @@ from backend.api.dependencies import Library, get_backend
 from backend.api.errors import ApiError
 from backend.api.routes.memory import IdentitySummary, identity_not_found, identity_summaries
 from backend.api.startup import Backend
+from backend.app.identities.forget import (
+    ForgetIdentityUseCase,
+    ForgetReport,
+    IdentityNotFoundError,
+)
 from backend.app.identities.models import Identity, IdentityState
 from backend.app.identities.use_cases import (
     SplitConflictError,
@@ -29,6 +35,29 @@ from backend.app.identities.use_cases import (
 from backend.app.memory.models import Occurrence, OccurrenceState
 
 router = APIRouter(tags=["identities"])
+
+
+class Forget(BaseModel):
+    expected_revision: int  # the revision the caller saw: a changed identity is refused
+
+
+class ForgetPending(BaseModel):
+    """Forgetting happened; part of the physical cleanup could not finish and is retried."""
+
+    outstanding: list[str]
+
+
+def forgotten_answer(backend: Backend, report: ForgetReport) -> Response:
+    """`204` when every vector and crop is gone, `202` with what is owed otherwise. Either way the
+    identities are already forgotten and unrecognizable; what is owed is cleanup, retried at the
+    next start and by a repeat of the request."""
+    if report.changed:
+        for identity_id in report.identity_ids:
+            backend.announce("identity.updated", "identity", str(identity_id))
+    if not report.outstanding:
+        return Response(status_code=204)
+    backend.capabilities["recovery"] = "DEGRADED"  # visible in /readiness until the next start
+    return JSONResponse(ForgetPending(outstanding=report.outstanding).model_dump(), status_code=202)
 
 
 class MergeMember(BaseModel):
@@ -53,6 +82,36 @@ def _active(session: Session, identity_id: uuid.UUID) -> Identity:
     if identity is None or identity.state != IdentityState.ACTIVE:
         raise identity_not_found(identity_id)
     return identity
+
+
+@router.post(
+    "/identities/{identity_id}/forget",
+    status_code=204,
+    responses={202: {"model": ForgetPending}},
+)
+def forget(
+    identity_id: uuid.UUID,
+    body: Forget,
+    library: Library,
+    backend: Annotated[Backend, Depends(get_backend)],
+) -> Response:
+    """Forget an identity (API section 8.3): the only operation that removes biometric memory. Its
+    vectors are erased and its faces stop resolving to anyone; the media stays and so does any
+    Person it was linked to, with their name. A repeat is harmless."""
+    use_case = ForgetIdentityUseCase(
+        library.unit_of_work, library.eraser, library.store,
+        clock=backend.settings.clock, new_id=backend.settings.new_id,
+    )  # fmt: skip
+    try:
+        report = use_case.forget(identity_id, expected_revision=body.expected_revision)
+    except IdentityNotFoundError:
+        raise identity_not_found(identity_id) from None
+    except StaleRevisionError as error:
+        raise ApiError(
+            409, "IDENTITY_CHANGED", "This person changed since you looked. Reload.",
+            details={"reason": str(error)},
+        ) from None  # fmt: skip
+    return forgotten_answer(backend, report)
 
 
 @router.post("/identities/merge")

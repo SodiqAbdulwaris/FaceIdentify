@@ -230,6 +230,7 @@ def assign_representation_to_identity(
     representation.identity_id = identity_id
     representation.ann_key = ann_key
     representation.activated_at = now
+    touch_identity(session, identity, now)  # (a view of what it owns taken earlier is stale)
 
     evidence = Evidence(
         id=new_id(),

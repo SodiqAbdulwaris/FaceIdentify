@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 from pydantic import BaseModel, StringConstraints
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -26,8 +27,10 @@ from backend.api.pagination import (
     older_than,
     paginate,
 )
+from backend.api.routes.identity_changes import ForgetPending, forgotten_answer
 from backend.api.routes.memory import identity_not_found
 from backend.api.startup import Backend
+from backend.app.identities.forget import ForgetIdentityUseCase, PersonNotFoundError
 from backend.app.identities.models import Identity, IdentityState
 from backend.app.identities.use_cases import IdentityManagerError, StaleRevisionError
 from backend.app.people.models import (
@@ -218,6 +221,27 @@ def rename(
         return _summaries(session, [person])[0]
 
     return _announced(backend, library.unit_of_work.write(write))
+
+
+@router.post(
+    "/people/{person_id}/forget",
+    status_code=204,
+    responses={202: {"model": ForgetPending}},
+)
+def forget_person(
+    person_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> Response:
+    """Forget a person (identity model section 46): run `ForgetIdentity` on each identity of the
+    Person. The Person, their name and notes stay, without visual support. A repeat is harmless."""
+    use_case = ForgetIdentityUseCase(
+        library.unit_of_work, library.eraser, library.store,
+        clock=backend.settings.clock, new_id=backend.settings.new_id,
+    )  # fmt: skip
+    try:
+        report = use_case.forget_person(person_id)
+    except PersonNotFoundError:
+        raise person_not_found(person_id) from None
+    return forgotten_answer(backend, report)
 
 
 @router.post("/people/{person_id}/assign-identity")

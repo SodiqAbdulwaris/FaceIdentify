@@ -155,8 +155,34 @@ class RepresentationEraser:
 
     def queue_in(self, session: Session, representation_ids: Sequence[uuid.UUID]) -> None:
         """`queue`, inside the caller's transaction: for a use case that must exclude the vectors
-        from retrieval in the same commit as its own change (permanent Source deletion)."""
-        self._queue(session, list(representation_ids), self._clock())
+        from retrieval in the same commit as its own change (permanent Source deletion, forgetting).
+
+        Representations in the `DELETED` state are taken too. That state is not an erasure and keeps
+        its vector, and its ordinary `REMOVE` may only have taken the key out of the live index (the
+        file keeps the bytes), so every `REMOVE` it had is forgotten and erasure queues its own,
+        which is applied by a rebuild."""
+        ids = list(representation_ids)
+        for chunk in _chunks(ids):
+            deleted = select(Representation.id).where(
+                Representation.id.in_(chunk), Representation.state == RepresentationState.DELETED
+            )
+            session.execute(
+                delete(IndexOperation).where(
+                    IndexOperation.representation_id.in_(deleted),
+                    IndexOperation.operation == IndexOperationKind.REMOVE,
+                ),
+                execution_options={"synchronize_session": False},
+            )
+            session.execute(
+                update(Representation)
+                .where(
+                    Representation.id.in_(chunk),
+                    Representation.state == RepresentationState.DELETED,
+                )
+                .values(state=RepresentationState.ERASING),
+                execution_options={"synchronize_session": False},
+            )
+        self._queue(session, ids, self._clock())
 
     def settle_log(self) -> list[str]:
         """Truncate the write-ahead log if a truncation is owed; what is still owed, by name (empty
