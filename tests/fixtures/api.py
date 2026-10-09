@@ -48,6 +48,7 @@ class Api:
     folder: Path  # where tests put the files they import (outside the library)
     clock: FrozenClock
     perception: PlantedPerception | None = None  # set when processing is on: what it "sees"
+    catalog: dict[str, Any] | None = None  # what processing registered (to restart on it)
 
     def image(
         self, name: str = "photo.png", size: tuple[int, int] = (4, 3), fmt: str = "PNG"
@@ -90,13 +91,30 @@ async def processing_api(
     """The application with processing on: a registered fake catalog and planted perception (no
     weights), the real scheduler, executor, acceptance and index. The catalog is registered by a
     first open of the library, which is closed again before the application starts on it."""
+    async with processing_app(tmp_path, clock, new_id, monkeypatch) as running:
+        yield running
+
+
+@asynccontextmanager
+async def processing_app(
+    tmp_path: Path,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    catalog: dict[str, Any] | None = None,
+    folder: str = "user-files",
+) -> AsyncIterator[Api]:
+    """One run of the application on the library under `tmp_path`. A test that restarts it passes
+    the `catalog` the first run registered (`Api.catalog`) and a new `folder`."""
     settings = library_settings(tmp_path, clock, new_id)
-    with open_library(
-        library_root=settings.library_root, local_state_root=settings.local_state_root,
-        clock=clock, new_id=new_id, retry=settings.retry,
-        transaction_retry=settings.transaction_retry, index_batch=50, max_index_passes=5,
-    ) as lib:  # fmt: skip
-        catalog = prepare_catalog(lib, clock, new_id)
+    if catalog is None:
+        with open_library(
+            library_root=settings.library_root, local_state_root=settings.local_state_root,
+            clock=clock, new_id=new_id, retry=settings.retry,
+            transaction_retry=settings.transaction_retry, index_batch=50, max_index_passes=5,
+        ) as lib:  # fmt: skip
+            catalog = prepare_catalog(lib, clock, new_id)
     detector, embedder = (
         variant_from_json(catalog["detector"]),
         variant_from_json(catalog["embedder"]),
@@ -104,6 +122,10 @@ async def processing_api(
     perception = PlantedPerception(detector, embedder)
     plan = PerceptionPlan(uuid.UUID(catalog["space_id"]), NDIM, (detector,), (embedder,))
     monkeypatch.setattr(ExecuteProcessingJob, "_plan", lambda _self, _session, _frozen: plan)
+
+    def planner(*_args: Any, **_selection: Any) -> PerceptionPlan:  # (a face query plans too)
+        return plan
+
     secret = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
     app = create_backend_app(
         secret,
@@ -116,11 +138,13 @@ async def processing_api(
             lease_for=timedelta(minutes=5),
             idle_seconds=60.0,
             owner="api-test",
+            planner=planner,
         ),
         media_limits=MediaLimits(max_pixels=MAX_PIXELS, max_bytes=MAX_BYTES),
     )
-    async with serving(app, secret, tmp_path / "user-files", clock) as running:
+    async with serving(app, secret, tmp_path / folder, clock) as running:
         running.perception = perception
+        running.catalog = catalog
         yield running
 
 

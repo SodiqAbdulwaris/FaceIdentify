@@ -406,6 +406,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search/face": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Search Face */
+        post: operations["search_face"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources": {
         parameters: {
             query?: never;
@@ -690,6 +707,41 @@ export interface components {
          */
         ErrorEnvelope: {
             error: components["schemas"]["ErrorBody"];
+        };
+        /** FaceAnswer */
+        FaceAnswer: {
+            bounding_box: components["schemas"]["BoundingBox"];
+            /** Detection Score */
+            detection_score: number;
+            identity_answer: components["schemas"]["IdentitySummary"] | null;
+            /** Index */
+            index: number;
+            /** Possible People */
+            possible_people: components["schemas"]["PossiblePerson"][];
+            /** Reason */
+            reason: string;
+            /** Retrieval Complete */
+            retrieval_complete: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "IDENTITY_ANSWER" | "POSSIBLE_PEOPLE" | "UNKNOWN";
+        };
+        /** FaceRanking */
+        FaceRanking: {
+            /** Plan */
+            plan: string;
+            /** Policy Version */
+            policy_version: string;
+            /** Similarity */
+            similarity: string;
+        };
+        /** FaceSearchResponse */
+        FaceSearchResponse: {
+            /** Faces */
+            faces: components["schemas"]["FaceAnswer"][];
+            ranking: components["schemas"]["FaceRanking"];
         };
         /** Forget */
         Forget: {
@@ -1006,6 +1058,14 @@ export interface components {
             calibration_mode: string;
             /** Decision Policy Version */
             decision_policy_version: string | null;
+        };
+        /** PossiblePerson */
+        PossiblePerson: {
+            identity: components["schemas"]["IdentitySummary"];
+            /** Matching Faces */
+            matching_faces: number;
+            /** Similarity */
+            similarity: number;
         };
         /** ProcessingRunBrief */
         ProcessingRunBrief: {
@@ -2049,6 +2109,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    search_face: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceSearchResponse"];
                 };
             };
             /** @description The one error shape. */

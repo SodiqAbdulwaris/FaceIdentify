@@ -150,6 +150,110 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "FaceAnswer": {
+        "properties": {
+          "bounding_box": {
+            "$ref": "#/components/schemas/BoundingBox"
+          },
+          "detection_score": {
+            "title": "Detection Score",
+            "type": "number"
+          },
+          "identity_answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdentitySummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "possible_people": {
+            "items": {
+              "$ref": "#/components/schemas/PossiblePerson"
+            },
+            "title": "Possible People",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "retrieval_complete": {
+            "title": "Retrieval Complete",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "IDENTITY_ANSWER",
+              "POSSIBLE_PEOPLE",
+              "UNKNOWN"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "bounding_box",
+          "detection_score",
+          "status",
+          "reason",
+          "identity_answer",
+          "possible_people",
+          "retrieval_complete"
+        ],
+        "title": "FaceAnswer",
+        "type": "object"
+      },
+      "FaceRanking": {
+        "properties": {
+          "plan": {
+            "title": "Plan",
+            "type": "string"
+          },
+          "policy_version": {
+            "title": "Policy Version",
+            "type": "string"
+          },
+          "similarity": {
+            "title": "Similarity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan",
+          "policy_version",
+          "similarity"
+        ],
+        "title": "FaceRanking",
+        "type": "object"
+      },
+      "FaceSearchResponse": {
+        "properties": {
+          "faces": {
+            "items": {
+              "$ref": "#/components/schemas/FaceAnswer"
+            },
+            "title": "Faces",
+            "type": "array"
+          },
+          "ranking": {
+            "$ref": "#/components/schemas/FaceRanking"
+          }
+        },
+        "required": [
+          "faces",
+          "ranking"
+        ],
+        "title": "FaceSearchResponse",
+        "type": "object"
+      },
       "Forget": {
         "properties": {
           "expected_revision": {
@@ -1042,6 +1146,28 @@
           "automatic_matching"
         ],
         "title": "PolicyProvenance",
+        "type": "object"
+      },
+      "PossiblePerson": {
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/IdentitySummary"
+          },
+          "matching_faces": {
+            "title": "Matching Faces",
+            "type": "integer"
+          },
+          "similarity": {
+            "title": "Similarity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "identity",
+          "similarity",
+          "matching_faces"
+        ],
+        "title": "PossiblePerson",
         "type": "object"
       },
       "ProcessingRunBrief": {
@@ -3076,6 +3202,37 @@
           }
         },
         "summary": "Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/search/face": {
+      "post": {
+        "operationId": "search_face",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaceSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Search Face",
         "tags": [
           "search"
         ]
