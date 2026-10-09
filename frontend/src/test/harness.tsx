@@ -33,7 +33,7 @@ export interface Handler {
   /** A path, or a pattern the path must match. */
   path: string | RegExp
   /** The JSON answer, or a function making it (a status other than 200 needs `reply`). */
-  respond: Body | ((call: Call) => Body | Reply)
+  respond: Body | ((call: Call) => Body | Reply | Promise<Body | Reply>)
   status?: number
 }
 
@@ -104,7 +104,9 @@ function stubBackend(handlers: Handler[]) {
         unexpected.push(`${method} ${url.pathname}`)
         return new Response('{}', { status: 599 })
       }
-      const answer = typeof handler.respond === 'function' ? handler.respond(call) : handler.respond
+      const answer = await (typeof handler.respond === 'function'
+        ? handler.respond(call)
+        : handler.respond)
       if (answer instanceof Reply) {
         return new Response(JSON.stringify(answer.body), { status: answer.status })
       }
