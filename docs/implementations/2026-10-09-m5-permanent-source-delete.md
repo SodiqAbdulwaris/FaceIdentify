@@ -67,6 +67,25 @@ The review (Codex, on the PR) found real defects; all were fixed:
   the runs; the image hook hides cached bytes when disabled; focus moves to "Keep it", Escape returns
   it to the button, and the warning is the dialog's description.
 
+A second review (same reviewer) found more, and these were fixed too:
+
+- A `DELETED`-state representation could carry an ordinary `REMOVE` that only took its key out of the
+  live index (the file keeps the bytes); intent now forgets every `REMOVE` it had, so erasure queues
+  and applies its own by a rebuild.
+- Startup recovery marks an artifact `DELETED` before it tries its staged file, so a locked `.part`
+  file was skipped: deletion now removes the staged files of every owned managed artifact itself and
+  stays unfinished while one cannot be removed.
+- Deleting from an open source page leaves the page (a mounted observer keeps what it loaded after the
+  cache is cleared), which releases the picture and its object URL.
+- Completing an artifact's deletion tolerates the other request finishing at any step, including after
+  this one's own failure; `changed` is reported only by the request whose guarded write finalized the
+  Source.
+- A hint needs the supporting face to still belong to the person the candidate was for (a correction
+  or split may have moved it).
+- The index coordinator's attempt-count query is chunked; a test lowers SQLite's variable limit to
+  prove it (the earlier test only covered the snapshot statements).
+- Focus returns to the button after a refused deletion.
+
 Not changed, and why: a referenced original's `external_path` stays on the tombstone because the
 artifact `location` CHECK requires it (see the question below). The 820-line test commit is one new
 module for one use case.
@@ -88,7 +107,7 @@ module for one use case.
 
 ## Tests
 
-- `tests/integration/test_permanent_source_delete.py` (29), on a real library (SQLite, USearch, managed
+- `tests/integration/test_permanent_source_delete.py` (34), on a real library (SQLite, USearch, managed
   files, restarts): only a recycled Source; busy; bytes, crop, thumbnail, faces, vectors, runs, jobs,
   snapshots gone, the other image untouched, and the vector's bytes found in no database, log or
   index file; repeat; referenced originals (available and missing) untouched; shared and lone
@@ -102,14 +121,15 @@ module for one use case.
   after); every survivor (a redundant `continue`, an untested thumbnail clear, an untested artifact-state
   guard, a state set that only AVAILABLE exercised, a redundant representation delete, an untested
   settle of an owed log, a race guard, two hint rules) was removed or closed by a test.
-- Front end (7 new, 158 total): ask first and cancel, focus and Escape, forgetting what was fetched, the
+- Front end (9 new, 159 total): ask first and cancel, focus and Escape, forgetting what was fetched, the
   partial notice, the refusal, cached bytes of an unavailable image, and the source page; thirteen
   mutations, one survivor (the card offering it outside the bin) closed by an assertion.
-- `test_api_corrections.py` gains four tests for the live hints.
+- `test_api_corrections.py` gains six tests for the live hints; `test_index_operation_repository.py`
+  one for the bounded query.
 
 ## Verification
 
-- Front end: `npm run typecheck`, `npx oxlint --deny-warnings`, `npm test` (158 passed), `npm run build`.
+- Front end: `npm run typecheck`, `npx oxlint --deny-warnings`, `npm test` (159 passed), `npm run build`.
 - Backend gate: see the PR.
 
 ## Open issues / follow-ups
