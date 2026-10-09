@@ -473,6 +473,15 @@ It may:
 - schedule eligible managed artifacts for deletion
 - preserve necessary correction/deletion history
 
+> **Agent design 2026-10-09 (awaiting the owner's confirmation; built):** the body carries the
+> `expected_revision` the caller saw (a changed identity is `409 IDENTITY_CHANGED`; an unknown or
+> not-active one is `404 IDENTITY_NOT_FOUND`). The answer is `204` when every vector is erased and `202`
+> with `{outstanding: [...]}` when part of the cleanup is still owed (the identity is already forgotten
+> and unrecognizable; recovery is marked degraded in `/readiness`); a repeat is harmless and announces
+> nothing. `POST /api/v1/people/{person_id}/forget` runs it on each identity of a Person and keeps the
+> Person and their name; it answers the same way (`404 PERSON_NOT_FOUND`). A forgotten identity's
+> occurrences stop being authoritative, and `IDENTITY_FORGOTTEN` Evidence keeps ids only.
+
 ---
 
 # 9. Observations
