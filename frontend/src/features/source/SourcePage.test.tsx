@@ -219,6 +219,19 @@ describe('a source', () => {
     expect(screen.queryByRole('button', { name: 'Process' })).toBeNull()
   })
 
+  it('offers no retry while the image is in the recycle bin', async () => {
+    open([
+      { path: SOURCE, respond: detail({ state: 'RECYCLED', processing_status: 'FAILED' }) },
+      media,
+      noFaces,
+      { path: `${SOURCE}/processing-runs`, respond: page([run({ state: 'FAILED' })]) },
+    ])
+
+    await screen.findByRole('note')
+
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
   it('says so when the processing history cannot be loaded', async () => {
     open([
       { path: SOURCE, respond: detail() },

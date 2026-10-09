@@ -1,6 +1,7 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { detail } from '@/test/fixtures'
 import { apiError, failure, renderApp, run } from '@/test/harness'
 
 // look again quickly while work is under way (the real wait is seconds)
@@ -10,6 +11,7 @@ vi.mock('../status', async (importOriginal) => ({
 }))
 
 const RUN = '/api/v1/processing-runs/r1'
+const OWNER = { path: '/api/v1/sources/s1', respond: detail() }
 const job = (over: Record<string, unknown> = {}) => ({
   id: 'j1',
   state: 'RUNNING',
@@ -94,6 +96,7 @@ describe('a processing run', () => {
         }),
       },
       { method: 'POST', path: `${RUN}/retry`, status: 202, respond: run({ id: 'r2' }) },
+      OWNER,
     ])
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -105,15 +108,28 @@ describe('a processing run', () => {
     )
     expect(screen.getByText('Failed', { selector: 'dt' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Cancel processing' })).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    await user.click(await screen.findByRole('button', { name: 'Try again' }))
 
     await waitFor(() => expect(calls.some((c) => c.path === `${RUN}/retry`)).toBe(true))
+  })
+
+  it('offers no retry while the image is in the recycle bin', async () => {
+    const { calls } = renderApp('/processing/r1', [
+      { path: RUN, respond: run({ state: 'FAILED' }) },
+      { path: '/api/v1/sources/s1', respond: detail({ state: 'RECYCLED' }) },
+    ])
+
+    await screen.findByRole('heading', { name: 'Processing' })
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/v1/sources/s1')).toBe(true))
+    await new Promise((resolve) => setTimeout(resolve, 50)) // let the answer reach the screen
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
   })
 
   it('shows the backend message when a request is refused', async () => {
     const user = userEvent.setup()
     renderApp('/processing/r1', [
       { path: RUN, respond: run({ state: 'FAILED' }) },
+      OWNER,
       {
         method: 'POST',
         path: `${RUN}/retry`,

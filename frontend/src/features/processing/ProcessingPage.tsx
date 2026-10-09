@@ -26,6 +26,14 @@ export function ProcessingPage() {
       query.state.data && isActive(query.state.data.state) ? ACTIVE_REFETCH_MS : false,
   })
 
+  // A recycled image is not processed, so a retry is offered only while its image is active.
+  const owner = useQuery({
+    queryKey: keys.source(run.data?.source_id ?? ''),
+    queryFn: () => endpoints.getSource(run.data!.source_id),
+    enabled: run.isSuccess,
+    retry: false,
+  })
+
   if (run.isError) {
     const notFound = run.error instanceof ApiError && run.error.code === 'RUN_NOT_FOUND'
     return (
@@ -100,7 +108,7 @@ export function ProcessingPage() {
             Cancel processing
           </Button>
         ) : null}
-        {canRetry(data.state) ? (
+        {canRetry(data.state) && owner.data?.state === 'ACTIVE' ? (
           <Button disabled={actions.busy} onClick={() => actions.retry.mutate(data)}>
             Try again
           </Button>

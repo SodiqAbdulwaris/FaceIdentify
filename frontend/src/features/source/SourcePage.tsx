@@ -118,7 +118,7 @@ export function SourcePage() {
                 Cancel processing
               </Button>
             ) : null}
-            {latest && canRetry(latest.state) && !missing ? (
+            {latest && canRetry(latest.state) && !missing && detail.state === 'ACTIVE' ? (
               <Button disabled={actions.busy} onClick={() => actions.retry.mutate(latest)}>
                 Try again
               </Button>

@@ -44,6 +44,7 @@ export function SourceCard({ source, recycled = false, onNotice }: Props) {
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: keys.sources }),
+        queryClient.invalidateQueries({ queryKey: keys.source(source.id) }),
         queryClient.invalidateQueries({ queryKey: ['identity'] }),
       ]),
   })

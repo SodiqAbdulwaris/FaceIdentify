@@ -343,7 +343,7 @@ describe('importing', () => {
   it('moves an image to the recycle bin with one click and refreshes the library', async () => {
     const user = userEvent.setup()
     let recycled = false
-    const { calls } = renderApp('/library', [
+    const { calls, queryClient } = renderApp('/library', [
       {
         path: SOURCES,
         respond: () => page(recycled ? [] : [source({ id: 's1', display_name: 'beach.png' })]),
@@ -360,12 +360,15 @@ describe('importing', () => {
       media,
     ])
 
+    queryClient.setQueryData(['source', 's1'], { state: 'ACTIVE' }) // as if its page was visited
     await user.click(
       await screen.findByRole('button', { name: 'Move beach.png to the recycle bin' }),
     )
 
     expect(await screen.findByText('No images yet')).toBeInTheDocument()
     expect(calls.some((c) => c.method === 'DELETE' && c.path === `${SOURCES}/s1`)).toBe(true)
+    // a cached page for this image must not keep showing it as active
+    expect(queryClient.getQueryState(['source', 's1'])?.isInvalidated).toBe(true)
   })
 
   it('shows what was recycled in the recycle bin, where it can be restored, not processed', async () => {
