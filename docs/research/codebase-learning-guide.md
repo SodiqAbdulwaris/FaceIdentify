@@ -58,7 +58,7 @@ decides one of three things for each face:
    ("abstain").
 
 You can then name a person, correct a wrong guess, merge two memories that are the same person, split
-one that is two people, and search by name (built) or by a face (planned). Nothing leaves your machine:
+one that is two people, and search by name or by a face (both built). Nothing leaves your machine:
 there is no cloud, no account and no network service in the design. This is a personal tool.
 
 The owner's rule, repeated through the project: **a wrong automatic guess is worse than no guess.**
