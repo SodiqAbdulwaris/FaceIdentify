@@ -1,6 +1,7 @@
-import { useMutation } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link } from 'react-router'
+import { keys } from '@/api/keys'
 import type { FaceAnswer } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
@@ -20,13 +21,24 @@ const NOT_SUPPORTED = 'Only JPEG, PNG, BMP and WebP pictures can be searched wit
  */
 export function FaceSearch() {
   const { endpoints } = useBackend()
-  const [picture, setPicture] = useState<File | null>(null)
+  // The picture lives here, not in the query cache: leaving the screen drops it.
+  const [picture, setPicture] = useState<{ id: number; file: File } | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const chooser = useRef<HTMLInputElement>(null)
-  const url = useObjectUrl(picture ?? undefined)
-  const search = useMutation({ mutationFn: (file: File) => endpoints.searchFace(file) })
-  const { reset, mutate } = search
+  const url = useObjectUrl(picture?.file)
+  // An event that changes a face, a name or an image refreshes this like any search: the old answer
+  // is hidden while it is asked again, so a forgotten or deleted person is never left on screen.
+  const search = useQuery({
+    queryKey: keys.faceSearch(picture?.id ?? 0),
+    queryFn: () => endpoints.searchFace((picture as { file: File }).file),
+    enabled: picture !== null,
+    gcTime: 0,
+    staleTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+  const answer = search.isFetching || search.isError ? undefined : search.data
 
   const take = (file: File | undefined) => {
     if (!file) return
@@ -35,9 +47,7 @@ export function FaceSearch() {
       return
     }
     setProblem(null)
-    setPicture(file)
-    reset()
-    mutate(file)
+    setPicture((previous) => ({ id: (previous?.id ?? 0) + 1, file }))
   }
 
   useEffect(() => {
@@ -96,18 +106,21 @@ export function FaceSearch() {
           {problem}
         </p>
       ) : null}
-      {search.isPending ? <p className="text-muted-foreground">Looking for faces…</p> : null}
+      <p role="status" aria-live="polite" aria-label="Face search status" className="text-muted-foreground">
+        {search.isFetching
+          ? 'Looking for faces…'
+          : answer
+            ? answer.faces.length === 0
+              ? 'No face was found in this picture.'
+              : `${answer.faces.length} ${answer.faces.length === 1 ? 'face' : 'faces'} found in this picture.`
+            : ''}
+      </p>
       {search.isError ? (
         <p role="alert" className="text-destructive">
           The picture could not be searched: {errorMessage(search.error)}
         </p>
       ) : null}
-      {search.data && search.data.faces.length === 0 ? (
-        <p role="status" aria-label="Face search result">
-          No face was found in this picture.
-        </p>
-      ) : null}
-      {search.data?.faces.map((face) => (
+      {answer?.faces.map((face) => (
         <Face key={face.index} face={face} url={url} />
       ))}
     </section>

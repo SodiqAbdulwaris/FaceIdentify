@@ -171,6 +171,8 @@ class Backend:
     # Set once startup has finished, whether it opened the library or failed. Thread-safe, so a
     # test can wait for it instead of sleeping.
     settled: threading.Event = field(default_factory=threading.Event)
+    # One face search decodes and perceives at a time, so a burst cannot pile up decoded pictures.
+    face_search_gate: threading.Lock = field(default_factory=threading.Lock)
     events: EventHub = field(init=False)
     _opened: AbstractContextManager[OpenLibrary] | None = None
 

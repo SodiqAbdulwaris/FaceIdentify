@@ -642,7 +642,9 @@ Repeating the same face search must not grow memory.
 > `UNKNOWN`, the policy `reason`, `possible_people` with `similarity` and `matching_faces`, and
 > `retrieval_complete`); `ranking.similarity` is `COSINE_UNCALIBRATED`. A picture with no face is `200` with
 > `faces: []`. Errors: `400 QUERY_IMAGE_UNREADABLE`, `413`, `415`, `422`, `503 PROCESSING_UNAVAILABLE`,
-> `503 PERCEPTION_UNAVAILABLE`.
+> `503 PERCEPTION_UNAVAILABLE`, `503 SEARCH_INDEX_UNAVAILABLE`. A path may name any readable local file (the
+> bearer token already grants import of any file) except a network path; the body is size-checked as it
+> arrives and the answer is built in the same read transaction that validated the candidates.
 
 ---
 

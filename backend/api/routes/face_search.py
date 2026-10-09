@@ -32,12 +32,13 @@ from backend.app.recognition.face_query import FaceQuery, FaceQueryResult, Queri
 from backend.app.recognition.reasoner import RecognitionOutcome
 from backend.app.runtime.perception_client import PerceptionError
 from backend.app.runtime.worker_config import RuntimeUnavailableError
+from backend.infrastructure.indexing.representation_index import IndexUnusableError
 from backend.infrastructure.media.image import (
     CorruptImageError,
     ImageTooLargeError,
     UnsupportedImageError,
 )
-from backend.ml.supervisor.supervisor import WorkerFailedError
+from backend.ml.supervisor.supervisor import MLUnavailableError, WorkerFailedError
 
 router = APIRouter(tags=["search"])
 
@@ -72,17 +73,35 @@ class FaceSearchResponse(BaseModel):
     ranking: FaceRanking
 
 
+# A JSON body only names a file; anything longer than this is not one.
+JSON_BODY_LIMIT = 8192
+
+
+def too_large() -> ApiError:
+    return ApiError(413, "MEDIA_TOO_LARGE", "The image is larger than is allowed.")
+
+
 def _read_query(raw: bytes, content_type: str, limits: MediaLimits) -> bytes:
-    """The picture's bytes: the body itself, or the file a JSON body names."""
+    """The picture's bytes: the body itself, or the file a JSON body names.
+
+    Trust boundary: the bearer token already lets its holder read any file on this computer
+    through import, so a path is accepted as is, except that a network path (UNC or device) is
+    refused: it could make this computer reach out and authenticate to another one. The file is
+    read through one handle and never more than the limit, whatever it grows into after a check.
+    """
     if "json" not in content_type:
         return raw
     try:
-        path = Path(json.loads(raw)["path"])
-        if not path.is_file() or path.stat().st_size > limits.max_bytes:
+        path = json.loads(raw)["path"]
+        if not isinstance(path, str) or path.startswith(("\\\\", "//")):
             raise ValueError
-        return path.read_bytes()
+        with Path(path).open("rb") as handle:
+            data = handle.read(limits.max_bytes + 1)
     except (ValueError, KeyError, TypeError, OSError):
         raise ApiError(400, "QUERY_IMAGE_UNREADABLE", "The image could not be read.") from None
+    if len(data) > limits.max_bytes:
+        raise too_large()
+    return data
 
 
 def _answer(session: Session, result: FaceQueryResult) -> FaceSearchResponse:
@@ -133,7 +152,25 @@ def _answer(session: Session, result: FaceQueryResult) -> FaceSearchResponse:
     )
 
 
-@router.post("/search/face")
+_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                }
+            },
+            "image/*": {"schema": {"type": "string", "format": "binary"}},
+            "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+        },
+    }
+}
+
+
+@router.post("/search/face", openapi_extra=_BODY)
 async def search_face(
     request: Request,
     library: Library,
@@ -141,10 +178,14 @@ async def search_face(
     limits: Annotated[MediaLimits, Depends(media_limits)],
 ) -> FaceSearchResponse:
     settings = processing_settings(backend)
-    raw = await request.body()
     content_type = request.headers.get("content-type", "")
-    if "json" not in content_type and len(raw) > limits.max_bytes:
-        raise ApiError(413, "MEDIA_TOO_LARGE", "The image is larger than is allowed.")
+    ceiling = JSON_BODY_LIMIT if "json" in content_type else limits.max_bytes
+    received = bytearray()
+    async for chunk in request.stream():  # (counted as it arrives: nothing over the limit is kept)
+        received += chunk
+        if len(received) > ceiling:
+            raise too_large()
+    raw = bytes(received)
 
     def run() -> FaceSearchResponse:
         image = _read_query(raw, content_type, limits)
@@ -153,13 +194,15 @@ async def search_face(
             packages=library.packages,
             client_for=settings.client_for,
             global_index_for=library.coordinator.open_for_recognition,
+            exclusive=library.coordinator.exclusive,
             planner=settings.planner,
             request_for=settings.request_for,
             max_pixels=settings.max_pixels,
             recognition_k=settings.recognition_k,
         )
         try:
-            result = query.search(image)
+            with backend.face_search_gate:
+                return query.search(image, _answer)
         except UnsupportedImageError:
             raise ApiError(
                 415,
@@ -176,11 +219,15 @@ async def search_face(
             raise ApiError(
                 503, "PROCESSING_UNAVAILABLE", "No processing configuration is available."
             ) from None
-        except (PerceptionError, WorkerFailedError):
+        except (PerceptionError, WorkerFailedError, MLUnavailableError):
             raise ApiError(
                 503, "PERCEPTION_UNAVAILABLE", "The faces could not be looked for just now.",
                 retryable=True,
             ) from None  # fmt: skip
-        return library.unit_of_work.read(lambda session: _answer(session, result))
+        except IndexUnusableError:
+            raise ApiError(
+                503, "SEARCH_INDEX_UNAVAILABLE",
+                "The memory's search index is not usable. It is rebuilt when the app starts.",
+            ) from None  # fmt: skip
 
     return await anyio.to_thread.run_sync(run)

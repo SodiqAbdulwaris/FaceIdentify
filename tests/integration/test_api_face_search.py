@@ -4,22 +4,32 @@ A picture goes in, the people it may show come out, and nothing is remembered: n
 job. Perception is planted (no weights); the library, the index and the recognition policy are real.
 """
 
+import hashlib
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
+from sqlalchemy.orm import class_mapper
 
 from backend.api.startup import ProcessingUnavailableError
 from backend.app.identities.models import Evidence, Identity
 from backend.app.jobs.models import Job
 from backend.app.memory.models import Observation, Occurrence, Representation
 from backend.app.processing.models import ProcessingRun
-from backend.app.runtime.perception_client import Detected, PerceptionError
+from backend.app.runtime.perception_client import (
+    Detected,
+    FaceVector,
+    PerceptionError,
+    Represented,
+)
 from backend.app.sources.models import Artifact, Source
+from backend.infrastructure.indexing.representation_index import IndexUnusableError
 from backend.ml.contracts.messages import Detection
 from backend.ml.contracts.protocol import MLErrorCode
+from backend.ml.supervisor.supervisor import MLUnavailableError
 from tests.fixtures.api import Api, error, processing_app
 from tests.integration.test_api_search import FACES, face, name_identity
 
@@ -41,18 +51,22 @@ MODELS = (
 
 
 def snapshot(api: Api) -> dict[str, Any]:
-    """Everything a query could have written: every row count and every file in the library."""
+    """Everything a query could have written: the full contents of every authoritative table and
+    the hash of every file in the library (a same-size overwrite or an update shows)."""
     assert api.backend.library is not None
     with api.backend.library.session_factory() as session:
         rows = {
-            model.__tablename__: session.scalar(select(func.count()).select_from(model))
+            model.__tablename__: sorted(
+                repr({c.key: getattr(row, c.key) for c in class_mapper(model).column_attrs})
+                for row in session.scalars(select(model))
+            )
             for model in MODELS
         }
     files = {
-        str(path.relative_to(root)): path.stat().st_size
+        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
         for root in (api.backend.settings.library_root, api.backend.settings.local_state_root)
         for path in sorted(root.rglob("*"))
-        if path.is_file() and path.suffix not in {".db-wal", ".db-shm", ".lock"}
+        if path.is_file() and not path.name.endswith((".db-wal", ".db-shm", ".lock"))
     }
     return {"rows": rows, "files": files}
 
@@ -305,3 +319,131 @@ async def test_the_same_search_gives_the_same_answer_after_a_restart(
     assert again == before  # the memory and its index survived, and the query changed nothing
     assert repeat == again
     assert unchanged
+
+
+async def test_limits_are_kept_while_the_picture_arrives(
+    processing_api: Api, tmp_path: Path
+) -> None:
+    api = processing_api
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"x" * 100_001)
+
+    error(await api.client.post(FACE_SEARCH, json={"path": str(big)}), 413, "MEDIA_TOO_LARGE")
+    error(await api.client.post(FACE_SEARCH, json={"path": "x" * 9000}), 413, "MEDIA_TOO_LARGE")
+    error(
+        await api.client.post(FACE_SEARCH, json={"path": "\\server\\share\a.png"}),
+        400,
+        "QUERY_IMAGE_UNREADABLE",
+    )
+    error(
+        await api.client.post(FACE_SEARCH, json={"path": "//server/share/a.png"}),
+        400,
+        "QUERY_IMAGE_UNREADABLE",
+    )
+
+
+async def test_the_search_index_or_worker_being_unavailable_is_said_plainly(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = processing_api
+    assert api.perception is not None
+    assert api.backend.library is not None
+    path = str(api.image("q.png"))
+
+    def failed(_pixels: Any) -> Any:
+        raise MLUnavailableError("the worker failed")
+
+    monkeypatch.setattr(api.perception, "detect", failed)
+    worker = await api.client.post(FACE_SEARCH, json={"path": path})
+    monkeypatch.undo()
+
+    def unusable(_space: Any) -> Any:
+        raise IndexUnusableError("the index is damaged")
+
+    monkeypatch.setattr(api.backend.library.coordinator, "open_for_recognition", unusable)
+    index = await api.client.post(FACE_SEARCH, json={"path": path})
+
+    assert error(worker, 503, "PERCEPTION_UNAVAILABLE")["retryable"] is True
+    error(index, 503, "SEARCH_INDEX_UNAVAILABLE")
+
+
+async def test_a_picture_of_several_faces_is_answered_face_by_face(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = processing_api
+    assert api.perception is not None
+    await name_identity(api, await face(api, "ada.png", 0), "Ada")
+    await name_identity(api, await face(api, "bob.png", 1), "Bob")
+    perception = api.perception
+    boxes = [(0.1, 0.1, 0.4, 0.4), (0.5, 0.5, 0.9, 0.9)]
+
+    def detect(_pixels: Any) -> Detected:
+        return Detected(
+            tuple(Detection(0, i, box, 0.9, None) for i, box in enumerate(boxes)),
+            perception.detector,
+        )
+
+    def represent(_pixels: Any, _detections: Any) -> Represented:
+        vectors = (FACES[0], FACES[1])
+        return Represented(
+            tuple(FaceVector(i, v, "L2_NORMALIZED") for i, v in enumerate(vectors)),
+            perception.embedder,
+            (),
+        )
+
+    monkeypatch.setattr(perception, "detect", detect)
+    monkeypatch.setattr(perception, "represent", represent)
+
+    found = await api.client.post(FACE_SEARCH, json={"path": str(api.image("two.png"))})
+
+    first, second = found.json()["faces"]
+    assert (first["index"], second["index"]) == (0, 1)
+    assert first["possible_people"][0]["identity"]["person"]["display_name"] == "Ada"
+    assert second["possible_people"][0]["identity"]["person"]["display_name"] == "Bob"
+    assert second["bounding_box"]["x"] == 0.5
+
+
+async def test_a_merged_person_is_offered_once_under_the_survivor(processing_api: Api) -> None:
+    api = processing_api
+    await name_identity(api, await face(api, "ada.png", 0), "Ada")
+    await face(api, "other.png", 1)
+    items = (await api.client.get("/api/v1/identities")).json()["items"]
+    named = next(i for i in items if i["person"])
+    other = next(i for i in items if not i["person"])
+    merged = await api.client.post(
+        "/api/v1/identities/merge",
+        json={
+            "identities": [
+                {"id": named["id"], "revision": named["revision"]},
+                {"id": other["id"], "revision": other["revision"]},
+            ],
+            "preferred_identity_id": named["id"],
+        },
+    )
+    assert merged.status_code == 200, merged.text
+
+    found = await look(api, FACES[1])
+
+    people = found["faces"][0]["possible_people"]
+    assert [p["identity"]["id"] for p in people].count(named["id"]) == 1
+    assert other["id"] not in [p["identity"]["id"] for p in people]
+
+
+async def test_searches_made_at_the_same_time_all_get_their_answer(processing_api: Api) -> None:
+    api = processing_api
+    await name_identity(api, await face(api, "ada.png", 0), "Ada")
+    assert api.perception is not None
+    api.perception.vector = FACES[0]
+    path = str(api.image("q.png"))
+
+    async with anyio.create_task_group() as group:
+        answers: list[Any] = []
+
+        async def ask_once() -> None:
+            answers.append(await api.client.post(FACE_SEARCH, json={"path": path}))
+
+        for _ in range(4):
+            group.start_soon(ask_once)
+
+    assert [a.status_code for a in answers] == [200] * 4
+    assert len({a.text for a in answers}) == 1

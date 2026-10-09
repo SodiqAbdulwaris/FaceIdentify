@@ -2129,7 +2129,15 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    path: string;
+                };
+                "application/octet-stream": string;
+                "image/*": string;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
