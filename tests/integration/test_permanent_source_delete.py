@@ -8,6 +8,7 @@ ids and scores but nothing that can be searched, shown or recognised again.
 """
 
 import io
+import sqlite3
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -17,7 +18,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import event, func, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import (
@@ -599,11 +600,11 @@ def test_bytes_are_only_removed_for_an_artifact_whose_deletion_was_recorded(open
 
         with pytest.raises(ArtifactStateError):
             complete_artifact_deletion(
-                lib.lib.session_factory, lib.lib.store, original, clock=lib.clock
+                lib.lib.unit_of_work, lib.lib.store, original, clock=lib.clock
             )  # AVAILABLE: nobody asked for it to go
         with pytest.raises(ArtifactStateError):
             complete_artifact_deletion(
-                lib.lib.session_factory, lib.lib.store, uuid.uuid4(), clock=lib.clock
+                lib.lib.unit_of_work, lib.lib.store, uuid.uuid4(), clock=lib.clock
             )
 
         assert lib.lib.store.digest(key) is not None
@@ -765,7 +766,7 @@ def test_two_requests_at_once_do_not_trip_over_each_other(opened: Any) -> None:
         assert fast.delete(source_id).complete  # the other request finishes first
 
         # The slow one wakes up late and finds everything done.
-        complete_artifact_deletion(lib.lib.session_factory, lib.lib.store, crop, clock=lib.clock)
+        complete_artifact_deletion(lib.lib.unit_of_work, lib.lib.store, crop, clock=lib.clock)
         lib.lib.unit_of_work.write(lambda s: slow._finalize(s, source_id, lib.clock()))
         report = slow._carry_on(source_id)
 
@@ -790,11 +791,11 @@ def test_the_other_request_finishing_an_artifact_midway_is_not_an_error(
             real(key)
             if not raced:  # while this one removes the bytes, the other request finishes the job
                 raced.append(key)
-                complete_artifact_deletion(lib.lib.session_factory, store, crop, clock=lib.clock)
+                complete_artifact_deletion(lib.lib.unit_of_work, store, crop, clock=lib.clock)
 
         monkeypatch.setattr(store, "delete", racing)
 
-        complete_artifact_deletion(lib.lib.session_factory, store, crop, clock=lib.clock)
+        complete_artifact_deletion(lib.lib.unit_of_work, store, crop, clock=lib.clock)
 
         assert {a.id: a.state for a in only(lib, select(Artifact))}[crop] == "DELETED"
 
@@ -843,7 +844,7 @@ def test_a_person_still_seen_elsewhere_keeps_a_face_to_show(opened: Any) -> None
         [after] = only(lib, select(Identity))
         assert after.state == "ACTIVE"
         assert after.representative_observation_id == second_face
-        assert after.revision == revision + 1
+        assert after.revision == revision + 2  # once for the intent, once for the new face
 
 
 def test_what_describes_a_deleted_file_goes_with_it(opened: Any) -> None:
@@ -970,7 +971,7 @@ def test_a_failure_after_the_other_request_finished_is_not_an_error(
 
         monkeypatch.setattr(store, "delete", other_finishes_then_this_fails)
 
-        complete_artifact_deletion(lib.lib.session_factory, store, crop, clock=lib.clock)
+        complete_artifact_deletion(lib.lib.unit_of_work, store, crop, clock=lib.clock)
 
         assert {a.id: a.state for a in only(lib, select(Artifact))}[crop] == "DELETED"
 
@@ -1002,6 +1003,9 @@ def test_a_request_beaten_to_the_finalizing_transaction_reports_no_change(opened
         class Racing:
             """The other request finishes just before this one's finalizing write."""
 
+            def read(self, work: Any) -> Any:
+                return real.read(work)
+
             def write(self, work: Any) -> Any:
                 if not beaten:
                     beaten.append(fast._carry_on(source_id))
@@ -1013,3 +1017,50 @@ def test_a_request_beaten_to_the_finalizing_transaction_reports_no_change(opened
 
         assert beaten[0].changed  # the other request did it
         assert (report.complete, report.changed) == (True, False)
+
+
+# --- what the third review found -----------------------------------------------------------------
+
+
+def test_a_busy_database_while_settling_an_artifact_is_retried(opened: Any) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    with opened() as lib:
+        source_id, _ = process(lib, C)
+        crop = add_face_crop(lib, source_id)
+        recycle(lib, source_id)
+        steps = deletion(lib)
+        lib.lib.unit_of_work.write(lambda s: steps._begin(s, source_id, lib.clock()))
+        failures = {"left": 1}
+
+        def busy_once(_session: Session) -> None:
+            if failures["left"]:
+                failures["left"] -= 1
+                inner = sqlite3.OperationalError("database is locked")
+                inner.sqlite_errorcode = sqlite3.SQLITE_BUSY
+                raise OperationalError("COMMIT", {}, inner)
+
+        event.listen(Session, "before_commit", busy_once)
+        try:
+            complete_artifact_deletion(lib.lib.unit_of_work, lib.lib.store, crop, clock=lib.clock)
+        finally:
+            event.remove(Session, "before_commit", busy_once)
+
+        assert failures["left"] == 0  # the busy commit really happened
+        assert {a.id: a.state for a in only(lib, select(Artifact))}[crop] == "DELETED"
+
+
+def test_beginning_a_deletion_changes_the_revision_of_every_identity_that_loses_a_face(
+    opened: Any,
+) -> None:
+    with opened() as lib:
+        first, _ = process(lib, A)
+        process(lib, B)  # the same identity, kept by its second image
+        [identity] = only(lib, select(Identity))
+        recycle(lib, first)
+        steps = deletion(lib)
+
+        lib.lib.unit_of_work.write(lambda s: steps._begin(s, first, lib.clock()))
+
+        [after] = only(lib, select(Identity))
+        assert after.revision == identity.revision + 1  # a merge prepared before is now stale
