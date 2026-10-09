@@ -46,7 +46,6 @@ from backend.app.jobs.models import Job
 from backend.app.memory.erasure import CHUNK, RepresentationEraser
 from backend.app.memory.models import (
     IndexOperation,
-    IndexOperationKind,
     Observation,
     ObservationState,
     Occurrence,
@@ -217,30 +216,9 @@ class PermanentSourceDeletion:
             elif artifact.state in DELETABLE_STATES:
                 request_artifact_deletion(session, artifact.id, clock=lambda: now)
         # The faces leave recognition, search and every reader in this same commit: the vectors
-        # are queued for erasure (a DELETED row, which the eraser ignores, is made erasable first),
+        # are queued for erasure (a DELETED row is made erasable by the eraser first),
         # and the occurrences and observations stop being authoritative.
-        observations = select(Observation.id).where(Observation.source_id == source_id)
         no_sync = {"synchronize_session": False}
-        # A DELETED row keeps its vector and may carry an ordinary REMOVE that only took the key
-        # out of the live index (the file keeps the bytes): forget every REMOVE it had, so erasure
-        # queues its own, which is applied by a rebuild.
-        deleted_vectors = select(Representation.id).where(
-            Representation.observation_id.in_(observations),
-            Representation.state == RepresentationState.DELETED,
-        )
-        session.execute(
-            delete(IndexOperation).where(
-                IndexOperation.representation_id.in_(deleted_vectors),
-                IndexOperation.operation == IndexOperationKind.REMOVE,
-            ),
-            execution_options=no_sync,
-        )
-        session.execute(
-            update(Representation)
-            .where(Representation.id.in_(deleted_vectors))
-            .values(state=RepresentationState.ERASING),
-            execution_options=no_sync,
-        )
         self._eraser.queue_in(session, list(session.scalars(self._representation_ids(source_id))))
         # Whoever relied on these faces sees a different identity from now on: a merge or split
         # that was prepared against the old one must be refused (optimistic locking).

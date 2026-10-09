@@ -89,6 +89,8 @@ async def test_when_both_are_named_the_survivors_name_wins(api: Api, new_id: See
             PEOPLE, json={"display_name": name, "identity_id": who.identity}
         )
         assert made.status_code == 201
+        # naming changes what the identity is: the view the merge starts from is a fresh one
+        who.revision = (await api.client.get(f"{IDENTITIES}/{who.identity}")).json()["revision"]
 
     merged = (await api.client.post(f"{IDENTITIES}/merge", json=body(keep, lose))).json()
 

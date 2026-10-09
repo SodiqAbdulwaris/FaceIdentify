@@ -145,6 +145,7 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
         )  # fmt: skip
         self.has_creation_evidence[identity_id] = True
         self.active_reps_by_identity[identity_id].add(rep_id)
+        self.revision[identity_id] += 1  # what it owns changed: an earlier view is stale
 
     @rule(target=people)
     def create_person(self) -> uuid.UUID:
@@ -161,6 +162,7 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
         except IdentityManagerError:
             return  # already linked to exactly this person: a documented no-op rejection
         self.has_person[identity_id] = True
+        self.revision[identity_id] += 1  # its Person changed: an earlier view is stale
 
     @rule(identity_id=active_identities)
     def remove_person(self, identity_id: uuid.UUID) -> None:
@@ -171,6 +173,7 @@ class IdentityLifecycleMachine(RuleBasedStateMachine):
         except IdentityManagerError:
             return  # no active association to remove
         self.has_person[identity_id] = False
+        self.revision[identity_id] += 1  # its Person changed: an earlier view is stale
 
     @rule(person_id=people, new_name=PERSON_NAMES)
     def rename(self, person_id: uuid.UUID, new_name: str) -> None:

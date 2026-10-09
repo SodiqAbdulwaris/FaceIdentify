@@ -55,6 +55,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/identities/{identity_id}/forget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Forget
+         * @description Forget an identity (API section 8.3): the only operation that removes biometric memory. Its
+         *     vectors are erased and its faces stop resolving to anyone; the media stays and so does any
+         *     Person it was linked to, with their name. A repeat is harmless.
+         */
+        post: operations["forget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/identities/{identity_id}/occurrences": {
         parameters: {
             query?: never;
@@ -238,6 +260,27 @@ export interface paths {
         put?: never;
         /** Assign Identity */
         post: operations["assign_identity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/people/{person_id}/forget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Forget Person
+         * @description Forget a person (identity model section 46): run `ForgetIdentity` on each identity of the
+         *     Person. The Person, their name and notes stay, without visual support. A repeat is harmless.
+         */
+        post: operations["forget_person"];
         delete?: never;
         options?: never;
         head?: never;
@@ -618,6 +661,19 @@ export interface components {
          */
         ErrorEnvelope: {
             error: components["schemas"]["ErrorBody"];
+        };
+        /** Forget */
+        Forget: {
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /**
+         * ForgetPending
+         * @description Forgetting happened; part of the physical cleanup could not finish and is retried.
+         */
+        ForgetPending: {
+            /** Outstanding */
+            outstanding: string[];
         };
         /** IdentityLink */
         IdentityLink: {
@@ -1144,6 +1200,48 @@ export interface operations {
             };
         };
     };
+    forget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                identity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Forget"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForgetPending"];
+                };
+            };
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     identity_occurrences: {
         parameters: {
             query?: {
@@ -1564,6 +1662,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PersonSummary"];
                 };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    forget_person: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForgetPending"];
+                };
+            };
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description The one error shape. */
             default: {

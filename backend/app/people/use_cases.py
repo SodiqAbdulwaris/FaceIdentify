@@ -18,7 +18,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.identities.models import Evidence, EvidenceKind, Identity, IdentityState
-from backend.app.identities.use_cases import IdentityManagerError, StaleRevisionError
+from backend.app.identities.use_cases import (
+    IdentityManagerError,
+    StaleRevisionError,
+    touch_identity,
+)
 from backend.app.people.models import (
     AssociationState,
     IdentityPersonAssociation,
@@ -116,6 +120,7 @@ def assign_identity_to_person(
     )
     session.add(association)
     session.flush()
+    touch_identity(session, identity, now)  # (its Person changed: an earlier view is stale)
     return association
 
 
@@ -155,6 +160,9 @@ def remove_identity_from_person(
     current.ended_at = now
     current.revision += 1
     session.flush()
+    identity = session.get(Identity, identity_id)
+    assert identity is not None  # (a Person link cannot outlive its identity: foreign key)
+    touch_identity(session, identity, now)  # (its Person changed: an earlier view is stale)
     return current
 
 
