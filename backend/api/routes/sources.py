@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Annotated, Any, BinaryIO, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -52,6 +52,11 @@ from backend.app.sources.lifecycle import (
     restore_source,
 )
 from backend.app.sources.models import Artifact, ArtifactState, Source, SourceState, StorageMode
+from backend.app.sources.permanent_delete import (
+    PermanentSourceDeletion,
+    SourceMissingError,
+    SourceNotRecycledError,
+)
 from backend.app.sources.repository import LibraryCursor, SourceRepository
 from backend.infrastructure.media.image import (
     CorruptImageError,
@@ -106,6 +111,13 @@ class SourceDetail(SourceSummary):
     original_filename: str | None
     latest_processing_run: ProcessingRunBrief | None
     recycled_at: datetime | None
+
+
+class DeletionPending(BaseModel):
+    """Permanent deletion began but is not finished: what is owed is retried at the next start."""
+
+    state: str
+    outstanding: list[str]
 
 
 class ImportRequest(BaseModel):
@@ -182,9 +194,9 @@ def _source_detail(session: Session, source_id: uuid.UUID) -> SourceDetail:
     row = session.execute(
         select(Source, Artifact)
         .join(Artifact, Artifact.id == Source.original_artifact_id)
-        .where(Source.id == source_id)
+        .where(Source.id == source_id, Source.state != SourceState.DELETED)
     ).one_or_none()
-    if row is None:
+    if row is None:  # a permanently deleted Source is gone; only a tombstone remains
         raise source_not_found(source_id)
     source, artifact = row
     return _detail(source, artifact, _latest_runs(session, [source_id]).get(source_id))
@@ -347,6 +359,42 @@ def restore(
     if changed:
         backend.announce("source.updated", "source", str(source_id))
     return library.unit_of_work.read(lambda session: _source_detail(session, source_id))
+
+
+@router.post(
+    "/{source_id}/permanent-delete", status_code=204, responses={202: {"model": DeletionPending}}
+)
+def permanent_delete(
+    source_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> Response:
+    """Delete a recycled Source for good (API section 5.7): its bytes, faces, vectors and runs go;
+    the Evidence and the people the user named stay. `204` when nothing but the tombstone is left;
+    `202` when part of it could not finish yet (a locked file), which is retried at the next start.
+    A repeat is harmless."""
+    deletion = PermanentSourceDeletion(
+        library.session_factory, library.unit_of_work, library.eraser, library.store,
+        clock=backend.settings.clock,
+    )  # fmt: skip
+    try:
+        report = deletion.delete(source_id)
+    except SourceMissingError:
+        raise source_not_found(source_id) from None
+    except SourceBusyError:
+        raise ApiError(
+            409, "SOURCE_BUSY", "The source is being processed; cancel that first.",
+            details={"source_id": str(source_id)},
+        ) from None  # fmt: skip
+    except SourceNotRecycledError:
+        raise ApiError(
+            409, "SOURCE_NOT_RECYCLED", "Move the source to the recycle bin before deleting it.",
+            details={"source_id": str(source_id)},
+        ) from None  # fmt: skip
+    if report.changed:
+        backend.announce("source.updated", "source", str(source_id))
+    if report.complete:
+        return Response(status_code=204)
+    pending = DeletionPending(state=SourceState.DELETING, outstanding=report.outstanding)
+    return JSONResponse(pending.model_dump(), status_code=202)
 
 
 @router.get("/{source_id}")
