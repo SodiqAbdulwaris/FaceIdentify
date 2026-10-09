@@ -154,6 +154,10 @@ def capabilities_from(report: StartupReport) -> dict[str, str]:
     }
 
 
+# Face searches in flight at once (see `Backend.face_search_slots`).
+FACE_SEARCH_SLOTS = 3
+
+
 @dataclass
 class Backend:
     """What the API process owns: the library once opened, and the lifecycle around it."""
@@ -173,6 +177,11 @@ class Backend:
     settled: threading.Event = field(default_factory=threading.Event)
     # One face search decodes and perceives at a time, so a burst cannot pile up decoded pictures.
     face_search_gate: threading.Lock = field(default_factory=threading.Lock)
+    # How many face searches may be in flight (reading, waiting or perceiving) at once: each can
+    # hold a picture up to the size limit, so the memory they hold together is bounded too.
+    face_search_slots: threading.BoundedSemaphore = field(
+        default_factory=lambda: threading.BoundedSemaphore(FACE_SEARCH_SLOTS)
+    )
     events: EventHub = field(init=False)
     _opened: AbstractContextManager[OpenLibrary] | None = None
 

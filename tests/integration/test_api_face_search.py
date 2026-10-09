@@ -5,6 +5,7 @@ job. Perception is planted (no weights); the library, the index and the recognit
 """
 
 import hashlib
+import threading
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,7 @@ from backend.app.runtime.perception_client import (
 from backend.app.sources.models import Artifact, Source
 from backend.infrastructure.indexing.representation_index import IndexUnusableError
 from backend.ml.contracts.messages import Detection
-from backend.ml.contracts.protocol import MLErrorCode
+from backend.ml.contracts.protocol import ContractError, MLErrorCode
 from backend.ml.supervisor.supervisor import MLUnavailableError
 from tests.fixtures.api import Api, error, processing_app
 from tests.integration.test_api_search import FACES, face, name_identity
@@ -335,11 +336,12 @@ async def test_limits_are_kept_while_the_picture_arrives(
         400,
         "QUERY_IMAGE_UNREADABLE",
     )
-    error(
-        await api.client.post(FACE_SEARCH, json={"path": "//server/share/a.png"}),
-        400,
-        "QUERY_IMAGE_UNREADABLE",
-    )
+    for network in ("//server/share/a.png", r"/\server/share/a.png", r"\/server/share/a.png"):
+        error(
+            await api.client.post(FACE_SEARCH, json={"path": network}),
+            400,
+            "QUERY_IMAGE_UNREADABLE",
+        )
 
 
 async def test_the_search_index_or_worker_being_unavailable_is_said_plainly(
@@ -442,8 +444,47 @@ async def test_searches_made_at_the_same_time_all_get_their_answer(processing_ap
         async def ask_once() -> None:
             answers.append(await api.client.post(FACE_SEARCH, json={"path": path}))
 
-        for _ in range(4):
+        for _ in range(3):
             group.start_soon(ask_once)
 
-    assert [a.status_code for a in answers] == [200] * 4
+    assert [a.status_code for a in answers] == [200] * 3
     assert len({a.text for a in answers}) == 1
+
+
+async def test_too_many_searches_at_once_are_turned_away_and_the_slot_is_given_back(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = processing_api
+    assert api.perception is not None
+    api.perception.vector = FACES[0]
+    path = str(api.image("q.png"))
+    taken = threading.BoundedSemaphore(1)
+    taken.acquire()
+    monkeypatch.setattr(api.backend, "face_search_slots", taken)
+
+    busy = await api.client.post(FACE_SEARCH, json={"path": path})
+    taken.release()
+    again = await api.client.post(FACE_SEARCH, json={"path": path})
+    refused = await api.client.post(FACE_SEARCH, json={"path": str(api.folder / "nowhere.png")})
+    after = await api.client.post(FACE_SEARCH, json={"path": path})
+
+    assert error(busy, 429, "FACE_SEARCH_BUSY")["retryable"] is True
+    assert again.status_code == 200
+    assert refused.status_code == 400  # a refusal gives its slot back too
+    assert after.status_code == 200
+
+
+async def test_a_worker_output_lost_between_calls_is_a_retryable_503(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = processing_api
+    assert api.perception is not None
+
+    def lost(_pixels: Any, _detections: Any) -> Any:
+        raise ContractError(MLErrorCode.SHARED_MEMORY_UNAVAILABLE, "the output segment is gone")
+
+    monkeypatch.setattr(api.perception, "represent", lost)
+
+    response = await api.client.post(FACE_SEARCH, json={"path": str(api.image("q.png"))})
+
+    assert error(response, 503, "PERCEPTION_UNAVAILABLE")["retryable"] is True

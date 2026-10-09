@@ -17,8 +17,23 @@
 - A picture chosen by path has no preview in the web view (the backend reads the file; the web view never
   does), so its faces are listed without crops. Pictures dropped or pasted keep their crops.
 
+## Changes after the independent review
+
+The review also found issues in the face-search path this picker shares; fixed here:
+
+- A dialog that cannot be opened is shown, not swallowed.
+- An answer that was on its way when a forget, delete or merge event arrived is never kept: the screen asks
+  again until no event overlapped the request (`staleTime: Infinity` no longer lets a late answer stand).
+- Mixed-slash network paths (`/\\server`, `\\/server`) are refused like `\\server` and `//server`.
+- At most three face searches are in flight (reading, waiting or perceiving); more get `429
+  FACE_SEARCH_BUSY` (retryable) before their picture is read, which bounds the memory they hold together;
+  the upload buffer is checked per chunk and only one copy is kept.
+- A worker output lost between calls (a `ContractError`) is the retryable `503 PERCEPTION_UNAVAILABLE`.
+- Still a follow-up in the supervisor: a lease covering execute, copy and release shared by processing and
+  queries, so a processing crash cannot cost a query its output at all.
+
 ## Tests
 
-- `FaceSearch.native.test.tsx` (2): the chosen path is sent as `{path}` and a cancelled dialog sends nothing;
+- `FaceSearch.native.test.tsx` (3): the chosen path is sent as `{path}` and a cancelled dialog sends nothing;
   `backend.test.ts` covers the browser fallback. `cargo check` and `cargo fmt --check` pass locally; the
   dialog itself needs a human (a desktop run), as for `choose_images`.

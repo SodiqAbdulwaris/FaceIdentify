@@ -25,7 +25,12 @@ from backend.api.errors import ApiError
 from backend.api.routes.memory import BoundingBox, IdentitySummary, identity_summaries
 from backend.api.routes.processing import processing_settings
 from backend.api.routes.sources import media_limits
-from backend.api.startup import Backend, MediaLimits, ProcessingUnavailableError
+from backend.api.startup import (
+    Backend,
+    MediaLimits,
+    ProcessingSettings,
+    ProcessingUnavailableError,
+)
 from backend.app.identities.models import Identity
 from backend.app.processing.configuration import ProcessingConfigurationError
 from backend.app.recognition.face_query import FaceQuery, FaceQueryResult, QueriedFace
@@ -38,6 +43,7 @@ from backend.infrastructure.media.image import (
     ImageTooLargeError,
     UnsupportedImageError,
 )
+from backend.ml.contracts.protocol import ContractError
 from backend.ml.supervisor.supervisor import MLUnavailableError, WorkerFailedError
 
 router = APIRouter(tags=["search"])
@@ -93,7 +99,8 @@ def _read_query(raw: bytes, content_type: str, limits: MediaLimits) -> bytes:
         return raw
     try:
         path = json.loads(raw)["path"]
-        if not isinstance(path, str) or path.startswith(("\\\\", "//")):
+        # (Windows reads / as \ too, so //server and \\/server are network paths as well)
+        if not isinstance(path, str) or path.replace("/", "\\").startswith("\\\\"):
             raise ValueError
         with Path(path).open("rb") as handle:
             data = handle.read(limits.max_bytes + 1)
@@ -178,14 +185,33 @@ async def search_face(
     limits: Annotated[MediaLimits, Depends(media_limits)],
 ) -> FaceSearchResponse:
     settings = processing_settings(backend)
+    if not backend.face_search_slots.acquire(blocking=False):
+        raise ApiError(
+            429, "FACE_SEARCH_BUSY", "Other pictures are being searched. Try again in a moment.",
+            retryable=True,
+        )  # fmt: skip
+    try:
+        return await _search(request, library, backend, limits, settings)
+    finally:
+        backend.face_search_slots.release()
+
+
+async def _search(
+    request: Request,
+    library: Library,
+    backend: Backend,
+    limits: MediaLimits,
+    settings: ProcessingSettings,
+) -> FaceSearchResponse:
     content_type = request.headers.get("content-type", "")
     ceiling = JSON_BODY_LIMIT if "json" in content_type else limits.max_bytes
     received = bytearray()
     async for chunk in request.stream():  # (counted as it arrives: nothing over the limit is kept)
-        received += chunk
-        if len(received) > ceiling:
+        if len(received) + len(chunk) > ceiling:
             raise too_large()
+        received += chunk
     raw = bytes(received)
+    del received  # (one copy, not two, while the picture waits for the worker)
 
     def run() -> FaceSearchResponse:
         image = _read_query(raw, content_type, limits)
@@ -219,7 +245,7 @@ async def search_face(
             raise ApiError(
                 503, "PROCESSING_UNAVAILABLE", "No processing configuration is available."
             ) from None
-        except (PerceptionError, WorkerFailedError, MLUnavailableError):
+        except (PerceptionError, WorkerFailedError, MLUnavailableError, ContractError):
             raise ApiError(
                 503, "PERCEPTION_UNAVAILABLE", "The faces could not be looked for just now.",
                 retryable=True,

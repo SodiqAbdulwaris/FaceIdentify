@@ -81,7 +81,7 @@ face; people are shown as "Possible people" with their similarity.
 
 ## Tests
 
-- `tests/integration/test_api_face_search.py` (17), on a real library with planted perception: a known face
+- `tests/integration/test_api_face_search.py` (19), on a real library with planted perception: a known face
   finds its person nearest first with similarity; a stranger is not named; no face; a search writes no row
   and no file (every table count and every library file compared before and after, repeated, from a path
   and from bytes); path and bytes give the same answer; unreadable, unsupported, corrupt and oversized

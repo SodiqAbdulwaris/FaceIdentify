@@ -141,6 +141,31 @@ describe('face search', () => {
     await waitFor(() => expect(screen.queryByRole('link', { name: /Ada/ })).toBeNull())
   })
 
+  it('never keeps an answer that was on its way when something changed', async () => {
+    let release: (value: object) => void = () => undefined
+    let calls = 0
+    const { queryClient } = renderApp('/search', [
+      {
+        method: 'POST',
+        path: FACE,
+        respond: () => {
+          calls += 1
+          if (calls === 1) return new Promise((resolve) => (release = resolve)) // Ada, delayed
+          return answer([face({ possible_people: [] })]) // after she was forgotten
+        },
+      },
+    ])
+    await choose(picture())
+    await waitFor(() => expect(calls).toBe(1))
+
+    void queryClient.invalidateQueries({ queryKey: ['search'] }) // the forget event
+    release(answer([face()])) // the old answer arrives late
+
+    await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2))
+    await screen.findByRole('region', { name: 'Face 1 of the picture' })
+    expect(screen.queryByRole('link', { name: /Ada/ })).toBeNull()
+  })
+
   it('keeps neither the picture nor the answer once the screen is left', async () => {
     const { queryClient, router } = renderApp('/search', [
       { method: 'POST', path: FACE, respond: answer([face()]) },

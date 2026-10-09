@@ -13,7 +13,9 @@ vi.mock('@/native/backend', async (importOriginal) => ({
 const FACE = '/api/v1/search/face'
 const answer = { faces: [], ranking: { plan: 'FACE_QUERY', policy_version: 'v', similarity: 'x' } }
 
-beforeEach(() => choosePicture.mockReset())
+beforeEach(() => {
+  choosePicture.mockReset() // (not returned: a returned function would run as cleanup)
+})
 
 describe('face search in the desktop app', () => {
   it('searches with the path of the picture chosen in the native dialog, sending no bytes', async () => {
@@ -25,6 +27,17 @@ describe('face search in the desktop app', () => {
     await waitFor(() => expect(calls.filter((c) => c.path === FACE)).toHaveLength(1))
     expect(calls.find((c) => c.path === FACE)?.body).toEqual({ path: 'C:/pictures/a.png' })
     await screen.findByText('No face was found in this picture.')
+  })
+
+  it('says so when the dialog cannot be opened', async () => {
+    choosePicture.mockImplementation(async () => {
+      throw new Error('the dialog task failed')
+    })
+    renderApp('/search', [])
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a picture' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The file dialog could not be opened')
   })
 
   it('does nothing when the dialog is cancelled', async () => {

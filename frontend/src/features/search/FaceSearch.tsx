@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Link } from 'react-router'
 import { keys } from '@/api/keys'
@@ -22,6 +22,7 @@ const NOT_SUPPORTED = 'Only JPEG, PNG, BMP and WebP pictures can be searched wit
  */
 export function FaceSearch() {
   const { endpoints } = useBackend()
+  const queryClient = useQueryClient()
   // The picture lives here, not in the query cache: leaving the screen drops it.
   // (a picture chosen in the native dialog is only a path: the backend reads it, once)
   const [picture, setPicture] = useState<{ id: number; file?: File; path?: string } | null>(null)
@@ -31,10 +32,33 @@ export function FaceSearch() {
   const url = useObjectUrl(picture?.file)
   // An event that changes a face, a name or an image refreshes this like any search: the old answer
   // is hidden while it is asked again, so a forgotten or deleted person is never left on screen.
+  // Counts the invalidations of the search, so an answer asked before one is never kept after it.
+  const invalidations = useRef(0)
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (
+          event.type === 'updated' &&
+          event.action.type === 'invalidate' &&
+          event.query.queryKey[0] === 'search'
+        ) {
+          invalidations.current += 1
+        }
+      }),
+    [queryClient],
+  )
+  const ask = () =>
+    picture?.file ? endpoints.searchFace(picture.file) : endpoints.searchFaceByPath(picture?.path ?? '')
   const search = useQuery({
     queryKey: keys.faceSearch(picture?.id ?? 0),
-    queryFn: () =>
-      picture?.file ? endpoints.searchFace(picture.file) : endpoints.searchFaceByPath(picture?.path ?? ''),
+    queryFn: async () => {
+      for (;;) {
+        const before = invalidations.current
+        const answer = await ask()
+        // A forget, delete or merge that happened while this was on its way makes it stale: ask again.
+        if (before === invalidations.current) return answer
+      }
+    },
     enabled: picture !== null,
     gcTime: 0,
     staleTime: Infinity,
@@ -48,10 +72,14 @@ export function FaceSearch() {
       chooser.current?.click()
       return
     }
-    const path = await choosePicture()
-    if (path === null) return // the dialog was cancelled
-    setProblem(null)
-    setPicture((previous) => ({ id: (previous?.id ?? 0) + 1, path }))
+    try {
+      const path = await choosePicture()
+      if (path === null) return // the dialog was cancelled
+      setProblem(null)
+      setPicture((previous) => ({ id: (previous?.id ?? 0) + 1, path }))
+    } catch (error) {
+      setProblem(`The file dialog could not be opened: ${errorMessage(error)}`)
+    }
   }
 
   const take = (file: File | undefined) => {
