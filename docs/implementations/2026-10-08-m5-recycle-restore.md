@@ -29,7 +29,7 @@
   restore it, and a note when it is there; a person's faces from a recycled image say "From an image
   in the recycle bin" and are still counted. `ApiClient.delete`, `recycleSource`, `restoreSource`.
 - The agent design (idempotent repeats, the busy refusal, the error codes) is recorded in the API
-  spec as an agent design awaiting the owner's confirmation.
+  spec as an agent design (confirmed by the owner on 2026-10-09).
 
 ## Tests
 
