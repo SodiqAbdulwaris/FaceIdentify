@@ -519,6 +519,8 @@ describe('importing', () => {
         'being processed',
       )
       expect(screen.getByRole('img', { name: 'beach.png' })).toBeInTheDocument()
+      // the question closed on the refusal: focus is back on the button that opened it
+      expect(screen.getByRole('button', { name: 'Delete beach.png permanently' })).toHaveFocus()
     })
   })
 
