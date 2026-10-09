@@ -5,7 +5,7 @@ detail behind any line, follow its link into [`docs/implementations/`](../implem
 the work still to come see [`M3_M4_COMPLETION_PLAN.md`](M3_M4_COMPLETION_PLAN.md) and the per-task
 status in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md).
 
-_Last updated: 2026-10-09 (permanent source delete built). Keep this file true and short (rules:
+_Last updated: 2026-10-09 (forget identity and person built). Keep this file true and short (rules:
 [`documentation.md`](../../.agents/rules/documentation.md))._
 
 **Where we are:** M0 to M4 are done on the development profile (TST-038 and TST-039 close on the
@@ -13,7 +13,7 @@ real-model path in M5; the `buffalo_l` weights are chosen and run for real on CP
 to end on the development profile and survives a restart. Next is M5, the first real recognition
 milestone: [M5 plan](M5_PLAN.md).
 
-**What is next:** [M5 remaining work](M5_REMAINING_WORK.md): forget, search, and the assisted cross-source recognition gate. The owner decided on 2026-10-08 that cross-source recognition is *assisted* (ranked matches plus confirmation, TST-057A); *automatic* recognition (TST-057B) stays blocked pending a verified calibration.
+**What is next:** [M5 remaining work](M5_REMAINING_WORK.md): search, and the assisted cross-source recognition gate. The owner decided on 2026-10-08 that cross-source recognition is *assisted* (ranked matches plus confirmation, TST-057A); *automatic* recognition (TST-057B) stays blocked pending a verified calibration.
 
 **New to the code?** Read [`docs/research/codebase-learning-guide.md`](../research/codebase-learning-guide.md): twelve parts from Python basics to this repository's design, with a walkthrough of one photograph.
 

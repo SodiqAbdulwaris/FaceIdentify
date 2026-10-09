@@ -1648,7 +1648,7 @@ simply refetch everything. The server greets each connection with a `hello` mess
 - Request bodies are validated; error responses never echo user input or paths.
 - Original files are never modified; paths are resolved safely (no escaping the library root).
 - Model files are hash-verified before use; the worker loads exactly the bytes it hashed.
-- Biometric data is local; only `ForgetIdentity` [designed] removes it, with the erasure procedure of
+- Biometric data is local; only `ForgetIdentity` [built] removes it, with the erasure procedure of
   Part 6.6.
 - The model weights are licensed for research use; they stay local and are never committed.
 
@@ -1762,8 +1762,10 @@ that records Evidence and bumps revisions.
 | **Assign / remove** a person link | `POST /people/{id}/assign-identity`, `.../remove-identity` | |
 | **Read** | `GET /identities`, `/people`, `/sources/{id}/occurrences`, `/identities/{id}/occurrences` | authoritative (`ACTIVE`) data only |
 
-**Not built yet [designed]:** `ForgetIdentity` (the *only* operation that removes biometric memory; "forget person" runs it for each
-of a Person's identities), historical and name search, face search (query-only; never stores the
+**Built:** `ForgetIdentity` (`POST /identities/{id}/forget`: the *only* operation that removes biometric memory; `POST /people/{id}/forget` runs it for each
+of a Person's identities and keeps the name).
+
+**Not built yet [designed]:** historical and name search, face search (query-only; never stores the
 query), cross-source recognition on real models, and the M5 real-world gate.
 
 ## 8.6 Deleting is not one thing

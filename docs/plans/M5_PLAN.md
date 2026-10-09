@@ -297,7 +297,7 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
 
 ### Step 4. Lifecycle: recycle, restore, permanent delete, forget (TST-059, SEC-006)
 
-**4a (recycle and restore) built 2026-10-08** ([entry](../implementations/2026-10-08-m5-recycle-restore.md)): `DELETE /sources/{id}` and `POST /sources/{id}/restore`, the recycle bin view, and the recycled marker on occurrences. **4b (permanent delete) built 2026-10-09** ([entry](../implementations/2026-10-09-m5-permanent-source-delete.md)): `POST /sources/{id}/permanent-delete`, intent then bytes then vectors then one finalizing transaction, Evidence kept but detached, restart-proof. 4c (forget) follows.
+**4a (recycle and restore) built 2026-10-08** ([entry](../implementations/2026-10-08-m5-recycle-restore.md)): `DELETE /sources/{id}` and `POST /sources/{id}/restore`, the recycle bin view, and the recycled marker on occurrences. **4c (forget) built 2026-10-09** ([entry](../implementations/2026-10-09-m5-forget-identity.md)). **4b (permanent delete) built 2026-10-09** ([entry](../implementations/2026-10-09-m5-permanent-source-delete.md)): `POST /sources/{id}/permanent-delete`, intent then bytes then vectors then one finalizing transaction, Evidence kept but detached, restart-proof.
 
 - Recycle and restore routes over `recycle_source` and `restore_source` (built). Normal library
   browsing hides a recycled Source; identity views, counts and historical search keep its Occurrences,
@@ -318,8 +318,8 @@ Each item is its own PR (or more). Nothing in track R blocks steps 1 to 4.
     Person. It never deletes the Person record or its user-authored name and notes, which stay in
     People without visual support. A Person with several Identities can have one forgotten and keep
     the others.
-  - Nothing is built for Forget until the owner decides, and the decision then goes into this plan and
-    the specs as dated notes.
+  - Built 2026-10-09 as decided (the owner confirmed these definitions on 2026-10-07); the two
+    routes and their answers are recorded as an agent design in the API spec, section 8.3.
 - Tests: a forgotten or deleted memory cannot be resurrected by later processing or index rebuild,
   checked after a restart (TST-059) and by the byte-level erasure policy tests (SEC-006).
 
