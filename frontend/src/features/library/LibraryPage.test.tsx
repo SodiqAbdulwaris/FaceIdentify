@@ -480,6 +480,40 @@ describe('importing', () => {
       expect(queryClient.getQueryState(['runs'])?.isInvalidated).toBe(true)
     })
 
+    it('removes the card at once, even when the list cannot be refreshed afterwards', async () => {
+      const user = userEvent.setup()
+      let deleted = false
+      renderApp('/library', [
+        {
+          path: SOURCES,
+          respond: (call) =>
+            call.query.get('state') !== 'RECYCLED'
+              ? page([])
+              : deleted
+                ? failure(500, 'INTERNAL_ERROR', 'The list could not be read.')
+                : page([source({ id: 's1', display_name: 'beach.png' })]),
+        },
+        {
+          method: 'POST',
+          path: `${SOURCES}/s1/permanent-delete`,
+          status: 204,
+          respond: () => {
+            deleted = true
+            return null
+          },
+        },
+        media,
+      ])
+      await user.click(await screen.findByRole('button', { name: 'Recycle bin' }))
+      await screen.findByRole('img', { name: 'beach.png' })
+
+      await user.click(screen.getByRole('button', { name: 'Delete beach.png permanently' }))
+      await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
+
+      await waitFor(() => expect(screen.queryByRole('img', { name: 'beach.png' })).toBeNull())
+      expect(screen.queryByText('beach.png')).toBeNull()
+    })
+
     it('says so when part of the deletion could not finish yet', async () => {
       const user = userEvent.setup()
       inTheBin({ status: 202 })

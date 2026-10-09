@@ -53,7 +53,7 @@ export function RecycleControl({
           sourceId={source.id}
           name={source.display_name}
           onNotice={onNotice}
-          onGone={() => void navigate('/library')}
+          onGone={(notice) => void navigate('/library', { state: { notice } })}
         />
       ) : null}
     </div>

@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { keys } from '@/api/keys'
 import { useBackend } from '@/app/useBackend'
@@ -21,8 +22,10 @@ interface Props {
 export function SourceCard({ source, recycled = false, onNotice }: Props) {
   const { endpoints } = useBackend()
   const queryClient = useQueryClient()
+  // Deleted for good: the card goes at once, whatever the list refetch does next.
+  const [gone, setGone] = useState(false)
   const missing = source.availability !== 'AVAILABLE'
-  const image = useSourceImage(source.id, !missing)
+  const image = useSourceImage(source.id, !missing && !gone)
   // One request per card, so a second click elsewhere cannot make this button look idle again.
   const process = useMutation({
     mutationFn: () => endpoints.processSource(source.id),
@@ -50,6 +53,7 @@ export function SourceCard({ source, recycled = false, onNotice }: Props) {
       ]),
   })
 
+  if (gone) return null
   return (
     <li className="flex flex-col overflow-hidden rounded-lg border bg-card">
       <Link to={`/library/source/${source.id}`} className="block aspect-[4/3] bg-muted">
@@ -74,6 +78,7 @@ export function SourceCard({ source, recycled = false, onNotice }: Props) {
             sourceId={source.id}
             name={source.display_name}
             onNotice={onNotice}
+            onGone={() => setGone(true)}
             compact
           />
         ) : null}
