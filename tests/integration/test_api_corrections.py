@@ -272,10 +272,6 @@ def unresolved(api: Api, new_id: SeededUUIDs) -> Unresolved:
                 evidence_id=abstention.id, representation_id=representation.id, role="SUBJECT"
             )
         )
-        old = build.observation(
-            session.get(ProcessingRun, observation.processing_run_id), state="SUPERSEDED"
-        )
-        support = build.representation(old, state="ACTIVE", ann_key=2, identity_id=None)
         others = [build.identity().id for _ in range(3)]
         hidden = build.identity(state="PENDING").id  # not a person anyone can be told it is
         ranked = (
@@ -283,10 +279,16 @@ def unresolved(api: Api, new_id: SeededUUIDs) -> Unresolved:
             (others[0], 0.1), (others[1], 0.09), (others[2], 0.08),
         )  # fmt: skip
         for rank, (who, score) in enumerate(ranked):
+            seen_with = build.representation(  # the face this candidate was compared with
+                build.observation(
+                    session.get(ProcessingRun, observation.processing_run_id), state="SUPERSEDED"
+                ),
+                state="ACTIVE", ann_key=10 + rank, identity_id=who,
+            )  # fmt: skip
             build.add(
                 EvidenceCandidate(
                     evidence_id=abstention.id, rank=rank, identity_id=who, raw_similarity=score,
-                    decision="CANDIDATE", details_json=compared_with(support.id, score),
+                    decision="CANDIDATE", details_json=compared_with(seen_with.id, score),
                 )
             )  # fmt: skip
         stray = build.evidence(kind="RECOGNITION_ABSTAINED")  # cites this face only as a candidate
@@ -337,14 +339,29 @@ async def test_unresolved_faces_are_listed_with_who_they_resembled(
 
 
 async def likely_after_changing_alices_evidence(
-    api: Api, u: Unresolved, members: list[tuple[str, float]], *, erase_support: bool = False
+    api: Api,
+    u: Unresolved,
+    members: list[tuple[str, float]],
+    *,
+    erase_support: bool = False,
+    reassign_support: bool = False,
 ) -> list[tuple[str, float]]:
-    """Alice's recorded candidate is made of `members` (`support` and `self` are faces that
-    exist, `gone` one that does not; `erase_support` erases `support`'s memory); what the
-    unresolved-face list then says she resembled."""
+    """Alice's recorded candidate is made of `members`: `support` and `second` are faces of hers
+    that exist, `gone` one that does not. `erase_support` erases `support`'s memory and
+    `reassign_support` hands it to Bob. What the unresolved-face list then says she resembled."""
     assert api.backend.library is not None
     with api.backend.library.session_factory() as session:
-        [support] = session.scalars(select(Representation.id).where(Representation.ann_key == 2))
+        [support, second] = session.scalars(
+            select(Representation.id)
+            .where(Representation.identity_id == uuid.UUID(u.alice))
+            .order_by(Representation.ann_key)
+        )
+        if reassign_support:
+            session.execute(
+                update(Representation)
+                .where(Representation.id == support)
+                .values(identity_id=uuid.UUID(u.bob))
+            )
         if erase_support:
             session.execute(
                 update(Representation)
@@ -360,7 +377,7 @@ async def likely_after_changing_alices_evidence(
                         "representation_id": str(
                             {
                                 "support": support,
-                                "self": uuid.UUID(u.representation),
+                                "second": second,
                                 "gone": uuid.uuid4(),
                             }[which]
                         ),
@@ -394,13 +411,25 @@ async def test_a_hint_is_not_supported_by_a_face_whose_memory_was_erased(
     assert u.alice not in [who for who, _ in seen]
 
 
+async def test_a_hint_is_not_supported_by_a_face_that_now_belongs_to_someone_else(
+    api: Api, new_id: SeededUUIDs
+) -> None:
+    u = unresolved(api, new_id)
+
+    seen = await likely_after_changing_alices_evidence(
+        api, u, [("support", 0.4)], reassign_support=True
+    )
+
+    assert u.alice not in [who for who, _ in seen]  # that face was moved to Bob since
+
+
 async def test_a_hint_takes_the_best_of_the_faces_that_remain(
     api: Api, new_id: SeededUUIDs
 ) -> None:
     u = unresolved(api, new_id)
 
     seen = await likely_after_changing_alices_evidence(
-        api, u, [("support", 0.30), ("self", 0.35), ("gone", 0.99)]
+        api, u, [("support", 0.30), ("second", 0.35), ("gone", 0.99)]
     )
 
     assert [score for _, score in seen][:2] == [0.38, 0.35]

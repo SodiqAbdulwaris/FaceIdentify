@@ -226,18 +226,21 @@ def _likely(session: Session, representation_ids: list[uuid.UUID]) -> dict[uuid.
         (representation_id, identity_id, similarity, _members(details))
         for representation_id, identity_id, similarity, details in rows.all()
     ]
-    alive = set(
-        session.scalars(
-            select(Representation.id).where(
+    # A face supports a hint only while it exists, still holds its vector, and still belongs to
+    # the person the candidate was for (a correction or a split may have moved it since).
+    alive = {
+        face: identity
+        for face, identity in session.execute(
+            select(Representation.id, Representation.identity_id).where(
                 Representation.id.in_({m for *_, members in compared for m in members}),
                 Representation.state.in_(_SUPPORTING),
             )
-        )
-    )
+        ).tuples()
+    }
     best: dict[uuid.UUID, dict[uuid.UUID, float]] = {}
     for representation_id, identity_id, _similarity, members in compared:
         assert identity_id is not None  # (filtered above)
-        supported = [score for member, score in members.items() if member in alive]
+        supported = [score for member, score in members.items() if alive.get(member) == identity_id]
         if supported:
             per = best.setdefault(representation_id, {})
             per[identity_id] = max(per.get(identity_id, -2.0), max(supported))
