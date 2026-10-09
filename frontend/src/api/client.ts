@@ -85,8 +85,16 @@ export class ApiClient {
   }
 
   /** A command whose answer is `204` (no body) or carries a body (for example a `202`). */
-  async command<T>(path: string): Promise<{ status: number; body: T | null }> {
-    const response = await this.send(path, { method: 'POST' })
+  async command<T>(path: string, request?: unknown): Promise<{ status: number; body: T | null }> {
+    const init: RequestInit =
+      request === undefined
+        ? { method: 'POST' }
+        : {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request),
+          }
+    const response = await this.send(path, init)
     const body = response.status === 204 ? null : ((await response.json()) as T)
     return { status: response.status, body }
   }

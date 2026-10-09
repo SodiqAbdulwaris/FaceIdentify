@@ -17,6 +17,7 @@ export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
       ...(typeof sourceId === 'string' ? [keys.source(sourceId)] : []),
       keys.sources, // a source's processing status is part of the library list
       keys.identities, // an accepted run creates and grows identities
+      keys.people, // a person's identity count follows
       ['identity'], // every open identity page (their counts and faces change)
     ]
   }
@@ -26,7 +27,7 @@ export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
     event.type.startsWith('identity.')
   ) {
     // A name or a corrected face shows on the people list, every person page and every source.
-    return [keys.identities, ['identity'], ['source']]
+    return [keys.identities, keys.people, ['identity'], ['source']]
   }
   return []
 }

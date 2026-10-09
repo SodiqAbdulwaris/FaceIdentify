@@ -35,6 +35,7 @@ export function NameForm({
       Promise.all([
         queryClient.invalidateQueries({ queryKey: keys.identity(identityId) }),
         queryClient.invalidateQueries({ queryKey: keys.identities }),
+        queryClient.invalidateQueries({ queryKey: keys.people }),
         queryClient.invalidateQueries({ queryKey: ['source'] }),
       ]),
   })

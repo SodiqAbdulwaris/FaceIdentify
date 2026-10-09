@@ -62,6 +62,7 @@ function Unresolved({ sourceId, face }: { sourceId: string; face: UnresolvedFace
       Promise.all([
         queryClient.invalidateQueries({ queryKey: keys.sourceUnresolved(sourceId) }),
         queryClient.invalidateQueries({ queryKey: keys.identities }),
+        queryClient.invalidateQueries({ queryKey: keys.people }),
         queryClient.invalidateQueries({ queryKey: ['identity'] }),
         queryClient.invalidateQueries({ queryKey: ['source'] }),
       ]),

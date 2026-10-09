@@ -13,7 +13,56 @@ const face = {
   face_crop: null,
 }
 
+const person = (over: Record<string, unknown> = {}) => ({
+  id: 'p1',
+  display_name: 'Ada',
+  revision: 1,
+  identity_count: 0,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  ...over,
+})
+
 describe('people', () => {
+  it('lists the named people of every page, not only the first', async () => {
+    renderApp('/identities', [
+      { path: PEOPLE, respond: page([identity({ id: 'a1' })]) },
+      {
+        path: '/api/v1/people',
+        respond: (call) =>
+          call.query.get('cursor') === 'more'
+            ? page([person({ id: 'p2', display_name: 'Bob' })])
+            : page([person({ id: 'p1', display_name: 'Ada' })], 'more'),
+      },
+      media,
+    ])
+
+    const section = await screen.findByRole('region', { name: 'People without a remembered face' })
+
+    expect(await within(section).findByText('Bob')).toBeInTheDocument()
+    expect(within(section).getByText('Ada')).toBeInTheDocument()
+  })
+
+  it('also lists a named person the app remembers no face for, and says it cannot recognise them', async () => {
+    renderApp('/identities', [
+      { path: PEOPLE, respond: page([identity({ id: 'a1' })]) },
+      {
+        path: '/api/v1/people',
+        respond: page([
+          person({ id: 'p1', display_name: 'Ada', identity_count: 0 }),
+          person({ id: 'p2', display_name: 'Bob', identity_count: 2 }),
+        ]),
+      },
+      media,
+    ])
+
+    const section = await screen.findByRole('region', { name: 'People without a remembered face' })
+
+    expect(within(section).getByText('Ada')).toBeInTheDocument()
+    expect(within(section).queryByText('Bob')).toBeNull() // Bob still has faces: he is in the list
+    expect(within(section).getByText(/cannot recognise them/)).toBeInTheDocument()
+  })
+
   it('invites the user to process images when nobody is known yet', async () => {
     renderApp('/identities', [{ path: PEOPLE, respond: page([]) }])
 

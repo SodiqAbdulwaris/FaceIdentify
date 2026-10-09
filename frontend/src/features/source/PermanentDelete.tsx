@@ -55,6 +55,7 @@ export function PermanentDelete({
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: keys.sources }),
         queryClient.invalidateQueries({ queryKey: keys.identities }),
+        queryClient.invalidateQueries({ queryKey: keys.people }),
         queryClient.invalidateQueries({ queryKey: ['identity'] }),
         queryClient.invalidateQueries({ queryKey: keys.runs }),
         queryClient.invalidateQueries({ queryKey: ['run'] }),
