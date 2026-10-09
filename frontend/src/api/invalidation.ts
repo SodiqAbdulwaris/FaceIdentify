@@ -6,7 +6,8 @@ import { keys } from './keys'
 
 export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
   if (event.type.startsWith('source.')) {
-    return [keys.sources, keys.source(event.resource.id)]
+    // ['identity']: a face of a recycled image carries a marker on every open person page
+    return [keys.sources, keys.source(event.resource.id), ['identity']]
   }
   if (event.type.startsWith('processing_run.')) {
     const sourceId = event.data.source_id

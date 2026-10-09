@@ -15,7 +15,11 @@ const event = (type: string, id: string, data: Record<string, unknown> = {}): Ev
 
 describe('staleBecauseOf', () => {
   it('a new source makes the library list and that source stale', () => {
-    expect(staleBecauseOf(event('source.created', 's1'))).toEqual([keys.sources, keys.source('s1')])
+    expect(staleBecauseOf(event('source.created', 's1'))).toEqual([
+      keys.sources,
+      keys.source('s1'),
+      ['identity'],
+    ])
   })
 
   it('a run change makes the run, its source, the library and the people stale', () => {
