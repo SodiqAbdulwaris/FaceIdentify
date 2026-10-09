@@ -105,7 +105,9 @@ async def test_an_unknown_source_is_not_found_either_way(api: Api) -> None:
     error(await api.client.post(f"{SOURCES}/{missing}/restore"), 404, "SOURCE_NOT_FOUND")
 
 
-@pytest.mark.parametrize("state", ["RUNNING", "PENDING", "PAUSED", "FINALIZING", "CANCELLING"])
+@pytest.mark.parametrize(
+    "state", ["RUNNING", "PENDING", "PAUSING", "PAUSED", "FINALIZING", "CANCELLING"]
+)
 async def test_a_source_being_processed_is_not_recycled_until_that_ends(
     api: Api, clock: FrozenClock, new_id: SeededUUIDs, state: str
 ) -> None:
