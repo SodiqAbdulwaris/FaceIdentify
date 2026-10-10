@@ -12,7 +12,8 @@ it only through its HTTP API, as the desktop app does:
 1. Enrol: for each chosen person, import all but the held-out photographs (each a separate Source),
    process them, and *place* each photograph's subject face into that person's identity (this stands
    in for the human confirmation that assisted recognition relies on; automatic matching is off, so
-   nothing is placed by the application) and name the person.
+   the application places nothing by similarity, though it may start a new identity for a face
+   nobody resembles, which is then adopted or corrected) and name the person.
 2. Query (TST-057A): every held-out photograph is searched by face (`POST /search/face`). The people
    offered are ranked by similarity; Recall@1, Recall@5 and the mean reciprocal rank are measured
    over
@@ -151,12 +152,28 @@ async def running(settings: LibrarySettings, providers: tuple[str, ...]) -> Any:
 def choose_people(
     manifest: dict[str, Any], dataset: Path, count: int, minimum: int
 ) -> list[dict[str, Any]]:
-    """People with enough photographs, in a stable order that depends only on their names."""
+    """People with enough photographs, in a stable order that depends only on their names.
+
+    Every photograph must lie inside the dataset folder, and each distinct picture is used once
+    (by content): a picture listed twice, or the same bytes under two names, could otherwise be
+    enrolled and queried, and a query that finds itself inflates every number.
+    """
+    root = dataset.resolve()
+    seen: set[str] = set()
     people = []
     for name, entries in manifest.items():
-        files = sorted(
-            dataset / entry["file"] for entry in entries if (dataset / entry["file"]).is_file()
-        )
+        files = []
+        for entry in entries:
+            path = (dataset / entry["file"]).resolve()
+            if root not in path.parents:
+                raise SystemExit(f"{entry['file']} is outside the dataset folder")
+            if not path.is_file():
+                continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest not in seen:
+                seen.add(digest)
+                files.append(path)
+        files.sort()
         if len(files) >= minimum:
             held = max(1, len(files) // 4)
             people.append({"name": name, "enrol": files[:-held], "query": files[-held:]})
@@ -195,6 +212,30 @@ async def wait_for_runs(gate: Gate, run_ids: list[str]) -> dict[str, str]:
     return states
 
 
+async def faces_of(gate: Gate, source_id: str) -> list[dict[str, Any]]:
+    """Every face of a photograph: the ones nobody has placed and the ones already placed."""
+    unplaced = (await gate.get(f"/sources/{source_id}/unresolved-faces"))["items"]
+    placed = (await gate.get(f"/sources/{source_id}/occurrences"))["items"]
+    faces = [
+        {
+            "bounding_box": f["bounding_box"],
+            "representation_id": f["representation_id"],
+            "occurrence": None,
+        }
+        for f in unplaced
+    ]
+    faces += [
+        {
+            "bounding_box": o["representative_observation"]["bounding_box"],
+            "representation_id": None,
+            "occurrence": o,
+        }
+        for o in placed
+        if o["representative_observation"]
+    ]
+    return faces
+
+
 async def enrol(
     gate: Gate, people: list[dict[str, Any]], log: dict[str, Any]
 ) -> dict[str, dict[str, Any]]:
@@ -227,20 +268,32 @@ async def enrol(
         }
         for path in person["enrol"]:
             source_id = sources[path]
-            faces = (await gate.get(f"/sources/{source_id}/unresolved-faces"))["items"]
+            faces = await faces_of(gate, source_id)
             chosen = subject(faces, "bounding_box")
             if chosen is None:
                 skipped["no_face" if not faces else "no_subject"] += 1
                 continue
-            placed = await gate.post(
-                f"/representations/{chosen['representation_id']}/resolve",
-                {"identity_id": record["identity_id"]},
-            )
+            if chosen["occurrence"] is None:  # not placed by the application: place it
+                placed = await gate.post(
+                    f"/representations/{chosen['representation_id']}/resolve",
+                    {"identity_id": record["identity_id"]},
+                )
+                identity_id = placed["identity_id"]
+            else:  # the application already made an identity for it (an empty library does)
+                identity_id = chosen["occurrence"]["identity_id"]
+                if record["identity_id"] not in (None, identity_id):
+                    await gate.post(
+                        f"/occurrences/{chosen['occurrence']['id']}/reassign",
+                        {
+                            "expected_identity_id": identity_id,
+                            "identity_id": record["identity_id"],
+                        },
+                    )
+                    identity_id = record["identity_id"]
             if record["identity_id"] is None:
-                record["identity_id"] = placed["identity_id"]
+                record["identity_id"] = identity_id
                 named = await gate.post(
-                    "/people",
-                    {"display_name": person["name"], "identity_id": placed["identity_id"]},
+                    "/people", {"display_name": person["name"], "identity_id": identity_id}
                 )
                 record["person_id"] = named["id"]
             record["sources"].append(source_id)
@@ -479,6 +532,13 @@ async def main_async(args: argparse.Namespace) -> int:
         ]
         log["restart_metrics_after_workflow"] = metrics(again)
 
+    used = hashlib.sha256(
+        b"".join(
+            hashlib.sha256(path.read_bytes()).digest()
+            for person in people
+            for path in sorted(person["enrol"] + person["query"])
+        )
+    ).hexdigest()
     weights = hashlib.sha256(
         json.dumps(sorted(os.listdir(state / "runtime" / "packages"))).encode()
     ).hexdigest()
@@ -501,6 +561,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "dataset_manifest_sha256": hashlib.sha256(
                 (dataset / "manifest.json").read_bytes()
             ).hexdigest(),
+            "photographs_used_sha256": used,  # (the manifest holds no per-file digest)
         },
         "workflow_checks": checks,
         "log": log,

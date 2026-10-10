@@ -41,18 +41,35 @@ as measured against provisional labels, not as verified.**
 
 | Measure | Value |
 |---|---|
-| People chosen / photographs processed / runs failed | 40 / 495 / 0 |
-| Enrolment photographs skipped (no face / no clear subject) | 82 / 244 |
-| Eligible held-out queries (a clear subject, person has 2+ enrolled photographs) | 46 (105 held-out photographs left out) |
-| Recall@1 | 0.717 (Wilson 95%: 0.575 to 0.827) |
-| Recall@5 | 0.804 (0.668 to 0.893) |
-| MRR | 0.754 |
-| Queries wrote nothing | yes: sources, identities and runs counts equal before and after (495, 39, 495) |
+| People chosen / photographs processed / runs failed | 40 / 475 / 0 |
+| Enrolment photographs skipped (no face / no clear subject) | 77 / 232 |
+| Eligible held-out queries (a clear subject, person has 2+ enrolled photographs) | 46 (95 held-out photographs left out) |
+| Recall@1 | 0.739 (Wilson 95%: 0.597 to 0.844) |
+| Recall@5 | 0.826 (0.693 to 0.909) |
+| MRR | 0.775 |
+| Queries wrote nothing | yes: sources, identities and runs counts equal before and after (475, 36, 475) |
 | Workflow checks | 10 of 10 pass, including the restart |
 
 Reading: the numbers are low for a recognition product and the set is small, formal, skewed to adult official
 photographs and group shots (half of the enrolment photographs had no clear subject). They describe ranked
 suggestions that a person confirms, which is what assisted recognition is.
+
+## Changes after the independent review
+
+The review found flaws in the script that would have flattered or invalidated the numbers; all were fixed and the
+gate was re-run (the numbers above are from the re-run; the first run, before the fixes, gave Recall@1 0.717,
+Recall@5 0.804, MRR 0.754 on 495 photographs):
+
+- **Enrolment now sees faces the application already placed** (an empty library makes an identity for a face
+  nobody resembles), adopting or correcting them instead of skipping the photograph or naming a bystander.
+- **Holdout is by picture content**: every distinct picture is used once (a listed-twice entry or the same bytes
+  under two names is dropped), so no query can find itself; a manifest entry outside the dataset folder stops the
+  run. The manifest holds no per-file digest (the builder's docstring says it does: to be corrected when the set
+  is rebuilt), so the report records one digest of all photographs used instead.
+- Face search regression test for the 50-face shortlist, and a picture id unique across visits to the Search
+  screen (an earlier pending search can no longer be taken for a later picture's answer).
+- The "queries wrote nothing" check compares counts of sources, identities and runs over every page; it cannot
+  see other writes. The backend tests compare every row and file hash.
 
 ## For the owner
 

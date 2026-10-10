@@ -32,6 +32,7 @@ from backend.ml.contracts.messages import Detection
 from backend.ml.contracts.protocol import ContractError, MLErrorCode
 from backend.ml.supervisor.supervisor import MLUnavailableError
 from tests.fixtures.api import Api, error, processing_app
+from tests.integration.test_api_memory import processed
 from tests.integration.test_api_search import FACES, face, name_identity
 
 FACE_SEARCH = "/api/v1/search/face"
@@ -488,3 +489,18 @@ async def test_a_worker_output_lost_between_calls_is_a_retryable_503(
     response = await api.client.post(FACE_SEARCH, json={"path": str(api.image("q.png"))})
 
     assert error(response, 503, "PERCEPTION_UNAVAILABLE")["retryable"] is True
+
+
+async def test_a_person_beyond_the_nearest_few_faces_is_still_offered(processing_api: Api) -> None:
+    api = processing_api
+    assert api.perception is not None
+    await name_identity(api, await face(api, "x0.png", 0), "Xavier")
+    for index in range(1, 7):  # seven faces of one person, all nearer than anyone else
+        await face(api, f"x{index}.png", 0)
+    api.perception.vector = FACES[1]
+    await name_identity(api, await processed(api, "y.png"), "Yolanda")
+
+    found = await look(api, FACES[0])
+
+    names = [p["identity"]["person"]["display_name"] for p in found["faces"][0]["possible_people"]]
+    assert names == ["Xavier", "Yolanda"]  # the processing shortlist (2 here) would stop at Xavier
