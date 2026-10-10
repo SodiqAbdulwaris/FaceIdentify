@@ -79,6 +79,10 @@ class FaceSearchResponse(BaseModel):
     ranking: FaceRanking
 
 
+# How many nearest faces a search looks at, so several people can be ranked (the processing
+# shortlist is small because it only has to judge one match). Agent decision, M5 step 8.
+SEARCH_SHORTLIST = 50
+
 # A JSON body only names a file; anything longer than this is not one.
 JSON_BODY_LIMIT = 8192
 
@@ -224,7 +228,7 @@ async def _search(
             planner=settings.planner,
             request_for=settings.request_for,
             max_pixels=settings.max_pixels,
-            recognition_k=settings.recognition_k,
+            recognition_k=max(settings.recognition_k, SEARCH_SHORTLIST),
         )
         try:
             with backend.face_search_gate:
