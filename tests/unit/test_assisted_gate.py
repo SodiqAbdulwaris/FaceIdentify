@@ -3,7 +3,15 @@
 import json
 from pathlib import Path
 
-from evaluation.assisted_recognition_gate import choose_people, metrics, ranking, subject
+import pytest
+
+from evaluation.assisted_recognition_gate import (
+    choose_people,
+    faces_of,
+    metrics,
+    ranking,
+    subject,
+)
 
 
 def face(width: float, height: float) -> dict[str, dict[str, float]]:
@@ -80,7 +88,7 @@ def test_people_are_chosen_by_a_stable_order_and_hold_out_a_quarter_of_their_pho
         manifest[name] = []
         for index in range(count):
             file = f"{name}/{index:02}.jpg"
-            (tmp_path / file).write_bytes(b"x")
+            (tmp_path / file).write_bytes(file.encode())  # (every picture different)
             manifest[name].append({"file": file})
     (tmp_path / "Bob" / "04.jpg").unlink()  # listed but missing: not counted
 
@@ -91,3 +99,55 @@ def test_people_are_chosen_by_a_stable_order_and_hold_out_a_quarter_of_their_pho
     assert (len(by_name["Ada"]["enrol"]), len(by_name["Ada"]["query"])) == (6, 2)
     assert (len(by_name["Bob"]["enrol"]), len(by_name["Bob"]["query"])) == (3, 1)
     assert choose_people(manifest, tmp_path, count=5, minimum=4) == chosen
+
+
+def test_a_picture_is_used_once_even_when_listed_twice_or_copied_under_another_name(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "Ada").mkdir()
+    entries = []
+    for index in range(8):
+        file = f"Ada/{index:02}.jpg"
+        (tmp_path / file).write_bytes(
+            f"picture {index % 6}".encode()
+        )  # 00 and 06 are the same bytes
+        entries.append({"file": file})
+    entries.append({"file": "Ada/00.jpg"})  # listed twice
+
+    [ada] = choose_people({"Ada": entries}, tmp_path, count=1, minimum=4)
+
+    used = [path.read_bytes() for path in ada["enrol"] + ada["query"]]
+    assert len(used) == len(set(used)) == 6  # six distinct pictures
+    assert not set(ada["enrol"]) & set(ada["query"])  # nothing is on both sides
+
+
+def test_a_listed_file_outside_the_dataset_is_refused(tmp_path: Path) -> None:
+    dataset = tmp_path / "set"
+    dataset.mkdir()
+    (tmp_path / "elsewhere.jpg").write_bytes(b"x")
+
+    with pytest.raises(SystemExit, match="outside the dataset folder"):
+        choose_people({"Ada": [{"file": "../elsewhere.jpg"}]}, dataset, count=1, minimum=1)
+
+
+async def test_placed_and_unplaced_faces_are_both_considered() -> None:
+    class Gate:
+        async def get(self, path: str) -> dict[str, list[dict[str, object]]]:
+            box = {"x": 0, "y": 0, "width": 0.5, "height": 0.5}
+            if path.endswith("unresolved-faces"):
+                return {"items": [{"bounding_box": box, "representation_id": "r1"}]}
+            return {
+                "items": [
+                    {
+                        "id": "o1",
+                        "identity_id": "i1",
+                        "representative_observation": {"bounding_box": box},
+                    },
+                    {"id": "o2", "identity_id": "i2", "representative_observation": None},
+                ]
+            }
+
+    faces = await faces_of(Gate(), "s1")  # type: ignore[arg-type]
+
+    assert [f["representation_id"] for f in faces] == ["r1", None]
+    assert [f["occurrence"] and f["occurrence"]["id"] for f in faces] == [None, "o1"]

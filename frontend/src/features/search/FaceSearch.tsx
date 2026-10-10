@@ -12,6 +12,10 @@ import { errorMessage } from '../library/messages'
 import { useObjectUrl } from '../useSourceImage'
 
 const SUPPORTED = ['image/jpeg', 'image/png', 'image/bmp', 'image/webp']
+// Unique across visits to the screen: an answer still on its way for an earlier picture can never be
+// taken for the answer to a later one that happens to reuse a number.
+let pictures = 0
+const nextPictureId = () => (pictures += 1)
 const NOT_SUPPORTED = 'Only JPEG, PNG, BMP and WebP pictures can be searched with.'
 
 /**
@@ -76,7 +80,7 @@ export function FaceSearch() {
       const path = await choosePicture()
       if (path === null) return // the dialog was cancelled
       setProblem(null)
-      setPicture((previous) => ({ id: (previous?.id ?? 0) + 1, path }))
+      setPicture({ id: nextPictureId(), path })
     } catch (error) {
       setProblem(`The file dialog could not be opened: ${errorMessage(error)}`)
     }
@@ -89,7 +93,7 @@ export function FaceSearch() {
       return
     }
     setProblem(null)
-    setPicture((previous) => ({ id: (previous?.id ?? 0) + 1, file }))
+    setPicture({ id: nextPictureId(), file })
   }
 
   useEffect(() => {

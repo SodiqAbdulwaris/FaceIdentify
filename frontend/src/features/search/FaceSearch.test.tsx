@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { identity } from '@/test/fixtures'
-import { apiError, renderApp } from '@/test/harness'
+import { apiError, page, renderApp } from '@/test/harness'
 
 const FACE = '/api/v1/search/face'
 
@@ -164,6 +164,31 @@ describe('face search', () => {
     await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2))
     await screen.findByRole('region', { name: 'Face 1 of the picture' })
     expect(screen.queryByRole('link', { name: /Ada/ })).toBeNull()
+  })
+
+  it('never shows the answer of an earlier picture for a later one after coming back', async () => {
+    let calls = 0
+    const { router } = renderApp('/search', [
+      { path: '/api/v1/sources', respond: page([]) },
+      {
+        method: 'POST',
+        path: FACE,
+        respond: () => {
+          calls += 1
+          if (calls === 1) return new Promise(() => undefined) // picture A never answers
+          return answer([face({ possible_people: [] })]) // picture B: nobody in particular
+        },
+      },
+    ])
+    await choose(picture())
+    await waitFor(() => expect(calls).toBe(1))
+    await router.navigate('/library')
+    await router.navigate('/search')
+
+    await choose(picture())
+
+    expect(await screen.findByRole('region', { name: 'Face 1 of the picture' })).toBeInTheDocument()
+    expect(calls).toBe(2) // B asked for itself instead of reusing A's request
   })
 
   it('keeps neither the picture nor the answer once the screen is left', async () => {

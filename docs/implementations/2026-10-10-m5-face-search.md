@@ -81,11 +81,11 @@ face; people are shown as "Possible people" with their similarity.
 
 ## Tests
 
-- `tests/integration/test_api_face_search.py` (19), on a real library with planted perception: a known face
+- `tests/integration/test_api_face_search.py` (20), on a real library with planted perception: a known face
   finds its person nearest first with similarity; a stranger is not named; no face; a search writes no row
   and no file (every table count and every library file compared before and after, repeated, from a path
   and from bytes); path and bytes give the same answer; unreadable, unsupported, corrupt and oversized
   pictures; forgotten, deleted and recycled people; perception and configuration failures; poor detection
   and an empty library; a person seen twice; and the same answer after restarting the application.
-- `frontend/src/features/search/FaceSearch.test.tsx` (9).
+- `frontend/src/features/search/FaceSearch.test.tsx` (10).
 - `tests/fixtures/api.py` gained `processing_app`, so a test can restart the application on one library.
