@@ -45,6 +45,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-09 | [M5 step 5a: historical and name search](2026-10-09-m5-search-people-and-history.md) | done; TST-055 |
 | 2026-10-10 | [M5 step 5b: face search](2026-10-10-m5-face-search.md) | done; TST-056 |
 | 2026-10-10 | [M5 step 5b follow-up: native picture picker](2026-10-10-m5-native-picture-picker.md) | done; TST-056 |
+| 2026-10-10 | [M5 step 8: assisted recognition and the real-world gate](2026-10-10-m5-assisted-recognition-gate.md) | evidence recorded; TST-057A awaits the owner |
 | 2026-10-09 | [M5 step 4c, part 1: revision 0010](2026-10-09-m5-revision-0010.md) | done; TST-059, TST-032 |
 | 2026-10-09 | [M5 step 4b: permanent deletion of a source](2026-10-09-m5-permanent-source-delete.md) | done; TST-059 second part |
 | 2026-10-08 | [M5 step 4a: recycle and restore a source](2026-10-08-m5-recycle-restore.md) | done; TST-059 first part |
