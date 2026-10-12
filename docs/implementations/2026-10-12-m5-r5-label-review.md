@@ -38,7 +38,7 @@
   photographs never count.
 - `evaluation/assisted_recognition_gate.py` takes `--manifest <verified manifest>`, so the same script produces the
   TST-057B numbers from verified labels. Unknown-identity (open-set) reporting separate from closed-set retrieval
-  is **not built yet** (see "Next").
+  was **not built yet** when this entry was written (built later the same day: see [the open-set entry](2026-10-12-m5-open-set-evaluation.md)).
 - Tests: `tests/unit/test_label_review.py` (18) and the gate's integrity checks in `test_assisted_gate.py`.
 - Smoke-checked on the real set: 44 candidate identities, 662 photographs listed, images served.
 
