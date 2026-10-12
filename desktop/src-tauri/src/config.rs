@@ -77,6 +77,22 @@ pub fn resolve_python(from_environment: Option<String>, repository: &Path) -> Pa
     }
 }
 
+/// The origins the web view is served from, which the host must be told to answer (the web
+/// view is a different origin from the loopback server). The packaged app's origin on Windows
+/// (`http` or `https` by Tauri's setting) and on the other platforms; in a debug build also the
+/// Vite dev server named in `tauri.conf.json`.
+pub fn web_view_origins(debug_build: bool) -> Vec<String> {
+    let mut origins = vec![
+        "http://tauri.localhost".to_string(),
+        "https://tauri.localhost".to_string(),
+        "tauri://localhost".to_string(),
+    ];
+    if debug_build {
+        origins.push("http://localhost:5173".to_string());
+    }
+    origins
+}
+
 /// Whether the backend runs with the fake catalog and perception. On in debug builds (so the
 /// workflow can be tried before real models exist), off in release builds; the environment can
 /// say either way. Never a release setting.
@@ -91,6 +107,17 @@ pub fn development_profile(from_environment: Option<String>, debug_build: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dev_server_is_an_allowed_origin_only_in_a_debug_build() {
+        let release = web_view_origins(false);
+        let debug = web_view_origins(true);
+
+        assert!(release.contains(&"http://tauri.localhost".to_string()));
+        assert!(!release.iter().any(|o| o.contains("5173")));
+        assert!(debug.contains(&"http://localhost:5173".to_string()));
+        assert!(debug.iter().all(|o| !o.contains('*')));
+    }
 
     #[test]
     fn the_picker_offers_exactly_the_formats_the_backend_imports() {

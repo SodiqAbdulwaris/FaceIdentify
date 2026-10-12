@@ -368,6 +368,7 @@ def create_backend_app(
     settings: LibrarySettings,
     processing: ProcessingSettings | None = None,
     media_limits: MediaLimits | None = None,
+    allowed_origins: tuple[str, ...] = (),
 ) -> FastAPI:
     """The authenticated application whose lifespan opens the library (and, when `processing` is
     given, then starts the scheduler), whose `/readiness` reports the real lifecycle, and which
@@ -380,6 +381,7 @@ def create_backend_app(
         readiness=backend.readiness,
         lifespan=backend_lifespan(backend),
         events=backend.events,
+        allowed_origins=allowed_origins,
     )
     app.include_router(api_router)
     return app
