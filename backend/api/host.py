@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -69,6 +70,8 @@ class HostOptions:
     development_profile: bool = False
     # Stop gracefully when standard input reaches end of file.
     stdin_lifeline: bool = False
+    # The web view origins that may read answers (the shell names them; none by default).
+    allowed_origins: tuple[str, ...] = ()
 
 
 def _process_id(text: str) -> int:
@@ -77,6 +80,16 @@ def _process_id(text: str) -> int:
     if value <= 0:
         raise argparse.ArgumentTypeError("a process id is positive")
     return value
+
+
+_ORIGIN = re.compile(r"^(https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?|tauri://localhost)$")
+
+
+def _origin(text: str) -> str:
+    """One exact origin: a scheme, a host and perhaps a port. No `*`, no path, no list."""
+    if not _ORIGIN.fullmatch(text):
+        raise argparse.ArgumentTypeError(f"not an exact origin: {text!r}")
+    return text
 
 
 def parse_options(argv: Sequence[str]) -> HostOptions:
@@ -95,6 +108,13 @@ def parse_options(argv: Sequence[str]) -> HostOptions:
         action="store_true",
         help="shut down gracefully when standard input is closed",
     )
+    parser.add_argument(
+        "--allow-origin",
+        action="append",
+        type=_origin,
+        default=[],
+        help="a web view origin allowed to read answers (repeatable; exact origins only)",
+    )
     arguments = parser.parse_args(list(argv))  # a usage error exits 2, as argparse does
     return HostOptions(
         arguments.library_root,
@@ -102,6 +122,7 @@ def parse_options(argv: Sequence[str]) -> HostOptions:
         arguments.parent_pid,
         arguments.development_profile,
         arguments.stdin_lifeline,
+        tuple(arguments.allow_origin),
     )
 
 
@@ -224,6 +245,7 @@ async def serve(
         if options.development_profile
         else real_processing(library, providers=providers_from(os.environ)),
         MediaLimits(PROVISIONAL_MAX_PIXELS, PROVISIONAL_MAX_BYTES),
+        options.allowed_origins,
     )
     listener = _loopback_listener()  # from here on, whatever happens, it is closed below
     server = uvicorn.Server(

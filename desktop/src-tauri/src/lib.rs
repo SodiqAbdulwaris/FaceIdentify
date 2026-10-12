@@ -129,6 +129,7 @@ fn start_backend(app: &AppHandle) {
         working_dir: repository,
         library_root: backend.library_root.clone(),
         local_state_root,
+        allowed_origins: config::web_view_origins(cfg!(debug_assertions)),
         development_profile: config::development_profile(
             std::env::var(config::DEVELOPMENT_PROFILE_ENV).ok(),
             cfg!(debug_assertions),

@@ -10,12 +10,13 @@ import asyncio
 import base64
 import binascii
 import hmac
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from typing import Any, Final
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from starlette.websockets import WebSocketDisconnected
@@ -77,6 +78,7 @@ def create_app(
     readiness: Callable[[], BackendReadiness] | None = None,
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
     events: EventHub | None = None,
+    allowed_origins: Sequence[str] = (),
 ) -> FastAPI:
     """Build an in-memory-only authenticated sidecar application.
 
@@ -101,6 +103,22 @@ def create_app(
         if not _http_authorized(request.headers.get("authorization"), expected):
             return _unauthorized()
         return await call_next(request)
+
+    if allowed_origins:
+        # The web view is a different origin from this loopback server, so it can only read an
+        # answer if the server says that origin may. Exactly the origins the shell named, never
+        # `*`, never credentials (the capability travels in a header the page sets itself). Added
+        # after the capability check so it is outermost: the browser's preflight carries no
+        # token and is answered here, before the check; every real request still needs one.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(allowed_origins),
+            allow_methods=["GET", "POST", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type", "If-None-Match"],
+            allow_credentials=False,
+            expose_headers=["ETag"],
+            max_age=600,
+        )
 
     @app.get("/health")
     async def health() -> dict[str, str]:

@@ -107,6 +107,9 @@ pub struct SidecarConfig {
     pub local_state_root: PathBuf,
     /// The fake catalog and perception under an uncalibrated policy: never a release setting.
     pub development_profile: bool,
+    /// The web view origins the host may answer (exact origins; CORS). Without them the web view
+    /// cannot read a single answer from the loopback server.
+    pub allowed_origins: Vec<String>,
 }
 
 impl SidecarConfig {
@@ -124,6 +127,9 @@ impl SidecarConfig {
             .arg("--stdin-lifeline");
         if self.development_profile {
             command.arg("--development-profile");
+        }
+        for origin in &self.allowed_origins {
+            command.arg("--allow-origin").arg(origin);
         }
         command
             .env(TOKEN_ENV, token)
@@ -295,6 +301,7 @@ mod tests {
             library_root: dir.join("library"),
             local_state_root: dir.join("state"),
             development_profile: false,
+            allowed_origins: Vec::new(),
         }
     }
 
@@ -346,6 +353,7 @@ mod tests {
             library_root: "lib".into(),
             local_state_root: "state".into(),
             development_profile: false,
+            allowed_origins: Vec::new(),
         };
         let token = "T".repeat(43);
 
@@ -390,6 +398,7 @@ mod tests {
             library_root: "l".into(),
             local_state_root: "s".into(),
             development_profile: false,
+            allowed_origins: Vec::new(),
         };
         let has_flag = |config: &SidecarConfig| {
             config
@@ -401,6 +410,31 @@ mod tests {
         assert!(!has_flag(&config));
         config.development_profile = true;
         assert!(has_flag(&config));
+    }
+
+    #[test]
+    fn each_web_view_origin_is_passed_to_the_host_as_its_own_argument() {
+        let config = SidecarConfig {
+            python: "python".into(),
+            working_dir: ".".into(),
+            library_root: "l".into(),
+            local_state_root: "s".into(),
+            development_profile: false,
+            allowed_origins: vec![
+                "http://tauri.localhost".into(),
+                "http://localhost:5173".into(),
+            ],
+        };
+        let args: Vec<String> = config
+            .command("t", 1)
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        let at = args.iter().position(|a| a == "--allow-origin").unwrap();
+        assert_eq!(args[at + 1], "http://tauri.localhost");
+        assert_eq!(args[at + 2], "--allow-origin");
+        assert_eq!(args[at + 3], "http://localhost:5173");
     }
 
     #[test]
@@ -557,6 +591,7 @@ while True:
             library_root: dir.path().join("library"),
             local_state_root: dir.path().join("state"),
             development_profile: true,
+            allowed_origins: Vec::new(),
         };
         fs::create_dir_all(&config.library_root).unwrap();
 
