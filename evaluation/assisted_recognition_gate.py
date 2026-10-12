@@ -612,6 +612,12 @@ async def main_async(args: argparse.Namespace) -> int:
         raise SystemExit(f"{workdir} is not empty; a gate run needs a fresh library")
     manifest_path = Path(args.manifest) if args.manifest else dataset / "manifest.json"
     manifest = json.loads(guard(manifest_path).read_text(encoding="utf-8"))
+    provenance_path = dataset / "PROVENANCE.json"  # (an imported ready-labelled dataset)
+    provenance = (
+        json.loads(provenance_path.read_text(encoding="utf-8"))
+        if provenance_path.is_file()
+        else None
+    )
     verified = manifest.get("kind") == "verified-manifest"
     if verified:  # a verified manifest from label_review.py: its schema is checked, its digests too
         if manifest.get("schema_version") != 1 or not isinstance(manifest.get("people"), dict):
@@ -699,8 +705,14 @@ async def main_async(args: argparse.Namespace) -> int:
             "Labels come from a manifest exported by label_review.py: each photograph was "
             "verified by a human reviewer, and its digest was checked before use."
             if verified
-            else "Identity labels are Commons categories, not verified; a mislabelled "
-            "photograph can move the numbers either way. Not ground truth."
+            else (
+                f"Identity labels were {provenance['labels_by']} ({provenance['dataset']}); "
+                "this project has not verified them, and a mislabelled photograph can move the "
+                "numbers either way. Not ground truth."
+                if provenance
+                else "Identity labels are Commons categories, not verified; a mislabelled "
+                "photograph can move the numbers either way. Not ground truth."
+            )
         ),
         "configuration": {
             "package": PACKAGE_KEY,
