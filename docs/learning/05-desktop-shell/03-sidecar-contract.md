@@ -13,7 +13,7 @@ exercised on any machine.
 | Shell (start, handshake, stop) | `desktop/src-tauri/src/sidecar.rs` (`SidecarConfig::command`, `parse_handshake`, `generate_token`, `start`, `Sidecar::stop`) |
 | Backend (host) | `backend/api/host.py` ([host lesson](../03-backend/architecture/03-host-and-startup.md)) |
 | Spec | decided 2026-10-06; `IMPLEMENTATION_ARCHITECTURE.md` section 22 |
-| Tests | Rust: 13 tests in `sidecar.rs` (including `the_command_carries_the_token_only_in_the_environment`); Python: `tests/integration/test_api_host.py` |
+| Tests | Rust: 14 tests in `sidecar.rs` (including `the_command_carries_the_token_only_in_the_environment`); Python: `tests/integration/test_api_host.py` |
 
 ## 3. How it works
 
@@ -21,7 +21,8 @@ The shell, in order:
 
 1. Makes a **token**: 32 random bytes from the operating system (`getrandom`), URL-safe base64 without padding: 43 characters.
 2. Builds the command: `<python> -m backend.api.host --library-root <dir> --local-state-root <dir> --parent-pid <shell pid> --stdin-lifeline`
-   plus `--development-profile` in debug builds. **The token goes only in the environment** (`FACEIDENTIFY_LAUNCH_TOKEN`), never an argument.
+   plus one `--allow-origin <origin>` per web view origin (`http://tauri.localhost`, `https://tauri.localhost`, `tauri://localhost`, and in a debug build only
+   `http://localhost:5173`; this is the CORS fix, [its entry](../../implementations/2026-10-12-webview-cors.md)) and `--development-profile` in debug builds. **The token goes only in the environment** (`FACEIDENTIFY_LAUNCH_TOKEN`), never an argument.
    On Windows it adds `CREATE_NO_WINDOW` so no console flashes up. Standard input, output and error are pipes.
 3. Spawns it; a thread logs its stderr; another reads **one line** from stdout with a timeout (120 s in `lib.rs`).
 4. Validates the line (`parse_handshake`): `schema_version` 1, `protocol` `faceidentify.v1`, `host` exactly `127.0.0.1`, a nonzero `port`. Anything else

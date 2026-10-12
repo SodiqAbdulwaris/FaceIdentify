@@ -30,7 +30,7 @@ your computer, so it is deliberately short and each one is explained here.
 - `#[tauri::command]` plus `#[serde(tag = "state", rename_all = "snake_case")]` is why the JSON says `"state": "ready"`.
 - Dialog commands are `async` and run the blocking dialog in `spawn_blocking`, so the window stays responsive.
 - **In a plain browser** (`npm run dev`) there is no shell: `inShell()` is false, `chooseImages()` returns `[]`, and `backendStatus()` falls back
-  to the `VITE_BACKEND_*` variables, which hit a CORS block (see the [front-end README](../04-frontend/README.md)).
+  to the `VITE_BACKEND_*` variables, which work only if the host was started with `--allow-origin` for the page's origin (see the [front-end README](../04-frontend/README.md)).
 - The Rust enum `BackendStatus` and the TypeScript union `BackendStatus` in `native/backend.ts` are **written twice by hand** and must
   agree; `backend.test.ts` checks the page's half.
 

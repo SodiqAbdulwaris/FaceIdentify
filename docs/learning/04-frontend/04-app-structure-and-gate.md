@@ -35,7 +35,7 @@ main.tsx
 
 - **`backendStatus()`** returns `starting`, `ready` with a `Connection` (`base_url`, `events_url`, `token`, `protocol`), or `failed`.
   In the desktop app it is the Tauri command `backend_status`; outside the shell it falls back to `VITE_BACKEND_URL` and
-  `VITE_BACKEND_TOKEN` (see the CORS finding in the [folder README](README.md)).
+  `VITE_BACKEND_TOKEN` (needs the host started with `--allow-origin`; see the [folder README](README.md)).
 - **`BackendProvider`** builds one `ApiClient` and its `endpoints` per connection (`useMemo`), and puts them in context;
   every screen calls `useBackend()`.
 - **`DEGRADED` is usable**: the gate lets the screens render, because the library works (something recoverable is outstanding).

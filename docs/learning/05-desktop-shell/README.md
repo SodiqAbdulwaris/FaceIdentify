@@ -18,9 +18,9 @@ Windows, where CI runs them. What *was* run is the Python side of the same contr
 `tests/integration/test_api_host.py` and the real host driven from a script that does what `sidecar.rs` does
 ([host and startup](../03-backend/architecture/03-host-and-startup.md)), and the web app against the real backend (`npm run test:e2e`).
 
-**A question this folder leaves open** (details in the [security-minded reading of the CSP](04-library-folder-and-dialogs.md)):
-the backend sends no cross-origin (CORS) headers and the web view's origin differs from `127.0.0.1:<port>`. A plain Chromium page
-was blocked by exactly this (see the [front-end README](../04-frontend/README.md)). Whether the Windows web view treats Tauri's
-own origin the same way **was not tested here**; the owner should confirm on Windows that the packaged window connects.
+**One thing still for the owner on Windows.** The web view is a different origin from `127.0.0.1:<port>`, so the backend must answer it with CORS headers. That
+was a real defect (the window stayed on "Opening your library…"); it was fixed on `main` (`docs/implementations/2026-10-12-webview-cors.md`): the shell passes the
+web view's origins to the host with `--allow-origin`. The entry itself says the fix is **not yet confirmed in the real desktop window**; this guide could not
+confirm it either (no display), so please check that the packaged window connects.
 
 Back to the [guide index](../README.md).

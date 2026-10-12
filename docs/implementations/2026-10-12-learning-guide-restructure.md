@@ -117,10 +117,7 @@ Ambiguities were resolved conservatively; please confirm or overrule.
 
 ## Findings (found while verifying; not fixed here)
 
-1. **Browser development path blocked by CORS.** `frontend/src/native/backend.ts` says a plain browser can use `VITE_BACKEND_URL` and `VITE_BACKEND_TOKEN`.
-   Tried with Chromium against `npm run dev` and a development-profile backend: the page stays on "Opening your library..." and the console reports the
-   `/readiness` request was blocked by CORS. `grep -rni "cors\|access-control" backend` finds nothing. **Whether the packaged Windows web view (origin
-   `tauri.localhost` calling `http://127.0.0.1:<port>`) has the same problem is untested here; please check on Windows.**
+1. **CORS (resolved on `main` while this PR was open).** My first draft found that a browser page was blocked by CORS: the page stayed on "Opening your library..." because the backend sent no cross-origin headers. `main` has since fixed it (`2026-10-12-webview-cors.md`: `--allow-origin`, exact origins). After merging `main` I re-ran the same Chromium check with `--allow-origin http://localhost:5173`: the library screen appears. The fix's own entry says it is not yet confirmed in the real Windows window; I could not confirm it either. The lessons now describe the fixed behaviour.
 2. **Linux test failures that are Windows-only in effect.** `tests/integration/test_ml_supervisor.py` (11 tests) calls `tasklist`;
    three race tests in `test_runtime_package_store.py` rely on Windows refusing a rename onto a directory; in `tests/recovery`, one test depends on a
    Windows file lock (164 passed, 1 failed on Linux). CI runs on Windows.
@@ -140,7 +137,7 @@ review/grep, not by the test suite (ruff reports only an unused import); a copie
 
 Run on 2026-10-12 on Linux from the repository folder:
 
-- `uv run ruff format --check .`: 297 files already formatted. `uv run ruff check .`: all checks passed. `uv run mypy`: no issues in 291 source files.
+- `uv run ruff format --check .`: 300 files already formatted. `uv run ruff check .`: all checks passed. `uv run mypy`: no issues in 293 source files.
 - `npm run lint`: no findings (also with `--deny-warnings`, exit 0). `npm run typecheck`: clean. `npm test`: 24 files, 193 tests passed.
   `npm run build`: built. `npm run test:e2e`: 1 passed (the real web app against the real backend).
 - Relative links: a small script (in `docs/learning/07-walkthrough-and-glossary/05-further-reading-and-keeping-true.md`, standard library only) reports
@@ -152,6 +149,8 @@ Run on 2026-10-12 on Linux from the repository folder:
   Alembic column and a front-end screen passed and were discarded.
 - **Not verified:** `cargo test` and `clippy` (no webkit libraries or crate cache here), `npm run tauri dev` and the visible window, PowerShell variants, anything
   needing the local models or datasets, the interactive `label_review.py serve` page, and external links and books in the reading lists (not opened).
+
+Re-checked after merging `main` (2026-10-12, which added the CORS fix and the LFW/CelebA importer): ruff, mypy, typecheck, lint and the 193 front-end tests pass again; lessons updated for `--allow-origin`, the shell's 14 Rust tests and the new importer.
 
 ## Open issues / follow-ups
 

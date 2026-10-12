@@ -17,6 +17,7 @@ protections that exist, where each lives, and the tests that pin them.
 | WebSocket check | `event_stream` in `backend/api/app.py` ([events](07-events.md)) |
 | One error envelope that hides inputs and tracebacks | `backend/api/errors.py` |
 | Loopback only, exclusive port on Windows | `serve` in `backend/api/host.py` |
+| CORS: exact origins only, never `*`, no credentials; added outermost so a token-less preflight is answered, while every real request still needs the token | `create_app(allowed_origins=...)` in `backend/api/app.py`; host flag `--allow-origin`; `tests/unit/test_cors.py` (6) |
 | Safe storage keys, UNC paths refused for face search | `backend/infrastructure/storage` and the face-search route |
 | Model files hashed before use | [packages and catalog](../runtime-and-worker/04-packages-and-catalog.md) |
 | Tests | `tests/contracts/test_api_launch_capability.py`, `tests/security/test_test_data_isolation.py`, `tests/integration/test_api_host.py`, `test_api_lifespan.py`, `test_library_profile.py` |

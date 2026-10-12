@@ -13,6 +13,8 @@ Two kinds of knowledge that keep a recognition product honest: **how the numbers
 | [06 Rules, branches and reviews](06-rules-branches-reviews.md) | the branch / commit / PR workflow, step by step |
 | [07 Milestones, the tracker and decisions](07-milestones-tracker-decisions.md) | how to read the plans, the status page and the decisions |
 
+The labelled set can come from Wikimedia Commons (parked by the owner on 2026-10-12) or from LFW / CelebA through `import_labelled_dataset.py` ([overview](01-evaluation-overview.md)).
+
 **Everything that needs photographs or model weights is local only** (`evaluation/datasets/` and `local-models/` are git-ignored and are never
 committed; the photographs are biometric data). This folder therefore **describes** those scripts and shows their `--help`; it does not
 reproduce their results. What *can* be run anywhere without data is marked **works with no models**.
