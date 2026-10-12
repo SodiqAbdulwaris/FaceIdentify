@@ -1,6 +1,6 @@
 # The topic map
 
-The project began with a bare list of topics to research (`StackResearch.md`, since replaced by this guide).
+The project began with a bare list of topics to research (`StackResearch.md`, which was renamed and rewritten as the old single-file guide on 2026-10-08, now this folder).
 These two lessons keep **every one of those topics**, explain each in a sentence, and say what the project did
 with it: **[built]** (it is in the code and tested), **[designed]** (written in a specification, not built yet),
 or **[researched]** (considered, not chosen or not needed yet). "Chosen" means it is in the locked stack
