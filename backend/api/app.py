@@ -94,7 +94,7 @@ def create_app(
         lifespan=lifespan,
         generate_unique_id_function=operation_id,  # the function name: a readable generated client
     )
-    install_error_handlers(app)
+    install_error_handlers(app, allowed_origins)
 
     @app.middleware("http")
     async def require_launch_capability(

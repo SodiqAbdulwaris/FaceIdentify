@@ -86,6 +86,28 @@ async def test_with_no_origins_named_there_are_no_cors_headers_at_all() -> None:
     assert "access-control-allow-origin" not in real.headers
 
 
+async def test_an_unexpected_error_is_still_readable_by_an_allowed_origin() -> None:
+    app = create_app(TOKEN, allowed_origins=ALLOWED)
+
+    @app.get("/boom")
+    async def boom() -> None:
+        raise RuntimeError("something broke")
+
+    web = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test"
+    )
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+
+    allowed = await web.get("/boom", headers={**auth, "Origin": "http://tauri.localhost"})
+    other = await web.get("/boom", headers={**auth, "Origin": "http://evil.example"})
+
+    assert allowed.status_code == 500
+    assert allowed.headers["access-control-allow-origin"] == "http://tauri.localhost"
+    assert allowed.json()["error"]["diagnostic_id"]  # the page can read it
+    assert other.status_code == 500
+    assert "access-control-allow-origin" not in other.headers
+
+
 def test_the_host_takes_exact_origins_only() -> None:
     base = ["--library-root", "L", "--local-state-root", "S"]
     options = parse_options(

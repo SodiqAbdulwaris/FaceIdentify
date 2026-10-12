@@ -13,6 +13,7 @@ Every error the API returns is `{"error": {code, message, details, retryable, di
 
 import logging
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -85,7 +86,7 @@ def error_response(
     )
 
 
-def install_error_handlers(app: FastAPI) -> None:
+def install_error_handlers(app: FastAPI, allowed_origins: Sequence[str] = ()) -> None:
     @app.exception_handler(ApiError)
     async def api_error(_request: Request, error: ApiError) -> JSONResponse:
         return error_response(
@@ -114,14 +115,22 @@ def install_error_handlers(app: FastAPI) -> None:
         return error_response(error.status_code, code, "The request could not be served.")
 
     @app.exception_handler(Exception)
-    async def unexpected(_request: Request, error: Exception) -> JSONResponse:
+    async def unexpected(request: Request, error: Exception) -> JSONResponse:
         diagnostic_id = uuid.uuid4().hex
         LOG.error(
             "unhandled %s [diagnostic %s]", type(error).__name__, diagnostic_id, exc_info=error
         )
-        return error_response(
+        response = error_response(
             500,
             "INTERNAL_ERROR",
             "An unexpected error occurred.",
             diagnostic_id=diagnostic_id,
         )
+        # This response is made outside the CORS middleware (the server-error layer is outermost),
+        # so without these a web view could not read even the diagnostic id.
+        origin = request.headers.get("origin")
+        if origin is not None and origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Expose-Headers"] = "ETag"
+        return response

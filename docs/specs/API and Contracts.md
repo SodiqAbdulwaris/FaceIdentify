@@ -108,7 +108,7 @@ On reconnection, sequence gaps, or uncertainty, the frontend refetches state thr
 
 ---
 
-> **Decision 2026-10-12 (defect fix; agent design awaiting the owner's confirmation):** the web view is a
+> **Agent design 2026-10-12 (a defect fix; awaiting the owner's confirmation, not yet a decision):** the web view is a
 > different origin from the loopback server, so the host answers CORS for exactly the origins the shell names
 > (`--allow-origin`; the packaged app's origins, and the Vite dev server in a debug build only): no `*`, no
 > credentials, and a preflight is answered before the launch-capability check while every real request still
