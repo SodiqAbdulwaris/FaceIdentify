@@ -14,7 +14,7 @@ stops you from trusting a stale one.
 | What is the next piece of work, in order? | `docs/plans/M5_REMAINING_WORK.md`, `M5_PLAN.md` (and `M3_M4_COMPLETION_PLAN.md` for the finished milestones) | 85, 374, 114 |
 | Is this behaviour tested, and does the test pass? | `docs/plans/TESTING_IMPLEMENTATION_TRACKER.md` (rows `TST-nnn` with a status) | 402 |
 | What was decided, and what is open? | `.agents/CONTEXT.md` ("Known conflicts and open questions", numbered, plus the owner decisions inside the plans as dated `> **Decision YYYY-MM-DD:**` notes) | 477 |
-| What happened when a specific change was made? | `docs/implementations/` (one entry per change, 136 of them, newest by date prefix) | |
+| What happened when a specific change was made? | `docs/implementations/` (one entry per change; 136 files including its README; newest by date prefix) | |
 | What must the system do? | `docs/specs/` (authoritative; edit only with the owner's approval) | |
 | Where did the long-range roadmap start? | `docs/plans/Roadmap-Plan.md` | 2646 |
 
@@ -49,7 +49,7 @@ grep -n "New to the code" docs/plans/PROJECT_STATUS.md                          
 ```
 
 Observed: `TST-057A` shows `PASSING` and `TST-057B` shows `BLOCKED`; `PASSING` appears on 47 lines (rows plus legend and prose, so not a precise count of tests);
-`docs/implementations/` holds 136 entries. Then open `PROJECT_STATUS.md` and find, in under two minutes: the current milestone, one thing that is
+`docs/implementations/` holds 136 files (its README plus the entries). Then open `PROJECT_STATUS.md` and find, in under two minutes: the current milestone, one thing that is
 **not** built, and the open blocker (the model licence).
 
 ## 5. Change it
