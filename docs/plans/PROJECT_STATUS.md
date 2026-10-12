@@ -13,7 +13,7 @@ real-model path in M5; the `buffalo_l` weights are chosen and run for real on CP
 to end on the development profile and survives a restart. Next is M5, the first real recognition
 milestone: [M5 plan](M5_PLAN.md).
 
-**What is next:** [M5 remaining work](M5_REMAINING_WORK.md): the owner's review of the labels with the new label-review utility ([entry](../implementations/2026-10-12-m5-r5-label-review.md)), then TST-057B on verified labels; and, as before, the assisted cross-source recognition gate. The owner decided on 2026-10-08 that cross-source recognition is *assisted* (ranked matches plus confirmation, TST-057A); *automatic* recognition (TST-057B) stays blocked pending a verified calibration.
+**What is next:** [M5 remaining work](M5_REMAINING_WORK.md): the owner's review of the labels with the label-review utility (the open-set evaluation is built too: [entry](../implementations/2026-10-12-m5-open-set-evaluation.md)) ([entry](../implementations/2026-10-12-m5-r5-label-review.md)), then TST-057B on verified labels; and, as before, the assisted cross-source recognition gate. The owner decided on 2026-10-08 that cross-source recognition is *assisted* (ranked matches plus confirmation, TST-057A); *automatic* recognition (TST-057B) stays blocked pending a verified calibration.
 
 **New to the code?** Read [`docs/research/codebase-learning-guide.md`](../research/codebase-learning-guide.md): twelve parts from Python basics to this repository's design, with a walkthrough of one photograph.
 

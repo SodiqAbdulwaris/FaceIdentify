@@ -26,12 +26,12 @@
 
 | Measure | Value |
 |---|---|
-| Enrolled people / enrolled photographs / closed-set queries | 9 / 61 / 18 |
+| Enrolled people / photographs imported / subject faces placed / closed-set queries | 9 / 61 / 59 / 18 |
 | Closed-set Recall@1, Recall@5, MRR | 1.000 / 1.000 / 1.000 (Wilson 95% for the recalls: 0.824 to 1.000) |
-| Strangers: people / photographs used as queries | 12 / 25 |
+| Strangers: people / photographs attempted / evaluated (a clear subject face) | 12 / 26 / 25 (one photograph had no clear subject and is left out; the denominator is conditional on that) |
 | Strangers' top-candidate similarity | 0.046 to 0.237 (median 0.159) |
 | Strangers the application accepted as a known person (its real policy) | 0 of 25; all 25 were offered only as possible people |
-| Strangers accepted at a cut-off of 0.30 or higher | 0 of 25 (Wilson 95% upper bound 0.133) |
+| Strangers accepted at a cut-off of 0.30 or higher | 0 of 25 (nominal per-query Wilson 95% interval 0 to 0.133, see below) |
 | Enrolled people rightly top-ranked at similarity >= 0.30 / 0.50 / 0.70 | 18 / 17 / 13 of 18, none wrongly |
 | Workflow checks, same rankings after restart, queries wrote nothing | 10 of 10, yes, yes |
 
@@ -44,8 +44,9 @@
 - **Why it cannot be trusted further:** 9 enrolled identities and 25 stranger queries (the targets are 40 and
   far more); the strangers are people the owner could verify, i.e. the clearest photographs, and the 66
   UNCERTAIN and 90 flagged photographs (the hard cases) are not in it; strangers were not chosen to resemble the
-  enrolled people (same family, same agency, similar age and appearance); 0 of 25 only bounds the false-match
-  rate below about 13% at 95% confidence.
+  enrolled people (same family, same agency, similar age and appearance); 0 of 25 gives a nominal per-query interval (Wilson 95%, 0 to 0.133) that assumes the
+  queries are independent; they are repeated photographs of 12 selected people, so it is **not** a population
+  bound and no calibration confidence claim should be built on it (that needs an identity-aware protocol).
 - Per-identity numbers are 1 to 3 queries each: shown for completeness, not evidence.
 
 ## What is still missing for TST-057B

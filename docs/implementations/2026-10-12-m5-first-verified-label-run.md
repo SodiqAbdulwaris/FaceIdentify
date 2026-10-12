@@ -32,7 +32,7 @@ have 5 or more photographs. `evaluation/assisted_recognition_gate.py --manifest 
   identities with 5+ photographs, 18 of 80 held-out queries, only 7 of 9 identities have 2 or more queries;
   (2) **selection bias**: the owner verified only photographs they could confidently identify, so the hard cases
   (66 UNCERTAIN, 90 flagged, 370 unreviewed) are exactly the ones left out, and a perfect score on the easy ones
-  says little about the rest; (3) **the open-set evaluation is not built**: nothing here measures what happens
+  says little about the rest; (3) **the open-set evaluation was not built at that time** (it is now: see [the open-set entry](2026-10-12-m5-open-set-evaluation.md)): nothing here measures what happens
   to a person who is *not* enrolled (false matches and abstentions), which TST-057B requires and which closed-set
   retrieval cannot show.
 - 18 queries is too few for any claim beyond "no failures were seen"; the interval's lower bound is 0.824.

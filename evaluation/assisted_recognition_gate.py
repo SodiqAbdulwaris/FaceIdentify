@@ -41,6 +41,7 @@ import os
 import platform
 import secrets
 import shutil
+import statistics
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -306,6 +307,8 @@ async def enrol(
             record["faces"] += 1
         enrolled[person["name"]] = record
     log["enrolment"] = {
+        "photographs_imported": len(sources),
+        "faces_placed": sum(r["faces"] for r in enrolled.values()),
         "skipped_photographs": skipped,
         "people": {n: r["faces"] for n, r in enrolled.items()},
     }
@@ -336,7 +339,7 @@ def ranking(answer: dict[str, Any]) -> list[dict[str, Any]] | None:
         offered.append(
             {
                 "person": person["display_name"] if person else None,
-                "similarity": round(entry["similarity"], 4),
+                "similarity": entry["similarity"],  # (full precision: cut-offs compare it as is)
             }
         )
     return offered
@@ -362,10 +365,11 @@ async def run_queries(
     return results
 
 
-def wilson(k: int, n: int) -> list[float]:
-    """The Wilson 95% interval of k out of n."""
+def wilson(k: int, n: int) -> list[float] | None:
+    """The Wilson 95% interval of k out of n; None when nothing was observed (n = 0), because an
+    interval of [0, 0] would read as evidence."""
     if n == 0:
-        return [0.0, 0.0]
+        return None
     z, p = 1.96, k / n
     centre = (p + z * z / (2 * n)) / (1 + z * z / n)
     spread = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
@@ -420,7 +424,8 @@ def open_set(results: list[dict[str, Any]]) -> dict[str, Any]:
     For each cut-off, a top candidate at or above it would be *accepted*: for an unknown person that
     is a false match; for a known person it is right or wrong. `policy` counts what the
     application itself decided under its real policy (accepting nothing, today)."""
-    unknown = [r for r in results if r.get("unknown") and r["offered"] is not None]
+    attempted = [r for r in results if r.get("unknown")]
+    unknown = [r for r in attempted if r["offered"] is not None]
     known = [
         r for r in results if not r.get("unknown") and r["eligible"] and r["offered"] is not None
     ]
@@ -461,7 +466,9 @@ def open_set(results: list[dict[str, Any]]) -> dict[str, Any]:
     scores = sorted(s for r in unknown if (s := top(r)) is not None)
     return {
         "unknown_people": sorted({r["person"] for r in unknown}),
-        "unknown_queries": len(unknown),
+        "unknown_queries_attempted": len(attempted),
+        "unknown_queries_without_a_subject_face": len(attempted) - len(unknown),
+        "unknown_queries": len(unknown),  # evaluated: those with a clear subject face
         "unknown_with_no_candidate": sum(1 for r in unknown if not r["offered"]),
         "known_queries": len(known),
         "policy": {
@@ -477,7 +484,7 @@ def open_set(results: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "unknown_top1_similarity": {
             "min": scores[0] if scores else None,
-            "median": scores[len(scores) // 2] if scores else None,
+            "median": statistics.median(scores) if scores else None,
             "max": scores[-1] if scores else None,
         },
         "by_cutoff": table,

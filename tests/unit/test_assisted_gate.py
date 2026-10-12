@@ -78,7 +78,7 @@ def test_the_people_offered_for_the_subject_face_come_best_first() -> None:
     }
 
     assert ranking(answer) == [
-        {"person": "Ada", "similarity": 0.8123},
+        {"person": "Ada", "similarity": 0.81234},  # (full precision)
         {"person": None, "similarity": 0.4},
     ]
     assert ranking({"faces": []}) is None
@@ -269,7 +269,28 @@ def test_per_identity_retrieval_counts_first_place_and_top_five() -> None:
 
 
 def test_the_wilson_interval_is_between_zero_and_one_and_wider_for_fewer_queries() -> None:
-    low, high = wilson(0, 18)
-    assert (low, high) == (0.0, 0.176)
-    assert wilson(5, 10)[1] - wilson(5, 10)[0] > wilson(50, 100)[1] - wilson(50, 100)[0]
-    assert wilson(0, 0) == [0.0, 0.0]
+    interval = wilson(0, 18)
+    assert interval == [0.0, 0.176]
+    few, many = wilson(5, 10), wilson(50, 100)
+    assert few is not None
+    assert many is not None
+    assert few[1] - few[0] > many[1] - many[0]
+    assert wilson(0, 0) is None  # nothing observed: no interval, not a zero-width one
+
+
+def test_a_score_just_under_a_cutoff_is_not_accepted_and_the_median_is_exact() -> None:
+    results = [
+        ranked("Z", [("A", 0.29996)], unknown=True),  # would round up to 0.30
+        ranked("Z", [("A", 0.20)], unknown=True),
+        ranked("Y", [], unknown=True, status="UNKNOWN"),
+        {"person": "X", "unknown": True, "eligible": False, "offered": None, "status": None},
+    ]
+
+    found = open_set(results)
+
+    by = {row["cutoff"]: row for row in found["by_cutoff"]}
+    assert by[0.3]["unknown_false_accepts"] == 0
+    assert found["unknown_top1_similarity"]["median"] == pytest.approx(0.249980)  # of two scores
+    assert found["unknown_queries_attempted"] == 4
+    assert found["unknown_queries_without_a_subject_face"] == 1
+    assert found["unknown_queries"] == 3
