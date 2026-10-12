@@ -35,14 +35,14 @@ This folder: `docs/learning/`. The old single-file guide is now a short redirect
 
   ```bash
   python3 - <<'EOF'
-  import pathlib, re, sys
+  import pathlib, re, sys, urllib.parse
   root = pathlib.Path("docs/learning")
   bad = []
   for md in root.rglob("*.md"):
       for target in re.findall(r"\]\(([^)#\s]+)(?:#[^)]*)?\)", md.read_text(encoding="utf-8")):
           if target.startswith(("http:", "https:", "mailto:")):
               continue
-          if not (md.parent / target).resolve().exists():
+          if not (md.parent / urllib.parse.unquote(target)).resolve().exists():
               bad.append(f"{md}: {target}")
   print("\n".join(bad) or "all relative links resolve")
   sys.exit(1 if bad else 0)
