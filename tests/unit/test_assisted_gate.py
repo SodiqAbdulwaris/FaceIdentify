@@ -1,5 +1,6 @@
 """The arithmetic and selection rules of the assisted-recognition gate script (M5 step 8)."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -151,3 +152,28 @@ async def test_placed_and_unplaced_faces_are_both_considered() -> None:
 
     assert [f["representation_id"] for f in faces] == ["r1", None]
     assert [f["occurrence"] and f["occurrence"]["id"] for f in faces] == [None, "o1"]
+
+
+def test_a_verified_photograph_that_changed_or_vanished_stops_the_run(tmp_path: Path) -> None:
+    (tmp_path / "Ada").mkdir()
+    for index in range(5):
+        (tmp_path / "Ada" / f"{index}.jpg").write_bytes(f"photo {index}".encode())
+    good = hashlib.sha256(b"photo 0").hexdigest()
+    entries = [
+        {"file": f"Ada/{i}.jpg", "sha256": hashlib.sha256(f"photo {i}".encode()).hexdigest()}
+        for i in range(5)
+    ]
+    assert choose_people({"Ada": entries}, tmp_path, count=1, minimum=4)  # as verified
+
+    changed = [{**entries[0], "sha256": "0" * 64}, *entries[1:]]
+    with pytest.raises(SystemExit, match="changed after it was verified"):
+        choose_people({"Ada": changed}, tmp_path, count=1, minimum=4)
+
+    (tmp_path / "Ada" / "0.jpg").unlink()
+    with pytest.raises(SystemExit, match="verified but is missing"):
+        choose_people(
+            {"Ada": [{"file": "Ada/0.jpg", "sha256": good}, *entries[1:]]},
+            tmp_path,
+            count=1,
+            minimum=4,
+        )

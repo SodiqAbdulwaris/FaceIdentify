@@ -4,6 +4,7 @@ import hashlib
 import http.client
 import json
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -117,7 +118,7 @@ def test_a_changed_or_repeated_photograph_is_left_out(dataset: Path) -> None:
         "Ada Lovelace/01.jpg",
     ]
     assert left["duplicates_dropped"] == ["Ada Lovelace/02.jpg"]
-    assert left["changed_since_review"] == ["Ada Lovelace/03.jpg"]
+    assert left["stale_needs_review"] == ["Ada Lovelace/03.jpg"]
 
 
 def test_the_export_reports_the_shortfall_against_the_targets_and_never_pads(dataset: Path) -> None:
@@ -206,3 +207,118 @@ def test_the_page_needs_its_token_serves_listed_photographs_and_records_decision
     assert bad == 400
     assert b"decision is one of" in message
     assert review.current()["Ada Lovelace/00.jpg"]["decision"] == "VERIFIED"
+
+
+def test_a_relabelled_photograph_must_be_reviewed_again(dataset: Path) -> None:
+    Review(dataset, "sodiq").decide("Ada Lovelace/00.jpg", "VERIFIED")
+    manifest = json.loads((dataset / "manifest.json").read_text(encoding="utf-8"))
+    moved = manifest["Ada Lovelace"].pop(0)
+    manifest["Bob Barker"].append(moved)  # the same file, now proposed as Bob
+    (dataset / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    again = Review(dataset, "sodiq")
+    document = again.export()
+
+    assert "Ada Lovelace/00.jpg" not in [
+        e["file"] for items in document["people"].values() for e in items
+    ]
+    assert document["left_out"]["stale_needs_review"] == ["Ada Lovelace/00.jpg"]
+    assert again.status()["stale_needs_review"] == 1
+
+
+def test_a_photograph_replaced_while_the_tool_runs_is_not_trusted(dataset: Path) -> None:
+    review = Review(dataset, "sodiq")
+    review.decide("Ada Lovelace/00.jpg", "VERIFIED")
+    (dataset / "Ada Lovelace/00.jpg").write_bytes(b"a different photograph")  # no restart
+
+    document = review.export()
+
+    assert document["people"] == {}
+    assert document["left_out"]["stale_needs_review"] == ["Ada Lovelace/00.jpg"]
+
+
+def test_a_half_written_last_line_does_not_stop_a_resume(dataset: Path) -> None:
+    review = Review(dataset, "sodiq")
+    review.decide("Ada Lovelace/00.jpg", "VERIFIED")
+    with review.log_path.open("ab") as log:
+        log.write(b'{"file": "Ada Lovelace/01.jp')  # a crash in the middle of an append
+
+    again = Review(dataset, "sodiq")
+    assert again.current()["Ada Lovelace/00.jpg"]["decision"] == "VERIFIED"
+    again.decide("Ada Lovelace/02.jpg", "VERIFIED")  # the next append starts a new line
+
+    third = Review(dataset, "sodiq")
+    assert sorted(third.current()) == ["Ada Lovelace/00.jpg", "Ada Lovelace/02.jpg"]
+    torn = (dataset / "review" / "decisions.torn.jsonl").read_text(encoding="utf-8")
+    assert "01.jp" in torn  # the fragment is kept, set aside, not deleted
+
+
+def test_damage_before_the_end_of_the_log_is_not_hidden(dataset: Path) -> None:
+    review = Review(dataset, "sodiq")
+    review.decide("Ada Lovelace/00.jpg", "VERIFIED")
+    review.decide("Ada Lovelace/01.jpg", "VERIFIED")
+    lines = review.log_path.read_text(encoding="utf-8").splitlines()
+    review.log_path.write_text("not json\n" + "\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="damaged"):
+        review.current()
+
+
+def test_two_exports_in_the_same_instant_are_two_files(
+    dataset: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz: object = None) -> "Frozen":
+            return cls(2026, 10, 12, 12, 0, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(label_review, "datetime", Frozen)
+    review = Review(dataset, "sodiq")
+    review.decide("Ada Lovelace/00.jpg", "VERIFIED")
+
+    first, second = review.write_export(), review.write_export()
+
+    assert first != second
+    assert first.exists()
+    assert second.exists()
+
+
+def test_a_link_out_of_the_dataset_cannot_carry_the_log_or_a_read(
+    dataset: Path, tmp_path: Path
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (dataset / "review").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symbolic links are not allowed here")
+
+    with pytest.raises(SystemExit, match="outside the dataset"):
+        Review(dataset, "sodiq")
+
+
+def test_titles_and_labels_are_drawn_as_text_never_as_markup() -> None:
+    page = label_review.PAGE
+    # data goes in through textContent, value or append of strings, never innerHTML
+    assert "innerHTML" not in page
+    assert "textContent:e.title" in page
+
+
+def test_photographs_declared_the_same_picture_count_once_and_one_side_of_a_split(
+    dataset: Path,
+) -> None:
+    (dataset / "Ada Lovelace/04.jpg").write_bytes(b"the same picture, re-encoded")
+    review = Review(dataset, "sodiq")
+    review.decide("Ada Lovelace/00.jpg", "VERIFIED")
+    review.decide("Ada Lovelace/04.jpg", "VERIFIED", same_picture_as="Ada Lovelace/00.jpg")
+    review.decide("Ada Lovelace/01.jpg", "VERIFIED")
+
+    people, left = review.verified()
+
+    assert [e["file"] for e in people["Ada Lovelace"]] == [
+        "Ada Lovelace/00.jpg",
+        "Ada Lovelace/01.jpg",
+    ]
+    assert left["duplicates_dropped"] == ["Ada Lovelace/04.jpg"]
+    with pytest.raises(ReviewError, match="another photograph"):
+        review.decide("Ada Lovelace/01.jpg", "VERIFIED", same_picture_as="Nowhere/99.jpg")

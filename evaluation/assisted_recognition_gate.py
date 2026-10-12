@@ -167,9 +167,14 @@ def choose_people(
             path = (dataset / entry["file"]).resolve()
             if root not in path.parents:
                 raise SystemExit(f"{entry['file']} is outside the dataset folder")
+            expected = entry.get("sha256")  # (a verified manifest records what was reviewed)
             if not path.is_file():
+                if expected:
+                    raise SystemExit(f"{entry['file']} was verified but is missing")
                 continue
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if expected and digest != expected:
+                raise SystemExit(f"{entry['file']} changed after it was verified")
             if digest not in seen:
                 seen.add(digest)
                 files.append(path)
@@ -473,7 +478,11 @@ async def main_async(args: argparse.Namespace) -> int:
         raise SystemExit(f"{workdir} is not empty; a gate run needs a fresh library")
     manifest_path = Path(args.manifest) if args.manifest else dataset / "manifest.json"
     manifest = json.loads(guard(manifest_path).read_text(encoding="utf-8"))
-    manifest = manifest.get("people", manifest)  # (a verified manifest from label_review.py)
+    verified = manifest.get("kind") == "verified-manifest"
+    if verified:  # a verified manifest from label_review.py: its schema is checked, its digests too
+        if manifest.get("schema_version") != 1 or not isinstance(manifest.get("people"), dict):
+            raise SystemExit("the verified manifest is not schema 1")
+        manifest = manifest["people"]
     state = workdir / "local-state"
     for part in (
         "runtime",
@@ -546,9 +555,15 @@ async def main_async(args: argparse.Namespace) -> int:
     ).hexdigest()
     log["finished"] = datetime.now(UTC).isoformat()
     report = {
-        "what": "TST-057A assisted recognition and the M5 real-world gate (labels unverified)",
-        "label_caveat": "Identity labels are Commons categories, not verified; a mislabelled "
-        "photograph can move the numbers either way. Not ground truth.",
+        "what": "TST-057A assisted recognition and the M5 real-world gate "
+        + ("(human-verified labels)" if verified else "(labels unverified)"),
+        "label_caveat": (
+            "Labels come from a manifest exported by label_review.py: each photograph was "
+            "verified by a human reviewer, and its digest was checked before use."
+            if verified
+            else "Identity labels are Commons categories, not verified; a mislabelled "
+            "photograph can move the numbers either way. Not ground truth."
+        ),
         "configuration": {
             "package": PACKAGE_KEY,
             "people": len(people),
