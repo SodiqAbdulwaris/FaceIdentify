@@ -6,7 +6,7 @@ The decision policy ([recognition](../03-backend/recognition/03-decision-policy.
 numbers must come from **measurement**, not from guessing, because a wrong automatic match merges two people's memories. The
 evaluation scripts measure, on a labelled set of photographs, how well the installed models separate *the same* person from
 *different* people, and what happens when the application is driven the way a person would drive it. The result so far is sobering and
-it is why automatic matching is switched off ([measured operating point](../../research/measured-operating-point.md)).
+it is why automatic matching is switched off (a later run on owner-verified labels looks much better but is too small and too easy to change that) ([measured operating point](../../research/measured-operating-point.md)).
 
 ## 2. Where it lives
 
@@ -26,7 +26,7 @@ it is why automatic matching is switched off ([measured operating point](../../r
   them. *Leave-one-out*: each photograph is a query against the others with itself removed. *Subject-disjoint*: people are split by a hash of
   their name into a **selection half** (the threshold is chosen here) and a **final half** (the threshold is *reported* here, having taken no
   part in the choice). Choosing and reporting on different people is what stops a threshold from merely memorising its own data.
-- **Honest uncertainty**: results carry a Wilson 95% interval; the identity labels are Commons categories (human-curated, **not verified**), so
+- **Honest uncertainty**: results carry a Wilson 95% interval; the identity labels are Commons categories (human-curated, **not verified** unless reviewed with the label-review tool), so
   a mislabelled photograph can make the numbers look better or worse with no direction.
 - **Recorded, not claimed**: each report stores the configuration, environment, exclusions and the SHA-256 of the dataset manifest.
 - **Safety rules**: never commit photographs, embeddings, reports or model files; never put real personal data in docs; `build_commons_dataset.py`

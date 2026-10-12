@@ -31,6 +31,9 @@ itself and never looks at embeddings.
 - **The server** listens on 127.0.0.1 only; every request carries a per-run token; it serves only files the manifest lists; the page draws names as text, never markup.
   `serve` takes `--reviewer` and `--port`.
 
+**The first real use** is recorded in `docs/implementations/2026-10-12-m5-first-verified-label-run.md`: the owner reviewed 292 of 662 photographs; the verified export was then used for the first run on
+human-verified labels. Reviewing is slow and has a selection effect (the photographs a person can confidently identify are the easy ones), which is why the export reports its shortfall honestly.
+
 ## 4. Try it
 
 **Works with no real data (a synthetic set). Verified 2026-10-12.** Make a tiny set of invented pictures under the git-ignored folder (the tool

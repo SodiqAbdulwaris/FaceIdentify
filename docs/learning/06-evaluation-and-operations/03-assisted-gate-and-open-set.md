@@ -13,7 +13,7 @@ measures the result of *assisted* recognition: how highly the right person is ra
 |---|---|
 | The script | `evaluation/assisted_recognition_gate.py` (748 lines) |
 | Its tests (no photographs) | `tests/unit/test_assisted_gate.py` (13) |
-| Result summary | `docs/plans/PROJECT_STATUS.md` (Recall@1 0.739, Recall@5 0.826, MRR 0.775 on unverified labels) and the M5 gate entry in `docs/implementations/` |
+| Recorded runs | `docs/implementations/2026-10-10-m5-assisted-recognition-gate.md` (first run on unverified labels: Recall@1 0.739, Recall@5 0.826, MRR 0.775), `2026-10-12-m5-first-verified-label-run.md` (human-verified labels) and `2026-10-12-m5-open-set-evaluation.md` (adds strangers) |
 
 ## 3. How it works
 
@@ -30,6 +30,12 @@ Flags (from `--help`, verified 2026-10-12): `--dataset`, `--local-state-root`, `
 report); `--manifest` (a verified manifest from `label_review.py export`), `--people`, `--unknown`, `--minimum-photographs`.
 
 The labels are still Commons categories unless you pass a **verified manifest** ([next lesson](04-label-review-tool.md)); the report says which.
+
+**What the recorded runs say, and do not say.** On the unverified labels the first run scored Recall@1 0.739; the owner then verified a subset of labels by eye and a
+second run on that subset scored 1.000 on 18 queries, which suggests much of the earlier gap was label noise and group photographs rather than the model. The entry
+is explicit that this **does not pass TST-057B** (automatic recognition): the verified set is far below the targets (9 of 40 identities with five or more photographs, 18 of 80
+queries), the owner verified only photographs they could confidently identify (a selection bias that leaves the hard cases out), and 18 queries support no claim beyond "no
+failures were seen". The open-set run added strangers: none of 25 was accepted as a known person. TST-057B stays `BLOCKED`.
 
 ## 4. Try it
 
