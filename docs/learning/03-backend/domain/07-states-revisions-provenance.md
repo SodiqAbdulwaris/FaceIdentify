@@ -22,7 +22,7 @@ edited from two windows, and still explain itself.
   transitions*: `UPDATE ... WHERE state = 'RUNNING'`, so a stale actor changes nothing.
 - **`PENDING` means private.** A run's output is `PENDING` until acceptance makes it `ACTIVE`; a crash leaves it unseen
   ([acceptance](../processing/04-checkpoints-and-acceptance.md)).
-- **`SUPERSEDED` and `DELETED` keep history.** A re-run supersedes older output; it does not erase it. Only erasure removes
+- **`SUPERSEDED` and `DELETED` keep history.** The design is that a re-run supersedes older output rather than erasing it (**not built yet**: today a repeated processing request leaves both generations `ACTIVE`). Only erasure removes
   biometric bytes ([erasure](../../02-data-and-storage/07-erasure.md)).
 - **Revision**: new rows start at `1`; every change adds `1`. An update names the revision it saw
   (`expected_revision`); if the row has moved on, zero rows match and the caller gets a conflict (HTTP 409) and re-reads.

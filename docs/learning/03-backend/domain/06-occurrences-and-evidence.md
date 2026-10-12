@@ -21,7 +21,7 @@ judged them. A wrong decision can then be explained, and corrected without rewri
 - **Occurrence**: one identity within one source, `kind` `IMAGE`, `TRACK` or `SEGMENT` (only `IMAGE` is built; the others
   are designed for video). A check says an `IMAGE` occurrence has no frame or time range. `OccurrenceObservation` lists
   the member observations in order, and `representative_observation_id` is the one shown. States `PENDING` → `ACTIVE`
-  at acceptance; `SUPERSEDED` when a re-run replaces it; `DELETED`.
+  at acceptance; `SUPERSEDED` is *designed* for when a re-run replaces it but is not set by any code today; `DELETED`.
 - **Evidence** is append-only. Its `kind` says what happened: `IDENTITY_CREATED`, `IDENTITY_MATCHED`, `RECOGNITION_ABSTAINED`,
   `IDENTITY_ASSIGNED_TO_PERSON`, `IDENTITY_REMOVED_FROM_PERSON`, `IDENTITY_MERGED`, `IDENTITY_SPLIT`, `IDENTITY_FORGOTTEN`,
   `USER_CORRECTION`, `PERSON_RENAMED`, `SOURCE_PERMANENTLY_DELETED`. It names the run, source, identity and person involved

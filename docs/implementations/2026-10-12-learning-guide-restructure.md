@@ -152,6 +152,8 @@ Run on 2026-10-12 on Linux from the repository folder:
 
 Re-checked after merging `main` (2026-10-12, which added the CORS fix and the LFW/CelebA importer): ruff, mypy, typecheck, lint and the 193 front-end tests pass again; lessons updated for `--allow-origin`, the shell's 14 Rust tests and the new importer.
 
+Corrected after the owner's local review of the PR (2026-10-12): script commands now carry `PYTHONPATH=.` (the scripts import `backend`); the unsupported `python -m sqlite3` read-only URI was removed; the missing-file exercise now uses a copy and states that restoring the file does not bring the artifact back (nothing calls the reverify functions); re-run supersession is described as designed, not built; the forget lessons no longer promise a new identity (the real-profile policy abstains when candidates remain); `npm run generate:types` is written with `--workspace frontend`.
+
 ## Open issues / follow-ups
 
 - The independent review of the pull request (read-only subagent) is recorded on the PR.

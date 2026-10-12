@@ -61,9 +61,11 @@ safe code-reading exercise: follow `import_managed` and write down which transac
 
 ## 6. Break it on purpose
 
-Delete one file from `lib/originals` while the backend is stopped, then start it: recovery marks that artifact `MISSING`
-(existence only; nothing is hashed at startup) and the source reports its original unavailable. Restore the file's name to
-recover (do this only on the practice library).
+On a **copy** of the practice library (never the only copy), move one file out of `originals/` to another folder while the backend is stopped, then start the
+backend on the copy: recovery marks that artifact `MISSING` (existence only; nothing is hashed at startup) and the source reports its original unavailable.
+To undo the experiment, discard the copy. **Limitation:** putting the file back and restarting does *not* bring the artifact back to `AVAILABLE`. The functions that
+do (`reverify_managed_artifact`, `reverify_referenced_artifact`, `relink_referenced_artifact` in `backend/app/sources/`) exist, but nothing calls them yet, so today the
+artifact stays `MISSING` until such a step is wired in (verified by `grep`, 2026-10-12; reviewer finding on PR #170).
 
 ## 7. Exercises
 

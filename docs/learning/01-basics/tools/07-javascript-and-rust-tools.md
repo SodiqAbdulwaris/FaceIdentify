@@ -16,7 +16,7 @@ because CI runs them all.
 | **TypeScript** (`tsc`) | The type checker for `.ts` and `.tsx` (`npm run typecheck` is `tsc -b`) | `frontend/tsconfig*.json` |
 | **Vitest** + **Testing Library** + **jsdom** | The front-end test runner, a simulated browser, and helpers that find elements the way a user does (by role and text) | `test` block in `vite.config.ts`; setup in `src/test/setup.ts` |
 | **oxlint** | The linter (`npm run lint`). The project does **not** use Prettier: the style is single quotes, no semicolons, and a formatter run would rewrite whole files | |
-| **openapi-typescript** | Turns the backend's OpenAPI document into `schema.d.ts` (`npm run generate:types`) | `frontend/src/api/` |
+| **openapi-typescript** | Turns the backend's OpenAPI document into `schema.d.ts` (`npm run generate:types --workspace frontend`) | `frontend/src/api/` |
 | **Cargo** | Rust's build tool and package manager (`cargo build`, `test`, `fmt`, `clippy`) | `desktop/src-tauri/Cargo.toml`, `Cargo.lock` |
 | **Tauri CLI** | `@tauri-apps/cli` installed by npm; `npm run tauri dev` opens the desktop app | `desktop/src-tauri/tauri.conf.json` |
 | **gh** | GitHub's command line (`gh pr create`, `gh pr checks`) | |
@@ -102,7 +102,7 @@ yet.
 
 **Answers**
 
-1. `npm run generate:api` (routes to `openapi.json` to `schema.d.ts`); `npm run generate:types` only
+1. `npm run generate:api` (routes to `openapi.json` to `schema.d.ts`); `npm run generate:types --workspace frontend` only
    regenerates the TypeScript from the committed JSON.
 2. `npm test` runs fast unit and component tests against fakes; `test:e2e` drives the real Python host
    through the whole image workflow.

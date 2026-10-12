@@ -61,7 +61,7 @@ rename a folder over another; they are meant for Windows. The 38 that passed inc
 *(Needs the local weights; unverified here.)* The real install is a script, with the flags it declares:
 
 ```bash
-uv run python scripts/install_reference_models.py --models-dir local-models/buffalo_l \
+PYTHONPATH=. uv run python scripts/install_reference_models.py --models-dir local-models/buffalo_l \
   --detector det_10g.onnx --embedder w600k_r50.onnx --local-state-root <your local state folder>
 ```
 

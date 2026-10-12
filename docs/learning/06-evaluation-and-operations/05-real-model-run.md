@@ -37,9 +37,9 @@ research-licensed and never committed; this is a **local** procedure on your mac
 **Needs the local models: describe only; not run here.** Shapes, from the scripts' own docstrings and `--help` (flags verified 2026-10-12):
 
 ```bash
-uv run python scripts/install_reference_models.py --models-dir local-models/buffalo_l \
+PYTHONPATH=. uv run python scripts/install_reference_models.py --models-dir local-models/buffalo_l \
     --detector det_10g.onnx --embedder w600k_r50.onnx --local-state-root local-models/state
-uv run python scripts/smoke_real_models.py --local-state-root local-models/state \
+PYTHONPATH=. uv run python scripts/smoke_real_models.py --local-state-root local-models/state \
     --providers CPUExecutionProvider local-models/images/a1.jpg local-models/images/a2.jpg
 uv run pytest -m e2e tests/e2e/test_real_models.py
 ```
