@@ -18,10 +18,10 @@ have 5 or more photographs. `evaluation/assisted_recognition_gate.py --manifest 
 | Measure | Value |
 |---|---|
 | Identities / photographs enrolled / held-out queries | 9 / 61 / 18 |
-| Recall@1, Recall@5, MRR | 1.000 / 1.000 / 1.000 (Wilson 95%: 0.824 to 1.000) |
+| Recall@1, Recall@5, MRR | 1.000 / 1.000 / 1.000 (Wilson 95% interval, for the two recalls only: 0.824 to 1.000; none is computed for MRR) |
 | Workflow checks (name search, recycle, restore, split, merge, delete, forget, restart) | 10 of 10 |
 | Ranking stability after restart | same rankings |
-| Queries wrote nothing (sources, identities, runs unchanged) | yes (61, 9, 61) |
+| Queries wrote nothing (sources, identities, runs unchanged) | yes (61, 9, 61); this check compares counts only |
 
 ## What this does and does not show
 
