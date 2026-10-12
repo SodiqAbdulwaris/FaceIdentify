@@ -187,6 +187,24 @@ def choose_people(
     return people[:count]
 
 
+def load_provenance(path: Path) -> dict[str, Any] | None:
+    """The provenance an imported dataset carries (`import_labelled_dataset.py`), checked before a
+    library is built: None when there is none, a stop when it is not what it must be."""
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        value = None
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != 1
+        or not all(isinstance(value.get(k), str) and value[k] for k in ("dataset", "labels_by"))
+    ):
+        raise SystemExit(f"{path} is not a valid provenance record (schema 1, dataset, labels_by)")
+    return value
+
+
 def subject(faces: list[dict[str, Any]], box: str) -> dict[str, Any] | None:
     """The one face a photograph is about: its only face, or one DOMINANCE times larger."""
     if not faces:
@@ -613,11 +631,7 @@ async def main_async(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest) if args.manifest else dataset / "manifest.json"
     manifest = json.loads(guard(manifest_path).read_text(encoding="utf-8"))
     provenance_path = dataset / "PROVENANCE.json"  # (an imported ready-labelled dataset)
-    provenance = (
-        json.loads(provenance_path.read_text(encoding="utf-8"))
-        if provenance_path.is_file()
-        else None
-    )
+    provenance = load_provenance(provenance_path)
     verified = manifest.get("kind") == "verified-manifest"
     if verified:  # a verified manifest from label_review.py: its schema is checked, its digests too
         if manifest.get("schema_version") != 1 or not isinstance(manifest.get("people"), dict):

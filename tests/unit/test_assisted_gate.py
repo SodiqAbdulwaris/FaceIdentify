@@ -9,6 +9,7 @@ import pytest
 from evaluation.assisted_recognition_gate import (
     choose_people,
     faces_of,
+    load_provenance,
     metrics,
     open_set,
     partition_people,
@@ -294,3 +295,28 @@ def test_a_score_just_under_a_cutoff_is_not_accepted_and_the_median_is_exact() -
     assert found["unknown_queries_attempted"] == 4
     assert found["unknown_queries_without_a_subject_face"] == 1
     assert found["unknown_queries"] == 3
+
+
+def test_provenance_is_checked_before_a_library_is_built(tmp_path: Path) -> None:
+    path = tmp_path / "PROVENANCE.json"
+    assert load_provenance(path) is None  # none: a Commons set
+
+    path.write_text(
+        json.dumps({"schema_version": 1, "dataset": "LFW", "labels_by": "its creators"})
+    )
+    assert load_provenance(path) == {
+        "schema_version": 1,
+        "dataset": "LFW",
+        "labels_by": "its creators",
+    }
+
+    for bad in (
+        '{"schema_version": 1}',
+        "{}",
+        "[]",
+        "not json",
+        '{"schema_version": 2, "dataset": "x", "labels_by": "y"}',
+    ):
+        path.write_text(bad)
+        with pytest.raises(SystemExit, match="not a valid provenance"):
+            load_provenance(path)
