@@ -21,7 +21,23 @@ will label the own set later.
   were supplied by the dataset creators and are **not verified by this project**.
 - `assisted_recognition_gate.py` reads `PROVENANCE.json` when it sits beside the manifest and says in its report
   who supplied the labels.
-- Tests: `tests/unit/test_import_labelled_dataset.py` (4).
+- Tests: `tests/unit/test_import_labelled_dataset.py` (10) and the gate's provenance check in
+  `tests/unit/test_assisted_gate.py`.
+
+## Safety rules (after the independent review)
+
+- A CelebA identity must be a plain number; a file name must be a bare name; every picture must resolve to a
+  regular `.jpg`/`.jpeg`/`.png` file inside `--source` (a link or `..` that leaves it is skipped); an output
+  folder name is sanitised and checked to lie under the output folder.
+- A picture is reserved only by the person who keeps it (not by a person who fails the minimum, nor beyond a
+  person's cap); `--people`, `--minimum` and `--maximum` must be at least 1.
+- The gate checks `PROVENANCE.json` (schema 1, dataset and labels_by present) before it builds a library.
+
+## Verification (2026-10-12)
+
+`uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform linux` pass;
+`uv run pytest tests/unit` passes (all unit tests, including the ten importer tests and the gate's). No dataset
+was downloaded, so the importer has run only on synthetic folders: **a real LFW or CelebA import is untried**.
 
 ## How to use it
 

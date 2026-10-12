@@ -86,3 +86,82 @@ def test_an_existing_output_is_never_overwritten_and_only_the_datasets_folder_is
         importer.write("lfw", chosen, datasets / "lfw")
     with pytest.raises(SystemExit, match="must be inside"):
         importer.write("lfw", chosen, tmp_path / "elsewhere")
+
+
+def test_a_table_cannot_name_files_outside_the_source_or_odd_identities(tmp_path: Path) -> None:
+    source = tmp_path / "celeba"
+    images = source / "img_align_celeba"
+    images.mkdir(parents=True)
+    (images / "000001.jpg").write_bytes(b"one")
+    secret = tmp_path / "private.jpg"
+    secret.write_bytes(b"private")
+    lines = [
+        "000001.jpg 7",
+        f"{secret} 7",  # an absolute path
+        "../../private.jpg 7",  # leaves the source
+        "000001.jpg 1/../../../../escaped",  # an identity that is not a number
+        "000001.txt 7",  # not a picture
+    ]
+    (source / "identity_CelebA.txt").write_text("\n".join(lines), encoding="utf-8")
+
+    people = importer.read_celeba(source)
+
+    assert {n: [f.name for f in files] for n, files in people.items()} == {
+        "identity 7": ["000001.jpg"]
+    }
+
+
+def test_a_link_leaving_the_source_is_not_followed(tmp_path: Path) -> None:
+    source = tmp_path / "lfw"
+    (source / "Ada_Lovelace").mkdir(parents=True)
+    outside = tmp_path / "outside.jpg"
+    outside.write_bytes(b"outside")
+    try:
+        (source / "Ada_Lovelace" / "linked.jpg").symlink_to(outside)
+    except OSError:
+        pytest.skip("symbolic links are not allowed here")
+    (source / "Ada_Lovelace" / "real.jpg").write_bytes(b"real")
+
+    people = importer.read_lfw(source)
+
+    assert [f.name for f in people["Ada Lovelace"]] == ["real.jpg"]
+
+
+def test_a_shared_picture_is_reserved_only_by_the_person_who_keeps_it(tmp_path: Path) -> None:
+    def pictures(name: str, contents: list[bytes]) -> list[Path]:
+        folder = tmp_path / name
+        folder.mkdir()
+        files = []
+        for index, data in enumerate(contents):
+            path = folder / f"{index}.jpg"
+            path.write_bytes(data)
+            files.append(path)
+        return files
+
+    # "A" (first in hash order or not) fails the minimum; "B" holds the picture too and must keep it
+    people = {
+        "A": pictures("A", [b"shared"]),
+        "B": pictures("B", [b"shared", b"b1", b"b2"]),
+        "C": pictures("C", [b"c1", b"c2", b"c3", b"c4"]),
+    }
+
+    chosen = importer.select(people, minimum=2, count=10, maximum=3)
+
+    assert {n: len(f) for n, f in chosen.items()} == {"B": 3, "C": 3}
+    # a picture beyond a person's cap is not taken from the pool either
+    again = importer.select(
+        {"B": people["B"], "D": pictures("D", [b"b2", b"d1", b"d2"])},
+        minimum=2,
+        count=10,
+        maximum=2,
+    )
+    assert {n: len(f) for n, f in again.items()} == {"B": 2, "D": 2}
+    assert b"b2" in [f.read_bytes() for f in again["D"]]  # B was capped before reaching it
+
+
+@pytest.mark.parametrize("options", [["--people", "0"], ["--minimum", "0"], ["--maximum", "-1"]])
+def test_non_positive_limits_are_refused(tmp_path: Path, options: list[str]) -> None:
+    source = lfw_source(tmp_path)
+
+    with pytest.raises(SystemExit, match="at least 1"):
+        importer.main(["lfw", "--source", str(source), *options])
