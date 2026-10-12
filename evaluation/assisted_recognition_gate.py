@@ -319,6 +319,12 @@ async def ask(gate: Gate, path: Path) -> dict[str, Any]:
     return body
 
 
+def subject_status(answer: dict[str, Any]) -> str | None:
+    """What the application itself said about the subject face (its own decision, not ours)."""
+    chosen = subject(answer["faces"], "bounding_box")
+    return None if chosen is None else str(chosen["status"])
+
+
 def ranking(answer: dict[str, Any]) -> list[dict[str, Any]] | None:
     """The people offered for the photograph's subject face, best first (None: no subject face)."""
     chosen = subject(answer["faces"], "bounding_box")
@@ -342,16 +348,145 @@ async def run_queries(
     results = []
     for person in people:
         for path in person["query"]:
-            offered = ranking(await ask(gate, path))
+            answer = await ask(gate, path)
             results.append(
                 {
                     "person": person["name"],
                     "file": path.name,
+                    "unknown": bool(person.get("unknown")),
                     "eligible": enrolled[person["name"]]["faces"] >= 2,
-                    "offered": offered,
+                    "offered": ranking(answer),
+                    "status": subject_status(answer),
                 }
             )
     return results
+
+
+def wilson(k: int, n: int) -> list[float]:
+    """The Wilson 95% interval of k out of n."""
+    if n == 0:
+        return [0.0, 0.0]
+    z, p = 1.96, k / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    spread = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return [round(max(0.0, centre - spread), 3), round(min(1.0, centre + spread), 3)]
+
+
+# Candidate similarity cut-offs the open-set table is read at: what a policy that accepted any
+# top candidate at or above the cut-off would have done, known and unknown people alike.
+THRESHOLDS = tuple(round(0.30 + 0.05 * step, 2) for step in range(11))
+
+
+def partition_people(
+    everyone: list[dict[str, Any]], *, known_count: int, minimum: int, unknown_count: int
+) -> list[dict[str, Any]]:
+    """The people to enrol (at least `minimum` photographs, `known_count` of them, in the stable
+    order) and the people never enrolled (`unknown_count` of the rest, any with a photograph): all
+    of an unknown person's photographs become open-set queries. No photograph is in both groups
+    (`choose_people` has already used each distinct picture once)."""
+    known = [p for p in everyone if len(p["enrol"]) + len(p["query"]) >= minimum][:known_count]
+    named = {p["name"] for p in known}
+    unknown = [
+        {
+            "name": person["name"],
+            "enrol": [],
+            "query": sorted(person["enrol"] + person["query"]),
+            "unknown": True,
+        }
+        for person in [p for p in everyone if p["name"] not in named][:unknown_count]
+    ]
+    return known + unknown
+
+
+def per_identity(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Retrieval by enrolled person: queries, first-place hits and hits within five."""
+    table: dict[str, dict[str, int]] = {}
+    for r in results:
+        if r.get("unknown") or not r["eligible"] or r["offered"] is None:
+            continue
+        row = table.setdefault(r["person"], {"queries": 0, "recall_at_1": 0, "recall_at_5": 0})
+        names = [o["person"] for o in r["offered"]]
+        row["queries"] += 1
+        if r["person"] in names[:1]:
+            row["recall_at_1"] += 1
+        if r["person"] in names[:5]:
+            row["recall_at_5"] += 1
+    return dict(sorted(table.items()))
+
+
+def open_set(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """What happens to someone who was never enrolled, reported apart from closed-set retrieval.
+
+    For each cut-off, a top candidate at or above it would be *accepted*: for an unknown person that
+    is a false match; for a known person it is right or wrong. `policy` counts what the
+    application itself decided under its real policy (accepting nothing, today)."""
+    unknown = [r for r in results if r.get("unknown") and r["offered"] is not None]
+    known = [
+        r for r in results if not r.get("unknown") and r["eligible"] and r["offered"] is not None
+    ]
+
+    def top(r: dict[str, Any]) -> float | None:
+        return r["offered"][0]["similarity"] if r["offered"] else None
+
+    table = []
+    for cutoff in THRESHOLDS:
+        false_accepts = sum(1 for r in unknown if (s := top(r)) is not None and s >= cutoff)
+        right = sum(
+            1
+            for r in known
+            if (s := top(r)) is not None
+            and s >= cutoff
+            and r["offered"][0]["person"] == r["person"]
+        )
+        wrong = sum(
+            1
+            for r in known
+            if (s := top(r)) is not None
+            and s >= cutoff
+            and r["offered"][0]["person"] != r["person"]
+        )
+        table.append(
+            {
+                "cutoff": cutoff,
+                "unknown_false_accepts": false_accepts,
+                "unknown_false_accept_rate": round(false_accepts / len(unknown), 3)
+                if unknown
+                else None,
+                "unknown_false_accept_wilson95": wilson(false_accepts, len(unknown)),
+                "known_accepted_correct": right,
+                "known_accepted_wrong": wrong,
+                "known_recall_at_cutoff": round(right / len(known), 3) if known else None,
+            }
+        )
+    scores = sorted(s for r in unknown if (s := top(r)) is not None)
+    return {
+        "unknown_people": sorted({r["person"] for r in unknown}),
+        "unknown_queries": len(unknown),
+        "unknown_with_no_candidate": sum(1 for r in unknown if not r["offered"]),
+        "known_queries": len(known),
+        "policy": {
+            "identity_answers_for_unknown_people": sum(
+                1 for r in unknown if r["status"] == "IDENTITY_ANSWER"
+            ),
+            "possible_people_offered_for_unknown_people": sum(
+                1 for r in unknown if r["status"] == "POSSIBLE_PEOPLE"
+            ),
+            "unknown_status_for_unknown_people": sum(
+                1 for r in unknown if r["status"] == "UNKNOWN"
+            ),
+        },
+        "unknown_top1_similarity": {
+            "min": scores[0] if scores else None,
+            "median": scores[len(scores) // 2] if scores else None,
+            "max": scores[-1] if scores else None,
+        },
+        "by_cutoff": table,
+        "note": (
+            "Closed-set retrieval does not show whether a stranger is rejected. Read the cut-off "
+            "table as: at this similarity, how many strangers would have been accepted, and how "
+            "many known people correctly."
+        ),
+    }
 
 
 def metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -367,22 +502,14 @@ def metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
             hits5 += rank <= 5
     n = len(eligible)
 
-    def wilson(k: int) -> list[float]:
-        if n == 0:
-            return [0.0, 0.0]
-        z, p = 1.96, k / n
-        centre = (p + z * z / (2 * n)) / (1 + z * z / n)
-        spread = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
-        return [round(max(0.0, centre - spread), 3), round(min(1.0, centre + spread), 3)]
-
     return {
         "queries": n,
         "recall_at_1": round(hits1 / n, 3) if n else None,
-        "recall_at_1_wilson95": wilson(hits1),
+        "recall_at_1_wilson95": wilson(hits1, n),
         "recall_at_5": round(hits5 / n, 3) if n else None,
-        "recall_at_5_wilson95": wilson(hits5),
+        "recall_at_5_wilson95": wilson(hits5, n),
         "mrr": round(reciprocal / n, 3) if n else None,
-        "ineligible_or_no_subject": len(results) - n,
+        "ineligible_or_no_subject": len([r for r in results if not r.get("unknown")]) - n,
     }
 
 
@@ -501,7 +628,13 @@ async def main_async(args: argparse.Namespace) -> int:
         max_index_passes=PROVISIONAL_INDEX_PASSES,
     )
     providers = providers_from(os.environ)
-    people = choose_people(manifest, dataset, args.people, args.minimum_photographs)
+    people = partition_people(
+        choose_people(manifest, dataset, 10**6, 1),
+        known_count=args.people,
+        minimum=args.minimum_photographs,
+        unknown_count=args.unknown,
+    )
+    known_names = [p["name"] for p in people if not p.get("unknown")]
     log: dict[str, Any] = {"started": datetime.now(UTC).isoformat(), "providers": list(providers)}
 
     async with running(settings, providers) as gate:
@@ -513,6 +646,9 @@ async def main_async(args: argparse.Namespace) -> int:
         log["queries_wrote_nothing"] = before == after
         log["counts"] = {"before_queries": before, "after_queries": after}
         log["metrics"] = metrics(results)
+        log["per_identity"] = per_identity(results)
+        if args.unknown:
+            log["open_set"] = open_set(results)
         log["queries"] = results
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
@@ -531,12 +667,7 @@ async def main_async(args: argparse.Namespace) -> int:
     async with running(settings, providers) as gate:
         again = await run_queries(gate, people, enrolled)
         checks["restart_keeps_name_search"] = bool(
-            [
-                p
-                for p in (await gate.get("/search", q=people[0]["name"].lower()))["results"][
-                    "people"
-                ]
-            ]
+            [p for p in (await gate.get("/search", q=known_names[0].lower()))["results"]["people"]]
         )
         checks["restart_gives_the_same_rankings"] = [r["offered"] for r in settled] == [
             r["offered"] for r in again
@@ -567,6 +698,7 @@ async def main_async(args: argparse.Namespace) -> int:
         "configuration": {
             "package": PACKAGE_KEY,
             "people": len(people),
+            "unknown_people": args.unknown,
             "minimum_photographs": args.minimum_photographs,
             "dominance": DOMINANCE,
         },
@@ -595,6 +727,12 @@ def main() -> int:
     parser.add_argument("--report", required=True)
     parser.add_argument("--manifest", help="a verified manifest (label_review.py export)")
     parser.add_argument("--people", type=int, default=12)
+    parser.add_argument(
+        "--unknown",
+        type=int,
+        default=0,
+        help="people never enrolled: their photographs are open-set queries (TST-057B)",
+    )
     parser.add_argument("--minimum-photographs", type=int, default=5)
     return asyncio.run(main_async(parser.parse_args()))
 
