@@ -112,6 +112,8 @@ Ambiguities were resolved conservatively; please confirm or overrule.
 8. **CONTEXT.md.** Its header is dated 2026-10-07 although later work exists. I only prepended a 2026-10-12 note and did not rewrite the file (out of scope);
    you may want it brought up to date separately.
 9. **No tracker row, spec or plan was changed** (rules: only verified status; specs only with approval).
+10. **A new top-level docs folder.** `documentation.md` lists `specs/`, `plans/`, `guides/`, `strategy/`, `research/` and `archive/` and says not to create new top-level documents where one fits. You asked for `docs/learning/`, so I used it. The alternative is `docs/guides/learning/`. Recommendation: keep `docs/learning/` (it is a whole guide, not a how-to) and amend `documentation.md` to list it, which I did not do without your approval.
+11. **Commit bodies.** Large area commits mostly lack the one-line body `commits.md` asks for; decision 2 is the disclosure. History is not rewritten without your permission.
 
 ## Findings (found while verifying; not fixed here)
 
