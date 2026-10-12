@@ -39,8 +39,26 @@
 - `evaluation/assisted_recognition_gate.py` takes `--manifest <verified manifest>`, so the same script produces the
   TST-057B numbers from verified labels. Unknown-identity (open-set) reporting separate from closed-set retrieval
   is **not built yet** (see "Next").
-- Tests: `tests/unit/test_label_review.py` (10).
+- Tests: `tests/unit/test_label_review.py` (18) and the gate's integrity checks in `test_assisted_gate.py`.
 - Smoke-checked on the real set: 44 candidate identities, 662 photographs listed, images served.
+
+## Changes after the independent review
+
+- A decision counts only while the photograph still has the bytes and the proposed label it was reviewed under
+  (checked when serving, deciding and exporting, with a size-and-time cache); otherwise it is listed as
+  `stale_needs_review`. A relabelled or replaced photograph needs a new review.
+- The page draws names, titles and labels as text (DOM properties, no `innerHTML`), so a manifest title cannot run
+  script and forge decisions; saving a decision keeps keyboard focus on the same button, and each card is a
+  labelled group.
+- A half-written last line from a crash is moved to `decisions.torn.jsonl` (kept) and the log resumes; damage
+  before the end of the log stops the tool. Reads come from one snapshot under the lock; an export's digest and
+  counts describe the same snapshot.
+- `review/` and image reads are confined by real path (links and junctions followed); an export is a new file
+  every time (microsecond name, exclusive create).
+- `same_picture_as`: the reviewer declares copies or re-encodings; a group counts once (byte-identical files are
+  caught automatically).
+- The gate checks a verified manifest's schema and every file's digest (a changed or missing file stops the run)
+  and its report says the labels were human-verified, with provenance.
 
 ## The review is the owner's
 
