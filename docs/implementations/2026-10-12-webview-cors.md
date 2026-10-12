@@ -37,6 +37,17 @@ the web view's failed preflights).
 - Rust: each origin becomes its own `--allow-origin` argument; the dev server is allowed only in a debug build.
 - `cargo test` (21 passed, 1 ignored as before), `cargo check`, `cargo fmt`.
 
+## After the independent review
+
+- The unexpected-error response (`500 INTERNAL_ERROR`) is built by the server-error layer, outside the CORS
+  middleware, so it carried no CORS headers and a page could not read even the diagnostic id. The handler now
+  adds them for an allowed origin (test with a route that raises).
+- The API spec paragraph is an agent design awaiting the owner's confirmation, not a decision.
+- **Known, existing, not changed here:** the face-search path form rejects literal network paths (`\server`,
+  `//server`) but not a mapped network drive (`Z:\...`) or a junction that points at a share; opening one can
+  contact the share before the image is validated. A follow-up needs a drive-type and reparse-target check
+  with Windows tests.
+
 ## Not covered
 
 - The window itself: no automated test drives a real web view. The owner's `npm run tauri dev` is the check.
