@@ -471,7 +471,9 @@ async def main_async(args: argparse.Namespace) -> int:
     report_path = guard(Path(args.report))
     if workdir.exists() and any(workdir.iterdir()):
         raise SystemExit(f"{workdir} is not empty; a gate run needs a fresh library")
-    manifest = json.loads((dataset / "manifest.json").read_text(encoding="utf-8"))
+    manifest_path = Path(args.manifest) if args.manifest else dataset / "manifest.json"
+    manifest = json.loads(guard(manifest_path).read_text(encoding="utf-8"))
+    manifest = manifest.get("people", manifest)  # (a verified manifest from label_review.py)
     state = workdir / "local-state"
     for part in (
         "runtime",
@@ -558,9 +560,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "onnxruntime": onnxruntime.__version__,
             "platform": platform.platform(),
             "package_listing_sha256": weights,
-            "dataset_manifest_sha256": hashlib.sha256(
-                (dataset / "manifest.json").read_bytes()
-            ).hexdigest(),
+            "dataset_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
             "photographs_used_sha256": used,  # (the manifest holds no per-file digest)
         },
         "workflow_checks": checks,
@@ -578,6 +578,7 @@ def main() -> int:
     parser.add_argument("--local-state-root", required=True)
     parser.add_argument("--workdir", required=True)
     parser.add_argument("--report", required=True)
+    parser.add_argument("--manifest", help="a verified manifest (label_review.py export)")
     parser.add_argument("--people", type=int, default=12)
     parser.add_argument("--minimum-photographs", type=int, default=5)
     return asyncio.run(main_async(parser.parse_args()))
