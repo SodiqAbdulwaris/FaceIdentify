@@ -28,7 +28,9 @@ recognisable.*
    crops' bytes go. A crash or a locked file leaves the representations `ERASING` and the crops `DELETING`; startup recovery
    finishes both, and so does repeating the request.
 - The faces themselves (observations, boxes, the media) stay as media-analysis data but **no longer resolve to anyone**. A later
-  photograph of the same person is a *new unknown identity*: nothing is remembered of what they looked like.
+  photograph of the same person cannot be matched to the forgotten identity, because nothing is remembered of what they looked like. What happens to the new face
+  depends on the policy and on who else is in the library: with other candidates left, the current real-profile (abstain-only) policy answers `ABSTAIN`, so the face is
+  *unresolved* and waits for you to place it; only with nothing to compare against does it start a new identity.
 
 ## 4. Try it
 
@@ -61,14 +63,14 @@ merged identity: the tests that forget a merged survivor fail (the vectors on th
 ## 7. Exercises
 
 1. What survives forgetting an identity? What does not?
-2. Why is a later photograph of the person a new unknown?
+2. Why is a later photograph of the person not recognised as them?
 3. Why does authoritative forgetting come before physical erasure?
 4. How does forget differ from permanent delete?
 
 **Answers**
 
 1. Survives: photographs, boxes, the person's name. Gone: the vectors and keys, the occurrences' authority, the person link.
-2. Nothing remains to compare against.
+2. Nothing remains to compare against. The face ends up unresolved (abstained) or, in an empty library, as a new identity.
 3. If cleanup fails, the identity must already be unrecognisable; physical cleanup is retried.
 4. Forget removes biometric memory and keeps the media; permanent delete removes the picture and its faces' vectors.
 

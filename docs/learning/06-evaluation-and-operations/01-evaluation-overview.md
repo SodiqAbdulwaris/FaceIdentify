@@ -63,7 +63,7 @@ protocol change is a decision recorded in `docs/research/measured-operating-poin
 
 ## 6. Break it on purpose
 
-Ask for an output folder outside the ignored area: `uv run python evaluation/build_commons_dataset.py --out /tmp/x` is refused by design
+Ask for an output folder outside the ignored area: `PYTHONPATH=. uv run python evaluation/build_commons_dataset.py --out /tmp/x` is refused by design
 (*reasoned from its docstring; it also needs network access, so it was not run here*).
 
 ## 7. Exercises

@@ -95,7 +95,7 @@ each result** (provenance). A silent change of hardware would make that record a
    real and prints the provider that executed each stage:
 
    ```bash
-   uv run python scripts/smoke_real_models.py --local-state-root local-models/state \
+   PYTHONPATH=. uv run python scripts/smoke_real_models.py --local-state-root local-models/state \
      --providers CPUExecutionProvider path/to/one.jpg path/to/two.jpg
    ```
 

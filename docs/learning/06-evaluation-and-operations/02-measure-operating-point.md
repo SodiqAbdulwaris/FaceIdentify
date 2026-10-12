@@ -36,7 +36,7 @@ Flags (from `--help`, verified 2026-10-12): `--dataset`, `--local-state-root`, `
 **Needs local-only data and models: describe only, not run here.** The shape of the command (from the docstring):
 
 ```bash
-uv run python evaluation/measure_operating_point.py --dataset evaluation/datasets/commons-pd \
+PYTHONPATH=. uv run python evaluation/measure_operating_point.py --dataset evaluation/datasets/commons-pd \
     --local-state-root local-models/state --report evaluation/datasets/reports/commons-pd.json
 ```
 

@@ -28,10 +28,8 @@ already installed; the real `sqlite3` command line works the same way if you hav
 - **Never copy only `library.db`** while the backend runs; use the backup API ([lesson 02](02-sqlite-and-wal.md)).
 - **Never edit by hand** a library you care about. If you must experiment, experiment on a backup-API copy.
 - Tools: any SQLite viewer works (for example DB Browser for SQLite, or the `sqlite3` shell if you have it:
-  `sqlite3 "file:library.db?mode=ro" "select count(*) from sources;"`). Python 3.12 also ships a tiny shell:
-  `uv run python -m sqlite3 "file:/path/library.db?mode=ro"` accepts one SQL statement per line (it does not support
-  the `.tables` dot-commands; use `select name from sqlite_master where type='table'`). Scripts, as in every lesson
-  here, work everywhere.
+  `sqlite3 "file:library.db?mode=ro" "select count(*) from sources;"`). Do not use Python's `python -m sqlite3` shell for a read-only look: it opens the name you give it as a plain file (no `uri=True`), so a
+  `file:...?mode=ro` address fails with an `OperationalError`. Use the explicit Python connection above, as every lesson here does, which works everywhere.
 
 ### Reading a log
 

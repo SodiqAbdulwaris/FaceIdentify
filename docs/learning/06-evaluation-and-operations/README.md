@@ -15,6 +15,9 @@ Two kinds of knowledge that keep a recognition product honest: **how the numbers
 
 The labelled set can come from Wikimedia Commons (parked by the owner on 2026-10-12) or from LFW / CelebA through `import_labelled_dataset.py` ([overview](01-evaluation-overview.md)).
 
+**Running the scripts.** They import the `backend` package, so run them from the repository folder with `PYTHONPATH=.` (bash: `PYTHONPATH=. uv run python evaluation/...`; PowerShell:
+`$env:PYTHONPATH = "."` once, then `uv run python evaluation/...`). Without it you get `ModuleNotFoundError: No module named 'backend'` (reproduced 2026-10-12).
+
 **Everything that needs photographs or model weights is local only** (`evaluation/datasets/` and `local-models/` are git-ignored and are never
 committed; the photographs are biometric data). This folder therefore **describes** those scripts and shows their `--help`; it does not
 reproduce their results. What *can* be run anywhere without data is marked **works with no models**.

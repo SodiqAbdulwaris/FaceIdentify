@@ -84,8 +84,9 @@ and `backend/app`.
 ## 6. Break it on purpose
 
 Name the same noun two ways in your head ("face" for both observation and representation) and try to answer "what
-does re-running recognition replace?" You cannot. The answer is *representations and identity assignments*; the observation
-(a box on a picture) is superseded only by a re-run of detection.
+does re-running recognition replace?" You cannot. The intended answer is *representations and identity assignments*, with the observation
+(a box on a picture) superseded only by a re-run of detection. **That supersession is designed, not built:** the `SUPERSEDED` states exist in the tables, but no
+code sets them for observations, occurrences or representations today; a repeated processing request leaves both generations `ACTIVE` (reviewer's reproduction on PR #170).
 
 ## 7. Exercises
 
