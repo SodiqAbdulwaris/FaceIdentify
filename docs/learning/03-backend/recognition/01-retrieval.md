@@ -12,7 +12,7 @@ and the report says how many were refused, so a short list is never mistaken for
 | Thing | Where |
 |---|---|
 | `retrieve`, `Retrieval`, `RetrievedCandidate`, `Pool`, `IncompatibleSpaceError` | `backend/app/recognition/retrieval.py` |
-| The index it queries | `backend/infrastructure/index/` ([vector index lesson](../../02-data-and-storage/06-vector-index-and-outbox.md)) |
+| The index it queries | `backend/infrastructure/indexing/` ([vector index lesson](../../02-data-and-storage/06-vector-index-and-outbox.md)) |
 | Tests | `tests/integration/test_recognition_retrieval.py` (28) |
 
 ## 3. How it works
