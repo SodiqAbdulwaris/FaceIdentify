@@ -53,6 +53,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-12 | [Evaluation on LFW and CelebA; the Commons set parked](2026-10-12-labelled-dataset-import.md) | importer built; nothing downloaded yet |
 | 2026-10-12 | [Fix: the web view could not read the backend (CORS)](2026-10-12-webview-cors.md) | fixed; awaiting the owner's window check |
 | 2026-10-13 | [M5: the first run on LFW](2026-10-13-m5-lfw-evaluation.md) | evidence recorded; TST-057B not claimed |
+| 2026-10-12 | [The learning guide restructured into `docs/learning/`](2026-10-12-learning-guide-restructure.md) | done; documentation only |
 | 2026-10-09 | [M5 step 4c, part 1: revision 0010](2026-10-09-m5-revision-0010.md) | done; TST-059, TST-032 |
 | 2026-10-09 | [M5 step 4b: permanent deletion of a source](2026-10-09-m5-permanent-source-delete.md) | done; TST-059 second part |
 | 2026-10-08 | [M5 step 4a: recycle and restore a source](2026-10-08-m5-recycle-restore.md) | done; TST-059 first part |
