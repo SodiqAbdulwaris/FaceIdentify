@@ -51,6 +51,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-12 | [M5: first run on human-verified labels](2026-10-12-m5-first-verified-label-run.md) | evidence recorded; TST-057B not claimed |
 | 2026-10-12 | [M5: open-set evaluation](2026-10-12-m5-open-set-evaluation.md) | built and run once; TST-057B not claimed |
 | 2026-10-12 | [Evaluation on LFW and CelebA; the Commons set parked](2026-10-12-labelled-dataset-import.md) | importer built; nothing downloaded yet |
+| 2026-10-12 | [Fix: the web view could not read the backend (CORS)](2026-10-12-webview-cors.md) | fixed; awaiting the owner's window check |
 | 2026-10-09 | [M5 step 4c, part 1: revision 0010](2026-10-09-m5-revision-0010.md) | done; TST-059, TST-032 |
 | 2026-10-09 | [M5 step 4b: permanent deletion of a source](2026-10-09-m5-permanent-source-delete.md) | done; TST-059 second part |
 | 2026-10-08 | [M5 step 4a: recycle and restore a source](2026-10-08-m5-recycle-restore.md) | done; TST-059 first part |
