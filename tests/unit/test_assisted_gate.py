@@ -10,8 +10,12 @@ from evaluation.assisted_recognition_gate import (
     choose_people,
     faces_of,
     metrics,
+    open_set,
+    partition_people,
+    per_identity,
     ranking,
     subject,
+    wilson,
 )
 
 
@@ -177,3 +181,95 @@ def test_a_verified_photograph_that_changed_or_vanished_stops_the_run(tmp_path: 
             count=1,
             minimum=4,
         )
+
+
+def person(name: str, enrol: int, query: int = 1) -> dict[str, object]:
+    return {
+        "name": name,
+        "enrol": [Path(f"{name}/{i}.jpg") for i in range(enrol)],
+        "query": [Path(f"{name}/q{i}.jpg") for i in range(query)],
+    }
+
+
+def test_unknown_people_are_never_enrolled_and_all_their_photographs_are_queries() -> None:
+    everyone = [person("A", 5), person("B", 1), person("C", 6), person("D", 2, 0)]
+
+    people = partition_people(everyone, known_count=5, minimum=5, unknown_count=2)
+
+    known = [p for p in people if not p.get("unknown")]
+    unknown = [p for p in people if p.get("unknown")]
+    assert [p["name"] for p in known] == ["A", "C"]  # 6 or 7 photographs
+    assert [p["name"] for p in unknown] == ["B", "D"]  # the rest, whatever they have
+    assert all(p["enrol"] == [] for p in unknown)
+    assert [len(p["query"]) for p in unknown] == [2, 2]
+    assert partition_people(everyone, known_count=5, minimum=5, unknown_count=0) == [
+        everyone[0],
+        everyone[2],
+    ]
+
+
+def ranked(
+    person: str,
+    offered: list[tuple[str | None, float]],
+    *,
+    unknown: bool = False,
+    status: str = "POSSIBLE_PEOPLE",
+) -> dict[str, object]:
+    return {
+        "person": person,
+        "unknown": unknown,
+        "eligible": not unknown,
+        "offered": [{"person": n, "similarity": s} for n, s in offered],
+        "status": status,
+    }
+
+
+def test_the_open_set_counts_strangers_accepted_at_each_cutoff_apart_from_known_people() -> None:
+    results = [
+        ranked("A", [("A", 0.80), ("B", 0.40)]),  # a known person, right
+        ranked("A", [("B", 0.55), ("A", 0.50)]),  # a known person, wrong first
+        ranked("Z", [("A", 0.60)], unknown=True),  # a stranger resembling A
+        ranked("Z", [("B", 0.35)], unknown=True),
+        ranked("Y", [], unknown=True, status="UNKNOWN"),  # a stranger nobody resembles
+    ]
+
+    found = open_set(results)
+
+    assert (found["unknown_queries"], found["known_queries"]) == (3, 2)
+    assert found["unknown_with_no_candidate"] == 1
+    by = {row["cutoff"]: row for row in found["by_cutoff"]}
+    assert by[0.5]["unknown_false_accepts"] == 1  # only the 0.60 stranger
+    assert by[0.5]["known_accepted_correct"] == 1
+    assert by[0.5]["known_accepted_wrong"] == 1
+    assert by[0.7]["unknown_false_accepts"] == 0
+    assert by[0.7]["known_accepted_correct"] == 1
+    assert by[0.3]["unknown_false_accepts"] == 2
+    assert found["policy"] == {
+        "identity_answers_for_unknown_people": 0,
+        "possible_people_offered_for_unknown_people": 2,
+        "unknown_status_for_unknown_people": 1,
+    }
+    assert found["unknown_people"] == ["Y", "Z"]
+
+
+def test_per_identity_retrieval_counts_first_place_and_top_five() -> None:
+    results = [
+        ranked("A", [("A", 0.9)]),
+        ranked("A", [("B", 0.9), ("A", 0.8)]),
+        ranked("B", [("A", 0.9)]),
+        ranked("Z", [("A", 0.9)], unknown=True),
+    ]
+
+    table = per_identity(results)
+
+    assert table == {
+        "A": {"queries": 2, "recall_at_1": 1, "recall_at_5": 2},
+        "B": {"queries": 1, "recall_at_1": 0, "recall_at_5": 0},
+    }
+
+
+def test_the_wilson_interval_is_between_zero_and_one_and_wider_for_fewer_queries() -> None:
+    low, high = wilson(0, 18)
+    assert (low, high) == (0.0, 0.176)
+    assert wilson(5, 10)[1] - wilson(5, 10)[0] > wilson(50, 100)[1] - wilson(50, 100)[0]
+    assert wilson(0, 0) == [0.0, 0.0]
