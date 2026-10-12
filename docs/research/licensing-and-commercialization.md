@@ -141,19 +141,46 @@ action); CCPA/CPRA; local rules on video and camera surveillance (M7). The produ
 helps (everything local, user-controlled deletion and forgetting, query-is-not-ingest), but none of
 that replaces consent and retention rules for other people's faces.
 
-## 10. Evaluation data
+## 10. Datasets and training data
 
-- **Wikimedia Commons public-domain photographs** (`evaluation/build_commons_dataset.py`): only files
-  whose own metadata names an allow-listed public-domain status (`Public domain`, `PD-USGov*`) are
-  kept; the per-file licence name and URL, author, credit, source page, acquisition time and SHA-256
-  are recorded in the local `manifest.json`. They are used locally for measurement and **never
-  committed or redistributed** (`evaluation/datasets/` is Git-ignored). Public-domain copyright does
-  not remove personality, privacy or biometric-data rights of the people shown.
-- **Test pictures** under `local-models/images` (NASA photographs from Wikimedia Commons) are local
-  and not committed.
-- The Labeled Faces in the Wild dataset was not used (its host was unreachable and its terms could
-  not be checked).
-- Owner-supplied photographs, when added, are the owner's private data and stay local.
+**FaceIdentify does not train or fine-tune any model.** The two networks it runs (a face detector and a
+face recogniser) are third-party pretrained weights used **unmodified** (section 2), so the project has no
+training set of its own. The datasets that matter are therefore (a) the data *upstream* trained the weights
+on, whose terms travel with the weights, and (b) the data *we* use to evaluate and calibrate them. If the
+project ever trains or fine-tunes a model, every training set is added here in the same change.
+
+### 10.1 Data the pretrained weights were trained on (not ours; terms not verified)
+
+| Dataset | Behind which weights | Used here | Status of its terms |
+|---|---|---|---|
+| WebFace600K (derived from WebFace260M) | `buffalo_l` recogniser `w600k_r50.onnx` (selected); `buffalo_sc` | `buffalo_l` yes; `buffalo_sc` downloaded, not used | **Not verified.** Its own terms may restrict commercial use of models trained on it, independent of InsightFace's licence (section 2.3). |
+| WIDER FACE (as published for SCRFD) | `buffalo_l` detector `det_10g.onnx` | yes | **Not verified**: taken from the SCRFD paper, not read at source. Its terms are an open question for any commercial release. |
+| Glint360K | `antelopev2` recogniser `glintr100.onnx` | downloaded, **not used** | Not verified; irrelevant unless that package is adopted. |
+| MS1M-derived data | `arcfaceresnet100-8.onnx` (ONNX Model Zoo, Apache-2.0), considered as an alternative | **not used** | Not verified (section 2.3). |
+
+### 10.2 Data we use to evaluate and calibrate (ours to account for)
+
+| Dataset | Role | Size and provenance | Terms | Committed? |
+|---|---|---|---|---|
+| **Wikimedia Commons public-domain photographs** (`evaluation/build_commons_dataset.py`) | Measuring recognition (TST-044, TST-057A/B) and the operating point; the pool the owner reviews with `evaluation/label_review.py` | 44 people, 662 photographs on this machine, every one marked `public domain` by Commons' own metadata; only allow-listed statuses (`Public domain`, `PD-USGov*`) are kept | Public-domain copyright does **not** remove personality, privacy or biometric-data rights of the people shown. | **No**: `evaluation/datasets/` is Git-ignored; never redistributed |
+| NASA test pictures from Wikimedia Commons (`local-models/images`) | Local smoke tests of the runtime | a handful of files | public domain per Commons | No (local only) |
+| Owner-supplied photographs | The independent smoke test for TST-057A; any future private evaluation | the owner's own data | the owner's private data | No; stays local |
+
+Honest limits of the Commons set, which matter for any claim built on it:
+
+- **Its identity labels are Commons categories, not verified identity.** A human review is in progress
+  (R5; owner, from 2026-10-12): decisions, reviewer, time and photograph digests are kept in the local
+  `review/decisions.jsonl`, and only verified labels enter the verified manifest. Quality numbers are
+  reported against provisional labels until then.
+- **What the local manifest records.** Each of the 662 entries holds the file, the Commons title, the
+  thumbnail URL and the licence name. The builder script is written to also record author, credit, source
+  page, acquisition time and SHA-256, but the manifest currently on disk was built without them: those
+  must be re-collected before any decision to share or publish the set. The review utility records a
+  SHA-256 per photograph it reviews.
+- The set is small, formal and skewed toward adults photographed officially; it is a development aid,
+  not a benchmark.
+- **Not used:** the Labeled Faces in the Wild dataset (its host was unreachable and its terms could not
+  be checked).
 
 ## 11. Before any release: checklist
 
