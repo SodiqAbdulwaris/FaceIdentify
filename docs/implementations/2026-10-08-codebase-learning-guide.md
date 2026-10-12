@@ -5,6 +5,8 @@
 - **Status:** done
 - **Commits:** PR to be recorded when merged
 
+> **Update 2026-10-12:** the guide this entry describes was split into the small lessons of `docs/learning/`; `docs/research/codebase-learning-guide.md` is now a short pointer. What moved where is in [`2026-10-12-learning-guide-restructure.md`](2026-10-12-learning-guide-restructure.md). The text below is the record of the original single-file guide.
+
 ## What changed
 
 - `docs/research/StackResearch.md` (a bare, unexplained list of topics to research) is renamed to
