@@ -108,6 +108,12 @@ On reconnection, sequence gaps, or uncertainty, the frontend refetches state thr
 
 ---
 
+> **Decision 2026-10-12 (defect fix; agent design awaiting the owner's confirmation):** the web view is a
+> different origin from the loopback server, so the host answers CORS for exactly the origins the shell names
+> (`--allow-origin`; the packaged app's origins, and the Vite dev server in a debug build only): no `*`, no
+> credentials, and a preflight is answered before the launch-capability check while every real request still
+> needs the capability. With none named there are no CORS headers.
+
 # 3. API Versioning
 
 Application API routes use:
