@@ -1,0 +1,39 @@
+# 04 The front end
+
+The screen you see is a **React** application written in **TypeScript**, built by **Vite**, running inside the Tauri window. It
+holds no truth of its own: every name, face and status comes from the backend over HTTP, and a WebSocket only says "something
+changed, ask again".
+
+| Lesson | Teaches |
+|---|---|
+| [01 The web and JavaScript](01-web-and-javascript.md) | what a browser page is, and the JavaScript you need |
+| [02 TypeScript and tooling](02-typescript-and-tooling.md) | types, the generated API types, Vite, lint, typecheck |
+| [03 React](03-react.md) | components, state, effects, in this codebase's words |
+| [04 App structure and the gate](04-app-structure-and-gate.md) | `App`, the backend gate, the provider, the layout |
+| [05 The API client and queries](05-api-client-and-queries.md) | one client, one endpoints file, TanStack Query keys |
+| [06 Events and routing](06-events-and-routing.md) | the event client, invalidation, hash routes |
+| [07 Library and source screens](07-library-and-source-screens.md) | the two main screens, line by line |
+| [08 People and search screens](08-people-and-search-screens.md) | people, one person, search, face search |
+| [09 Styling and front-end tests](09-styling-and-frontend-tests.md) | Tailwind, shadcn, the scripted-backend test harness |
+| [10 Add a screen](10-add-a-screen.md) | a worked, dry-run recipe |
+
+**Works with no models and no desktop shell. Verified 2026-10-12 (Linux).** Four checks you can run from the repository folder
+after `npm ci`:
+
+```bash
+npm test            # 24 test files, 193 tests, about 17 s
+npm run typecheck   # tsc -b: no output means no type errors
+npm run lint        # oxlint
+npm run test:e2e    # the real web app against the real backend, about 11 s (needs `uv sync` first)
+```
+
+Observed: `Test Files  24 passed (24)`, `Tests  193 passed (193)`; typecheck and lint print only their header line; the end-to-end test
+printed `Test Files  1 passed (1)`.
+
+**Finding.** The comment in `frontend/src/native/backend.ts` says a plain browser can talk to a hand-started backend through
+`VITE_BACKEND_URL` and `VITE_BACKEND_TOKEN`. Tried on 2026-10-12 (Chromium against `npm run dev` and a development-profile
+backend): the page stays on "Opening your library…" and the console reports the request to `/readiness` was **blocked by CORS**
+(the backend sends no cross-origin headers). So that path does not work today; the working ways to see the screens are the
+desktop app (`npm run tauri dev`, Windows) and the tests. Recorded in the implementation entry; not fixed here.
+
+Back to the [guide index](../README.md).
