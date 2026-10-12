@@ -96,10 +96,9 @@ Stop the backend, and corrupt (do not delete) the index file:
 echo garbage > ~/faceidentify-play/state/indexes/*/index.*.usearch
 ```
 
-Start the backend. Expected: it still reaches `READY`: the manifest's SHA-256 no longer matches, so
-the damaged generation is **quarantined** (moved aside, never trusted) and a new index is built from
-the database. (Verified by test: `tests/integration/test_representation_index.py` covers a corrupt
-file; the by-hand run above was not repeated for the corrupt case.)
+Start the backend. Expected (observed 2026-10-12): it still reaches `READY`: the manifest's SHA-256 no longer
+matches, so the damaged generation is **quarantined** (moved to `indexes/<space>/quarantine/1/`, never trusted) and a
+new index is built from the database. `tests/integration/test_representation_index.py` proves the same.
 
 ## 7. Exercises
 
