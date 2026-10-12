@@ -146,7 +146,8 @@ that replaces consent and retention rules for other people's faces.
 **FaceIdentify does not train or fine-tune any model.** The two networks it runs (a face detector and a
 face recogniser) are third-party pretrained weights used **unmodified** (section 2), so the project has no
 training set of its own. The datasets that matter are therefore (a) the data *upstream* trained the weights
-on, whose terms travel with the weights, and (b) the data *we* use to evaluate and calibrate them. If the
+on, whose terms may affect training and downstream commercial use of the weights (subject to
+verification: none of it has been read at source), and (b) the data *we* use to evaluate and calibrate them. If the
 project ever trains or fine-tunes a model, every training set is added here in the same change.
 
 ### 10.1 Data the pretrained weights were trained on (not ours; terms not verified)
@@ -154,9 +155,9 @@ project ever trains or fine-tunes a model, every training set is added here in t
 | Dataset | Behind which weights | Used here | Status of its terms |
 |---|---|---|---|
 | WebFace600K (derived from WebFace260M) | `buffalo_l` recogniser `w600k_r50.onnx` (selected); `buffalo_sc` | `buffalo_l` yes; `buffalo_sc` downloaded, not used | **Not verified.** Its own terms may restrict commercial use of models trained on it, independent of InsightFace's licence (section 2.3). |
-| WIDER FACE (as published for SCRFD) | `buffalo_l` detector `det_10g.onnx` | yes | **Not verified**: taken from the SCRFD paper, not read at source. Its terms are an open question for any commercial release. |
+| WIDER FACE (as the SCRFD paper reports training SCRFD) | `buffalo_l` detector `det_10g.onnx` | yes | **Not verified, twice over:** this is the paper-level training data of the SCRFD method, and the link from that paper to this exact model-zoo checkpoint is **not documented** here; the dataset's terms were not read at source either. An open question for any commercial release. |
 | Glint360K | `antelopev2` recogniser `glintr100.onnx` | downloaded, **not used** | Not verified; irrelevant unless that package is adopted. |
-| MS1M-derived data | `arcfaceresnet100-8.onnx` (ONNX Model Zoo, Apache-2.0), considered as an alternative | **not used** | Not verified (section 2.3). |
+| MS1M-derived data | `arcfaceresnet100-8.onnx` (ONNX Model Zoo, Apache-2.0), considered as an alternative | **not used** | Search results only, **not verified** (section 2.3): neither the licence listing nor the training-data attribution was read at source. |
 
 ### 10.2 Data we use to evaluate and calibrate (ours to account for)
 
