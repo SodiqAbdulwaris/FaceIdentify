@@ -12,7 +12,7 @@ measures the result of *assisted* recognition: how highly the right person is ra
 | Thing | Where |
 |---|---|
 | The script | `evaluation/assisted_recognition_gate.py` (748 lines) |
-| Its tests (no photographs) | `tests/unit/test_assisted_gate.py` (13) |
+| Its tests (no photographs) | `tests/unit/test_assisted_gate.py` (14) |
 | Recorded runs | `docs/implementations/2026-10-10-m5-assisted-recognition-gate.md` (first run on unverified labels: Recall@1 0.739, Recall@5 0.826, MRR 0.775), `2026-10-12-m5-first-verified-label-run.md` (human-verified labels) and `2026-10-12-m5-open-set-evaluation.md` (adds strangers) |
 
 ## 3. How it works

@@ -13,6 +13,7 @@ it is why automatic matching is switched off (a later run on owner-verified labe
 | Script | What it does | Size |
 |---|---|---|
 | `evaluation/build_commons_dataset.py` | builds a small public-domain, identity-labelled set from Wikimedia Commons into `evaluation/datasets/` | 174 lines |
+| `evaluation/import_labelled_dataset.py` | imports a ready-labelled public dataset (LFW or CelebA) that you downloaded yourself into `evaluation/datasets/<name>/`, with a `PROVENANCE.json` saying the labels are the creators', not verified here | 197 lines |
 | `evaluation/label_review.py` | a local tool to review labels by eye and export a **verified** manifest | 572 |
 | `evaluation/measure_operating_point.py` | measures separation and picks a decision threshold (TST-044) | 478 |
 | `evaluation/assisted_recognition_gate.py` | drives the real application through its HTTP API (TST-057A) | 748 |
@@ -32,6 +33,13 @@ it is why automatic matching is switched off (a later run on owner-verified labe
 - **Safety rules**: never commit photographs, embeddings, reports or model files; never put real personal data in docs; `build_commons_dataset.py`
   *refuses* an output folder outside `evaluation/datasets/`; do not reference the dataset's contents in documentation. The local servers
   (label review) listen on 127.0.0.1 with a per-run token.
+
+**Which dataset?** The Commons set was the first one. On 2026-10-12 the owner **parked** it (kept as is, with its review log) and chose LFW and CelebA, which come with labels made
+by their creators ([entry](../../implementations/2026-10-12-labelled-dataset-import.md); no dataset had been downloaded or run when it was written). The importer takes
+`lfw` or `celeba`, `--source <extracted folder>` (required), and `--out`, `--minimum`, `--people`, `--maximum` (verified from `--help`, 2026-10-12); its selection is
+deterministic (people ordered by a hash of their name), a byte-identical picture is used once, nothing is downloaded by the project, and the gate's report repeats who
+supplied the labels. Its tests (`tests/unit/test_import_labelled_dataset.py`) use invented data. The dataset terms are not verified here
+(`docs/research/licensing-and-commercialization.md`, section 10).
 
 ## 4. Try it
 

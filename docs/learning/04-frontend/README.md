@@ -30,10 +30,12 @@ npm run test:e2e    # the real web app against the real backend, about 11 s (nee
 Observed: `Test Files  24 passed (24)`, `Tests  193 passed (193)`; typecheck and lint print only their header line; the end-to-end test
 printed `Test Files  1 passed (1)`.
 
-**Finding.** The comment in `frontend/src/native/backend.ts` says a plain browser can talk to a hand-started backend through
-`VITE_BACKEND_URL` and `VITE_BACKEND_TOKEN`. Tried on 2026-10-12 (Chromium against `npm run dev` and a development-profile
-backend): the page stays on "Opening your library…" and the console reports the request to `/readiness` was **blocked by CORS**
-(the backend sends no cross-origin headers). So that path does not work today; the working ways to see the screens are the
-desktop app (`npm run tauri dev`, Windows) and the tests. Recorded in the implementation entry; not fixed here.
+**Browser development (verified 2026-10-12).** A plain browser page is a different origin from the loopback backend, so the backend must be told to
+answer it (CORS). Since the fix recorded in `docs/implementations/2026-10-12-webview-cors.md`, the host takes `--allow-origin <exact origin>` (repeatable;
+the desktop shell passes the web view's origins itself). To use `npm run dev` without the shell, start a backend by hand with
+`--development-profile --allow-origin http://localhost:5173`, then start Vite with `VITE_BACKEND_URL=http://127.0.0.1:<port>` and
+`VITE_BACKEND_TOKEN=<token>` (the handshake line gives the port; the token is the one you set in `FACEIDENTIFY_LAUNCH_TOKEN`). Observed with Chromium: the
+library screen appears (empty library, "Live"). Without the flag the page stays on "Opening your library…" with a CORS error in the console, which is how the
+defect showed itself before the fix. (In the desktop app the packaged window's connection is still for the owner to confirm on Windows.)
 
 Back to the [guide index](../README.md).

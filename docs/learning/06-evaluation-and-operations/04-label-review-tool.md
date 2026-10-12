@@ -87,7 +87,7 @@ a tiny set honestly says it is nowhere near the targets. Two files appeared: `re
 
 The interactive page: `PYTHONPATH=. uv run python evaluation/label_review.py serve --dataset evaluation/datasets/practice --reviewer <your name>`
 prints the address to open (*the browser page was not driven in this session*). Tests: `uv run pytest tests/unit/test_label_review.py -q`
-(`55 passed` together with the other two evaluation unit files).
+(`56 passed` together with the other two evaluation unit files).
 
 ## 5. Change it
 

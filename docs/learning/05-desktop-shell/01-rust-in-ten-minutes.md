@@ -41,7 +41,7 @@ The ideas you meet, each with the line that shows it:
 ## 4. Try it
 
 **Works with no models. Verified 2026-10-12 (Linux) for `cargo fmt`; the rest unverified here.** Read `config.rs` (200 lines) first: it is
-pure logic with seven small tests in the same file. Then:
+pure logic with eight small tests in the same file. Then:
 
 ```bash
 cd desktop/src-tauri

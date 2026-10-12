@@ -49,7 +49,7 @@ FACEIDENTIFY_LAUNCH_TOKEN="$(uv run python -c 'import secrets; print(secrets.tok
 ```
 
 Observed: one JSON handshake line (`{"schema_version":1,"protocol":"faceidentify.v1","host":"127.0.0.1","port":44151,"pid":14544}`; your port and pid differ), then the process runs until the timeout ends it (exit code 124). (If you pipe the output through `grep`, the line may not appear before `timeout` kills it, because `grep` buffers.) Delete
-`/tmp/lib-demo /tmp/state-demo` afterwards. The shell's own choice logic is `config.rs`: read its seven tests
+`/tmp/lib-demo /tmp/state-demo` afterwards. The shell's own choice logic is `config.rs`: read its eight tests
 (`the_environment_beats_the_saved_choice_which_beats_the_default` is the specification of the paragraph above). `cargo test` would run them
 (*not run here*).
 
