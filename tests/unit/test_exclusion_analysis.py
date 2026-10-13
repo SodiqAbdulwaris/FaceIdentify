@@ -8,11 +8,13 @@ import pytest
 from evaluation.analyse_exclusions import (
     _centre_distance,
     _overlap,
+    _padded_finds_subject,
     _touches_border,
     area,
     counterfactuals,
     describe,
     look,
+    sheet,
     verdict,
 )
 from evaluation.assisted_recognition_gate import DOMINANCE, subject
@@ -146,3 +148,41 @@ def test_a_landmark_outside_the_image_is_a_border_drop_and_an_empty_box_is_not()
     empty = look(FakeSession(0.9, reach=-5.0), "x", picture())  # a reversed box, landmarks inside
     assert empty["kept"] == []
     assert empty["border_dropped"] == []
+
+
+def test_padding_must_recover_the_subject_candidate_not_a_background_face() -> None:
+    big, small = face(0.2, 0.2, 0.8, 0.8, 0.45), face(0.85, 0.05, 0.95, 0.15, 0.4)
+    original = record([], below=[big, small])
+    padded_subject = {"size": [128, 128], "kept": [face(0.35, 0.35, 0.65, 0.65, 0.9)]}
+    # (the picture was padded by half its size on each side: 64 -> 128, so the subject box
+    # 0.2..0.8 of the original sits at 0.35..0.65 of the padded picture)
+    assert _padded_finds_subject(original, padded_subject, 64, 64) is True
+    background = {"size": [128, 128], "kept": [face(0.675, 0.275, 0.725, 0.325, 0.9)]}
+    assert _padded_finds_subject(original, background, 64, 64) is False
+    assert _padded_finds_subject(record([]), padded_subject, 64, 64) is False
+
+
+def test_the_tiny_face_flag_uses_full_precision_areas() -> None:
+    faces = [face(0.0, 0.0, 0.2, 0.1, 0.9), face(0.5, 0.5, 0.5 + 0.0996, 0.6, 0.8)]  # 0.02, 0.00996
+    seen = describe(record(faces))
+    assert seen["status"] == "no_subject"
+    assert seen["second_area_fraction"] < 0.01  # (rounded to four places it would read 0.01)
+
+
+def test_a_contact_sheet_will_not_follow_a_symlink_out_of_the_datasets_folder(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import evaluation.assisted_recognition_gate as gate
+
+    root = (tmp_path / "datasets").resolve()
+    outside = (tmp_path / "outside.png").resolve()
+    (root / "reports").mkdir(parents=True)
+    monkeypatch.setattr(gate, "DATASETS_ROOT", root)
+    link = root / "reports" / "sheet.png"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks need a privilege this machine does not give")
+    with pytest.raises(SystemExit):
+        sheet([], root, link, "x")
+    assert not outside.exists()

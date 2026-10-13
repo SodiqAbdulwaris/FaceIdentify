@@ -150,8 +150,12 @@ def _overlap(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 
 def _padded_finds_subject(rec: dict[str, Any], padded: dict[str, Any], w: int, h: int) -> bool:
-    """Does a face found in the padded picture, mapped back, sit on the face the original run saw
-    below the floor? (A confident background face would not count.)"""
+    """Does a face found in the padded picture, mapped back, sit on the subject candidate: the
+    largest face the original run saw below the floor? A small background face would not count,
+    and with no candidate there is nothing to confirm."""
+    if not rec["below_floor"]:
+        return False
+    candidate = max(rec["below_floor"], key=area)
     pw, ph = padded["size"]
     for found in padded["kept"]:
         x0, y0, x1, y1 = found["box"]
@@ -159,7 +163,7 @@ def _padded_finds_subject(rec: dict[str, Any], padded: dict[str, Any], w: int, h
             "box": [(x0 * pw - w // 2) / w, (y0 * ph - h // 2) / h,
                     (x1 * pw - w // 2) / w, (y1 * ph - h // 2) / h],
         }  # fmt: skip
-        if any(_overlap(mapped, f) for f in rec["below_floor"]):
+        if _overlap(mapped, candidate):
             return True
     return False
 
@@ -203,8 +207,8 @@ def describe(rec: dict[str, Any]) -> dict[str, Any]:
         out["below_floor_faces"] = len(rec["below_floor"])
         out["border_dropped_faces"] = len(rec["border_dropped"])
         out["best_below_floor_score"] = max((f["score"] for f in rec["below_floor"]), default=None)
-        out["largest_below_floor_area_fraction"] = round(
-            max((area(f) for f in rec["below_floor"]), default=0.0), 4
+        out["largest_below_floor_area_fraction"] = max(
+            (area(f) for f in rec["below_floor"]), default=0.0
         )
     elif state == "no_subject":
         ranked = sorted(rec["kept"], key=area, reverse=True)
@@ -212,8 +216,8 @@ def describe(rec: dict[str, Any]) -> dict[str, Any]:
         out["ratio"] = round(ratio, 3)
         out["bucket"] = next(f"{lo}-{hi}" for lo, hi in BUCKETS if lo <= ratio < hi)
         out["second_score"] = ranked[1]["score"]
-        out["second_area_fraction"] = round(area(ranked[1]), 4)
-        out["largest_area_fraction"] = round(area(ranked[0]), 4)
+        out["second_area_fraction"] = area(ranked[1])
+        out["largest_area_fraction"] = area(ranked[0])
         out["second_touches_border"] = _touches_border(ranked[1])
         out["largest_is_most_central"] = min(rec["kept"], key=_centre_distance) is ranked[0]
     return out
@@ -265,8 +269,9 @@ def sheet(records: list[dict[str, Any]], dataset: Path, out: Path, title: str) -
         x, y = (i % cols) * size, (i // cols) * (size + 14)
         canvas.paste(image, (x, y + 14))
         ImageDraw.Draw(canvas).text((x + 2, y + 1), f"{i}: {rec['file'][:34]}", fill="black")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    canvas.save(out)
+    destination = guard(out)  # resolved: a symlink that leaves the datasets folder is refused
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(destination)
     print(f"{title}: {len(records)} -> {out}")
 
 

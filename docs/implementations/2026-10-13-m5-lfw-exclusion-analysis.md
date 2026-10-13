@@ -62,9 +62,11 @@ ineligible. 35 of the 100 enrolled people lost at least one enrolment photograph
 All five contain one real, frontal-enough face that fills 34% to 40% of the frame (the dataset's
 median largest face is 19%), scored 0.30 to 0.499 and so fell just under the floor. Padding each
 picture with a black margin of half its size on every side, nothing else changed, gave a confident
-detection (0.75 to 0.86) for **all five**, and each padded detection, mapped back, lies on the face
-the original run saw below the floor (checked, not assumed). So the floor is not what is wrong: the
-detector scores very large faces low on this canvas. Five photographs is a small sample.
+detection (0.75 to 0.86) for **all five**, and each padded detection, mapped back, lies on the
+largest face the original run saw below the floor, the subject candidate (checked, not assumed; a
+small background face would not count). That supports a scale hypothesis: the detector scores very
+large faces low on this canvas. It does not show that 0.5 is the right operating point (that needs
+false-positive and downstream measurements), and five photographs is a small sample.
 
 Across all 1,244 photographs the median score of the largest face falls as it grows (0.85 for the
 smallest fifth, 0.82 for the 0.22 to 0.35 band, and 0.62 for the four photographs above 0.35). One
@@ -160,10 +162,11 @@ chosen for the proxies.
   match the gate's: 5 and 46 enrolment, 33 stranger exclusions, 11 held-out queries (10 + 1 cascade).
   It decodes pictures with the application's own decoder (EXIF orientation applied) and keeps scores
   and boxes at full precision.
-- `uv run pytest tests/unit/test_exclusion_analysis.py tests/unit/test_assisted_gate.py -q`: 23 passed
+- `uv run pytest tests/unit/test_exclusion_analysis.py tests/unit/test_assisted_gate.py -q`: 26 passed
   (boundary regressions with a fake detector session: a 0.49996 score stays below the floor, a
   batched output is read like production reads it, a landmark outside the image is a border drop and
-  an empty box is not).
+  an empty box is not; padding must recover the subject candidate, not a background face; areas keep
+  full precision; a contact sheet will not follow a symlink out of the datasets folder).
   `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform linux`
   pass (302 files formatted, 294 source files).
 - **Not verified:** the padding result is five photographs; the category counts are the agent's
