@@ -150,6 +150,19 @@ verified). The importer needed a fix first: the standard download nests the pict
   does not explain it, since CelebA has more large faces and loses none. Candidate causes (the
   funnelling's rotation and black fill, the square canvas, the tight framing) are untested.
 
+## The owner's own photographs (`MyFaces/`, 11 pictures, 2026-10-13)
+
+A first look, with the same detector and the same assertions (nothing saved, aggregate only; the
+pictures are the owner's and Git-ignored):
+
+- All 11 pictures give exactly one confident face (scores 0.66 to 0.90); none is excluded. They are
+  small (183 by 275 to 738 by 414), faces fill 0.6% to 43% of the frame.
+- One picture has a face at 43% of the frame (larger than any CelebA face): it scores 0.66, and 0.82
+  once padded. That is the same large-face score drop as in LFW and CelebA, and it still passes the
+  floor. One picture of eleven: it supports the scale effect, it does not size it.
+- Faces at 0.6% and 1.3% of the frame (two pictures) are still found at 0.82 and 0.88, so small
+  faces are not a problem at this size.
+
 ## Root-cause findings
 
 1. **On LFW, very large faces fall under the 0.5 floor; CelebA does not reproduce it.** All five LFW
@@ -179,9 +192,10 @@ verified). The importer needed a fix first: the standard download nests the pict
 1. **Close-up detection: do not change the detector on this evidence.** LFW lost 5 of 1,244
    photographs (0.4%) and CelebA 1 of 1,736 (0.06%, an ambiguous crop). A second pass on a padded
    canvas (a new `scrfd-letterbox-v2` contract with its own provenance) would fix the five, but neither
-   selection represents the owner's intended photographs. The next measurement is the
-   owner's own photographs (selfies, ID photographs, tight phone crops); decide after that, and check
-   that padding adds no false faces.
+   selection represents the owner's intended photographs. The next measurement is a
+   larger set of the owner's own close-up photographs (selfies, ID photographs, tight phone crops;
+   the first 11 are above, with one large face that still passed); decide after that, and check that
+   padding adds no false faces.
 2. **Keep the floor at 0.5** and the border rule as they are.
 3. **Keep the subject rule for evaluation**, but stop treating its exclusions as pipeline loss in
    reports: say "not evaluated (ambiguous subject)". A better measurement is face-level labels for
