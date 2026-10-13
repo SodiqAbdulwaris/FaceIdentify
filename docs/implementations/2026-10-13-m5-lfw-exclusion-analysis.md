@@ -1,8 +1,8 @@
-# M5: where LFW photographs drop out before recognition (diagnostic; nothing changed)
+# M5: where LFW and CelebA photographs drop out before recognition (diagnostic; nothing changed)
 
 - **Date:** 2026-10-13
 - **Milestone / tracker IDs:** M5 track R; supports TST-057B (stays `BLOCKED`); no tracker row changes
-- **Status:** analysis done on LFW; **CelebA not yet evaluated**; no threshold, policy or model was changed
+- **Status:** analysis done on LFW and CelebA; no threshold, policy or model was changed
 - **Commits:** PR to be recorded when merged
 
 ## What was asked
@@ -119,12 +119,43 @@ I looked at the contact sheets of all 94 excluded photographs (51 enrolment, 10 
 they agreed with these proxies. Treat the counts as approximate: they depend on my reading and on the 0.7 and 1% cut-offs
 chosen for the proxies.
 
+## CelebA (same method, same 100 enrolled and 50 stranger people, 2026-10-13)
+
+`evaluation/import_labelled_dataset.py celeba --people 150 --maximum 12 --minimum 5` selected 150
+identities, 1,736 photographs (all 178 by 218 aligned crops; labels are the dataset creators', not
+verified). The importer needed a fix first: the standard download nests the pictures once more
+(`Img/img_align_celeba/img_align_celeba`) and keeps the table in `Anno/`, so it found none.
+
+| Group | Photographs | ok | no subject | no face |
+|---|---|---|---|---|
+| Enrolment | 872 | 872 | 0 | 0 |
+| Held-out known queries | 283 | 283 | 0 | 0 |
+| Strangers | 581 | 580 | 0 | 1 |
+
+- **No subject: 0.** CelebA crops hold one face (17 of 1,736 photographs show a second kept face and
+  all have a dominant subject). The subject rule that excluded 89 LFW photographs excludes none:
+  the LFW exclusions are a property of LFW's news photographs (several people per picture), not of
+  the rule.
+- **The one no-face photograph** (a stranger) is a mostly-hair corner crop with the face cut off by
+  the crop (largest candidate 0.469, 21% of the frame). Padding gives a 0.62 detection on that
+  face. I would call it an ambiguous crop, not a detector failure.
+- **Large faces:** the median largest face fills 27% of the frame (LFW 19%) and 27 photographs fill
+  35% or more. None was lost; 7 of those 27 scored under 0.7. So very large faces are scored lower
+  on CelebA too (median score by size: 0.83 up to 28%, 0.83 for 30% and more with 4.3% under 0.7),
+  but they stay above the floor.
+- **Why LFW differs is not established.** The LFW copy is the deep-funnelled set (rotated and
+  re-centred, black corners) at 250 by 250, CelebA is a 178 by 218 alignment. A size effect alone
+  does not explain it, since CelebA has more large faces and loses none. Candidate causes (the
+  funnelling's rotation and black fill, the square canvas, the tight framing) are untested.
+
 ## Root-cause findings
 
-1. **A close-up weakness in detection, not a floor problem.** Large faces are scored low by the
-   letterboxed detector and fall under 0.5. This is a product risk beyond LFW: selfies, passport and
-   ID-style photographs and tight crops fill that much of the frame. (CelebA's aligned crops are also
-   close-ups; **prediction, untested:** it will show many more no-face photographs than LFW.)
+1. **On LFW, very large faces fall under the 0.5 floor; CelebA does not reproduce it.** All five LFW
+   losses are faces at 34% to 40% of the frame, and padding fixes them. On CelebA (see below) the
+   same measurement lost one photograph in 1,736, and that one was a cut-off crop, not a close-up. I
+   had predicted CelebA would show *more* losses; **that prediction was wrong.** The weakness is
+   real in LFW's tail, but its size in the product is unknown: neither set contains the pictures
+   (selfies, ID photographs, tight crops by a phone) that the worry is about.
 2. **The subject rule is a labelling device of the evaluation, not a product rule.** It trades
    coverage for certainty about whose face carries the label. It correctly excludes the genuinely
    ambiguous photographs, and excludes about two thirds more where a person would pick the subject.
@@ -142,11 +173,12 @@ chosen for the proxies.
 
 ## Recommendations (each needs a dated owner decision; none is built)
 
-1. **Close-up detection (the one real pipeline finding).** A second detection pass on a padded canvas
-   when the first finds no face, or a margin always added, would be a new detector contract version
-   (`scrfd-letterbox-v2`) with its own provenance and a re-measurement. Do not decide before CelebA
-   is measured, because it is the dataset most likely to show the scale of the problem. Test on
-   more than 5 photographs and check that padding does not add false faces elsewhere.
+1. **Close-up detection: do not change the detector on this evidence.** LFW lost 5 of 1,244
+   photographs (0.4%) and CelebA 1 of 1,736 (0.06%, an ambiguous crop). A second pass on a padded
+   canvas (a new `scrfd-letterbox-v2` contract with its own provenance) would fix the five, but the
+   population that matters, real close-ups, is not in either dataset. The next measurement is the
+   owner's own photographs (selfies, ID photographs, tight phone crops); decide after that, and check
+   that padding adds no false faces.
 2. **Keep the floor at 0.5** and the border rule as they are.
 3. **Keep the subject rule for evaluation**, but stop treating its exclusions as pipeline loss in
    reports: say "not evaluated (ambiguous subject)". A better measurement is face-level labels for
@@ -162,6 +194,9 @@ chosen for the proxies.
   match the gate's: 5 and 46 enrolment, 33 stranger exclusions, 11 held-out queries (10 + 1 cascade).
   It decodes pictures with the application's own decoder (EXIF orientation applied) and keeps scores
   and boxes at full precision.
+- `PYTHONPATH=. uv run python evaluation/analyse_exclusions.py --dataset evaluation/datasets/celeba ...`
+  ran on 1,736 CelebA photographs with the same assertions (report `exclusions-celeba.json`,
+  Git-ignored). `uv run pytest tests/unit/test_import_labelled_dataset.py -q`: 11 passed.
 - `uv run pytest tests/unit/test_exclusion_analysis.py tests/unit/test_assisted_gate.py -q`: 26 passed
   (boundary regressions with a fake detector session: a 0.49996 score stays below the floor, a
   batched output is read like production reads it, a landmark outside the image is a border drop and
@@ -177,7 +212,7 @@ chosen for the proxies.
 
 Gaps found or confirmed here are tracked as GitHub issues #173 to #184 (listed in `docs/plans/PROJECT_STATUS.md`).
 
-- Evaluate the same rules on CelebA when it is downloaded, then decide on recommendation 1.
+- Measure the owner's own close-up photographs before deciding recommendation 1 (see issue #173).
 - Look-alike strangers (best similarity 0.402), margin and aggregation policy, and the hard-negatives
   selection mode remain deferred, as the owner decided.
 - The label-review tool could mark which face carries a label (recommendation 3).

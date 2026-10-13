@@ -439,7 +439,7 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 
 ## Next steps
 
-**Latest (2026-10-13):** the LFW exclusion analysis (`evaluation/analyse_exclusions.py`, `docs/implementations/2026-10-13-m5-lfw-exclusion-analysis.md`) found one real pipeline weakness: very large close-up faces are scored under the detector's 0.5 floor (all five LFW "no face" photographs; a black margin fixes all five). The subject rule that excluded 79 further photographs lives only in the evaluation gate, not the product. No threshold or policy changed; any detector change needs a dated owner decision and CelebA measured first.
+**Latest (2026-10-13):** the LFW and CelebA exclusion analysis (`evaluation/analyse_exclusions.py`, `docs/implementations/2026-10-13-m5-lfw-exclusion-analysis.md`) found no pipeline weakness that justifies a change yet: LFW lost 5 of 1,244 photographs to very large faces under the detector's 0.5 floor (a black margin fixes all five), CelebA lost 1 of 1,736 (an ambiguous crop) and none to the subject rule, which lives only in the evaluation gate. My prediction that CelebA would show more losses was wrong. No threshold or policy changed; any detector change needs a dated owner decision after the owner's own close-up photographs are measured. CelebA is imported (`evaluation/datasets/celeba`; the importer's nested-layout fix is in the same PR).
 
 **Current (2026-10-07):** M0 to M4 are done on the development profile. The next milestone is M5, the first
 real recognition milestone: [`docs/plans/M5_PLAN.md`](../docs/plans/M5_PLAN.md) (an identity-management
