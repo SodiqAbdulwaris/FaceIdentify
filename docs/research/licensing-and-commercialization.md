@@ -191,7 +191,8 @@ Honest limits of the Commons set, which matter for any claim built on it:
   leakage). Reading each dataset's terms at its source (and the Kaggle mirror's licence field) is issue 183.
 - **`MyFaces/` (owner's own photographs, 11 files, 2026-10-13):** local only and Git-ignored. Used only to
   measure the detector on the owner's own pictures; never committed, uploaded or shared; the owner's
-  own face, so no third-party terms apply, but treat it as biometric data like the others.
+  own pictures as supplied by the owner (who took them and under what rights is not verified here),
+  and biometric data like the others.
 - The Commons set above is **parked**, not removed: its review log and exports stay for later.
 
 ## 11. Before any release: checklist
