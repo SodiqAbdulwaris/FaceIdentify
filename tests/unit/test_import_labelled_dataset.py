@@ -56,6 +56,22 @@ def test_celeba_identities_come_from_the_table(tmp_path: Path) -> None:
     assert {n: len(f) for n, f in people.items()} == {"identity 10": 5, "identity 11": 1}
 
 
+def test_celeba_pictures_are_found_in_the_standard_nested_download_layout(tmp_path: Path) -> None:
+    source = tmp_path / "CelebA"
+    images = source / "Img" / "img_align_celeba" / "img_align_celeba"  # as the archive extracts
+    images.mkdir(parents=True)
+    (source / "Anno").mkdir()
+    lines = []
+    for index in range(1, 6):
+        (images / f"{index:06}.jpg").write_bytes(f"picture {index}".encode())
+        lines.append(f"{index:06}.jpg 7")
+    (source / "Anno" / "identity_CelebA.txt").write_text(chr(10).join(lines), encoding="utf-8")
+
+    people = importer.read_celeba(source)
+
+    assert {n: len(f) for n, f in people.items()} == {"identity 7": 5}
+
+
 def test_the_selection_is_stable_and_the_output_is_a_manifest_with_provenance(
     tmp_path: Path, datasets: Path
 ) -> None:
