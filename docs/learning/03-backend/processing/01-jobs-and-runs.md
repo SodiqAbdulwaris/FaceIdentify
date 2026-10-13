@@ -25,7 +25,9 @@ A run can outlive its job; a retry is a new job and a new run. Keeping them apar
 
 - **Request** (`POST /sources/{id}/process`): in one transaction, resolve and freeze the settings
   ([snapshots](02-configuration-snapshots.md)), create a run (`PENDING`) and a `PROCESS_SOURCE` job (`QUEUED`, priority
-  `INTERACTIVE`), and point the source at the run. A source that cannot be processed leaves **no rows** behind.
+  `INTERACTIVE`). The source is **not** pointed at the run yet: `current_processing_run_id` names the *accepted* run and
+  is set only by acceptance ([checkpoints and acceptance](04-checkpoints-and-acceptance.md)). A source that cannot be
+  processed leaves **no rows** behind.
 - **Job states**: `QUEUED`, `RUNNING`, `PAUSING`, `PAUSED`, `CANCELLING`, `CANCELLED`, `COMPLETED`, `FAILED`, `INTERRUPTED`.
 - **Run states**: `PENDING`, `RUNNING`, `PAUSING`, `PAUSED`, `CANCELLING`, `CANCELLED`, `FINALIZING`, `COMPLETED`, `FAILED`
   (and the recovery states `INTERRUPTED` and `NOT_RESUMABLE` described in [recovery](../architecture/06-recovery.md)).
@@ -34,9 +36,10 @@ A run can outlive its job; a retry is a new job and a new run. Keeping them apar
   ordering the words alphabetically would put `HIGH` before `INTERACTIVE`).
 - **Lease**: a claimed job records `lease_owner` and `lease_expires_at` (ten minutes) and a `heartbeat_at`, so a dead worker
   cannot hold work forever. `attempt_number` and `previous_job_id` record retries.
-- **Segment**: starting a run starts segment `ordinal` 0, `RUNNING`, and ends with an `end_reason`
+- **Segment**: starting a run starts segment `ordinal` 0, `RUNNING`, and ends with an `ended_reason`
   (`NORMAL`, `FALLBACK`, `CUDA_OOM`, `WORKER_CRASH`, `CANCELLED`, `SHUTDOWN`). A provider fallback ends one segment and starts the next.
-- Every state change is a **guarded transition** (`UPDATE ... WHERE state = ...`) and bumps `revision`.
+- Every state change is a **guarded transition** (`UPDATE ... WHERE state = ...`). Only a processing run carries a
+  `revision` that each change bumps; jobs and execution segments are guarded by their state alone.
 
 ## 4. Try it
 
@@ -59,7 +62,7 @@ pair, an executor, and a branch in the runner. Do the read-only version first: f
 
 ## 6. Break it on purpose
 
-Move a source to the recycle bin (`POST .../recycle`, [sources routes](../api/routes/sources.md)) and ask to process it: the
+Move a source to the recycle bin (`DELETE /api/v1/sources/{id}`, [sources routes](../api/routes/sources.md)) and ask to process it: the
 request is refused with `409 SOURCE_NOT_PROCESSABLE` and the reason "is not active", and **no run, job or snapshot is
 created** (`require_processable_image`; `test_unprocessable_source_leaves_no_snapshot_run_or_job`). *The 409 and its code were read
 from `backend/api/routes/processing.py` and the test, not curled in this session.*

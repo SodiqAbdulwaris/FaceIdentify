@@ -17,7 +17,7 @@ library folder and the private state folder, and it fences the page with a Conte
 
 ## 3. How it works
 
-- **Library root** (the user's data: database, originals, index), first match wins: the environment variable
+- **Library root** (the user's data: database and originals; the vector indexes live under the local state root), first match wins: the environment variable
   `FACEIDENTIFY_LIBRARY_ROOT` (empty counts as unset) → the folder saved by `choose_library` (only if absolute; a broken or relative
   file means "nothing saved") → `<app data dir>/library`. The shell creates it if missing. A new choice takes effect **at the next start**: the
   library cannot change under a running backend.
@@ -27,7 +27,7 @@ library folder and the private state folder, and it fences the page with a Conte
   (not built yet: M8 in the code's comment).
 - **Development profile**: on in debug builds, off in release; the variable `1`/`true` or `0`/`false` overrides; anything else lets the build decide
   (the profile guard in the library stops you from mixing, [profiles](../03-backend/architecture/04-profiles.md)).
-- **The Content Security Policy** (`tauri.conf.json`): `default-src 'self'`; scripts and styles only from the app itself;
+- **The Content Security Policy** (`tauri.conf.json`): `default-src 'self'`; scripts only from the app itself, styles from the app plus inline styles (`style-src 'self' 'unsafe-inline'`);
   `connect-src` allows the app, Tauri's IPC, and `http://127.0.0.1:*` and `ws://127.0.0.1:*` (the loopback backend); `img-src` and `media-src` allow
   `blob:` (pictures are shown from object URLs) and the loopback backend. So even if page code were tricked, it could not send data to an
   arbitrary website.

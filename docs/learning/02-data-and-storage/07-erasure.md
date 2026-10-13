@@ -84,7 +84,7 @@ Expected: `HTTP/1.1 204 No Content`. Then:
    `[('ADD', 'APPLIED', 6), ('REMOVE', 'APPLIED', 1)]` (the `REMOVE` was applied, by a rebuild); evidence
    `[('IDENTITY_FORGOTTEN',)]`; and `app_state` holds only `library_profile`: **no `wal_truncation_owed` marker is
    left**, because the truncation succeeded.
-3. The index shrank: `cat state/indexes/*/manifest.json` shows `"count"` one lower than before (5 instead of 6 in the
+3. The index shrank: `cat ~/faceidentify-play/state/indexes/*/manifest.json` shows `"count"` one lower than before (5 instead of 6 in the
    verified run), and only the new generation file remains.
 4. Search with the forgotten picture (`POST /api/v1/search/face`): it no longer finds that identity (observed
    `POSSIBLE_PEOPLE NOT_SIMILAR [0.208]`, the only remaining identity).

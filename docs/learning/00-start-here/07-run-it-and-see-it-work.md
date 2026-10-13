@@ -211,7 +211,7 @@ print(api.get(f"/api/v1/processing-runs/{run['id']}").json()["state"])   # COMPL
 In the real app the shell starts the backend for you and the page replaces `curl`. Open the page with
 `npm run tauri dev` (*unverified here: no display*). The behaviour it shows is exactly the sequence
 above; `npm run test:e2e` drives the same workflow against the real backend without a window
-(*not run here*; CI's "Desktop shell" job runs it).
+(*1 passed, as recorded in the restructure's implementation entry; not re-run by the reviewer*; CI's "Desktop shell" job runs it).
 
 ## 5. Change it
 

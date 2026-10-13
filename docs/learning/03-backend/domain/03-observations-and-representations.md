@@ -22,7 +22,7 @@ particular model: a new embedder gives new representations for the same observat
   `bbox_height`, all within 0..1, enforced by a check), `sequence_in_run` (unique per run), an optional `face_crop_artifact_id`,
   and the detector's `detector_component_version_id` and `runtime_variant_id` (provenance). Images carry no frame or
   time; video observations carry both (a check pairs them). States: `PENDING`, `ACTIVE`, `SUPERSEDED`, `REJECTED`, `DELETED` (`SUPERSEDED` is designed for re-runs and not set by any code yet).
-- **Representation**: `observation_id`, `representation_space_id`, `identity_id` (empty only for an accepted *abstention*),
+- **Representation**: `observation_id`, `representation_space_id`, `identity_id` (empty on a `PENDING` representation, and on an `ACTIVE` one only for an accepted *abstention*),
   `ann_key` (a number unique inside its space), `vector` (little-endian float32 bytes, so `4 x dimension` bytes, enforced), and
   `state`: `PENDING`, `ACTIVE`, `SUPERSEDED`, `ERASING`, `ERASED`, `DELETED`. A check
   says an `ACTIVE` representation must have an `ann_key`; another says only an `ERASED` one may lack its vector, and an
