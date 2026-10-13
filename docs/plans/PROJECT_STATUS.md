@@ -61,4 +61,3 @@ recorded decisions are in [`CONTEXT.md`](../../.agents/CONTEXT.md).
 | Label review: mark which face carries a label | [#181](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/181) |
 | Gate reports: exclusions by rule, including the enrolment cascade | [#182](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/182) |
 | LFW and CelebA terms to read at source | [#183](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/183) |
-| Evaluate the exclusion rules on CelebA | [#184](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/184) |
