@@ -160,6 +160,8 @@ chosen for the proxies.
 
 ## Open issues / follow-ups
 
+Gaps found or confirmed here are tracked as GitHub issues #173 to #184 (listed in `docs/plans/PROJECT_STATUS.md`).
+
 - Evaluate the same rules on CelebA when it is downloaded, then decide on recommendation 1.
 - Look-alike strangers (best similarity 0.402), margin and aggregation policy, and the hard-negatives
   selection mode remain deferred, as the owner decided.

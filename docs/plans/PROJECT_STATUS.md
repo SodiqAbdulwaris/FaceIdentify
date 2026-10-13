@@ -45,3 +45,20 @@ Run it with `npm run tauri dev` after `uv sync` and `npm install` (see the deskt
 **Open decisions and blockers:** the weights are research-licence, so they are a release blocker (owner accepted the risk for personal use); the M5 plan's open questions; the decision-policy
 numbers stay a labelled development profile until the evaluation baseline exists. All
 recorded decisions are in [`CONTEXT.md`](../../.agents/CONTEXT.md).
+
+## Known gaps (each is a GitHub issue; none blocks the M5 gate)
+
+| Gap | Issue |
+|---|---|
+| Very large close-up faces are scored under the detector's 0.5 floor (the one pipeline weakness the LFW analysis found); needs an owner decision after CelebA | [#173](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/173) |
+| Face search path form: mapped network drives and junctions are not refused | [#174](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/174) |
+| Queries and processing can contend for the one perception worker (no lease) | [#175](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/175) |
+| Face search: PDF queries deferred | [#176](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/176) |
+| Evaluation: hard-negatives selection mode not built | [#177](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/177) |
+| `measure_operating_point.py` cannot read a verified manifest | [#178](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/178) |
+| A missing original never comes back: nothing calls reverify or relink | [#179](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/179) |
+| Re-processing a source: nothing marks earlier output superseded | [#180](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/180) |
+| Label review: mark which face carries a label | [#181](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/181) |
+| Gate reports: exclusions by rule, including the enrolment cascade | [#182](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/182) |
+| LFW and CelebA terms to read at source | [#183](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/183) |
+| Evaluate the exclusion rules on CelebA | [#184](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/184) |
