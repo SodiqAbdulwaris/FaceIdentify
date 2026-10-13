@@ -21,7 +21,7 @@ commands you can run.
 ## 3. How it works
 
 **Branch names** are `<type>/<short-kebab-description>` where the type is one of `feat fix docs chore
-refactor test ci build perf style revert`: `feat/identity-merge-service`, `docs/guides/learning-guide-restructure`.
+refactor test ci build perf style revert`: `feat/identity-merge-service`, `docs/learning-guide-restructure`.
 Only one `/`; lowercase words joined by single hyphens.
 
 **Commit messages** are [Conventional Commits](https://www.conventionalcommits.org/):
@@ -80,7 +80,7 @@ GitHub login and was done through the GitHub tools, not repeated here).
 
    ```bash
    sh .githooks/check-branch-name "Feature/Bad_Name"            # exit 1, shows the pattern
-   sh .githooks/check-branch-name "docs/guides/learning-guide-restructure"   # exit 0, silent
+   sh .githooks/check-branch-name "docs/learning-guide-restructure"   # exit 0, silent
    ```
 
 4. See what your branch adds compared with `main` (works once `origin/main` is fetched):

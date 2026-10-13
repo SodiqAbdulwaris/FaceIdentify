@@ -36,7 +36,7 @@ and this lesson only explains them.
 **Works with no models. Verified 2026-10-12.** The two local checks are small shell scripts you can call yourself:
 
 ```bash
-for b in docs/guides/learning-guide-restructure Feat/Bad main fix/ok-name feat/two/slashes; do
+for b in docs/learning-guide-restructure Feat/Bad main fix/ok-name feat/two/slashes; do
   .githooks/check-branch-name "$b" >/dev/null 2>&1 && echo "OK  $b" || echo "BAD $b"
 done
 printf 'added stuff.\n' > /tmp/m1.txt; printf 'docs(learning): add the thing\n\nwhy\n' > /tmp/m2.txt
@@ -44,7 +44,7 @@ for f in /tmp/m1.txt /tmp/m2.txt; do .githooks/commit-msg "$f" >/dev/null 2>&1 &
 rm -f /tmp/m1.txt /tmp/m2.txt
 ```
 
-Observed: `OK` for `docs/guides/learning-guide-restructure` and `fix/ok-name`; `BAD` for `Feat/Bad` (uppercase), `main` (no type) and `feat/two/slashes`; `msg BAD added stuff.`
+Observed: `OK` for `docs/learning-guide-restructure` and `fix/ok-name`; `BAD` for `Feat/Bad` (uppercase), `main` (no type) and `feat/two/slashes`; `msg BAD added stuff.`
 and `msg OK docs(learning): add the thing`. These are the same scripts CI runs. Then, in a scratch clone or on a throwaway branch, try
 the whole loop once: `git switch -c docs/practice-note`, edit a file, `git commit` with a bad header (the hook refuses), then a good one,
 then `git switch -` and `git branch -D docs/practice-note`. (Pushing and the PR need the remote; not rehearsed here.)
