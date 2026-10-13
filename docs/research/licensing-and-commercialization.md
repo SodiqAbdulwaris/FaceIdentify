@@ -180,11 +180,18 @@ Honest limits of the Commons set, which matter for any claim built on it:
   SHA-256 per photograph it reviews.
 - The set is small, formal and skewed toward adults photographed officially; it is a development aid,
   not a benchmark.
-- **LFW and CelebA (both downloaded and evaluated 2026-10-13; CelebA's `README.txt` states non-commercial research use):** ready-labelled research
-  datasets the owner downloads and imports locally with `evaluation/import_labelled_dataset.py` (labels by their creators, not
-  verified here). **Terms not verified**: both are research datasets and CelebA states non-commercial use
-  only; they stay local, are never committed or redistributed, and their people may also appear in the
-  recogniser's training data (evaluation leakage). Both datasets' terms are still to be read at their sources (issue 183).
+- **LFW and CelebA (both downloaded and evaluated 2026-10-13):** ready-labelled research datasets the owner
+  downloads and imports locally with `evaluation/import_labelled_dataset.py` (labels by their creators, not
+  verified here). **Sources (owner, 2026-10-13):** LFW from the Kaggle mirror
+  <https://www.kaggle.com/datasets/jessicali9530/lfw-dataset> (the original is the UMass LFW page; the mirror's own
+  licence and terms were not retrievable from the agent's environment); CelebA from the creators'
+  page <https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html> (its `README.txt` states non-commercial research use).
+  **Terms not verified**: both are research datasets; they stay local, are never committed or
+  redistributed, and their people may also appear in the recogniser's training data (evaluation
+  leakage). Reading each dataset's terms at its source (and the Kaggle mirror's licence field) is issue 183.
+- **`MyFaces/` (owner's own photographs, 11 files, 2026-10-13):** local only and Git-ignored. Used only to
+  measure the detector on the owner's own pictures; never committed, uploaded or shared; the owner's
+  own face, so no third-party terms apply, but treat it as biometric data like the others.
 - The Commons set above is **parked**, not removed: its review log and exports stay for later.
 
 ## 11. Before any release: checklist

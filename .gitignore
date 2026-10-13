@@ -31,3 +31,4 @@ local-models/
 *.onnx
 LFW/
 CelebA/
+MyFaces/
