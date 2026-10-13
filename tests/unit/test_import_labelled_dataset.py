@@ -72,6 +72,38 @@ def test_celeba_pictures_are_found_in_the_standard_nested_download_layout(tmp_pa
     assert {n: len(f) for n, f in people.items()} == {"identity 7": 5}
 
 
+def test_celeba_discovery_survives_a_missing_first_picture(tmp_path: Path) -> None:
+    source = tmp_path / "CelebA"
+    images = source / "Img" / "img_align_celeba" / "img_align_celeba"
+    images.mkdir(parents=True)
+    (source / "Anno").mkdir()
+    lines = ["000001.jpg 7"]  # listed first, but not present
+    for index in range(2, 7):
+        (images / f"{index:06}.jpg").write_bytes(f"picture {index}".encode())
+        lines.append(f"{index:06}.jpg 7")
+    (source / "Anno" / "identity_CelebA.txt").write_text(chr(10).join(lines), encoding="utf-8")
+
+    assert {n: len(f) for n, f in importer.read_celeba(source).items()} == {"identity 7": 5}
+
+
+def test_a_celeba_folder_linked_from_outside_the_source_is_not_read(tmp_path: Path) -> None:
+    source = tmp_path / "CelebA"
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (source / "Anno").mkdir(parents=True)
+    lines = []
+    for index in range(1, 6):
+        (outside / f"{index:06}.jpg").write_bytes(f"picture {index}".encode())
+        lines.append(f"{index:06}.jpg 7")
+    (source / "Anno" / "identity_CelebA.txt").write_text(chr(10).join(lines), encoding="utf-8")
+    try:
+        (source / "img_align_celeba").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks need a privilege this machine does not give")
+
+    assert importer.read_celeba(source) == {}
+
+
 def test_the_selection_is_stable_and_the_output_is_a_manifest_with_provenance(
     tmp_path: Path, datasets: Path
 ) -> None:
