@@ -115,6 +115,8 @@ Ambiguities were resolved conservatively; please confirm or overrule.
 10. **A new top-level docs folder.** `documentation.md` lists `specs/`, `plans/`, `guides/`, `strategy/`, `research/` and `archive/` and says not to create new top-level documents where one fits. You asked for `docs/learning/`, so I used it. The alternative is `docs/guides/learning/`. Recommendation: keep `docs/learning/` (it is a whole guide, not a how-to) and amend `documentation.md` to list it, which I did not do without your approval.
 11. **Commit bodies.** Large area commits mostly lack the one-line body `commits.md` asks for; decision 2 is the disclosure. History is not rewritten without your permission.
 
+> **Decision 2026-10-13:** the owner chose `docs/guides/learning/` for the lessons (the alternative named in item 10) instead of a new top-level `docs/learning/`, so `documentation.md` needs no amendment. The folder was moved in a follow-up PR; this entry's earlier paths are the historical ones.
+
 ## Findings (found while verifying; not fixed here)
 
 1. **CORS (resolved on `main` while this PR was open).** My first draft found that a browser page was blocked by CORS: the page stayed on "Opening your library..." because the backend sent no cross-origin headers. `main` has since fixed it (`2026-10-12-webview-cors.md`: `--allow-origin`, exact origins). After merging `main` I re-ran the same Chromium check with `--allow-origin http://localhost:5173`: the library screen appears. The fix's own entry says it is not yet confirmed in the real Windows window; I could not confirm it either. The lessons now describe the fixed behaviour.
