@@ -83,11 +83,13 @@ PYTHONPATH=. uv run python evaluation/label_review.py export --dataset evaluatio
 Observed: status `reviewed 5, unreviewed 1, VERIFIED 3, INCORRECT 1, UNCERTAIN 1`; the export reports `verified_photographs 3`, `identities 1`,
 `identities_with_enough_images 0`, `left_out` `{not_verified: 2, flagged: 1}` and a **shortfall** of `verified_identities 40`, `verified_queries 80`:
 a tiny set honestly says it is nowhere near the targets. Two files appeared: `review/decisions.jsonl` (one line per decision) and
-`review/exports/verified-<time>.json`. Clean up: `rm -rf evaluation/datasets/practice`.
+`review/exports/verified-<time>.json`.
 
 The interactive page: `PYTHONPATH=. uv run python evaluation/label_review.py serve --dataset evaluation/datasets/practice --reviewer <your name>`
 prints the address to open (*the browser page was not driven in this session*). Tests: `uv run pytest tests/unit/test_label_review.py -q`
 (`56 passed` together with the other two evaluation unit files).
+
+Clean up when you are done with the interactive page: `rm -rf evaluation/datasets/practice` (the `serve` command above needs the folder).
 
 ## 5. Change it
 

@@ -36,7 +36,7 @@ milestone: [M5 plan](M5_PLAN.md).
 
 **Not built yet (so you know what you cannot try):** a packaged real-model app (the host's real profile runs the installed `buffalo_l` model on CPU or
 CUDA under the abstain-only policy; a debug shell build still starts the development profile, and
-the model package and policy file are installed by hand), no cross-source recognition gate yet (M5; naming, corrections, merge,
+the model package and policy file are installed by hand), no verified-set recognition-quality gate yet (the assisted gate script exists and its functional gate passes; TST-057B is blocked; M5; naming, corrections, merge,
 split, name search and face search are built), no movies or cameras (M6, M7), no installer or packaged runtime (M8).
 Run it with `npm run tauri dev` after `uv sync` and `npm install` (see the desktop entry).
 
