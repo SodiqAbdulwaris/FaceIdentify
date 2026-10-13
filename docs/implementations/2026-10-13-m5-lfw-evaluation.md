@@ -26,11 +26,14 @@ selected 150 people with at least 5 distinct pictures (at most 12 each: 1,244 ph
 | Strangers: people / photographs attempted / evaluated | 50 / 408 / 375 (33 without a clear subject face) |
 | Strangers accepted by the real policy | 0 of 375 (all offered only as possible people) |
 | Strangers' best-candidate similarity | 0.135 to 0.402 (median 0.193) |
-| Workflow checks, same rankings after restart, queries wrote nothing | 10 of 10, yes, yes (652, 100, 652) |
+| Workflow checks, same rankings after restart | 10 of 10, yes |
+| Library counts unchanged by the queries (images / identities / runs) | yes: 652 / 100 / 652 before and after. This run checked counts only; broader persistence checks are the integration tests', not this run's |
 
-Cut-off table (a candidate at or above the cut-off would be accepted), 375 strangers and 173 known queries:
+Cut-off table. Each query's top candidate would be *accepted* at or above the cut-off; "correctly accepted"
+means the accepted candidate is the right person (all 173 known queries are ranked first regardless; the
+column shows how many would still be accepted rather than abstain). 375 strangers and 173 known queries:
 
-| Cut-off | Strangers accepted | Known rightly top-ranked | Known wrongly accepted |
+| Cut-off | Strangers accepted (false matches) | Known correctly accepted | Known wrongly accepted |
 |---|---|---|---|
 | 0.30 | 14 | 173 | 0 |
 | 0.35 | 4 | 173 | 0 |
@@ -61,6 +64,7 @@ expected, since those steps removed enrolled people.
 
 ## What it changes, and what it does not
 
+- At a cut-off of 0.45, 172 of the 173 known queries would be correctly accepted and one would abstain.
 - It is the first run with a stranger pool large enough to show false-match behaviour at all (the earlier
   owner-verified run had 25 stranger queries). It makes the open-set protocol credible.
 - TST-057B still needs: a verified or trusted set at the dataset targets, hard negatives (strangers chosen to
