@@ -36,12 +36,14 @@ evaluation/datasets/reports/exclusions-lfw.json [--sheets evaluation/datasets/re
 |---|---|---|
 | Detector score floor 0.5 | `DetectorContract.score_threshold` in `backend/ml/perception/detection.py` | Candidates below it never leave the worker |
 | Border rule | same file, `usable` in `decode` | A box is clipped, but a detection with a landmark outside the image is dropped (alignment would be a guess) |
-| Policy floor `min_detection_score` 0.5 | `local-models/state/policies/insightface-buffalo-l.json`, read at decision time | Checked later, but equal to the detector floor, so it removes nothing the detector kept |
+| Policy floor `min_detection_score` | the policy file (`load_policy` in `backend/api/real.py`; `buffalo-l-abstain-only-v1` sets 0.5), applied by `IdentityReasoner.decide` in `backend/app/recognition/reasoner.py` | A separate decision-time quality gate. In the measured configuration it equals the detector floor, so it removes nothing the detector kept; nothing enforces that equality |
 | Subject rule (largest face at least 2.5 times the next) | **the evaluation gate only**, `DOMINANCE` in `evaluation/assisted_recognition_gate.py` | Chooses which one face stands for a photograph that has one label. The application does not apply it: it recognises every face |
 | Two enrolled faces | the gate, `eligible` | A person with fewer than 2 enrolled faces has their queries marked ineligible (a cascade from enrolment exclusions) |
 
-**So 79 of the 84 "lost" photographs are lost to the measurement, not to the product.** Only the 5
-no-face photographs are a pipeline loss.
+**So, in detector output and gate coverage, 79 of the 84 "lost" photographs are lost to the
+measurement, not to the detector.** Only the 5 no-face photographs are a detector loss. (Whether
+embedding or matching would also fail on the others was not measured here: this is not an accuracy
+result.)
 
 ## Result (the baseline reproduced exactly)
 
@@ -60,8 +62,9 @@ ineligible. 35 of the 100 enrolled people lost at least one enrolment photograph
 All five contain one real, frontal-enough face that fills 34% to 40% of the frame (the dataset's
 median largest face is 19%), scored 0.30 to 0.499 and so fell just under the floor. Padding each
 picture with a black margin of half its size on every side, nothing else changed, gave a confident
-detection (0.75 to 0.86) for **all five**. So the floor is not what is wrong: the detector scores
-very large faces low on this canvas.
+detection (0.75 to 0.86) for **all five**, and each padded detection, mapped back, lies on the face
+the original run saw below the floor (checked, not assumed). So the floor is not what is wrong: the
+detector scores very large faces low on this canvas. Five photographs is a small sample.
 
 Across all 1,244 photographs the median score of the largest face falls as it grows (0.85 for the
 smallest fifth, 0.82 for the 0.22 to 0.35 band, and 0.62 for the four photographs above 0.35). One
@@ -79,8 +82,9 @@ person at the image edge, not the subject, so the border rule did not cause that
 | Ratio 1.5 | 626 / 21 / 5 | 179 / 5 | 393 / 15 |
 | Largest face wins (no ratio test) | 647 / 0 / 5 | 184 / 0 | 408 / 0 |
 
-Lowering the floor is the wrong remedy: it recovers the 5 but turns 16 other photographs into
-"no subject" (the sub-0.5 detections are mostly real background faces, and below about 0.15 they are
+Lowering the floor looks like the wrong remedy (provisional: this measures the gate's coverage, not
+harm to the application, which processes faces one by one): it recovers the 5 but turns 16 other
+photographs into "no subject" (the sub-0.5 detections are mostly real background faces, and below about 0.15 they are
 clusters of junk boxes on clothing and texture, visible on the contact sheets). The border rule
 removes one confident face in the whole set; it cannot be rescued by a threshold.
 
@@ -122,8 +126,11 @@ chosen for the proxies.
 2. **The subject rule is a labelling device of the evaluation, not a product rule.** It trades
    coverage for certainty about whose face carries the label. It correctly excludes the genuinely
    ambiguous photographs, and excludes about two thirds more where a person would pick the subject.
-3. **The two 0.5 floors are one rule written twice.** The policy floor cannot go below the detector
-   floor without changing the detector contract; they must change together.
+3. **The two 0.5 floors are two rules with equal values.** The detector decides which candidates
+   leave perception; the policy floor independently gates a decision. Lowering only the policy floor
+   cannot recover a candidate the detector discarded; lowering only the detector floor exposes more
+   faces that the policy would still treat by its own gate. Equality is the measured configuration,
+   not an enforced invariant; review them together.
 4. **Stranger exclusions are biased towards crowds.** The 33 excluded stranger photographs are the
    ones with several prominent faces, which is where a stranger standing next to an enrolled person
    would be hardest. The open-set claim ("0 of 375 accepted") says nothing about them. (It is
@@ -151,7 +158,12 @@ chosen for the proxies.
 - `PYTHONPATH=. uv run python evaluation/analyse_exclusions.py ...` ran on all 1,244 photographs; its
   production-equivalent output matched `detection.decode` on every image (assertion), and its counts
   match the gate's: 5 and 46 enrolment, 33 stranger exclusions, 11 held-out queries (10 + 1 cascade).
-- `uv run pytest tests/unit/test_exclusion_analysis.py tests/unit/test_assisted_gate.py -q`: 20 passed.
+  It decodes pictures with the application's own decoder (EXIF orientation applied) and keeps scores
+  and boxes at full precision.
+- `uv run pytest tests/unit/test_exclusion_analysis.py tests/unit/test_assisted_gate.py -q`: 23 passed
+  (boundary regressions with a fake detector session: a 0.49996 score stays below the floor, a
+  batched output is read like production reads it, a landmark outside the image is a border drop and
+  an empty box is not).
   `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy` and `uv run mypy --platform linux`
   pass (302 files formatted, 294 source files).
 - **Not verified:** the padding result is five photographs; the category counts are the agent's

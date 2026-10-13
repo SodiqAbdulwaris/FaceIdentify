@@ -26,7 +26,9 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageDraw
 
+from backend.api.startup import PROVISIONAL_MAX_PIXELS
 from backend.app.runtime.package_store import RuntimePackageStore
+from backend.infrastructure.media.image import decode_image
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.ml.perception import detection
 from backend.ml.worker.onnx_session import load_session
@@ -43,6 +45,12 @@ DIAGNOSTIC_FLOOR = 0.05  # what the detector sees; used only to look, never to d
 BUCKETS = ((1.0, 1.5), (1.5, 2.0), (2.0, DOMINANCE))
 
 
+def pixels_of(path: Path) -> np.ndarray:
+    """The picture the application sees: its own decoder, EXIF orientation applied."""
+    pixels: np.ndarray = decode_image(path.read_bytes(), max_pixels=PROVISIONAL_MAX_PIXELS).pixels
+    return pixels
+
+
 def _nms(boxes: np.ndarray, scores: np.ndarray) -> list[int]:
     if not len(boxes):
         return []
@@ -50,7 +58,11 @@ def _nms(boxes: np.ndarray, scores: np.ndarray) -> list[int]:
 
 
 def look(session: Any, input_name: str, pixels: np.ndarray) -> dict[str, Any]:
-    """Every candidate of one image, split the way the production contract would split it."""
+    """Every candidate of one image, split the way the production contract would split it.
+
+    Scores and boxes keep full precision: a face at 0.49996 must stay below the floor, and the
+    subject ratio must be the gate's. Rounding is for presentation only.
+    """
     contract = detection.DetectorContract(score_threshold=DIAGNOSTIC_FLOOR)
     boxed = detection.letterbox(pixels, contract)
     outputs = [
@@ -62,13 +74,15 @@ def look(session: Any, input_name: str, pixels: np.ndarray) -> dict[str, Any]:
         outputs, detection.DetectorContract(), boxed.scale, (height, width)
     )
 
-    # the same decoding as detection.decode, kept candidate by candidate (a diagnostic copy)
+    # the same decoding as detection.decode, kept candidate by candidate (a diagnostic copy);
+    # `_rows` is the production shape and finiteness check (it accepts a leading batch axis of one)
     boxes, scores, points = [], [], []
     for level, stride in enumerate(detection.STRIDES):
         centres = detection._anchor_centres(contract.input_size, stride)
-        score = outputs[level][:, 0]
-        distance = outputs[level + 3] * stride
-        offset = outputs[level + 6]
+        count = len(centres)
+        score = detection._rows(outputs[level], count, 1, "scores")[:, 0]
+        distance = detection._rows(outputs[level + 3], count, 4, "boxes") * stride
+        offset = detection._rows(outputs[level + 6], count, 2 * detection.LANDMARKS, "landmarks")
         keep = score >= DIAGNOSTIC_FLOOR
         c, s, d, o = centres[keep], score[keep], distance[keep], offset[keep]
         boxes.append(
@@ -83,39 +97,46 @@ def look(session: Any, input_name: str, pixels: np.ndarray) -> dict[str, Any]:
     p = np.concatenate(points) / boxed.scale
     b[:, [0, 2]] = np.clip(b[:, [0, 2]], 0.0, width)
     b[:, [1, 3]] = np.clip(b[:, [1, 3]], 0.0, height)
-    usable = (
-        (b[:, 0] < b[:, 2])
-        & (b[:, 1] < b[:, 3])
-        & (p[:, :, 0] >= 0).all(axis=1)
+    box_ok = (b[:, 0] < b[:, 2]) & (b[:, 1] < b[:, 3])  # something is left after clipping
+    inside = (  # all five landmarks lie inside the image (what alignment needs)
+        (p[:, :, 0] >= 0).all(axis=1)
         & (p[:, :, 0] <= width).all(axis=1)
         & (p[:, :, 1] >= 0).all(axis=1)
         & (p[:, :, 1] <= height).all(axis=1)
     )
+    usable = box_ok & inside
 
     def faces(mask: np.ndarray) -> list[dict[str, Any]]:
         bb, ss = b[mask], s[mask]
         return [
             {
-                "score": round(float(ss[i]), 4),
+                "score": float(ss[i]),
                 "box": [
-                    round(float(bb[i, 0]) / width, 4),
-                    round(float(bb[i, 1]) / height, 4),
-                    round(float(bb[i, 2]) / width, 4),
-                    round(float(bb[i, 3]) / height, 4),
+                    float(bb[i, 0]) / width,
+                    float(bb[i, 1]) / height,
+                    float(bb[i, 2]) / width,
+                    float(bb[i, 3]) / height,
                 ],
             }
             for i in _nms(bb, ss)
         ]
 
     kept = faces(usable & (s >= PRODUCTION_FLOOR))
-    mine = sorted(f["score"] for f in kept)  # the diagnostic copy must equal production
-    theirs = sorted(round(f.score, 4) for f in production)
-    assert len(mine) == len(theirs), "the diagnostic decoding no longer matches production"
-    assert np.allclose(mine, theirs, atol=1e-3), "the diagnostic scores differ from production"
+    # the diagnostic copy must equal production: same faces, same scores, same boxes
+    assert len(kept) == len(production), "the diagnostic decoding no longer matches production"
+    for mine, theirs in zip(
+        sorted(kept, key=lambda f: -f["score"]),
+        sorted(production, key=lambda f: -f.score),
+        strict=True,
+    ):
+        assert mine["score"] == theirs.score, "a score differs from production"
+        assert np.allclose(mine["box"], theirs.box, atol=1e-6), "a box differs from production"
     below = [f for f in faces(usable & (s >= DIAGNOSTIC_FLOOR)) if f["score"] < PRODUCTION_FLOOR]
-    # a face the border rule removed: confident, but alignment would need a landmark outside
+    # a face the border rule removed: a landmark outside the image (the box itself was usable)
     cut = [
-        f for f in faces(~usable & (s >= PRODUCTION_FLOOR)) if not any(_overlap(f, k) for k in kept)
+        f
+        for f in faces(box_ok & ~inside & (s >= PRODUCTION_FLOOR))
+        if not any(_overlap(f, k) for k in kept)
     ]
     return {"size": [width, height], "kept": kept, "below_floor": below, "border_dropped": cut}
 
@@ -126,6 +147,21 @@ def _overlap(a: dict[str, Any], b: dict[str, Any]) -> bool:
     inter = max(0.0, min(ax1, bx1) - max(ax0, bx0)) * max(0.0, min(ay1, by1) - max(ay0, by0))
     union = (ax1 - ax0) * (ay1 - ay0) + (bx1 - bx0) * (by1 - by0) - inter
     return bool(union > 0 and inter / union > detection.DetectorContract().nms_iou)
+
+
+def _padded_finds_subject(rec: dict[str, Any], padded: dict[str, Any], w: int, h: int) -> bool:
+    """Does a face found in the padded picture, mapped back, sit on the face the original run saw
+    below the floor? (A confident background face would not count.)"""
+    pw, ph = padded["size"]
+    for found in padded["kept"]:
+        x0, y0, x1, y1 = found["box"]
+        mapped = {
+            "box": [(x0 * pw - w // 2) / w, (y0 * ph - h // 2) / h,
+                    (x1 * pw - w // 2) / w, (y1 * ph - h // 2) / h],
+        }  # fmt: skip
+        if any(_overlap(mapped, f) for f in rec["below_floor"]):
+            return True
+    return False
 
 
 def area(face: dict[str, Any]) -> float:
@@ -217,7 +253,7 @@ def sheet(records: list[dict[str, Any]], dataset: Path, out: Path, title: str) -
     rows = (len(records) + cols - 1) // cols
     canvas = Image.new("RGB", (cols * size, rows * (size + 14)), "white")
     for i, rec in enumerate(records):
-        image = Image.open(dataset / rec["file"]).convert("RGB")
+        image = Image.fromarray(pixels_of(dataset / rec["file"]))
         w, h = image.size
         draw = ImageDraw.Draw(image)
         for key, colour in (("kept", "lime"), ("below_floor", "red"), ("border_dropped", "blue")):
@@ -279,7 +315,7 @@ def main() -> int:
     for name, paths in groups.items():
         records = []
         for path in sorted(paths):
-            pixels = np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
+            pixels = pixels_of(path)
             rec = look(session, input_name, pixels)
             rec["file"] = path.relative_to(dataset).as_posix()
             rec["describe"] = describe(rec)
@@ -289,7 +325,8 @@ def main() -> int:
                 h, w = pixels.shape[:2]
                 margin = ((h // 2, h // 2), (w // 2, w // 2), (0, 0))
                 padded = look(session, input_name, np.pad(pixels, margin))
-                rec["padded_kept_scores"] = [f["score"] for f in padded["kept"]]
+                rec["padded_kept"] = padded["kept"]
+                rec["padded_matches_subject"] = _padded_finds_subject(rec, padded, w, h)
             records.append(rec)
         statuses = Counter(r["describe"]["status"] for r in records)
         report["groups"][name] = {
