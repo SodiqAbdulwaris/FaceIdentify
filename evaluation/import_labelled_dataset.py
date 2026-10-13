@@ -86,13 +86,14 @@ def read_celeba(source: Path) -> dict[str, list[Path]]:
     if table is None:
         raise SystemExit(f"no identity_CelebA.txt under {source}")
     # The standard download nests the pictures once more (`Img/img_align_celeba/img_align_celeba`)
-    # and keeps the table in `Anno/`, so look for the folder that holds the first listed picture.
-    first = next(
-        (ln.split()[0] for ln in table.read_text(encoding="utf-8").splitlines() if ln.split()), ""
-    )
+    # and keeps the table in `Anno/`, so look for the folder that holds a listed picture.
+    listed = [ln.split()[0] for ln in table.read_text(encoding="utf-8").splitlines() if ln.split()]
     candidates = [source / "img_align_celeba", source / "img_celeba", table.parent]
     candidates += sorted(p for n in ("img_align_celeba", "img_celeba") for p in source.rglob(n))
-    folder = next((c for c in candidates if c.is_dir() and (c / first).is_file()), source)
+    folder = next(  # (any of the first listed pictures will do: one of them may be missing)
+        (c for c in candidates if c.is_dir() and any((c / n).is_file() for n in listed[:50])),
+        source,
+    )
     people: dict[str, list[Path]] = {}
     for line in table.read_text(encoding="utf-8").splitlines():
         parts = line.split()

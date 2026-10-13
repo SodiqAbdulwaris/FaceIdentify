@@ -134,15 +134,17 @@ verified). The importer needed a fix first: the standard download nests the pict
 
 - **No subject: 0.** CelebA crops hold one face (17 of 1,736 photographs show a second kept face and
   all have a dominant subject). The subject rule that excluded 89 LFW photographs excludes none:
-  the LFW exclusions are a property of LFW's news photographs (several people per picture), not of
-  the rule.
+  those exclusions come from the interaction of LFW's news photographs (several people per picture)
+  with the dominance rule; a different rule would exclude fewer of them, as the counterfactuals
+  show.
 - **The one no-face photograph** (a stranger) is a mostly-hair corner crop with the face cut off by
   the crop (largest candidate 0.469, 21% of the frame). Padding gives a 0.62 detection on that
   face. I would call it an ambiguous crop, not a detector failure.
 - **Large faces:** the median largest face fills 27% of the frame (LFW 19%) and 27 photographs fill
-  35% or more. None was lost; 7 of those 27 scored under 0.7. So very large faces are scored lower
-  on CelebA too (median score by size: 0.83 up to 28%, 0.83 for 30% and more with 4.3% under 0.7),
-  but they stay above the floor.
+  35% or more. None was lost; 7 of those 27 scored under 0.7. The median score is unchanged by size
+  (0.83 for every size band), so what the data shows is a low-score *tail* among the largest faces
+  (4.3% under 0.7 at 30% of the frame or more, against under 1% below that), not a steady decline.
+  The tail stays above the floor.
 - **Why LFW differs is not established.** The LFW copy is the deep-funnelled set (rotated and
   re-centred, black corners) at 250 by 250, CelebA is a 178 by 218 alignment. A size effect alone
   does not explain it, since CelebA has more large faces and loses none. Candidate causes (the
@@ -154,8 +156,9 @@ verified). The importer needed a fix first: the standard download nests the pict
    losses are faces at 34% to 40% of the frame, and padding fixes them. On CelebA (see below) the
    same measurement lost one photograph in 1,736, and that one was a cut-off crop, not a close-up. I
    had predicted CelebA would show *more* losses; **that prediction was wrong.** The weakness is
-   real in LFW's tail, but its size in the product is unknown: neither set contains the pictures
-   (selfies, ID photographs, tight crops by a phone) that the worry is about.
+   real in LFW's tail, but its size in the product is unknown: neither measured selection establishes
+   performance on a representative sample of the pictures the worry is about (selfies, ID
+   photographs, tight phone crops).
 2. **The subject rule is a labelling device of the evaluation, not a product rule.** It trades
    coverage for certainty about whose face carries the label. It correctly excludes the genuinely
    ambiguous photographs, and excludes about two thirds more where a person would pick the subject.
@@ -175,8 +178,8 @@ verified). The importer needed a fix first: the standard download nests the pict
 
 1. **Close-up detection: do not change the detector on this evidence.** LFW lost 5 of 1,244
    photographs (0.4%) and CelebA 1 of 1,736 (0.06%, an ambiguous crop). A second pass on a padded
-   canvas (a new `scrfd-letterbox-v2` contract with its own provenance) would fix the five, but the
-   population that matters, real close-ups, is not in either dataset. The next measurement is the
+   canvas (a new `scrfd-letterbox-v2` contract with its own provenance) would fix the five, but neither
+   selection represents the owner's intended photographs. The next measurement is the
    owner's own photographs (selfies, ID photographs, tight phone crops); decide after that, and check
    that padding adds no false faces.
 2. **Keep the floor at 0.5** and the border rule as they are.
@@ -210,7 +213,7 @@ verified). The importer needed a fix first: the standard download nests the pict
 
 ## Open issues / follow-ups
 
-Gaps found or confirmed here are tracked as GitHub issues #173 to #184 (listed in `docs/plans/PROJECT_STATUS.md`).
+Gaps found or confirmed here are tracked as GitHub issues #173 to #183 (listed in `docs/plans/PROJECT_STATUS.md`); #184 (evaluate on CelebA) was completed in this entry and closed.
 
 - Measure the owner's own close-up photographs before deciding recommendation 1 (see issue #173).
 - Look-alike strangers (best similarity 0.402), margin and aggregation policy, and the hard-negatives
