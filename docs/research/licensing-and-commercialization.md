@@ -180,11 +180,11 @@ Honest limits of the Commons set, which matter for any claim built on it:
   SHA-256 per photograph it reviews.
 - The set is small, formal and skewed toward adults photographed officially; it is a development aid,
   not a benchmark.
-- **LFW (downloaded and evaluated 2026-10-13) and CelebA (planned; not downloaded):** ready-labelled research
+- **LFW and CelebA (both downloaded and evaluated 2026-10-13; CelebA's `README.txt` states non-commercial research use):** ready-labelled research
   datasets the owner downloads and imports locally with `evaluation/import_labelled_dataset.py` (labels by their creators, not
   verified here). **Terms not verified**: both are research datasets and CelebA states non-commercial use
   only; they stay local, are never committed or redistributed, and their people may also appear in the
-  recogniser's training data (evaluation leakage). LFW's terms are still to be read at source and CelebA's confirmed when it is downloaded.
+  recogniser's training data (evaluation leakage). Both datasets' terms are still to be read at their sources (issue 183).
 - The Commons set above is **parked**, not removed: its review log and exports stay for later.
 
 ## 11. Before any release: checklist

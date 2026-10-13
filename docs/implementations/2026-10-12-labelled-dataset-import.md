@@ -60,3 +60,6 @@ was downloaded, so the importer has run only on synthetic folders: **a real LFW 
 - **Terms not verified.** Both are research datasets; CelebA states non-commercial use. Recorded in the
   licensing file (section 10.2); never committed or redistributed.
 - CelebA is large (about 200,000 pictures); the importer copies only the selection.
+- **Fix 2026-10-13:** the standard CelebA archive extracts to `Img/img_align_celeba/img_align_celeba` with the
+  table in `Anno/`, so the importer first found no photographs; it now looks for the folder that holds the first
+  listed picture (test added). CelebA was imported the same day: 150 identities, 1,736 photographs.
