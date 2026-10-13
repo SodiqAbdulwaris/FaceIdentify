@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-12
 - **Milestone / tracker IDs:** M4/M5 defect found by the owner's first real desktop run; no tracker row
-- **Status:** fixed and tested; **not yet confirmed in the real desktop window** (needs the owner's run)
+- **Status:** fixed and tested; **confirmed in the real desktop window by the owner on 2026-10-13**
 - **Commits:** PR to be recorded when merged
 
 ## The defect
