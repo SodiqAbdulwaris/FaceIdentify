@@ -5,7 +5,7 @@ detail behind any line, follow its link into [`docs/implementations/`](../implem
 the work still to come see [`M3_M4_COMPLETION_PLAN.md`](M3_M4_COMPLETION_PLAN.md) and the per-task
 status in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md).
 
-_Last updated: 2026-10-12 (search, face search, the real-model gate and the label-review utility built; TST-057A functional gate passing with quality unverified, its independent smoke test owed by the owner). Keep this file true and short (rules:
+_Last updated: 2026-10-13 (the first LFW run recorded; search, face search, the real-model gate and the label-review utility built; TST-057A functional gate passing with quality unverified, its independent smoke test owed by the owner). Keep this file true and short (rules:
 [`documentation.md`](../../.agents/rules/documentation.md))._
 
 **Where we are:** M0 to M4 are done on the development profile (TST-038 and TST-039 close on the
