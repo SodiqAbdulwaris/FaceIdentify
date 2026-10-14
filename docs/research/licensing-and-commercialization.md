@@ -189,6 +189,10 @@ Honest limits of the Commons set, which matter for any claim built on it:
   **Terms not verified**: both are research datasets; they stay local, are never committed or
   redistributed, and their people may also appear in the recogniser's training data (evaluation
   leakage). Reading each dataset's terms at its source (and the Kaggle mirror's licence field) is issue 183.
+- **`celebs-manual/` (pictures of well-known people collected by hand by the owner, from 2026-10-14):**
+  local only and Git-ignored; sources vary (Wikimedia Commons with its licence, Flickr, press and web
+  pages) and are not recorded per file unless the owner keeps the original file name (`rename-log.json`
+  keeps it). Copyrighted works kept for local evaluation, never shared; terms not verified.
 - **`MyFaces/` (owner's own photographs, 11 files, 2026-10-13):** local only and Git-ignored. Used only to
   measure the detector on the owner's own pictures; never committed, uploaded or shared; the owner's
   own pictures as supplied by the owner (who took them and under what rights is not verified here),
