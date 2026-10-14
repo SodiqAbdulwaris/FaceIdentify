@@ -10,13 +10,20 @@
 - `evaluation/measure_operating_point.py` gains `--manifest`: a `label_review.py` export
   (`kind: verified-manifest`, schema 1). Every verified photograph must lie inside the dataset
   folder, exist and match its reviewed SHA-256 **before** any cached embedding is used (the same
-  checks as the gate's `choose_people`). A verified run caches embeddings under a name that also
-  carries the manifest digest, so a different selection never reuses another's vectors. The report
+  checks as the gate's `choose_people`). Every used picture is hashed once: a byte-identical copy
+  under a second name is left out and counted (`byte_identical_copies_left_out`), since
+  leave-one-out removes a query by name and a copy would match itself; and the embedding cache is
+  named by a key over every used file name with its digest, so an edited picture or a different
+  selection never reuses cached vectors (the old weights-only cache name could, for any manifest). The report
   records `verified_labels` and the manifest digest, and its `limits` text names the label source.
   Without `--manifest` the script reads `manifest.json` as before.
 - `tests/unit/test_measure_operating_point_manifest.py`: a valid export, a photograph changed after
-  review, a missing photograph, a missing digest, a path escaping the dataset, a wrong schema and the
-  legacy manifest.
+  review, a missing photograph, a missing digest, a path escaping the dataset, a wrong schema, the
+  legacy manifest, byte-identical copies, and the cache key changing with a picture's bytes and
+  with the selection (symlink escapes are covered by `resolve()` but not tested: creating symlinks
+  needs extra rights on Windows).
+- The independent review of this PR found the duplicate-copy and stale-cache gaps; both were fixed
+  and the run below repeated with identical results (0 copies in this set).
 - The code was first written in PR 187, whose CI failed (an 80-character commit header and
   formatting). It is carried over here, reformatted, with a mypy fix in the test; PR 187 can be
   closed in favour of this one (the owner's call).
@@ -64,7 +71,10 @@ No `--write-policy`: the installed policy is untouched. Report Git-ignored.
 
 ## Verification
 
-- `uv run pytest -q tests/unit/test_measure_operating_point_manifest.py`: 4 passed.
+- `uv run pytest -q tests/unit/test_measure_operating_point_manifest.py`: 6 passed (and fail to
+  import without the change).
+- After the review fix the run was repeated (`operating-point-celebs-commons-conservative-v2.json`):
+  halves, pair distributions, both chosen points and the final-half results equal the first run.
 - Full backend gate before the PR: see the PR description for the exact results.
 - The run above finished with exit code 0 and `verified_labels: true`; the installed policy files
   were not written.
