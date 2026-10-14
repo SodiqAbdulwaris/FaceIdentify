@@ -34,8 +34,9 @@ Protocol (open set, leave-one-out, subject-disjoint):
 
 Default labels are unverified Commons categories; use --manifest with a label_review.py
 export for human-reviewed labels. Verified photographs are digest-checked even when embeddings
-are cached. Reports record the manifest hash and label provenance. Embeddings are cached beside
-the dataset, with verified caches also keyed by manifest digest.
+are cached. Byte-identical copies are used once. Reports record the manifest hash and label
+provenance. Embeddings are cached beside the dataset, keyed by the weights digest and by every
+used file name with the digest of its bytes.
 """
 
 import argparse
@@ -112,8 +113,14 @@ def dominant(detections: tuple[Any, ...], ratio: float = DOMINANCE) -> Any:
     return None
 
 
-def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], bool, str]:
-    """Read either manifest format and verify reviewed photographs before using any cache."""
+def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], bool, str, str, int]:
+    """Read either manifest format and verify reviewed photographs before using any cache.
+
+    Returns the people, whether the labels are verified, the manifest's digest, a content key
+    (every used file name with the digest of its bytes, so a changed picture or selection never
+    reuses cached vectors) and how many pictures were left out as byte-identical to an earlier
+    one: a copy under a second name would otherwise match itself in leave-one-out.
+    """
     manifest_bytes = manifest_path.read_bytes()
     payload = json.loads(manifest_bytes)
     verified = isinstance(payload, dict) and payload.get("kind") == "verified-manifest"
@@ -126,9 +133,14 @@ def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], b
     if not isinstance(manifest, dict):
         raise SystemExit("the dataset manifest must map people to photographs")
     root = dataset.resolve()
-    for photos in manifest.values():
+    seen: set[str] = set()
+    used: list[tuple[str, str]] = []
+    kept: dict[str, Any] = {}
+    duplicates = 0
+    for person, photos in manifest.items():
         if not isinstance(photos, list):
             raise SystemExit("each person must have a list of photographs")
+        kept[person] = []
         for photo in photos:
             name = photo["file"]
             path = (root / name).resolve()
@@ -137,13 +149,27 @@ def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], b
             expected = photo.get("sha256")
             if verified and not expected:
                 raise SystemExit(f"{name} has no verified digest")
-            if expected:
-                if not path.is_file():
+            if not path.is_file():
+                if expected:
                     raise SystemExit(f"{name} was verified but is missing")
-                actual = hashlib.sha256(path.read_bytes()).hexdigest()
-                if actual != expected:
-                    raise SystemExit(f"{name} changed after it was verified")
-    return manifest, verified, hashlib.sha256(manifest_bytes).hexdigest()
+                kept[person].append(photo)  # (legacy: counted as failed when embedded)
+                continue
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            if expected and actual != expected:
+                raise SystemExit(f"{name} changed after it was verified")
+            if actual in seen:
+                duplicates += 1
+                continue
+            seen.add(actual)
+            used.append((name, actual))
+            kept[person].append(photo)
+    content_key = hashlib.sha256(json.dumps(sorted(used)).encode()).hexdigest()
+    return kept, verified, hashlib.sha256(manifest_bytes).hexdigest(), content_key, duplicates
+
+
+def cache_path(dataset: Path, weights_digest: str, content_key: str) -> Path:
+    """Cached vectors belong to one set of weights and one exact set of pictures."""
+    return dataset / f"embeddings-{weights_digest[:12]}-{content_key[:16]}-subject.npz"
 
 
 def embed_dataset(
@@ -152,16 +178,10 @@ def embed_dataset(
     store: RuntimePackageStore,
     *,
     manifest: dict[str, Any],
-    manifest_hash: str,
-    verified: bool,
+    content_key: str,
 ) -> tuple[dict[str, Any], dict[str, np.ndarray], dict[str, int], str]:
     plan, digest = plan_from(store, provider)
-    # A verified selection must never reuse vectors from a different manifest.
-    cache = dataset / (
-        f"embeddings-{digest[:12]}-{manifest_hash[:16]}-subject.npz"
-        if verified
-        else f"embeddings-{digest[:12]}-subject.npz"
-    )
+    cache = cache_path(dataset, digest, content_key)
     skipped = {"no_face": 0, "no_subject": 0, "failed": 0}
     if cache.exists():
         stored = np.load(cache, allow_pickle=False)
@@ -404,14 +424,11 @@ def main() -> None:
     roots = StorageRoots(Path(), arguments.local_state_root)
     store = RuntimePackageStore(roots, new_id=uuid.uuid4)
     manifest_path = arguments.manifest or arguments.dataset / "manifest.json"
-    manifest, verified, manifest_hash = read_manifest(arguments.dataset, manifest_path)
+    manifest, verified, manifest_hash, content_key, duplicates = read_manifest(
+        arguments.dataset, manifest_path
+    )
     manifest, vectors, skipped, digest = embed_dataset(
-        arguments.dataset,
-        arguments.provider,
-        store,
-        manifest=manifest,
-        manifest_hash=manifest_hash,
-        verified=verified,
+        arguments.dataset, arguments.provider, store, manifest=manifest, content_key=content_key
     )
 
     by_person: dict[str, list[Photo]] = {}
@@ -499,6 +516,7 @@ def main() -> None:
         },
         "exclusions": {
             "photographs_without_a_usable_subject": skipped,
+            "byte_identical_copies_left_out": duplicates,
             "people_with_a_single_usable_photograph": single,
         },
         "people_used": len(by_person),
