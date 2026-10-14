@@ -189,6 +189,13 @@ Honest limits of the Commons set, which matter for any claim built on it:
   **Terms not verified**: both are research datasets; they stay local, are never committed or
   redistributed, and their people may also appear in the recogniser's training data (evaluation
   leakage). Reading each dataset's terms at its source (and the Kaggle mirror's licence field) is issue 183.
+- **Celebrity set from Wikimedia Commons (`evaluation/datasets/celebrities-cc`, 2026-10-14):** photographs of
+  well-known living people, read through the Commons API with `build_commons_dataset.py --licences free
+  --follow-years`. Each file's licence (CC0, CC BY or CC BY-SA, or public domain; never NC or ND),
+  licence URL, author, credit and source page are recorded in the local manifest. CC BY and BY-SA ask for
+  attribution (and share-alike for adaptations): met by the manifest, and the files stay local and are never
+  redistributed. Commons' per-file licence metadata is taken as given and not independently checked; the
+  people depicted are living individuals (biometric data like every set here).
 - **`MyFaces/` (owner's own photographs, 11 files, 2026-10-13):** local only and Git-ignored. Used only to
   measure the detector on the owner's own pictures; never committed, uploaded or shared; the owner's
   own pictures as supplied by the owner (who took them and under what rights is not verified here),

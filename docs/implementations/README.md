@@ -59,6 +59,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-13 | [The learning guide moved to `docs/guides/learning/`](2026-10-13-learning-guide-move.md) | done; documentation only |
 | 2026-10-14 | [M5: the CelebA run, and the decision on automatic acceptance](2026-10-14-m5-celeba-gate-and-acceptance-decision.md) | evidence recorded; acceptance stays off; TST-057B not claimed |
 | 2026-10-14 | [Label review: serve only named people (`--people`)](2026-10-14-label-review-people-filter.md) | done |
+| 2026-10-14 | [Commons builder: free licences, a people list and year categories](2026-10-14-commons-free-licence-builder.md) | tool built and run; labels unverified |
 | 2026-10-12 | [The learning guide restructured into `docs/guides/learning/`](2026-10-12-learning-guide-restructure.md) | done; documentation only |
 | 2026-10-09 | [M5 step 4c, part 1: revision 0010](2026-10-09-m5-revision-0010.md) | done; TST-059, TST-032 |
 | 2026-10-09 | [M5 step 4b: permanent deletion of a source](2026-10-09-m5-permanent-source-delete.md) | done; TST-059 second part |

@@ -15,6 +15,15 @@ aid, not a benchmark: it is small, skewed toward adults photographed formally, a
 only as good as Commons' categories.
 
 Needs network access to commons.wikimedia.org. Each request is polite (a user agent and a pause).
+
+Options (2026-10-14): `--licences free` also accepts CC0 and Creative Commons BY and BY-SA files
+(what most photographs of living people are), still read per file from Commons' metadata, never NC
+or ND;
+`--people "A,B"` names the people (the Commons category name); `--follow-years` also reads the
+person's "by year" and "in <year>" subcategories, where the photographs of a living person usually
+are. The defaults are unchanged. CC BY and BY-SA ask for attribution and share-alike, which a
+private local evaluation set meets by keeping the author, licence and source page in the manifest;
+the files are never redistributed.
 """
 
 import argparse
@@ -80,9 +89,33 @@ def api(**params: str) -> dict[str, Any]:
     return result
 
 
+FREE_LICENCE = re.compile(r"^(cc0|cc[ -]by(-sa)?)\b", re.IGNORECASE)
+FOLLOW = re.compile(r"\bby year\b|\bin (19|20)\d\d\b", re.IGNORECASE)
+MAX_CATEGORIES = 60  # per person: a bound, so a wide category cannot start an endless crawl
+
+
+def licence_name(metadata: dict[str, Any]) -> str:
+    return str(metadata.get("LicenseShortName", {}).get("value", "")).strip()
+
+
 def public_domain(metadata: dict[str, Any]) -> bool:
-    name = str(metadata.get("LicenseShortName", {}).get("value", "")).strip().lower()
+    name = licence_name(metadata).lower()
     return name in EXACT_STATUSES or name.startswith(STATUS_PREFIXES)
+
+
+def free_licence(metadata: dict[str, Any]) -> bool:
+    """Public domain, CC0, CC BY or CC BY-SA. Not NC or ND (Commons does not host those anyway)."""
+    name = licence_name(metadata)
+    if re.search(r"\b(nc|nd)\b", name, re.IGNORECASE):
+        return False
+    return public_domain(metadata) or FREE_LICENCE.match(name) is not None
+
+
+def follows(person: str, title: str) -> bool:
+    """Is this subcategory one that holds photographs of `person`? Only the person's own "by year"
+    and "in <year>" categories: not their films, signatures, logos or other people."""
+    name = title.removeprefix("Category:")
+    return name.startswith((person, f"Photographs of {person}")) and FOLLOW.search(name) is not None
 
 
 def plain(metadata: dict[str, Any], key: str) -> str:
@@ -91,12 +124,37 @@ def plain(metadata: dict[str, Any], key: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", value)).strip()
 
 
-def photographs(person: str, limit: int) -> list[dict[str, Any]]:
-    """Public-domain JPEG photographs in the person's category, with their rights metadata."""
-    members = api(
-        action="query", list="categorymembers", cmtitle=f"Category:{person}",
-        cmtype="file", cmlimit="250",
-    )["query"]["categorymembers"]  # fmt: skip
+def category_files(person: str, follow_years: bool) -> list[dict[str, Any]]:
+    """The files of the person's category and, with `follow_years`, of their year subcategories."""
+    queue = [f"Category:{person}"]
+    seen: set[str] = set()
+    titles: set[str] = set()
+    files: list[dict[str, Any]] = []
+    while queue and len(seen) < MAX_CATEGORIES:
+        category = queue.pop(0)
+        if category in seen:
+            continue
+        seen.add(category)
+        reply = api(
+            action="query", list="categorymembers", cmtitle=category,
+            cmtype="file|subcat" if follow_years else "file", cmlimit="250",
+        ).get("query", {}).get("categorymembers", [])  # fmt: skip
+        for member in reply:
+            if member["title"].startswith("Category:"):
+                if follows(person, member["title"]):
+                    queue.append(member["title"])
+            elif member["title"] not in titles:
+                titles.add(member["title"])
+                files.append(member)
+    return files
+
+
+def photographs(
+    person: str, limit: int, accept: Any = public_domain, follow_years: bool = False
+) -> list[dict[str, Any]]:
+    """JPEG photographs in the person's category (and year categories), with their rights
+    metadata, whose licence `accept` allows."""
+    members = category_files(person, follow_years)
     found: list[dict[str, Any]] = []
     for start in range(0, len(members), 25):
         titles = "|".join(m["title"] for m in members[start : start + 25])
@@ -107,7 +165,7 @@ def photographs(person: str, limit: int) -> list[dict[str, Any]]:
         for page in pages.values():
             info = (page.get("imageinfo") or [{}])[0]
             metadata = info.get("extmetadata", {})
-            if info.get("mime") == "image/jpeg" and public_domain(metadata):
+            if info.get("mime") == "image/jpeg" and accept(metadata):
                 found.append(
                     {
                         "title": page["title"],
@@ -128,7 +186,18 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--per-person", type=int, default=24)
     parser.add_argument("--minimum", type=int, default=4, help="people with fewer are dropped")
+    parser.add_argument("--licences", choices=("public-domain", "free"), default="public-domain")
+    parser.add_argument(
+        "--people", help="comma-separated Commons category names (default: the list)"
+    )
+    parser.add_argument("--follow-years", action="store_true")
     arguments = parser.parse_args()
+    accept = free_licence if arguments.licences == "free" else public_domain
+    people = (
+        [n.strip() for n in arguments.people.split(",") if n.strip()]
+        if arguments.people
+        else PEOPLE
+    )
     out = arguments.out.resolve()
     if out != DATASETS_ROOT and DATASETS_ROOT not in out.parents:
         raise SystemExit(
@@ -136,14 +205,14 @@ def main() -> None:
         )
     out.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, list[dict[str, Any]]] = {}
-    for person in PEOPLE:
+    for person in people:
         try:
-            items = photographs(person, arguments.per_person)
+            items = photographs(person, arguments.per_person, accept, arguments.follow_years)
         except Exception as error:  # noqa: BLE001 - one person failing must not stop the rest
             print(f"{person}: skipped ({error})")
             continue
         if len(items) < arguments.minimum:
-            print(f"{person}: only {len(items)} public-domain photographs, dropped")
+            print(f"{person}: only {len(items)} allowed photographs, dropped")
             continue
         folder = out / re.sub(r"[^A-Za-z0-9]+", "_", person).strip("_")
         folder.mkdir(exist_ok=True)
