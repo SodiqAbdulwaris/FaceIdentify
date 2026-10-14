@@ -71,7 +71,7 @@ from backend.api.startup import (
 DATASETS_ROOT = (Path(__file__).resolve().parent / "datasets").resolve()
 API = "/api/v1"
 DOMINANCE = 2.5  # a subject face is at least this many times larger than any other in the picture
-RUN_TIMEOUT = 900.0
+RUN_TIMEOUT = 900.0  # seconds to wait for the processing runs (`--run-timeout` sets it)
 
 
 def guard(path: Path) -> Path:
@@ -624,6 +624,8 @@ async def workflow(
 
 
 async def main_async(args: argparse.Namespace) -> int:
+    global RUN_TIMEOUT
+    RUN_TIMEOUT = args.run_timeout
     dataset, workdir = guard(Path(args.dataset)), guard(Path(args.workdir))
     report_path = guard(Path(args.report))
     if workdir.exists() and any(workdir.iterdir()):
@@ -734,6 +736,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "unknown_people": args.unknown,
             "minimum_photographs": args.minimum_photographs,
             "dominance": DOMINANCE,
+            "run_timeout_seconds": args.run_timeout,
         },
         "environment": {
             "python": platform.python_version(),
@@ -767,6 +770,12 @@ def main() -> int:
         help="people never enrolled: their photographs are open-set queries (TST-057B)",
     )
     parser.add_argument("--minimum-photographs", type=int, default=5)
+    parser.add_argument(
+        "--run-timeout",
+        type=float,
+        default=RUN_TIMEOUT,
+        help="seconds to wait for the enrolment processing runs (a larger set needs longer)",
+    )
     return asyncio.run(main_async(parser.parse_args()))
 
 
