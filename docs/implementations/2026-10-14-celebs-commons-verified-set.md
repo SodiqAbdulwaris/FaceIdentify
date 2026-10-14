@@ -38,6 +38,23 @@ PYTHONPATH=. uv run python evaluation/assisted_recognition_gate.py \
 - The five gate working folders from earlier runs (about 1.1 GB) and `celebrities-cc` (251 pictures from
   the first, noisy download) were deleted at the owner's request; the report files are kept.
 
+## Result so far (the retrieval and open-set phases, from the partial report, 2026-10-14 23:43)
+
+| Measure | Value |
+|---|---|
+| Enrolled people / photographs placed | 28 / 323 (none lost) |
+| Held-out queries evaluated | 84 |
+| Recall@1, Recall@5, MRR | 0.988, 0.988, 0.988 (Wilson 95% for the recalls: 0.936 to 0.998) |
+| Stranger queries / accepted by the real policy | 109 / 0 |
+| Best stranger similarity | 0.309 |
+| Cut-off read-out | 0.30: 3 strangers accepted; 0.35 to 0.55: 0 accepted, known accepted correctly 97.6% at 0.35 and 0.40, 96.4% at 0.45, 90.5% at 0.50, 86.9% at 0.55 |
+| Library counts unchanged by the queries | yes (counts only) |
+
+Against the owner's thresholds (Recall@1 0.85, Recall@5 0.95, MRR 0.90) the retrieval figures pass; the
+stability (same rankings after a restart) and workflow checks were **not recorded yet** (the run was
+still in those phases), and the identities are 36 of 40, so TST-057B is **not** claimed. These
+strangers are random other celebrities, not look-alikes (issue 177).
+
 ## Limits to carry into any claim
 
 - The labels are Commons categories checked by one reviewer. The set is celebrity photographs (many
