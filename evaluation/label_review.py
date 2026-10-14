@@ -38,6 +38,7 @@ photograph names and labels as text, never as markup.
 # ruff: noqa: E501  (the page below is one string of HTML and JavaScript)
 
 import argparse
+import csv
 import difflib
 import hashlib
 import http.server
@@ -114,10 +115,10 @@ class Review:
         """List only these people in the page. A name must be one the manifest has (case aside):
         a typo stops the tool rather than showing an empty page. Decisions, status and export are
         about the whole dataset and are not affected."""
-        known = {
-            identity.lower(): identity
-            for identity in {e["identity"] for e in self.entries.values()}
-        }
+        labels = {e["identity"] for e in self.entries.values()}
+        known: dict[str, set[str]] = {}
+        for identity in labels:  # (labels that differ only in case are all chosen together)
+            known.setdefault(identity.lower(), set()).add(identity)
         chosen: set[str] = set()
         unknown: list[str] = []
         for name in names:
@@ -125,11 +126,10 @@ class Review:
             if found is None:
                 unknown.append(name)
             else:
-                chosen.add(found)
+                chosen |= found
         if unknown:
             hints = {
-                n: difflib.get_close_matches(n, list(known.values()), n=2, cutoff=0.5)
-                for n in unknown
+                n: difflib.get_close_matches(n, sorted(labels), n=2, cutoff=0.5) for n in unknown
             }
             raise SystemExit(f"not in the manifest: {unknown} (close: {hints})")
         if not chosen:
@@ -572,12 +572,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument(
         "--people",
-        help="serve only these people, comma separated, exactly as the manifest names them",
+        help="serve only these people: comma separated, names as the manifest has them; quote a "
+        'name that contains a comma ("Doe, Jane",Ada)',
     )
     args = parser.parse_args(argv)
     review = Review(Path(args.dataset), args.reviewer)
-    if args.people:
-        review.focus([n for n in args.people.split(",") if n.strip()])
+    if args.people is not None:  # (an empty value is refused by `focus`, never "everyone")
+        review.focus([n for row in csv.reader([args.people]) for n in row if n.strip()])
     if args.command == "status":
         print(json.dumps(review.status(), indent=1))
     elif args.command == "export":
