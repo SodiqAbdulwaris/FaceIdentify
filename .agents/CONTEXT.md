@@ -474,6 +474,7 @@ Working rules that cost time before: work from the repository root and do not `c
 keeps the directory); write scripts with the Write tool, not heredocs with apostrophes; commit headers at most 72
 characters; many files are CRLF; `PYTHONPATH=.` for evaluation scripts; a background process dies when the session ends;
 a merge needs the owner's own message, and every PR needs an independent read-only review (`.agents/rules/branches.md`).
+**Operating point on verified labels (2026-10-15, issue 178):** `measure_operating_point.py --manifest <label_review export>` digest-checks every verified photograph; the conservative rule on the 36-identity celebrity set chose 0.3314 / margin 0.02 and made 0 false accepts on the final half (recall 0.988; 11 people, small). Measurement only: **automatic acceptance stays off** (decision 2026-10-14); `docs/implementations/2026-10-15-m5-verified-operating-point.md`.
 
 **Commons collector (2026-10-14):** `evaluation/collect_commons_portraits.py` (from the owner's `facescrape.py`, fixed) collects free-licence portraits by person from Wikimedia Commons into `evaluation/datasets/celebs-commons/`; `--dry-run` reads metadata only; `docs/implementations/2026-10-14-commons-portrait-collector.md`.
 
