@@ -442,6 +442,35 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 ## Next steps
 
 **Test race fixed (2026-10-15):** a run reads `COMPLETED` before acceptance wakes the index coordinator, which then saves the index on the scheduler thread; API tests that process an image (`processed()` in `tests/integration/test_api_memory.py`) now run one serialized coordinator pass before returning and assert every index operation is `APPLIED`, so nothing is still being written. `docs/implementations/2026-10-15-face-search-snapshot-index-race.md`.
+**Next steps (2026-10-15), in order** (written at the end of the 2026-10-14 session; the owner was asleep, so nothing here
+needs an answer to start):
+
+1. **Collect the gate result.** `evaluation/datasets/reports/gate-celebs-commons.json` (command in
+   `docs/implementations/2026-10-14-celebs-commons-verified-set.md`). If it is missing or still marked `"partial": true` and no
+   gate process is running, the run died with its session: delete `evaluation/datasets/gate-celebs-commons` and re-run the same
+   command in the background. Read: Recall@1, Recall@5, MRR against the owner's thresholds (0.85, 0.95, 0.90), the
+   same-rankings-after-restart check (stability 100%), `queries_wrote_nothing`, the workflow checks, and the open-set table
+   (strangers accepted at each cut-off, best stranger similarity). Record it (entry, tracker TST-057B row, status page,
+   this file). **It cannot pass TST-057B: 36 identities are below 40.** State both facts.
+2. **Close the identity gap automatically.** Make a people file of about 10 more well-known people not in the set (one
+   per line; `Display = Category` when the Commons category differs) and run
+   `collect_commons_portraits.py --out evaluation/datasets/celebs-commons --licence free --people-file <file>`
+   (it resumes: existing pictures are kept). Then the owner reviews only the new people
+   (`label_review.py serve ... --people "A,B,..."`). Do not mark anything verified on the owner's behalf without a statement.
+3. **Issue 178** (small): let `measure_operating_point.py` read a verified manifest (`--manifest`, the gate's digest
+   checks), then run the conservative precision rule on the verified set. Record the result; **do not enable automatic
+   acceptance** (decision 2026-10-14: it needs the verified set at the targets, hard negatives and an explicit
+   owner-approved code change).
+4. **Issue 177** (medium): a hard-negatives selection mode (strangers chosen by similarity to enrolled people), then
+   repeat the open-set evaluation with it.
+5. **Smaller, any time:** the unfinished CelebA workflow and restart phases (about an hour on CPU), #173 (the owner's
+   own close-ups in `MyFaces/`), #183 (LFW and CelebA terms at their sources), #188 (AVIF), the remaining Commons
+   public-domain review (14 people short, `label_review.py --people`).
+
+Working rules that cost time before: work from the repository root and do not `cd` elsewhere in a command (the shell
+keeps the directory); write scripts with the Write tool, not heredocs with apostrophes; commit headers at most 72
+characters; many files are CRLF; `PYTHONPATH=.` for evaluation scripts; a background process dies when the session ends;
+a merge needs the owner's own message, and every PR needs an independent read-only review (`.agents/rules/branches.md`).
 
 **Commons collector (2026-10-14):** `evaluation/collect_commons_portraits.py` (from the owner's `facescrape.py`, fixed) collects free-licence portraits by person from Wikimedia Commons into `evaluation/datasets/celebs-commons/`; `--dry-run` reads metadata only; `docs/implementations/2026-10-14-commons-portrait-collector.md`.
 
