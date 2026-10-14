@@ -322,3 +322,34 @@ def test_photographs_declared_the_same_picture_count_once_and_one_side_of_a_spli
     assert left["duplicates_dropped"] == ["Ada Lovelace/04.jpg"]
     with pytest.raises(ReviewError, match="another photograph"):
         review.decide("Ada Lovelace/01.jpg", "VERIFIED", same_picture_as="Nowhere/99.jpg")
+
+
+def test_the_page_can_be_limited_to_named_people_without_touching_the_rest(dataset: Path) -> None:
+    review = Review(dataset, "sodiq")
+    review.focus(["bob barker"])  # (case aside)
+    server, token = serve(review)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = str(server.server_address[0]), int(server.server_address[1])
+    try:
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        connection.request("GET", f"/api/state?t={token}")
+        state = json.loads(connection.getresponse().read())
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert set(state["people"]) == {"Bob Barker"}
+    assert state["status"]["photographs"] == 9  # the counts are about the whole dataset
+    assert len(review.entries) == 9  # and so is what an export would use
+
+
+def test_a_misspelt_person_stops_the_tool_with_a_hint(dataset: Path) -> None:
+    review = Review(dataset, "sodiq")
+    with pytest.raises(SystemExit) as stopped:
+        review.focus(["Ada Lovlace"])
+    assert "Ada Lovelace" in str(stopped.value)
+    assert review.shown is None
+    with pytest.raises(SystemExit):
+        review.focus([])

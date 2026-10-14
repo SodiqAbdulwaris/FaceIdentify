@@ -38,6 +38,7 @@ photograph names and labels as text, never as markup.
 # ruff: noqa: E501  (the page below is one string of HTML and JavaScript)
 
 import argparse
+import difflib
 import hashlib
 import http.server
 import json
@@ -102,11 +103,38 @@ class Review:
                         "identity": identity,
                         "title": item.get("title", ""),
                     }
+        self.shown: frozenset[str] | None = None  # people the page lists (None: everyone)
         self.review_dir = self.dataset / "review"
         self.log_path = self.review_dir / "decisions.jsonl"
         self._lock = threading.Lock()
         self._hashes: dict[str, tuple[tuple[int, int], str]] = {}
         self._confine(self.review_dir)
+
+    def focus(self, names: list[str]) -> None:
+        """List only these people in the page. A name must be one the manifest has (case aside):
+        a typo stops the tool rather than showing an empty page. Decisions, status and export are
+        about the whole dataset and are not affected."""
+        known = {
+            identity.lower(): identity
+            for identity in {e["identity"] for e in self.entries.values()}
+        }
+        chosen: set[str] = set()
+        unknown: list[str] = []
+        for name in names:
+            found = known.get(name.strip().lower())
+            if found is None:
+                unknown.append(name)
+            else:
+                chosen.add(found)
+        if unknown:
+            hints = {
+                n: difflib.get_close_matches(n, list(known.values()), n=2, cutoff=0.5)
+                for n in unknown
+            }
+            raise SystemExit(f"not in the manifest: {unknown} (close: {hints})")
+        if not chosen:
+            raise SystemExit("--people names nobody")
+        self.shown = frozenset(chosen)
 
     # --- the files ---------------------------------------------------------------------
 
@@ -471,6 +499,8 @@ def make_handler(review: Review, token: str) -> type[http.server.BaseHTTPRequest
             elif parsed.path == "/api/state":
                 people: dict[str, list[dict[str, str]]] = {}
                 for entry in review.entries.values():
+                    if review.shown is not None and entry["identity"] not in review.shown:
+                        continue
                     people.setdefault(entry["identity"], []).append(
                         {"file": entry["file"], "title": entry["title"]}
                     )
@@ -540,8 +570,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--reviewer", default="")
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument(
+        "--people",
+        help="serve only these people, comma separated, exactly as the manifest names them",
+    )
     args = parser.parse_args(argv)
     review = Review(Path(args.dataset), args.reviewer)
+    if args.people:
+        review.focus([n for n in args.people.split(",") if n.strip()])
     if args.command == "status":
         print(json.dumps(review.status(), indent=1))
     elif args.command == "export":
