@@ -89,6 +89,8 @@ The interactive page: `PYTHONPATH=. uv run python evaluation/label_review.py ser
 prints the address to open (*the browser page was not driven in this session*). Tests: `uv run pytest tests/unit/test_label_review.py -q`
 (`56 passed` together with the other two evaluation unit files).
 
+To review only some people, add `--people "Name One,Name Two"` (names exactly as the manifest has them, case aside; a misspelt name stops the tool with a hint). It filters the page only: counts and the export still cover the whole dataset.
+
 Clean up when you are done with the interactive page: `rm -rf evaluation/datasets/practice` (the `serve` command above needs the folder).
 
 ## 5. Change it
