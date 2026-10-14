@@ -1,9 +1,10 @@
-# The celebrity set from Commons: reviewed, exported, gate started
+# The celebrity set from Commons: reviewed, exported and gated
 
 - **Date:** 2026-10-14
 - **Milestone / tracker IDs:** M5 track R; TST-057B (stays `BLOCKED`: 36 of the 40 identities)
-- **Status:** the verified manifest is exported; **the gate run on it was started and its result is not
-  recorded here** (see Next); no threshold, policy or model changed
+- **Status:** the verified manifest is exported and the gate run on it finished (2026-10-14 23:50):
+  retrieval, stability and workflow figures meet the owner's thresholds, but **TST-057B is not passed**
+  (36 of 40 identities); no threshold, policy or model changed
 - **Commits:** PR to be recorded when merged
 
 ## What was done
@@ -38,7 +39,7 @@ PYTHONPATH=. uv run python evaluation/assisted_recognition_gate.py \
 - The five gate working folders from earlier runs (about 1.1 GB) and `celebrities-cc` (251 pictures from
   the first, noisy download) were deleted at the owner's request; the report files are kept.
 
-## Result so far (the retrieval and open-set phases, from the partial report, 2026-10-14 23:43)
+## Result (final report, finished 2026-10-14 23:50; first read from the partial report at 23:43)
 
 | Measure | Value |
 |---|---|
@@ -48,12 +49,20 @@ PYTHONPATH=. uv run python evaluation/assisted_recognition_gate.py \
 | Stranger queries / accepted by the real policy | 109 / 0 |
 | Best stranger similarity | 0.309 |
 | Cut-off read-out | 0.30: 3 strangers accepted; 0.35 to 0.55: 0 accepted, known accepted correctly 97.6% at 0.35 and 0.40, 96.4% at 0.45, 90.5% at 0.50, 86.9% at 0.55 |
-| Library counts unchanged by the queries | yes (counts only) |
+| Library counts unchanged by the queries | yes: 323 sources, 28 identities, 323 runs before and after (counts only) |
+| Workflow checks | 10 of 10 (name search, recycle and restore, split then merge, permanent delete, forget, restart name search, same rankings) |
+| Same rankings after a restart | yes (the 84 rankings after the workflow equal those after the restart) |
+| Recall@1 after the workflow and restart | 0.952 (80 of 84): the 3 queries of the person the workflow forgets (Scarlett Johansson) no longer match, by design, plus the miss below |
 
-Against the owner's thresholds (Recall@1 0.85, Recall@5 0.95, MRR 0.90) the retrieval figures pass; the
-stability (same rankings after a restart) and workflow checks were **not recorded yet** (the run was
-still in those phases), and the identities are 36 of 40, so TST-057B is **not** claimed. These
-strangers are random other celebrities, not look-alikes (issue 177).
+The one miss: Morgan Freeman `015.jpg`, whose own identity is not among the offered candidates (top
+candidate Tom Hanks at 0.145, so the real policy would abstain rather than answer wrongly).
+
+Against the owner's thresholds (Recall@1 0.85, Recall@5 0.95, MRR 0.90, stability 100%, workflow
+100%, zero unintended mutations) **every measured figure passes**, but the set has **36 identities
+of the required 40** (28 of them enrolled in this run), so **TST-057B is not passed** and stays
+`BLOCKED`; automatic acceptance stays off. These strangers are random other celebrities, not
+look-alikes (issue 177), and the sample is small (Wilson 95% interval for 0 of 109: 0 to 0.034 if
+queries were independent, which they are not).
 
 ## Limits to carry into any claim
 
