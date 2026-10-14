@@ -62,6 +62,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-14 | [The celebrity set from Commons: reviewed, exported and gated](2026-10-14-celebs-commons-verified-set.md) | two verified gate runs: 36 identities (historical, below 40) and 48 identities (40 enrolled, 118 queries: Recall@1 0.983, 10 of 10 workflow checks, 0 of 115 strangers accepted, every measured threshold met); TST-057B stays blocked (automatic acceptance off) |
 | 2026-10-14 | [The Commons portrait collector (from the owner's `facescrape.py`)](2026-10-14-commons-portrait-collector.md) | built and dry-run; pictures unverified |
 | 2026-10-15 | [Flaky face-search test: the index was still being saved](2026-10-15-face-search-snapshot-index-race.md) | done; test-only |
+| 2026-10-15 | [M5: the operating point on a verified manifest (issue 178)](2026-10-15-m5-verified-operating-point.md) | done; conservative rule on 36 verified identities: 0 false accepts on the final half, recall 0.988; acceptance stays off |
 | 2026-10-12 | [The learning guide restructured into `docs/guides/learning/`](2026-10-12-learning-guide-restructure.md) | done; documentation only |
 | 2026-10-09 | [M5 step 4c, part 1: revision 0010](2026-10-09-m5-revision-0010.md) | done; TST-059, TST-032 |
 | 2026-10-09 | [M5 step 4b: permanent deletion of a source](2026-10-09-m5-permanent-source-delete.md) | done; TST-059 second part |
