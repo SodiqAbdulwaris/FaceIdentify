@@ -14,6 +14,7 @@ from evaluation.assisted_recognition_gate import (
     open_set,
     partition_people,
     per_identity,
+    positive_seconds,
     ranking,
     subject,
     wilson,
@@ -320,3 +321,12 @@ def test_provenance_is_checked_before_a_library_is_built(tmp_path: Path) -> None
         path.write_text(bad)
         with pytest.raises(SystemExit, match="not a valid provenance"):
             load_provenance(path)
+
+
+def test_a_wait_must_be_a_finite_number_above_zero() -> None:
+    import argparse
+
+    assert positive_seconds("3600") == 3600.0
+    for bad in ("0", "-5", "nan", "inf", "soon"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            positive_seconds(bad)

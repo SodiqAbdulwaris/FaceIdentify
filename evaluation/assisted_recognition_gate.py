@@ -71,7 +71,18 @@ from backend.api.startup import (
 DATASETS_ROOT = (Path(__file__).resolve().parent / "datasets").resolve()
 API = "/api/v1"
 DOMINANCE = 2.5  # a subject face is at least this many times larger than any other in the picture
-RUN_TIMEOUT = 900.0  # seconds to wait for the processing runs (`--run-timeout` sets it)
+RUN_TIMEOUT = 900.0  # default seconds to wait for the processing runs (`--run-timeout`)
+
+
+def positive_seconds(text: str) -> float:
+    """A wait in seconds: a finite number above zero (`nan` and `inf` would never expire)."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number") from None
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(f"{text!r} must be a finite number above zero")
+    return value
 
 
 def guard(path: Path) -> Path:
@@ -219,9 +230,11 @@ def subject(faces: list[dict[str, Any]], box: str) -> dict[str, Any] | None:
     return None
 
 
-async def wait_for_runs(gate: Gate, run_ids: list[str]) -> dict[str, str]:
+async def wait_for_runs(
+    gate: Gate, run_ids: list[str], timeout: float = RUN_TIMEOUT
+) -> dict[str, str]:
     states: dict[str, str] = {}
-    deadline = asyncio.get_event_loop().time() + RUN_TIMEOUT
+    deadline = asyncio.get_event_loop().time() + timeout
     pending = set(run_ids)
     while pending:
         for run_id in list(pending):
@@ -261,7 +274,10 @@ async def faces_of(gate: Gate, source_id: str) -> list[dict[str, Any]]:
 
 
 async def enrol(
-    gate: Gate, people: list[dict[str, Any]], log: dict[str, Any]
+    gate: Gate,
+    people: list[dict[str, Any]],
+    log: dict[str, Any],
+    run_timeout: float = RUN_TIMEOUT,
 ) -> dict[str, dict[str, Any]]:
     """Import and process the enrolment photographs, then place each subject into its person."""
     sources: dict[Path, str] = {}
@@ -274,7 +290,7 @@ async def enrol(
     runs = {}
     for source_id in sources.values():
         runs[source_id] = (await gate.post(f"/sources/{source_id}/process"))["id"]
-    states = await wait_for_runs(gate, list(runs.values()))
+    states = await wait_for_runs(gate, list(runs.values()), run_timeout)
     log["processing"] = {
         "runs": len(states),
         "failed": sum(s != "COMPLETED" for s in states.values()),
@@ -624,8 +640,6 @@ async def workflow(
 
 
 async def main_async(args: argparse.Namespace) -> int:
-    global RUN_TIMEOUT
-    RUN_TIMEOUT = args.run_timeout
     dataset, workdir = guard(Path(args.dataset)), guard(Path(args.workdir))
     report_path = guard(Path(args.report))
     if workdir.exists() and any(workdir.iterdir()):
@@ -668,7 +682,7 @@ async def main_async(args: argparse.Namespace) -> int:
 
     async with running(settings, providers) as gate:
         log["readiness"] = (await gate.client.get("/readiness")).json()
-        enrolled = await enrol(gate, people, log)
+        enrolled = await enrol(gate, people, log, args.run_timeout)
         before = await gate.counts()
         results = await run_queries(gate, people, enrolled)
         after = await gate.counts()
@@ -681,7 +695,15 @@ async def main_async(args: argparse.Namespace) -> int:
         log["queries"] = results
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
-            json.dumps({"partial": True, "log": log}, indent=1), encoding="utf-8"
+            json.dumps(
+                {
+                    "partial": True,
+                    "configuration": {"run_timeout_seconds": args.run_timeout},
+                    "log": log,
+                },
+                indent=1,
+            ),
+            encoding="utf-8",
         )
         print(
             json.dumps({"metrics": log["metrics"], "enrolment": log["enrolment"]}, indent=1),
@@ -772,7 +794,7 @@ def main() -> int:
     parser.add_argument("--minimum-photographs", type=int, default=5)
     parser.add_argument(
         "--run-timeout",
-        type=float,
+        type=positive_seconds,
         default=RUN_TIMEOUT,
         help="seconds to wait for the enrolment processing runs (a larger set needs longer)",
     )

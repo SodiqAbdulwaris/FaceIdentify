@@ -5,7 +5,7 @@ detail behind any line, follow its link into [`docs/implementations/`](../implem
 the work still to come see [`M3_M4_COMPLETION_PLAN.md`](M3_M4_COMPLETION_PLAN.md) and the per-task
 status in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md).
 
-_Last updated: 2026-10-14 (the CelebA run recorded and the decision on automatic acceptance made: it stays off; the LFW and CelebA exclusion analysis recorded: a handful of detection failures, the rest lost to the evaluation's subject rule (none on CelebA); the first LFW run recorded; search, face search, the real-model gate and the label-review utility built; TST-057A functional gate passing with quality unverified, its independent smoke test owed by the owner). Keep this file true and short (rules:
+_Last updated: 2026-10-14 (the CelebA run recorded and the decision on automatic acceptance made: it stays off; the LFW and CelebA exclusion analysis recorded: a handful of detection failures, the rest lost to the evaluation's subject rule (none on CelebA); the first LFW run recorded; search, face search, the real-model gate and the label-review utility built; TST-057A functional gate passing with quality unverified, the owner reported the independent smoke test done on 2026-10-14; its individual checklist outcomes were not itemised, and recognition quality stays unverified). Keep this file true and short (rules:
 [`documentation.md`](../../.agents/rules/documentation.md))._
 
 **Where we are:** M0 to M4 are done on the development profile (TST-038 and TST-039 close on the
