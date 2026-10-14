@@ -67,6 +67,18 @@ of the required 40** (28 of them enrolled in this run), so **TST-057B is not pas
 look-alikes (issue 177), and the sample is small (Wilson 95% interval for 0 of 109: 0 to 0.034 if
 queries were independent, which they are not).
 
+## Closing the identity gap (2026-10-15)
+
+`collect_commons_portraits.py --out evaluation/datasets/celebs-commons --licence free --per-person 15
+--people-file evaluation/datasets/celebs-commons/people-2026-10-15.txt` (the collector resumes; existing
+pictures were kept) added **180 pictures for 12 people**, 15 each: Hugh Jackman, Benedict Cumberbatch,
+Cate Blanchett, Nicole Kidman, Matt Damon, Samuel L. Jackson, Denzel Washington, Meryl Streep, Viola
+Davis, Lupita Nyong'o, Kristen Stewart, Jake Gyllenhaal (rejected candidates: 190 without one dominant
+face, 30 too small, 19 not JPEG, 2 duplicates). Twelve rather than four, so the set still reaches 40 if
+the review drops some. **They are unreviewed:** nothing is verified until the owner reviews them
+(`label_review.py serve --dataset evaluation/datasets/celebs-commons --reviewer sodiq --people "<the 12
+names>"`); then a new export and a gate re-run follow.
+
 ## Limits to carry into any claim
 
 - The labels are Commons categories checked by one reviewer. The set is celebrity photographs (many
