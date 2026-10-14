@@ -31,8 +31,8 @@ investigated). That is a harness limit, not a result. The gate gained `--run-tim
 | Stranger queries evaluated | 580 | 375 |
 | Strangers accepted by the real policy | 0 (all offered as possible people) | 0 |
 | Strangers' best similarity: median / max | 0.198 / 0.383 | 0.193 / 0.402 |
-| Correct match similarity: minimum / 5th percentile | 0.284 / 0.535 | 0.430 / 0.633 |
-| Queries changed the library | no (872 / 100 / 872 before and after) | no |
+| Similarity of correctly ranked top-1 matches (misses excluded): minimum / 5th percentile | 0.284 / 0.535 | 0.430 / 0.633 |
+| Library counts unchanged by the queries (images / identities / runs; counts only, not rows or files) | yes (872 / 100 / 872) | yes |
 
 The six CelebA misses are not near-misses: the correct person scored 0.11 to 0.15 (two were not offered at
 all) against a wrong person at 0.17 to 0.31. They look like mislabelled or very different photographs;
@@ -48,7 +48,7 @@ unverified. None would have been accepted at any cut-off at or above 0.35.
 | 0.45 | 0 | 273 (0.965) | 0 | 172 (0.994) |
 | 0.50 | 0 | 270 (0.954) | 0 | not tabulated here |
 
-At 0.45, none of 955 strangers was accepted on either set (95% upper bound about 0.3% by the rule of three),
+At 0.45, none of 955 strangers was accepted on either set (a nominal 95% upper bound of about 0.3% by the rule of three, which assumes independent queries; repeated photographs of the same strangers are not independent, so it is not a population guarantee),
 no known person was accepted wrongly (0 of 445), and 96.5% to 99.4% of known queries were accepted correctly.
 That is far better than the Commons set's earlier "5 false accepts of 40", and it is the first evidence that a
 safe operating point may exist. It is **not** enough on its own (below).
@@ -65,10 +65,11 @@ Why, in order of weight:
    more images, 80 or more queries). LFW and CelebA labels are the creators' and unverified here; the only
    verified set has 9 identities and 18 queries.
 2. **The strangers were not hard.** They are random other people. Look-alikes are untested (the best stranger
-   is 0.402 on LFW and 0.383 on CelebA, and a look-alike or a relative would sit higher). The hard-negatives
-   mode is issue 177.
-3. **Both sets are friendly.** Press and celebrity photographs, many of whom are probably in the recogniser's
-   training data (recorded in the licensing file), so the numbers are optimistic. Neither contains the
+   is 0.402 on LFW and 0.383 on CelebA; how a look-alike or a relative would score is unmeasured). The
+   hard-negatives mode is issue 177.
+3. **Both sets are narrow.** LFW is news photographs and CelebA is aligned celebrity crops. Some of these
+   people may be in the recogniser's training data (a possibility recorded in the licensing file, not
+   measured here), which would make the numbers optimistic. Neither contains the
    owner's snapshots, cameras, lighting or ages. The first look at the owner's own photographs
    (`MyFaces/`, 28 decodable pictures of 29 files) found one face each, but it is a detector check, not recognition.
 4. **The cost is asymmetric.** A wrong automatic acceptance silently puts a face into the wrong person's
@@ -106,8 +107,9 @@ badge above the cut-off while still requiring one click) is possible without any
 ## Verification
 
 - `PYTHONPATH=. uv run python evaluation/assisted_recognition_gate.py ... --run-timeout 3600` produced the
-  figures above (CPU; report partial as stated). `uv run pytest tests/unit/test_assisted_gate.py -q`: 15
-  passed; ruff and mypy clean. The new option is covered by the parser help only.
+  figures above (CPU; report partial as stated). `uv run pytest tests/unit/test_assisted_gate.py -q`: 16
+  passed (the timeout must be a finite number above zero; it is passed through, not stored globally, and
+  recorded in the partial report too); ruff and mypy clean.
 - **Not verified:** the CelebA workflow checks and restart comparison (the run was unfinished); any of the
   labels; behaviour on the GPU path (not investigated).
 
