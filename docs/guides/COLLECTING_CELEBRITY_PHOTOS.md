@@ -47,44 +47,44 @@ category (0 usually means the pictures are in subcategories).
 
 | Person | Folder | Commons category | Seen | Notes |
 |---|---|---|---|---|
-| Jason Statham | `Jason Statham` | [Commons](https://commons.wikimedia.org/wiki/Category:Jason_Statham) | 24 | Top category has plenty. |
-| Dwayne Johnson | `Dwayne Johnson` | [Commons](https://commons.wikimedia.org/wiki/Category:Dwayne_Johnson) | 22 | Top category has plenty. |
-| Jennifer Lawrence | `Jennifer Lawrence` | [Commons](https://commons.wikimedia.org/wiki/Category:Jennifer_Lawrence) | 0 | Open 'Jennifer Lawrence by year'; skip 'Katniss Everdeen' and 'Signatures'. |
-| Jennifer Lopez | `Jennifer Lopez` | [Commons](https://commons.wikimedia.org/wiki/Category:Jennifer_Lopez) | 2 | Open 'by year'; skip 'Green Versace dress', 'logos', 'star', 'Signatures'. |
-| Jenna Ortega | `Jenna Ortega` | [Commons](https://commons.wikimedia.org/wiki/Category:Jenna_Ortega) | 0 | Open 'Jenna Ortega by year'. |
+| Jason Statham | `Jason_Statham` | [Commons](https://commons.wikimedia.org/wiki/Category:Jason_Statham) | 24 | Top category has plenty. |
+| Dwayne Johnson | `Dwayne_Johnson` | [Commons](https://commons.wikimedia.org/wiki/Category:Dwayne_Johnson) | 22 | Top category has plenty. |
+| Jennifer Lawrence | `Jennifer_Lawrence` | [Commons](https://commons.wikimedia.org/wiki/Category:Jennifer_Lawrence) | 0 | Open 'Jennifer Lawrence by year'; skip 'Katniss Everdeen' and 'Signatures'. |
+| Jennifer Lopez | `Jennifer_Lopez` | [Commons](https://commons.wikimedia.org/wiki/Category:Jennifer_Lopez) | 2 | Open 'by year'; skip 'Green Versace dress', 'logos', 'star', 'Signatures'. |
+| Jenna Ortega | `Jenna_Ortega` | [Commons](https://commons.wikimedia.org/wiki/Category:Jenna_Ortega) | 0 | Open 'Jenna Ortega by year'. |
 | Zendaya | `Zendaya` | [Commons](https://commons.wikimedia.org/wiki/Category:Zendaya) | 0 | Open 'Zendaya by year'; skip 'by clothing', 'wearing lipstick', 'album covers', 'Signatures'. |
-| Tom Hanks | `Tom Hanks` | [Commons](https://commons.wikimedia.org/wiki/Category:Tom_Hanks) | 20 |  |
-| Vin Diesel | `Vin Diesel` | [Commons](https://commons.wikimedia.org/wiki/Category:Vin_Diesel) | 27 |  |
-| Kevin Hart | `Kevin Hart` | [Commons](https://commons.wikimedia.org/wiki/Category:Kevin_Hart) | 27 |  |
-| Mark Wahlberg | `Mark Wahlberg` | [Commons](https://commons.wikimedia.org/wiki/Category:Mark_Wahlberg) | 12 |  |
-| Morgan Freeman | `Morgan Freeman` | [Commons](https://commons.wikimedia.org/wiki/Category:Morgan_Freeman) | 11 |  |
-| Leonardo DiCaprio | `Leonardo DiCaprio` | [Commons](https://commons.wikimedia.org/wiki/Category:Leonardo_DiCaprio) | 11 |  |
-| Idris Elba | `Idris Elba` | [Commons](https://commons.wikimedia.org/wiki/Category:Idris_Elba) | 13 |  |
-| Will Smith | `Will Smith` | [Commons](https://commons.wikimedia.org/wiki/Category:Will_Smith) | 7 | Also its subcategories. |
-| Lady Gaga | `Lady Gaga` | [Commons](https://commons.wikimedia.org/wiki/Category:Lady_Gaga) | 11 | Many costumes: choose clear face shots. |
-| Selena Gomez | `Selena Gomez` | [Commons](https://commons.wikimedia.org/wiki/Category:Selena_Gomez) | 8 |  |
-| Brad Pitt | `Brad Pitt` | [Commons](https://commons.wikimedia.org/wiki/Category:Brad_Pitt) | 7 |  |
-| Keanu Reeves | `Keanu Reeves` | [Commons](https://commons.wikimedia.org/wiki/Category:Keanu_Reeves) | 5 |  |
-| Natalie Portman | `Natalie Portman` | [Commons](https://commons.wikimedia.org/wiki/Category:Natalie_Portman) | 5 |  |
-| Emma Stone | `Emma Stone` | [Commons](https://commons.wikimedia.org/wiki/Category:Emma_Stone) | 5 |  |
-| Angelina Jolie | `Angelina Jolie` | [Commons](https://commons.wikimedia.org/wiki/Category:Angelina_Jolie) | 6 |  |
-| Tom Cruise | `Tom Cruise` | [Commons](https://commons.wikimedia.org/wiki/Category:Tom_Cruise) | 5 |  |
-| Taylor Swift | `Taylor Swift` | [Commons](https://commons.wikimedia.org/wiki/Category:Taylor_Swift) | 4 | Open 'by year'. |
-| Scarlett Johansson | `Scarlett Johansson` | [Commons](https://commons.wikimedia.org/wiki/Category:Scarlett_Johansson) | 0 | Open its subcategories (7). |
-| Margot Robbie | `Margot Robbie` | [Commons](https://commons.wikimedia.org/wiki/Category:Margot_Robbie) | 2 | Open its subcategories (12). |
-| Emma Watson | `Emma Watson` | [Commons](https://commons.wikimedia.org/wiki/Category:Emma_Watson) | 1 | Open its subcategories (6). |
+| Tom Hanks | `Tom_Hanks` | [Commons](https://commons.wikimedia.org/wiki/Category:Tom_Hanks) | 20 |  |
+| Vin Diesel | `Vin_Diesel` | [Commons](https://commons.wikimedia.org/wiki/Category:Vin_Diesel) | 27 |  |
+| Kevin Hart | `Kevin_Hart` | [Commons](https://commons.wikimedia.org/wiki/Category:Kevin_Hart) | 27 |  |
+| Mark Wahlberg | `Mark_Wahlberg` | [Commons](https://commons.wikimedia.org/wiki/Category:Mark_Wahlberg) | 12 |  |
+| Morgan Freeman | `Morgan_Freeman` | [Commons](https://commons.wikimedia.org/wiki/Category:Morgan_Freeman) | 11 |  |
+| Leonardo DiCaprio | `Leonardo_DiCaprio` | [Commons](https://commons.wikimedia.org/wiki/Category:Leonardo_DiCaprio) | 11 |  |
+| Idris Elba | `Idris_Elba` | [Commons](https://commons.wikimedia.org/wiki/Category:Idris_Elba) | 13 |  |
+| Will Smith | `Will_Smith` | [Commons](https://commons.wikimedia.org/wiki/Category:Will_Smith) | 7 | Also its subcategories. |
+| Lady Gaga | `Lady_Gaga` | [Commons](https://commons.wikimedia.org/wiki/Category:Lady_Gaga) | 11 | Many costumes: choose clear face shots. |
+| Selena Gomez | `Selena_Gomez` | [Commons](https://commons.wikimedia.org/wiki/Category:Selena_Gomez) | 8 |  |
+| Brad Pitt | `Brad_Pitt` | [Commons](https://commons.wikimedia.org/wiki/Category:Brad_Pitt) | 7 |  |
+| Keanu Reeves | `Keanu_Reeves` | [Commons](https://commons.wikimedia.org/wiki/Category:Keanu_Reeves) | 5 |  |
+| Natalie Portman | `Natalie_Portman` | [Commons](https://commons.wikimedia.org/wiki/Category:Natalie_Portman) | 5 |  |
+| Emma Stone | `Emma_Stone` | [Commons](https://commons.wikimedia.org/wiki/Category:Emma_Stone) | 5 |  |
+| Angelina Jolie | `Angelina_Jolie` | [Commons](https://commons.wikimedia.org/wiki/Category:Angelina_Jolie) | 6 |  |
+| Tom Cruise | `Tom_Cruise` | [Commons](https://commons.wikimedia.org/wiki/Category:Tom_Cruise) | 5 |  |
+| Taylor Swift | `Taylor_Swift` | [Commons](https://commons.wikimedia.org/wiki/Category:Taylor_Swift) | 4 | Open 'by year'. |
+| Scarlett Johansson | `Scarlett_Johansson` | [Commons](https://commons.wikimedia.org/wiki/Category:Scarlett_Johansson) | 0 | Open its subcategories (7). |
+| Margot Robbie | `Margot_Robbie` | [Commons](https://commons.wikimedia.org/wiki/Category:Margot_Robbie) | 2 | Open its subcategories (12). |
+| Emma Watson | `Emma_Watson` | [Commons](https://commons.wikimedia.org/wiki/Category:Emma_Watson) | 1 | Open its subcategories (6). |
 | Rihanna | `Rihanna` | [Commons](https://commons.wikimedia.org/wiki/Category:Rihanna) | 1 | Open its subcategories (7). |
 | Beyoncé | `Beyonce` | [Commons](https://commons.wikimedia.org/wiki/Category:Beyonc%C3%A9) | 0 | The category may be named differently; search Commons for 'Beyoncé'. |
-| Ariana Grande | `Ariana Grande` | [Commons](https://commons.wikimedia.org/wiki/Category:Ariana_Grande) | 0 | Open its subcategories (4). |
-| Chris Hemsworth | `Chris Hemsworth` | [Commons](https://commons.wikimedia.org/wiki/Category:Chris_Hemsworth) | 0 | Open its subcategories (3). |
-| Henry Cavill | `Henry Cavill` | [Commons](https://commons.wikimedia.org/wiki/Category:Henry_Cavill) | 0 | Few free photos; try Flickr. |
-| Ryan Reynolds | `Ryan Reynolds` | [Commons](https://commons.wikimedia.org/wiki/Category:Ryan_Reynolds) | 1 | Open its subcategories (3). |
-| Zoe Saldaña | `Zoe Saldana` | [Commons](https://commons.wikimedia.org/wiki/Category:Zoe_Salda%C3%B1a) | 3 |  |
-| Gal Gadot | `Gal Gadot` | [Commons](https://commons.wikimedia.org/wiki/Category:Gal_Gadot) | 1 |  |
-| Anne Hathaway | `Anne Hathaway` | [Commons](https://commons.wikimedia.org/wiki/Category:Anne_Hathaway) | 0 | No category found by the dry run; search Commons. |
-| Robert Downey Jr. | `Robert Downey Jr` | [Commons](https://commons.wikimedia.org/wiki/Category:Robert_Downey_Jr.) | 0 | No category found by the dry run; search Commons. |
-| Chris Evans | `Chris Evans` | [Commons](https://commons.wikimedia.org/wiki/Category:Chris_Evans) | 0 | No category found by the dry run (several people share the name); search Commons for 'Chris Evans (actor)'. |
-| Michael B. Jordan | `Michael B Jordan` | [Commons](https://commons.wikimedia.org/wiki/Category:Michael_B._Jordan) | 0 | Open its subcategories (3). |
+| Ariana Grande | `Ariana_Grande` | [Commons](https://commons.wikimedia.org/wiki/Category:Ariana_Grande) | 0 | Open its subcategories (4). |
+| Chris Hemsworth | `Chris_Hemsworth` | [Commons](https://commons.wikimedia.org/wiki/Category:Chris_Hemsworth) | 0 | Open its subcategories (3). |
+| Henry Cavill | `Henry_Cavill` | [Commons](https://commons.wikimedia.org/wiki/Category:Henry_Cavill) | 0 | Few free photos; try Flickr. |
+| Ryan Reynolds | `Ryan_Reynolds` | [Commons](https://commons.wikimedia.org/wiki/Category:Ryan_Reynolds) | 1 | Open its subcategories (3). |
+| Zoe Saldaña | `Zoe_Saldana` | [Commons](https://commons.wikimedia.org/wiki/Category:Zoe_Salda%C3%B1a) | 3 |  |
+| Gal Gadot | `Gal_Gadot` | [Commons](https://commons.wikimedia.org/wiki/Category:Gal_Gadot) | 1 |  |
+| Anne Hathaway | `Anne_Hathaway` | [Commons](https://commons.wikimedia.org/wiki/Category:Anne_Hathaway) | 0 | No category found by the dry run; search Commons. |
+| Robert Downey Jr. | `Robert_Downey_Jr` | [Commons](https://commons.wikimedia.org/wiki/Category:Robert_Downey_Jr.) | 0 | No category found by the dry run; search Commons. |
+| Chris Evans | `Chris_Evans` | [Commons](https://commons.wikimedia.org/wiki/Category:Chris_Evans) | 0 | No category found by the dry run (several people share the name); search Commons for 'Chris Evans (actor)'. |
+| Michael B. Jordan | `Michael_B_Jordan` | [Commons](https://commons.wikimedia.org/wiki/Category:Michael_B._Jordan) | 0 | Open its subcategories (3). |
 
 ## After saving pictures
 
@@ -99,8 +99,9 @@ What the script does:
 - gives each new picture the next number (existing numbers never change, so review decisions stay valid);
 - keeps JPEGs as they are and converts PNG, WebP and BMP to JPEG;
 - moves anything unreadable, an AVIF (convert it to JPG first), or a duplicate into `_skipped/` inside
-  that person's folder, never deleting it; a picture saved under two people is kept once;
-- records the original name and hashes in `rename-log.json` and writes `manifest.json` and
+  that person's folder, and puts your original files in `_originals/`; nothing is ever deleted or
+  overwritten; a picture saved under two people is kept once;
+- records the original name and hashes in `rename-log.jsonl` and writes `manifest.json` and
   `PROVENANCE.json`, which the review and evaluation scripts read.
 
 Then review the labels before using the set:

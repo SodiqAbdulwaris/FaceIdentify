@@ -9,13 +9,23 @@
 
 - `evaluation/prepare_manual_dataset.py` with two commands: `init` makes one folder per person from
   `people.txt` (38 people by default, editable) under `evaluation/datasets/celebs-manual/`;
-  `number` (a dry run until `--apply`) gives each new picture the next number (`001.jpg`, ...), keeps
-  JPEGs byte for byte and converts PNG, WebP and BMP, sets unreadable files, AVIFs and duplicates aside
-  in `_skipped/` (never deleted), keeps a picture saved for two people once, appends the original name
-  and hashes to `rename-log.json`, and writes `manifest.json` and `PROVENANCE.json` in the shape the
-  review and evaluation scripts read.
+  `number` (a dry run until `--apply`) gives each new picture the next number (`001.jpg`, ...).
+- **Nothing is deleted or overwritten.** The numbered copy is written to a temporary file, checked and
+  moved into place; only then is the original moved into `_originals/` (rejects go to `_skipped/`),
+  under a unique name. A crash leaves every picture somewhere; a re-run recognises a picture it already
+  numbered by its hash.
+- JPEGs keep their bytes; PNG, WebP and BMP are converted; unreadable files, AVIFs and duplicates are set
+  aside; a picture saved for two people is kept once (all existing numbered files are read first, so
+  the order of people does not matter).
+- Numbered names (case aside, so `001.JPG` too) are never renamed; a damaged numbered file, or one
+  that is not a JPEG, stops the run before anything changes.
+- Every path is confined: a linked person folder, `_originals`, `_skipped` or metadata file is refused.
+- `rename-log.jsonl` (one line per picture, flushed before the original moves; a torn last line is
+  ignored), and `manifest.json` and `PROVENANCE.json` replaced atomically, in the shape the review and
+  evaluation scripts read.
 - `docs/guides/COLLECTING_CELEBRITY_PHOTOS.md`: what to collect, where to go (Wikimedia Commons first,
-  with a category link per person and what the dry run saw), what to avoid, and the commands.
+  with a category link per person and what the dry run saw), what to avoid, and the commands. Its folder
+  column is checked against the folders `init` made.
 
 ## Why
 
@@ -34,13 +44,16 @@ folders, directions and a script that numbers everything.
 
 ## Verification
 
-- `uv run pytest tests/unit/test_prepare_manual_dataset.py -q`: 6 passed (the folders and the listing,
-  dry run versus apply, stability and continuing numbers, a duplicate across two people, small pictures
-  flagged, a folder outside the datasets folder refused, duplicate folder names refused). ruff and mypy
+- `uv run pytest tests/unit/test_prepare_manual_dataset.py -q`: 13 passed, including the regressions the
+  independent review named: an uppercase numbered name is never deleted, two originals with one name in
+  separate runs are both kept, a crash after numbering does not double a picture, a damaged numbered file
+  stops the run, a duplicate under a later-listed person, case-only person names refused, and a linked
+  person folder or metadata file refused (real symlinks, which this machine permits). ruff and mypy
   clean.
-- `init` was run for real: 38 folders. `number` on the empty tree reports nothing to do.
-- **Not verified:** real photographs (the tests use generated ones); AVIF cannot be read on this
-  machine, which is why it is set aside with a hint.
+- `init` was run for real: 38 folders; every folder in the guide exists.
+- **Not verified:** real photographs (the tests use generated ones); junctions (only symlinks were
+  exercised; both resolve through `Path.resolve`); AVIF cannot be read on this machine, so it is set
+  aside with a hint.
 
 ## Open issues / follow-ups
 
