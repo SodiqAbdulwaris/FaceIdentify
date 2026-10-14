@@ -55,7 +55,7 @@ recorded decisions are in [`CONTEXT.md`](../../.agents/CONTEXT.md).
 | Queries and processing can contend for the one perception worker (no lease) | [#175](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/175) |
 | Face search: PDF queries deferred | [#176](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/176) |
 | Evaluation: hard-negatives selection mode not built | [#177](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/177) |
-| `measure_operating_point.py` cannot read a verified manifest | [#178](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/178) |
+| ~~`measure_operating_point.py` cannot read a verified manifest~~ resolved 2026-10-15 ([entry](../implementations/2026-10-15-m5-verified-operating-point.md)), closes when PR 195 merges | [#178](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/178) |
 | A missing original never comes back: nothing calls reverify or relink | [#179](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/179) |
 | Re-processing a source: nothing marks earlier output superseded | [#180](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/180) |
 | Label review: mark which face carries a label | [#181](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/181) |

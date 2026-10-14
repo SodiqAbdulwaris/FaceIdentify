@@ -3,10 +3,13 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import pytest
 
-from evaluation.measure_operating_point import cache_path, read_manifest
+import evaluation.measure_operating_point as mop
+from evaluation.measure_operating_point import cache_path, embed_dataset, read_manifest
 
 
 def test_verified_manifest_is_read_and_digest_is_checked(tmp_path: Path) -> None:
@@ -92,3 +95,33 @@ def test_cache_key_follows_picture_bytes_and_selection(tmp_path: Path) -> None:
     assert len({key, edited, narrower}) == 3
     paths = {cache_path(tmp_path, "w" * 64, k) for k in (key, edited, narrower)}
     assert len(paths) == 3
+
+
+class _Embedded(Exception):
+    """Raised instead of starting the model: the cache was not used."""
+
+
+def test_embedding_reuses_the_cache_only_for_the_same_pictures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    weights = "w" * 64
+    monkeypatch.setattr(mop, "plan_from", lambda store, provider: (None, weights))
+
+    def no_model(*args: object) -> None:
+        raise _Embedded
+
+    monkeypatch.setattr(mop, "supervisor_for", no_model)
+    (tmp_path / "a.jpg").write_bytes(b"first")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"P": [{"file": "a.jpg"}]}), "utf-8")
+    people, _, _, key, _ = read_manifest(tmp_path, manifest)
+    cached: dict[str, Any] = {"a.jpg": np.ones(4, dtype=np.float32)}
+    np.savez(cache_path(tmp_path, weights, key), **cached)
+
+    _, vectors, _, _ = embed_dataset(tmp_path, "CPU", None, manifest=people, content_key=key)  # type: ignore[arg-type]
+    assert list(vectors) == ["a.jpg"]
+
+    (tmp_path / "a.jpg").write_bytes(b"edited")  # legacy manifest: no digest records the edit
+    people, _, _, key, _ = read_manifest(tmp_path, manifest)
+    with pytest.raises(_Embedded):
+        embed_dataset(tmp_path, "CPU", None, manifest=people, content_key=key)  # type: ignore[arg-type]
