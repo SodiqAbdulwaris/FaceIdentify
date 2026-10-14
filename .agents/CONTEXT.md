@@ -455,7 +455,7 @@ needs an answer to start):
    same-rankings-after-restart check (stability 100%), `queries_wrote_nothing`, the workflow checks, and the open-set table
    (strangers accepted at each cut-off, best stranger similarity). Record it (entry, tracker TST-057B row, status page,
    this file). **It cannot pass TST-057B: 36 identities are below 40.** State both facts.
-2. **Close the identity gap automatically.** Make a people file of about 10 more well-known people not in the set (one
+2. **Collected 2026-10-15, awaiting the owner's review:** 180 pictures for 12 more people (names in the celebrity-set entry); next the owner reviews them with `label_review.py serve ... --people`, then export and re-run the gate. Original instruction kept: **Close the identity gap automatically.** Make a people file of about 10 more well-known people not in the set (one
    per line; `Display = Category` when the Commons category differs) and run
    `collect_commons_portraits.py --out evaluation/datasets/celebs-commons --licence free --people-file <file>`
    (it resumes: existing pictures are kept). Then the owner reviews only the new people
