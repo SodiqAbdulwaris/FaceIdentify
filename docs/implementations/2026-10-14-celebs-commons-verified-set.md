@@ -58,7 +58,10 @@ The one miss: Morgan Freeman `015.jpg`, whose own identity is not among the offe
 candidate Tom Hanks at 0.145, so the real policy would abstain rather than answer wrongly).
 
 Against the owner's thresholds (Recall@1 0.85, Recall@5 0.95, MRR 0.90, stability 100%, workflow
-100%, zero unintended mutations) **every measured figure passes**, but the set has **36 identities
+100%) **every measured figure passes**. "Zero unintended mutations" is only partly measured: the gate
+compares the source, identity and run counts before and after the queries, which cannot see row
+updates, other tables or file writes, so full non-mutation is not established by this run. Still,
+ but the set has **36 identities
 of the required 40** (28 of them enrolled in this run), so **TST-057B is not passed** and stays
 `BLOCKED`; automatic acceptance stays off. These strangers are random other celebrities, not
 look-alikes (issue 177), and the sample is small (Wilson 95% interval for 0 of 109: 0 to 0.034 if

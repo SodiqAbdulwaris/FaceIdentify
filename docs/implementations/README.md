@@ -59,7 +59,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-13 | [The learning guide moved to `docs/guides/learning/`](2026-10-13-learning-guide-move.md) | done; documentation only |
 | 2026-10-14 | [M5: the CelebA run, and the decision on automatic acceptance](2026-10-14-m5-celeba-gate-and-acceptance-decision.md) | evidence recorded; acceptance stays off; TST-057B not claimed |
 | 2026-10-14 | [Label review: serve only named people (`--people`)](2026-10-14-label-review-people-filter.md) | done |
-| 2026-10-14 | [The celebrity set from Commons: reviewed, exported, gate started](2026-10-14-celebs-commons-verified-set.md) | verified manifest exported (36 identities); gate result pending |
+| 2026-10-14 | [The celebrity set from Commons: reviewed, exported and gated](2026-10-14-celebs-commons-verified-set.md) | verified manifest exported (36 identities); gate finished: Recall@1 0.988, 10 of 10 workflow checks, 0 of 109 strangers accepted; TST-057B stays blocked (36 of 40 identities) |
 | 2026-10-14 | [The Commons portrait collector (from the owner's `facescrape.py`)](2026-10-14-commons-portrait-collector.md) | built and dry-run; pictures unverified |
 | 2026-10-15 | [Flaky face-search test: the index was still being saved](2026-10-15-face-search-snapshot-index-race.md) | done; test-only |
 | 2026-10-12 | [The learning guide restructured into `docs/guides/learning/`](2026-10-12-learning-guide-restructure.md) | done; documentation only |
