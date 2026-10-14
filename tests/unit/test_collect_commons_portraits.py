@@ -3,6 +3,9 @@
 import argparse
 import io
 import json
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -398,3 +401,40 @@ def test_rejections_are_counted_for_the_provenance(
     assert stats["rejected_licence"] == 1
     assert stats["rejected_not_jpeg"] == 1
     assert stats["rejected_no_dominant_face"] == 1
+
+
+def test_a_dropped_connection_is_retried_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"ok"
+
+    def flaky(request: object, timeout: int) -> Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise urllib.error.URLError("[WinError 10013] forbidden")
+        return Response()
+
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    assert collector.get_bytes("https://commons.example/x") == b"ok"
+    assert calls["n"] == 3
+
+
+def test_a_connection_that_never_comes_back_raises_after_the_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def down(request: object, timeout: int) -> None:
+        raise urllib.error.URLError("down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", down)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    with pytest.raises(urllib.error.URLError):
+        collector.get_bytes("https://commons.example/x", retries=3)
