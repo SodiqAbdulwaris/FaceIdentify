@@ -13,7 +13,8 @@ labels are the dataset creators', **not verified by this project**), with the re
 SCRFD and ArcFace on CPU under the abstain-only policy. Report: `evaluation/datasets/reports/gate-celeba.json`
 (Git-ignored). Its workflow and restart phases were still running when this entry was written, so the report
 was **partial**: the retrieval and open-set figures below are complete and final; the workflow checks and the
-restart comparison for CelebA are **not recorded here** (see Open items).
+restart comparison for CelebA are **not recorded here**: the process ended with the session that started it, with
+the report still marked partial (last written 10:15, no completion line in the log). They need a re-run (about an hour on CPU).
 
 The first two attempts stopped at the gate's fixed 900 s wait for the processing runs (CPU: 215 of 872
 unfinished; a run that asked for CUDA with a CPU fallback: 451 unfinished, and the GPU showed no use, not
@@ -69,7 +70,7 @@ Why, in order of weight:
 3. **Both sets are friendly.** Press and celebrity photographs, many of whom are probably in the recogniser's
    training data (recorded in the licensing file), so the numbers are optimistic. Neither contains the
    owner's snapshots, cameras, lighting or ages. The first look at the owner's own photographs
-   (`MyFaces/`, 29 pictures) found one face each, but it is a detector check, not recognition.
+   (`MyFaces/`, 28 decodable pictures of 29 files) found one face each, but it is a detector check, not recognition.
 4. **The cost is asymmetric.** A wrong automatic acceptance silently puts a face into the wrong person's
    memory; an abstention costs one click. Nothing is lost by waiting.
 
@@ -95,7 +96,7 @@ badge above the cut-off while still requiring one click) is possible without any
   independent smoke test was done and that images were imported and processed in the app (the CORS fix was
   confirmed the day before). The checklist's individual outcomes were not itemised to the agent; TST-057A stays
   `PASSING` as a functional gate with recognition quality still explicitly unverified.
-- **`MyFaces/` again (29 decodable of 30):** every picture gives exactly one confident face (0.66 to 0.93).
+- **`MyFaces/` again (28 decodable of 29 files):** every picture gives exactly one confident face (0.66 to 0.93).
   The face at 43% of the frame is still the lowest score (0.66; 0.82 padded); the next largest, at 31% to
   32%, score 0.86 to 0.87. `18.avif` is **refused by the application** (its decoder accepts JPEG, PNG,
   BMP and WebP only): issue 188.
