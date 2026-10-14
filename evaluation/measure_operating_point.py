@@ -32,11 +32,10 @@ Protocol (open set, leave-one-out, subject-disjoint):
 * The new-identity ceiling is chosen the same way: the highest observed best-score below which at
   least the target share of queries truly are unknown people (with at least `--minimum-below`).
 
-The numbers describe this small public-domain set only. Its identity labels are Commons categories,
-not verified: a mislabelled photograph can make the result look better or worse, so the residual
-label uncertainty has no direction. The report records the configuration, the environment, the
-exclusions and the hash of the dataset manifest so the run can be repeated. Embeddings are cached
-beside the dataset, keyed by the weights digest.
+Default labels are unverified Commons categories; use --manifest with a label_review.py
+export for human-reviewed labels. Verified photographs are digest-checked even when embeddings
+are cached. Reports record the manifest hash and label provenance. Embeddings are cached beside
+the dataset, with verified caches also keyed by manifest digest.
 """
 
 import argparse
@@ -113,12 +112,50 @@ def dominant(detections: tuple[Any, ...], ratio: float = DOMINANCE) -> Any:
     return None
 
 
+def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], bool, str]:
+    """Read either manifest format and verify reviewed photographs before using any cache."""
+    manifest_bytes = manifest_path.read_bytes()
+    payload = json.loads(manifest_bytes)
+    verified = isinstance(payload, dict) and payload.get("kind") == "verified-manifest"
+    if verified:
+        if payload.get("schema_version") != 1 or not isinstance(payload.get("people"), dict):
+            raise SystemExit("the verified manifest is not schema 1")
+        manifest = payload["people"]
+    else:
+        manifest = payload
+    if not isinstance(manifest, dict):
+        raise SystemExit("the dataset manifest must map people to photographs")
+    root = dataset.resolve()
+    for photos in manifest.values():
+        if not isinstance(photos, list):
+            raise SystemExit("each person must have a list of photographs")
+        for photo in photos:
+            name = photo["file"]
+            path = (root / name).resolve()
+            if root not in path.parents:
+                raise SystemExit(f"{name} is outside the dataset folder")
+            expected = photo.get("sha256")
+            if verified and not expected:
+                raise SystemExit(f"{name} has no verified digest")
+            if expected:
+                if not path.is_file():
+                    raise SystemExit(f"{name} was verified but is missing")
+                actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                if actual != expected:
+                    raise SystemExit(f"{name} changed after it was verified")
+    return manifest, verified, hashlib.sha256(manifest_bytes).hexdigest()
+
+
 def embed_dataset(
-    dataset: Path, provider: str, store: RuntimePackageStore
+    dataset: Path, provider: str, store: RuntimePackageStore, *,
+    manifest: dict[str, Any], manifest_hash: str, verified: bool,
 ) -> tuple[dict[str, Any], dict[str, np.ndarray], dict[str, int], str]:
     plan, digest = plan_from(store, provider)
-    cache = dataset / f"embeddings-{digest[:12]}-subject.npz"
-    manifest = json.loads((dataset / "manifest.json").read_text(encoding="utf-8"))
+    # A verified selection must never reuse vectors from a different manifest.
+    cache = dataset / (
+        f"embeddings-{digest[:12]}-{manifest_hash[:16]}-subject.npz"
+        if verified else f"embeddings-{digest[:12]}-subject.npz"
+    )
     skipped = {"no_face": 0, "no_subject": 0, "failed": 0}
     if cache.exists():
         stored = np.load(cache, allow_pickle=False)
@@ -340,6 +377,7 @@ def evaluate_final(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path, help="a verified manifest exported by label_review.py")
     parser.add_argument("--local-state-root", type=Path, required=True)
     parser.add_argument("--provider", default="CPUExecutionProvider")
     parser.add_argument("--report", type=Path, required=True)
@@ -357,7 +395,12 @@ def main() -> None:
     arguments = parser.parse_args()
     roots = StorageRoots(Path(), arguments.local_state_root)
     store = RuntimePackageStore(roots, new_id=uuid.uuid4)
-    manifest, vectors, skipped, digest = embed_dataset(arguments.dataset, arguments.provider, store)
+    manifest_path = arguments.manifest or arguments.dataset / "manifest.json"
+    manifest, verified, manifest_hash = read_manifest(arguments.dataset, manifest_path)
+    manifest, vectors, skipped, digest = embed_dataset(
+        arguments.dataset, arguments.provider, store,
+        manifest=manifest, manifest_hash=manifest_hash, verified=verified,
+    )
 
     by_person: dict[str, list[Photo]] = {}
     for person, items in manifest.items():
@@ -429,7 +472,6 @@ def main() -> None:
         if arguments.write_policy is not None:
             arguments.write_policy.parent.mkdir(parents=True, exist_ok=True)
             arguments.write_policy.write_text(json.dumps(policy_object, indent=1), encoding="utf-8")
-    manifest_hash = hashlib.sha256((arguments.dataset / "manifest.json").read_bytes()).hexdigest()
     report = {
         "configuration": {
             "provider": arguments.provider, "target_precision": TARGET_PRECISION,
@@ -441,6 +483,7 @@ def main() -> None:
             "python": platform.python_version(), "onnxruntime": onnxruntime.__version__,
             "platform": platform.platform(), "weights_digest": digest,
             "dataset_manifest_sha256": manifest_hash,
+            "verified_labels": verified,
         },
         "exclusions": {
             "photographs_without_a_usable_subject": skipped,
@@ -465,8 +508,9 @@ def main() -> None:
         "reported_on_final_half": evaluate_final(halves["final"]["queries"], policy, ceiling),
         "conservative": conservative,
         "limits": (
-            "Small public-domain set of formal adult photographs; labels are Commons categories, "
-            "not verified; leave-one-out open set; point estimates carry the intervals shown."
+            ("Human-reviewed identity labels with per-photograph digest verification; "
+             if verified else "Commons category labels, not verified; ")
+            + "leave-one-out open set; point estimates carry the intervals shown."
         ),
     }  # fmt: skip
     arguments.report.parent.mkdir(parents=True, exist_ok=True)
