@@ -326,23 +326,78 @@ def test_photographs_declared_the_same_picture_count_once_and_one_side_of_a_spli
 
 def test_the_page_can_be_limited_to_named_people_without_touching_the_rest(dataset: Path) -> None:
     review = Review(dataset, "sodiq")
+    inside = {"file": "Bob Barker/00.jpg", "decision": "VERIFIED"}
+    outside = {"file": "Ada Lovelace/00.jpg", "decision": "VERIFIED"}
+    review.decide(str(inside["file"]), str(inside["decision"]))
+    review.decide(str(outside["file"]), str(outside["decision"]))
+    before = (review.status(), review.current(), review.export()["counts"])
     review.focus(["bob barker"])  # (case aside)
     server, token = serve(review)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = str(server.server_address[0]), int(server.server_address[1])
-    try:
+
+    def call(method: str, path: str, body: dict[str, object] | None = None) -> tuple[int, bytes]:
         connection = http.client.HTTPConnection(host, port, timeout=5)
-        connection.request("GET", f"/api/state?t={token}")
-        state = json.loads(connection.getresponse().read())
+        connection.request(
+            method, path, json.dumps(body) if body is not None else None,
+            {"Content-Type": "application/json"},
+        )  # fmt: skip
+        response = connection.getresponse()
+        data = response.read()
         connection.close()
+        return response.status, data
+
+    try:
+        state = json.loads(call("GET", f"/api/state?t={token}")[1])
+        # a decision for a person the page does not list is still accepted (a view, not a gate)
+        status, _ = call(
+            "POST",
+            f"/api/decision?t={token}",
+            {"file": "Ada Lovelace/01.jpg", "decision": "EXCLUDED"},
+        )
     finally:
         server.shutdown()
         server.server_close()
 
     assert set(state["people"]) == {"Bob Barker"}
-    assert state["status"]["photographs"] == 9  # the counts are about the whole dataset
-    assert len(review.entries) == 9  # and so is what an export would use
+    assert status == 200
+    assert (review.status(), review.current(), review.export()["counts"]) != before  # (the new one)
+    review_again = Review(dataset, "sodiq")
+    assert review_again.export()["counts"] == review.export()["counts"]  # unfiltered, same answer
+    assert state["decisions"].keys() >= {
+        str(inside["file"]),
+        str(outside["file"]),
+    }  # the whole log is shown
+
+
+def test_names_differing_only_in_case_are_all_chosen_and_commas_are_quotable(
+    dataset: Path, tmp_path: Path
+) -> None:
+    manifest = json.loads((dataset / "manifest.json").read_text(encoding="utf-8"))
+    (dataset / "Doe, Jane").mkdir()
+    (dataset / "Doe, Jane" / "00.jpg").write_bytes(b"jane")
+    (dataset / "Ada Lovelace" / "zz.jpg").write_bytes(
+        b"lower ada"
+    )  # (one folder: Windows ignores case)
+    manifest["Doe, Jane"] = [{"file": "Doe, Jane/00.jpg", "title": "j"}]
+    manifest["ada lovelace"] = [{"file": "Ada Lovelace/zz.jpg", "title": "a"}]
+    (dataset / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    review = Review(dataset, "sodiq")
+    review.focus(["ADA LOVELACE"])
+    assert review.shown == frozenset({"Ada Lovelace", "ada lovelace"})  # no silent winner
+
+    # through the command line: a quoted name keeps its comma; an empty value is refused
+    assert (
+        label_review.main(
+            ["status", "--dataset", str(dataset), "--people", '"Doe, Jane",Bob Barker']
+        )
+        == 0
+    )
+    for empty in ("", " ", ",,"):
+        with pytest.raises(SystemExit):
+            label_review.main(["status", "--dataset", str(dataset), "--people", empty])
 
 
 def test_a_misspelt_person_stops_the_tool_with_a_hint(dataset: Path) -> None:

@@ -441,6 +441,8 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 
 ## Next steps
 
+**Review tool (2026-10-14):** `evaluation/label_review.py serve ... --people "Name,Name"` limits the review page to the named people (a view filter; counts and export stay whole-dataset), `docs/implementations/2026-10-14-label-review-people-filter.md`.
+
 **Latest (2026-10-13):** the LFW and CelebA exclusion analysis (`evaluation/analyse_exclusions.py`, `docs/implementations/2026-10-13-m5-lfw-exclusion-analysis.md`) found no pipeline weakness that justifies a change yet: LFW lost 5 of 1,244 photographs to very large faces under the detector's 0.5 floor (a black margin fixes all five), CelebA lost 1 of 1,736 (an ambiguous crop) and none to the subject rule, which lives only in the evaluation gate. My prediction that CelebA would show more losses was wrong. No threshold or policy changed; any detector change needs a dated owner decision after the owner's own close-up photographs are measured. CelebA is imported (`evaluation/datasets/celeba`; the importer's nested-layout fix is in the same PR).
 
 **Current (2026-10-07):** M0 to M4 are done on the development profile. The next milestone is M5, the first
