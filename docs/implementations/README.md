@@ -45,12 +45,12 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-09 | [M5 step 5a: historical and name search](2026-10-09-m5-search-people-and-history.md) | done; TST-055 |
 | 2026-10-10 | [M5 step 5b: face search](2026-10-10-m5-face-search.md) | done; TST-056 |
 | 2026-10-10 | [M5 step 5b follow-up: native picture picker](2026-10-10-m5-native-picture-picker.md) | done; TST-056 |
-| 2026-10-10 | [M5 step 8: assisted recognition and the real-world gate](2026-10-10-m5-assisted-recognition-gate.md) | evidence recorded; TST-057A awaits the owner |
+| 2026-10-10 | [M5 step 8: assisted recognition and the real-world gate](2026-10-10-m5-assisted-recognition-gate.md) | evidence recorded; TST-057A functional gate passed (owner, 2026-10-12); recognition quality unverified |
 | 2026-10-12 | [M5 R5: label-review utility, TST-057A decision, index cleanup](2026-10-12-m5-r5-label-review.md) | tool built; the review is the owner's |
 | 2026-10-12 | [Licensing record: datasets and training data](2026-10-12-licensing-datasets-and-training-data.md) | done |
 | 2026-10-12 | [M5: first run on human-verified labels](2026-10-12-m5-first-verified-label-run.md) | evidence recorded; TST-057B not claimed |
 | 2026-10-12 | [M5: open-set evaluation](2026-10-12-m5-open-set-evaluation.md) | built and run once; TST-057B not claimed |
-| 2026-10-12 | [Evaluation on LFW and CelebA; the Commons set parked](2026-10-12-labelled-dataset-import.md) | importer built; nothing downloaded yet |
+| 2026-10-12 | [Evaluation on LFW and CelebA; the Commons set parked](2026-10-12-labelled-dataset-import.md) | importer built; LFW and CelebA imported (2026-10-13) and evaluated (2026-10-13, 2026-10-14); labels unverified |
 | 2026-10-12 | [Fix: the web view could not read the backend (CORS)](2026-10-12-webview-cors.md) | fixed; confirmed in the real window by the owner 2026-10-13 |
 | 2026-10-13 | [M5: the first run on LFW](2026-10-13-m5-lfw-evaluation.md) | evidence recorded; TST-057B not claimed |
 | 2026-10-12 | [The learning guide restructured into `docs/learning/`](2026-10-12-learning-guide-restructure.md) | done; documentation only |
