@@ -258,3 +258,143 @@ def test_a_dry_run_downloads_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyP
 def test_output_outside_the_datasets_folder_is_refused(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         collector.main(["--out", str(tmp_path / "elsewhere"), "--dry-run"])
+
+
+def test_a_licence_name_and_url_that_disagree_are_refused() -> None:
+    by = "https://creativecommons.org/licenses/by/2.0/"
+    assert not collector.license_ok(
+        meta("CC BY 2.0", "https://creativecommons.org/licenses/by-nc/2.0/"), "free"
+    )
+    assert not collector.license_ok(
+        meta("CC BY 2.0", "https://creativecommons.org/licenses/by-nd/2.0/"), "free"
+    )
+    assert not collector.license_ok(meta("CC BY 2.0 NC", by), "free")
+    assert not collector.license_ok(meta("CC BY-SA 2.0", by), "free")  # family differs
+    assert not collector.license_ok(meta("CC BY 3.0", by), "free")  # version differs
+    assert not collector.license_ok(
+        meta("CC BY 2.0", "https://evil.example/licenses/by/2.0/"), "free"
+    )
+    assert not collector.license_ok(
+        meta("CC BY 2.0", "https://example.org/creativecommons.org/licenses/by/2.0/"), "free"
+    )
+    assert collector.license_ok(
+        meta("CC BY 2.0", "https://creativecommons.org/licenses/by/2.0"), "free"
+    )
+    assert collector.license_ok(
+        meta("CC BY 3.0 de", "https://creativecommons.org/licenses/by/3.0/de/"), "free"
+    )
+    pd_bad = meta("CC0", "https://evil.example/publicdomain/zero/1.0/")
+    assert not collector.license_ok(pd_bad, "pd")
+
+
+def test_longer_names_and_pairs_are_not_followed() -> None:
+    follow = collector.follows
+    assert not follow("Chris Evans (actor)", "Category:Chris Evans (presenter) in 2019")
+    assert not follow("Jennifer Lopez", "Category:Jennifer Lopez Smith in 2019")
+    assert not follow(
+        "Jennifer Lopez", "Category:Jennifer Lopez & Marc Anthony at the Grammy Awards"
+    )
+    assert not follow("Jennifer Lopez", "Category:Jennifer Lopez, Ben Affleck in 2022")
+    assert follow("Jennifer Lopez", "Category:Jennifer Lopez at the Grammy Awards")
+    assert not follow("Zendaya", "Category:Zendaya's family in 2019")
+
+
+def test_an_empty_or_non_latin_name_is_refused(tmp_path: Path) -> None:
+    listing = tmp_path / "people.txt"
+    listing.write_text("张伟\n", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        collector.read_people(listing)
+    listing.write_text("Ann = \n", encoding="utf-8")  # the category defaults to the name: fine
+    assert collector.read_people(listing) == [("Ann", "Ann")]
+
+
+def test_a_picture_is_published_into_a_free_name_and_never_replaces(tmp_path: Path) -> None:
+    folder = tmp_path / "Ann"
+    folder.mkdir()
+    (folder / "001.jpg").write_bytes(b"first")
+    (folder / "002.JPG").write_bytes(b"second, upper case")
+    name = collector.publish_picture(folder, b"third")
+    assert name == "003.jpg"
+    assert (folder / "001.jpg").read_bytes() == b"first"
+    assert (folder / "002.JPG").read_bytes() == b"second, upper case"
+    assert not [p for p in folder.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_an_interrupted_run_is_recovered_from_the_journal(tmp_path: Path) -> None:
+    out = tmp_path / "set"
+    (out / "Ann").mkdir(parents=True)
+    data = b"picture bytes"
+    (out / "Ann" / "001.jpg").write_bytes(data)
+    import hashlib
+
+    record = {
+        "file": "Ann/001.jpg", "person": "Ann", "title": "File:a.jpg",
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }  # fmt: skip
+    ghost = {"file": "Ann/002.jpg", "person": "Ann", "title": "File:b.jpg", "sha256": "0" * 64}
+    with (out / collector.JOURNAL).open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps(record) + "\n")
+        handle.write(json.dumps(ghost) + "\n")  # journalled, but the picture never arrived
+        handle.write('{"file": "Ann/003.jpg", "per')  # a torn last line
+    manifest: dict[str, list[dict[str, Any]]] = {}
+    assert collector.recover(out, manifest) == 1
+    assert [r["title"] for r in manifest["Ann"]] == ["File:a.jpg"]
+    assert collector.recover(out, manifest) == 0  # idempotent
+
+
+def test_a_set_made_with_free_licences_is_not_resumed_as_public_domain() -> None:
+    manifest = {"Ann": [{"licence_policy": "free"}]}
+    assert collector.policy_conflict(manifest, "pd") is not None
+    assert collector.policy_conflict(manifest, "free") is None
+    assert collector.policy_conflict({}, "pd") is None
+
+
+def test_two_runs_on_one_folder_are_refused_and_the_lock_is_released(tmp_path: Path) -> None:
+    with collector.single_run(tmp_path):
+        with pytest.raises(SystemExit):
+            with collector.single_run(tmp_path):
+                pass
+    with collector.single_run(tmp_path):  # free again
+        pass
+    assert not (tmp_path / collector.LOCK).exists()
+
+
+def test_a_linked_person_folder_is_not_written_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "set"
+    out.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (out / "Ann_One").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks need a privilege this machine does not give")
+    monkeypatch.setattr(collector, "candidates", lambda *a, **k: ["File:x.jpg"])
+    monkeypatch.setattr(collector, "info_pages", lambda titles: [page("File:x.jpg")])
+    monkeypatch.setattr(collector, "get_bytes", lambda url: noise(3))
+    with pytest.raises(SystemExit):
+        collector.collect("Ann One", "Ann One", arguments(), out, {}, [], FakeDetector())
+    assert list(outside.iterdir()) == []
+
+
+def test_rejections_are_counted_for_the_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections import Counter
+
+    out = tmp_path / "set"
+    out.mkdir()
+    pages = [
+        page("File:ok.jpg"),
+        page("File:nc.jpg", licence="CC BY-NC 2.0"),
+        page("File:v.png", mime="image/png"),
+    ]
+    monkeypatch.setattr(collector, "candidates", lambda *a, **k: [p["title"] for p in pages])
+    monkeypatch.setattr(collector, "info_pages", lambda titles: pages)
+    monkeypatch.setattr(collector, "get_bytes", lambda url: noise(9))
+    stats: Counter[str] = Counter()
+    collector.collect("A One", "A One", arguments(), out, {}, [], FakeDetector(crowded={1}), stats)
+    assert stats["rejected_licence"] == 1
+    assert stats["rejected_not_jpeg"] == 1
+    assert stats["rejected_no_dominant_face"] == 1
