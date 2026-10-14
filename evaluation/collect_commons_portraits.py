@@ -39,6 +39,7 @@ import argparse
 import contextlib
 import hashlib
 import html
+import http.client
 import io
 import json
 import os
@@ -123,6 +124,11 @@ def get_bytes(url: str, *, retries: int = 5) -> bytes:
                 raise
             delay = error.headers.get("Retry-After", "")
             time.sleep(min(120, int(delay)) if delay.isdigit() else 3 * (attempt + 1) ** 2)
+        except (urllib.error.URLError, ConnectionError, TimeoutError, http.client.HTTPException):
+            # a dropped or refused connection (Commons throttling, a network blip): wait, retry
+            if attempt == retries - 1:
+                raise
+            time.sleep(min(180, 15 * (attempt + 1) ** 2))
     raise RuntimeError("retries exhausted")
 
 

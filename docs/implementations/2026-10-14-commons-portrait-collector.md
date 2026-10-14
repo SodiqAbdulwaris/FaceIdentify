@@ -43,7 +43,7 @@ detector recall or unfiltered end-to-end performance, and a high identity-matchi
 pictures where a subject was found. The filter configuration and the rejection counts of the last run
 (licence, not a JPEG, size, no dominant face, duplicate, error) are recorded in `PROVENANCE.json`.
 
-## How to run it (not run yet)
+## How it was run
 
 ```bash
 # 1. look first (metadata only, downloads no picture):
@@ -73,9 +73,17 @@ would flatter any recognition result.
   renumbering; a free name that never replaces; recovery from the journal; a policy conflict; the lock;
   a linked person folder refused; rejection counts; a dry run downloads nothing; output outside the
   datasets folder refused). ruff and mypy (both platforms) clean.
-- **The collector itself was not run** at the owner's request (the owner will run it later), so the
-  numbers of pictures per person are not known; an earlier dry run of the previous version of the
-  crawl (metadata only) found 23 to 150 allowed candidates for six people.
+- **The collector was run for real on 2026-10-14** (`--licence free --per-person 15`, 40 people):
+  **536 pictures for 36 people** (126 MB), 35 people at 15, Jason Statham at 11, and **no picture** for
+  Beyonce, Anne Hathaway, Robert Downey Jr. and Tom Holland (no free picture with a dominant face in
+  the categories followed). Rejections in the final run: no dominant face 311, not a JPEG 55, too small
+  44, licence 7, duplicate 7. Licences kept: CC BY-SA 2.0 and CC BY 2.0 are most of it, then CC BY-SA
+  3.0 and 4.0, CC BY 3.0, public domain (21), CC BY 4.0, CC BY-SA 2.5; every record is
+  `identity_verified: false`, `rights_reviewed: false`.
+- **The first pass lost its network** partway (a socket-permission error, then dropped connections), so
+  25 people got nothing. The script retried only HTTP 429 and 5xx; it now also retries a dropped or
+  refused connection with back-off (two offline tests). The run was resumed: completed people were kept
+  and no picture was repeated.
 - **Not verified:** live Commons behaviour of the final version, real SCRFD inference inside it, that
   every followed category holds only the named person, and the licence metadata itself (taken as given).
 
