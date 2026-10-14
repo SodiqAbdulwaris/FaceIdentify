@@ -445,7 +445,10 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 **Next steps (2026-10-15), in order** (written at the end of the 2026-10-14 session; the owner was asleep, so nothing here
 needs an answer to start):
 
-1. **Collect the gate result.** `evaluation/datasets/reports/gate-celebs-commons.json` (command in
+1. **Done 2026-10-15:** the gate finished (2026-10-14 23:50): Recall@1 / Recall@5 / MRR 0.988 on 84 queries, 10 of 10
+   workflow checks, same rankings after a restart, queries wrote nothing, 0 of 109 strangers accepted (best 0.309); not
+   a TST-057B pass (36 of 40 identities). Recorded in the entry, tracker, status page. Original instruction kept below.
+   **Collect the gate result.** `evaluation/datasets/reports/gate-celebs-commons.json` (command in
    `docs/implementations/2026-10-14-celebs-commons-verified-set.md`). If it is missing or still marked `"partial": true` and no
    gate process is running, the run died with its session: delete `evaluation/datasets/gate-celebs-commons` and re-run the same
    command in the background. Read: Recall@1, Recall@5, MRR against the owner's thresholds (0.85, 0.95, 0.90), the
