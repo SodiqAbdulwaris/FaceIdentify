@@ -479,8 +479,8 @@ needs an answer to start):
    owner-approved code change).
 4. **Issue 177** (medium): a hard-negatives selection mode (strangers chosen by similarity to enrolled people), then
    repeat the open-set evaluation with it.
-5. **Smaller, any time:** the unfinished CelebA workflow and restart phases (about an hour on CPU), #173 (the owner's
-   own close-ups in `MyFaces/`), #183 (LFW's own page; CelebA and the Kaggle mirror read 2026-10-15), #188 (AVIF), the remaining Commons
+5. **Smaller, any time:** #173 (measured on `MyFaces/` 2026-10-15: 0 of 29 lost; open for a categorised close-up set
+   and the padded-fallback comparison, owner's call), #183 (LFW's own page; CelebA and the Kaggle mirror read 2026-10-15), #188 (AVIF), the remaining Commons
    public-domain review (14 people short, `label_review.py --people`).
 
 Working rules that cost time before: work from the repository root and do not `cd` elsewhere in a command (the shell
@@ -493,6 +493,8 @@ a merge needs the owner's own message, and every PR needs an independent read-on
 **Commons collector (2026-10-14):** `evaluation/collect_commons_portraits.py` (from the owner's `facescrape.py`, fixed) collects free-licence portraits by person from Wikimedia Commons into `evaluation/datasets/celebs-commons/`; `--dry-run` reads metadata only; `docs/implementations/2026-10-14-commons-portrait-collector.md`.
 
 **Review tool (2026-10-14):** `evaluation/label_review.py serve ... --people "Name,Name"` limits the review page to the named people (a view filter; counts and export stay whole-dataset), `docs/implementations/2026-10-14-label-review-people-filter.md`.
+
+**Close-ups and CelebA finished (2026-10-15):** `analyse_exclusions.py`'s own functions on the 29 `MyFaces/` pictures (no manifest, so a throwaway driver): 0 lost to the floor or the subject rule, largest face 43.5% at 0.66 (0.82 padded); issue 173 stays open (one person, uncategorised, no negatives). The CelebA gate re-run to completion (2 h 40 min CPU, detached): 10 of 10 workflow checks, same rankings after a restart, figures identical to 2026-10-14; report `evaluation/datasets/reports/gate-celeba-rerun.json`. `docs/implementations/2026-10-15-m5-myfaces-closeups-and-celeba-rerun.md`.
 
 **Latest (2026-10-13):** the LFW and CelebA exclusion analysis (`evaluation/analyse_exclusions.py`, `docs/implementations/2026-10-13-m5-lfw-exclusion-analysis.md`) found no pipeline weakness that justifies a change yet: LFW lost 5 of 1,244 photographs to very large faces under the detector's 0.5 floor (a black margin fixes all five), CelebA lost 1 of 1,736 (an ambiguous crop) and none to the subject rule, which lives only in the evaluation gate. My prediction that CelebA would show more losses was wrong. No threshold or policy changed; any detector change needs a dated owner decision after the owner's own close-up photographs are measured. CelebA is imported (`evaluation/datasets/celeba`; the importer's nested-layout fix is in the same PR).
 
