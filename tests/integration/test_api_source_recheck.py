@@ -35,6 +35,7 @@ from tests.fixtures.api import (
     serving,
 )
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+from tests.integration.test_api_processing_routes import break_run, finished, process
 
 V1 = "/api/v1/sources"
 
@@ -390,3 +391,66 @@ async def test_a_recheck_that_races_another_answers_what_the_other_settled(
 
     assert (result.state, result.reason, result.recovered) == ("AVAILABLE", None, True)
     assert _original(api, source["id"]).id == artifact_id
+
+
+# --- what the review found (PR 210) ---------------------------------------------------------
+
+
+async def test_an_original_with_no_fingerprint_is_never_brought_back_by_any_file(
+    api: Api,
+) -> None:
+    path = api.image("old.png")
+    source = await imported(api, path=str(path), storage_mode="REFERENCED")
+    _mark_missing(api, source["id"], "REFERENCED_FILE_MISSING")
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:  # an import from before hashes
+        artifact = session.get(Artifact, _original(api, source["id"]).id)
+        assert artifact is not None
+        artifact.sha256, artifact.size_bytes = None, None
+        session.commit()
+    path.write_text("not the photograph at all")  # something else now has the name
+
+    opened = await _detail(api, source["id"])
+    refused = error(
+        await api.client.post(f"{V1}/{source['id']}/recheck"), 409, "SOURCE_FILE_UNVERIFIABLE"
+    )
+
+    assert opened["availability"] == "MISSING"
+    assert refused["details"] == {"source_id": source["id"]}
+    assert _original(api, source["id"]).state == ArtifactState.MISSING
+
+
+async def test_a_managed_file_that_is_back_but_different_says_so_and_then_that_it_is_gone(
+    api: Api,
+) -> None:
+    source = await imported(api, path=str(api.image("home.png")))
+    managed = _managed_path(api, source["id"])
+    _mark_missing(api, source["id"], "MANAGED_FILE_MISSING")
+    _other_image(managed)
+
+    changed = (await api.client.post(f"{V1}/{source['id']}/recheck")).json()
+    managed.unlink()
+    gone = (await api.client.post(f"{V1}/{source['id']}/recheck")).json()
+
+    assert (changed["availability"], changed["availability_reason"]) == (
+        "MISSING",
+        "MANAGED_CONTENT_CHANGED",
+    )
+    assert (gone["availability"], gone["availability_reason"]) == (
+        "MISSING",
+        "MANAGED_FILE_MISSING",
+    )
+
+
+async def test_retrying_a_run_verifies_its_missing_original_first(processing_api: Api) -> None:
+    api = processing_api
+    source = await imported(api, path=str(api.image()))
+    old = await process(api, source)
+    await finished(api, old["id"])
+    break_run(api, old["id"])
+    _mark_missing(api, source["id"], "MANAGED_FILE_MISSING")  # flagged, but the file is there
+
+    accepted = await api.client.post(f"/api/v1/processing-runs/{old['id']}/retry")  # no open first
+
+    assert accepted.status_code == 202, accepted.text
+    assert _original(api, source["id"]).state == ArtifactState.AVAILABLE

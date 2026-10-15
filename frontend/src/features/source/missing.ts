@@ -2,5 +2,7 @@
 export function missingReason(reason: string | null | undefined): string {
   if (reason === 'REFERENCED_CONTENT_CHANGED')
     return 'A different file is now where this image was, so it is not the original any more.'
+  if (reason === 'MANAGED_CONTENT_CHANGED')
+    return 'The copy of this image kept in your library has changed, so it is not the original any more.'
   return 'The file for this image is missing. Put it back where it was to see it again.'
 }
