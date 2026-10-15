@@ -41,8 +41,8 @@ verified: a mislabelled photograph can make the numbers look better or worse, wi
 report says so and records the configuration, environment, exclusions and the dataset manifest hash.
 Exclusions are listed by rule (`log.exclusions`, issue 182): each enrolment photograph that placed
 no face, each known person those losses left with too few enrolled faces, and each query not
-evaluated, with why; a photograph with several faces and no dominant one is "not evaluated
-(ambiguous subject)", not a loss of the pipeline.
+evaluated, with why (from the first query pass); a photograph with several faces and no dominant
+one is "not evaluated (ambiguous subject)", not a loss of the pipeline.
 This is a local run (the weights are not in CI) and is recorded in the tracker with its evidence.
 """
 
@@ -99,8 +99,9 @@ EXCLUSION_RULES = {
         "than the rest"
     ),
     "too_few_enrolled_faces": (
-        f"not evaluated: the person was left with fewer than {MINIMUM_ENROLLED} enrolled faces "
-        "after the enrolment exclusions (the enrolment cascade)"
+        f"not evaluated: the person has fewer than {MINIMUM_ENROLLED} enrolled faces, because "
+        "enrolment photographs were left out (the enrolment cascade) or because fewer were set "
+        "aside for enrolment (each person's `cause` says which)"
     ),
 }
 
@@ -262,7 +263,10 @@ def subject(faces: list[dict[str, Any]], box: str) -> dict[str, Any] | None:
 
 
 def skip_reason(faces: list[dict[str, Any]], run_state: str) -> str | None:
-    """Why an enrolment photograph places no face (an `EXCLUSION_RULES` key), or None."""
+    """Why an enrolment photograph places no face (an `EXCLUSION_RULES` key), or None.
+
+    `enrol` asks only when the photograph has no subject face, so a run that did not complete is
+    named instead of being taken for a photograph without a face."""
     if run_state != "COMPLETED":
         return "processing_failed"
     if not faces:
@@ -352,10 +356,9 @@ async def enrol(
         for path in person["enrol"]:
             source_id = sources[path]
             faces = await faces_of(gate, source_id)
-            reason = skip_reason(faces, states[runs[source_id]])
             chosen = subject(faces, "bounding_box")
-            if reason is not None or chosen is None:
-                rule = reason or "no_subject"
+            if chosen is None:
+                rule = skip_reason(faces, states[runs[source_id]]) or "no_subject"
                 skipped[rule] += 1
                 excluded.append({"person": person["name"], "file": path.name, "rule": rule})
                 continue
@@ -390,7 +393,8 @@ async def enrol(
         "photographs_imported": len(sources),
         "faces_placed": sum(r["faces"] for r in enrolled.values()),
         "skipped_photographs": skipped,
-        "excluded_photographs": excluded,
+        "excluded_photographs": excluded,  # (moved into `log.exclusions`, grouped by rule)
+        "planned": {p["name"]: len(p["enrol"]) for p in people},
         "people": {n: r["faces"] for n, r in enrolled.items()},
     }
     return enrolled
@@ -740,13 +744,16 @@ def query_exclusion(result: dict[str, Any]) -> str | None:
 def exclusions(
     excluded_photographs: list[dict[str, str]],
     enrolled_faces: dict[str, int],
+    planned: dict[str, int],
     results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Every photograph and person left out, listed under the rule that left it out.
 
     Enrolment photographs that placed no face, the known people those losses left with too few
-    enrolled faces (the cascade), then the queries not evaluated: known people's (their total is
-    `metrics()["ineligible_or_no_subject"]`) and strangers' (random and hard negatives) apart."""
+    enrolled faces (the cascade; `cause` is "selection" when fewer than that were ever set aside
+    for them), then the queries not evaluated: known people's (their total is
+    `metrics()["ineligible_or_no_subject"]`) and strangers' (random and hard negatives) apart.
+    `results` is one query pass; the gate passes the first."""
 
     def by_rule(entries: list[tuple[str, dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
         grouped: dict[str, list[dict[str, Any]]] = {}
@@ -775,7 +782,13 @@ def exclusions(
         "rules": EXCLUSION_RULES,
         "enrolment_photographs": enrolment,
         "people_with_too_few_enrolled_faces": [
-            {"person": name, "enrolled_faces": enrolled_faces.get(name, 0)} for name in cascade
+            {
+                "person": name,
+                "planned_enrolment_photographs": planned.get(name, 0),
+                "enrolled_faces": enrolled_faces.get(name, 0),
+                "cause": "exclusions" if planned.get(name, 0) >= MINIMUM_ENROLLED else "selection",
+            }
+            for name in cascade
         ],
         "known_queries": known_queries,
         "stranger_queries": stranger_queries,
@@ -965,8 +978,11 @@ async def main_async(args: argparse.Namespace) -> int:
         log["queries_wrote_nothing"] = before == after
         log["counts"] = {"before_queries": before, "after_queries": after}
         log["metrics"] = metrics(results)
-        log["exclusions"] = exclusions(
-            log["enrolment"]["excluded_photographs"], log["enrolment"]["people"], results
+        log["exclusions"] = exclusions(  # (the first query pass)
+            log["enrolment"].pop("excluded_photographs"),
+            log["enrolment"]["people"],
+            log["enrolment"].pop("planned"),
+            results,
         )
         log["per_identity"] = per_identity(results)
         if args.unknown:  # random strangers only

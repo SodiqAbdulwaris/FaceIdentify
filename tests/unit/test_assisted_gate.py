@@ -10,6 +10,7 @@ from evaluation.assisted_recognition_gate import (
     EXCLUSION_RULES,
     MINIMUM_ENROLLED,
     choose_people,
+    enrol,
     exclusions,
     faces_of,
     load_pool,
@@ -478,17 +479,19 @@ def test_the_report_lists_every_exclusion_by_rule_including_the_enrolment_cascad
         {"person": "A", "file": "a3.jpg", "rule": "no_face"},
         {"person": "A", "file": "a4.jpg", "rule": "processing_failed"},
     ]
-    enrolled = {"A": 2, "B": 1, "Z": 0}
+    enrolled = {"A": 2, "B": 1, "C": 1, "Z": 0}
+    planned = {"A": 4, "B": 2, "C": 1, "Z": 0}  # C had one photograph set aside, by selection
     results = [
         asked("A", "a8.jpg", offered=["A"]),
         asked("A", "a9.jpg", faces=2),  # ambiguous subject
         asked("B", "b9.jpg", offered=["A"], eligible=False),  # the cascade
+        asked("C", "c9.jpg", offered=["C"], eligible=False),  # too few by selection
         asked("Z", "z1.jpg", offered=["A"], eligible=False, unknown=True),
         asked("Z", "z2.jpg", faces=0, eligible=False, unknown=True),
         asked("H", "h1.jpg", faces=4, eligible=False, unknown=True, hard_negative=True),
     ]
 
-    found = exclusions(excluded, enrolled, results)
+    found = exclusions(excluded, enrolled, planned, results)
 
     assert found["rules"] == EXCLUSION_RULES
     assert "ambiguous subject" in found["rules"]["no_subject"]
@@ -499,10 +502,26 @@ def test_the_report_lists_every_exclusion_by_rule_including_the_enrolment_cascad
         "no_subject": [{"person": "B", "file": "b1.jpg"}],
     }
     assert list(found["enrolment_photographs"]) == ["processing_failed", "no_face", "no_subject"]
-    assert found["people_with_too_few_enrolled_faces"] == [{"person": "B", "enrolled_faces": 1}]
+    assert found["people_with_too_few_enrolled_faces"] == [
+        {
+            "person": "B",
+            "planned_enrolment_photographs": 2,
+            "enrolled_faces": 1,
+            "cause": "exclusions",
+        },
+        {
+            "person": "C",
+            "planned_enrolment_photographs": 1,
+            "enrolled_faces": 1,
+            "cause": "selection",
+        },
+    ]
     assert found["known_queries"] == {
         "no_subject": [{"person": "A", "file": "a9.jpg"}],
-        "too_few_enrolled_faces": [{"person": "B", "file": "b9.jpg"}],
+        "too_few_enrolled_faces": [
+            {"person": "B", "file": "b9.jpg"},
+            {"person": "C", "file": "c9.jpg"},
+        ],
     }
     assert found["stranger_queries"] == {
         "no_face": [{"person": "Z", "file": "z2.jpg", "hard_negative": False}],
@@ -510,8 +529,8 @@ def test_the_report_lists_every_exclusion_by_rule_including_the_enrolment_cascad
     }
     assert found["counts"] == {
         "enrolment_photographs": {"processing_failed": 1, "no_face": 1, "no_subject": 1},
-        "people_with_too_few_enrolled_faces": 1,
-        "known_queries": {"no_subject": 1, "too_few_enrolled_faces": 1},
+        "people_with_too_few_enrolled_faces": 2,
+        "known_queries": {"no_subject": 1, "too_few_enrolled_faces": 2},
         "stranger_queries": {"no_face": 1, "no_subject": 1},
     }
     # the known queries listed are exactly the ones the retrieval totals leave out
@@ -522,9 +541,69 @@ def test_the_report_lists_every_exclusion_by_rule_including_the_enrolment_cascad
 
 
 def test_nothing_left_out_gives_empty_lists_not_missing_keys() -> None:
-    found = exclusions([], {"A": 3}, [asked("A", "a9.jpg", offered=["A"])])
+    found = exclusions([], {"A": 3}, {"A": 3}, [asked("A", "a9.jpg", offered=["A"])])
 
     assert found["enrolment_photographs"] == {}
     assert found["people_with_too_few_enrolled_faces"] == []
     assert found["known_queries"] == found["stranger_queries"] == {}
     assert found["counts"]["people_with_too_few_enrolled_faces"] == 0
+
+
+async def test_enrolment_records_each_photograph_it_leaves_out_and_why() -> None:
+    def box(size: float) -> dict[str, float]:
+        return {"x": 0, "y": 0, "width": size, "height": size}
+
+    unplaced = {  # source -> faces nobody has placed
+        "s-ok": [box(0.5)],
+        "s-none": [],
+        "s-crowd": [box(0.4), box(0.3)],
+        "s-failed": [],
+    }
+
+    class Gate:
+        def __init__(self) -> None:
+            self.sources: list[str] = []
+
+        async def post(self, path: str, body: dict[str, object] | None = None) -> dict[str, str]:
+            if path == "/sources/import":
+                source = "s-" + Path(str(body and body["path"])).stem
+                self.sources.append(source)
+                return {"id": source}
+            if path.endswith("/process"):
+                return {"id": "run-" + path.split("/")[2]}
+            if path.endswith("/resolve"):
+                return {"identity_id": "i1"}
+            return {"id": "p1"}  # /people
+
+        async def get(self, path: str) -> dict[str, object]:
+            if path.startswith("/processing-runs/"):
+                failed = path.endswith("s-failed")
+                return {"state": "FAILED" if failed else "COMPLETED"}
+            source = path.split("/")[2]
+            if path.endswith("unresolved-faces"):
+                items = [
+                    {"bounding_box": b, "representation_id": f"r-{source}"}
+                    for b in unplaced[source]
+                ]
+                return {"items": items}
+            return {"items": []}
+
+    log: dict[str, object] = {}
+    files = [Path(f"{stem}.jpg") for stem in ("ok", "none", "crowd", "failed")]
+
+    enrolled = await enrol(Gate(), [{"name": "Ada", "enrol": files}], log)  # type: ignore[arg-type]
+
+    assert enrolled["Ada"]["faces"] == 1
+    enrolment = log["enrolment"]
+    assert isinstance(enrolment, dict)
+    assert enrolment["excluded_photographs"] == [
+        {"person": "Ada", "file": "none.jpg", "rule": "no_face"},
+        {"person": "Ada", "file": "crowd.jpg", "rule": "no_subject"},
+        {"person": "Ada", "file": "failed.jpg", "rule": "processing_failed"},
+    ]
+    assert enrolment["skipped_photographs"] == {
+        "processing_failed": 1,
+        "no_face": 1,
+        "no_subject": 1,
+    }
+    assert enrolment["planned"] == {"Ada": 4}
