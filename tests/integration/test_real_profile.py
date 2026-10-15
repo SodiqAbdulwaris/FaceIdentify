@@ -50,10 +50,19 @@ from backend.app.runtime.models import RuntimePackageInstallation
 from backend.app.runtime.perception_client import Detected, FaceVector, Represented
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.ml.contracts.messages import Detection
+from backend.ml.contracts.protocol import MLErrorCode, MLOperation
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, imported, library_settings, serving
 from tests.fixtures.catalog_packages import manifest_dict, package_files
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+from tests.fixtures.onnx_models import EMBEDDING_DIMENSION
+from tests.integration.test_runtime_perception_client import (
+    Embedder,
+    Scripted,
+    detected,
+    error_response,
+)
+from tests.integration.test_runtime_perception_client import picture as pixels
 
 KEY = "reference-cpu"
 ABSTAIN_ONLY = {
@@ -237,27 +246,51 @@ def test_the_worker_state_reported_to_readiness_is_the_supervisors_own(
     assert pool.worker_state() == expected
 
 
+class Machine:
+    """A worker that answers like the real one: CUDA variants refuse to start until `cuda` is on."""
+
+    def __init__(self, cuda_ids: set[str]) -> None:
+        self.cuda = False
+        self.cuda_ids = cuda_ids
+        self.side = Embedder(SeededUUIDs(7))
+        self.script = Scripted(self.answer)
+
+    def answer(self, request: Any) -> Any:
+        if not self.cuda and request.options["runtime_variant_id"] in self.cuda_ids:
+            return error_response(request, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE)
+        if request.operation is MLOperation.DETECT_FACES:
+            return detected(request)
+        return self.side.answer(request)
+
+
+def job(pool: ClientPool, accelerated: PerceptionPlan) -> None:
+    """What one processing job asks of its client: detect, then represent."""
+    client = pool.client_for(accelerated)
+    found = client.detect(pixels(64, 64))
+    client.represent(pixels(64, 64), found.detections)
+
+
 def test_readiness_reports_the_provider_that_ran_and_a_fallback_is_logged_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    _, supervise = supervised()
-    pool = ClientPool(uuid.uuid4, supervise=supervise)
     cuda = replace(variant(1, "FACE_DETECTOR"), provider="CUDAExecutionProvider", device="GPU")
-    cpu = variant(2, "FACE_DETECTOR")
     embed_cuda = replace(variant(3, "FACE_REPRESENTATION"), provider="CUDAExecutionProvider")
-    embed_cpu = variant(4, "FACE_REPRESENTATION")
-    accelerated = PerceptionPlan(uuid.UUID(int=1), 4, (cuda, cpu), (embed_cuda, embed_cpu))
+    accelerated = PerceptionPlan(
+        uuid.UUID(int=1),
+        EMBEDDING_DIMENSION,
+        (cuda, variant(2, "FACE_DETECTOR")),
+        (embed_cuda, variant(4, "FACE_REPRESENTATION")),
+    )
+    machine = Machine({str(cuda.runtime_variant_id), str(embed_cuda.runtime_variant_id)})
+    pool = ClientPool(uuid.uuid4, supervise=lambda _plan, _policy: machine.script)
     assert pool.provider_state() == {
         "execution_provider": "NOT_STARTED",
         "provider_fallback": "NONE",
     }
 
-    with caplog.at_level(logging.INFO, logger="faceidentify.runtime"):
+    with machine.side.ledger, caplog.at_level(logging.INFO, logger="faceidentify.runtime"):
         for _ in range(3):  # three jobs on a machine where CUDA cannot start
-            client = pool.client_for(accelerated)
-            assert client._on_ran is not None
-            client._on_ran(cpu)
-            client._on_ran(embed_cpu)
+            job(pool, accelerated)
     assert pool.provider_state() == {
         "execution_provider": "CPUExecutionProvider",
         "provider_fallback": "ACTIVE",
@@ -265,20 +298,32 @@ def test_readiness_reports_the_provider_that_ran_and_a_fallback_is_logged_once(
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 2  # once per stage, not once per job
     assert "preferred CUDAExecutionProvider is not available" in warnings[0].getMessage()
+    assert len(machine.script.released) == 3  # every job's embedding output was released
 
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger="faceidentify.runtime"):
-        client = pool.client_for(accelerated)
-        assert client._on_ran is not None
-        client._on_ran(cuda)  # CUDA came back for the detector only
-    assert pool.provider_state() == {
-        "execution_provider": "CPUExecutionProvider,CUDAExecutionProvider",
-        "provider_fallback": "ACTIVE",  # the embedder still runs on its fallback
-    }
-    assert [r.levelno for r in caplog.records] == [logging.INFO]
-    client._on_ran(embed_cuda)
+    machine.cuda = True  # the accelerator works again (a later start, a fixed driver)
+    with machine.side.ledger, caplog.at_level(logging.INFO, logger="faceidentify.runtime"):
+        job(pool, accelerated)
     assert pool.provider_state() == {
         "execution_provider": "CUDAExecutionProvider",
+        "provider_fallback": "NONE",
+    }
+    assert [r.levelno for r in caplog.records] == [logging.INFO, logging.INFO]
+
+
+def test_a_stage_with_one_variant_is_never_a_fallback() -> None:
+    machine = Machine(set())
+    pool = ClientPool(uuid.uuid4, supervise=lambda _plan, _policy: machine.script)
+    single = PerceptionPlan(
+        uuid.UUID(int=2),
+        EMBEDDING_DIMENSION,
+        (variant(1, "FACE_DETECTOR"),),
+        (variant(2, "FACE_REPRESENTATION"),),
+    )
+    with machine.side.ledger:
+        job(pool, single)
+    assert pool.provider_state() == {
+        "execution_provider": "CPUExecutionProvider",
         "provider_fallback": "NONE",
     }
 
