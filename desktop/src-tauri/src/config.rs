@@ -14,8 +14,8 @@ pub const PYTHON_ENV: &str = "FACEIDENTIFY_PYTHON";
 pub const DEVELOPMENT_PROFILE_ENV: &str = "FACEIDENTIFY_DEVELOPMENT_PROFILE";
 const SETTINGS_FILE: &str = "shell.json";
 
-/// The image formats the backend can import (JPEG, PNG, BMP, WebP): what the file picker offers.
-pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "webp"];
+/// The image formats the backend can import (JPEG, PNG, BMP, WebP, AVIF): what the picker offers.
+pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "webp", "avif"];
 
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct Saved {
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn the_picker_offers_exactly_the_formats_the_backend_imports() {
-        assert_eq!(IMAGE_EXTENSIONS, ["jpg", "jpeg", "png", "bmp", "webp"]);
+        assert_eq!(IMAGE_EXTENSIONS, ["jpg", "jpeg", "png", "bmp", "webp", "avif"]);
     }
 
     #[test]
