@@ -15,8 +15,12 @@
   and **only their other photographs are scored**, so the photograph that chose a person never counts
   for them. Ties are broken by a hash of the name, so the pool's listing order never matters.
 - Left out of the pool: anyone whose name (underscores as spaces, case and spacing ignored) matches
-  anyone in the main dataset's `manifest.json` (not only the people the manifest in use keeps), any
-  picture byte-identical to one of the main set's pictures, and anyone left with fewer than two pictures.
+  anyone in the main dataset, **anyone with a picture byte-identical to one of the main dataset's**
+  (the whole person: one shared picture suggests the same person under another name), and anyone with
+  fewer than two pictures. "The main dataset" is everything its `manifest.json` lists, not only what
+  a verified export keeps.
+- The report carries a `hard_negative_caveat`: the pool's labels are its creators' and the main
+  dataset's verification does not extend to them.
 - The selection queries run **inside** the before/after library-count check.
 - The report gains `log.hard_negatives` (candidates, their selection-similarity spread, the chosen people
   with their selection photograph, nearest enrolled person and score, and what was left out of the pool)
@@ -79,4 +83,7 @@ Result: see below (being filled in when the run finishes).
 
 - `uv run pytest -q tests/unit/test_assisted_gate.py`: 18 passed; ruff, mypy (Windows and Linux) clean.
 - Full backend gate before the PR: results in the PR description.
-- Both real runs above finished with exit code 0, all workflow checks true and `queries_wrote_nothing` true.
+- The first real run finished with all workflow checks true and `queries_wrote_nothing` true. It ran
+  the code before the review fixes (whole-person exclusion on a shared picture, digests from the full
+  manifest, the pool caveat); checked afterwards, no picture in either LFW pool (150 or 1,680 people) is byte-identical to any of the 716 pictures the celebrity set lists, so neither run's selection changes.
+  The wide-pool run is still in progress and is not claimed here.

@@ -357,11 +357,16 @@ def test_a_pool_person_selects_on_one_picture_and_is_scored_on_the_others(tmp_pa
     pool = [
         pictures("Tom_Hanks", b"t0", b"t1"),  # the same name as an enrolled person
         pictures("Stranger", b"s0", b"s1", b"s2"),
-        pictures("Copied", shared, b"c1"),  # one picture shared: one left, too few
+        pictures("Alias", shared, b"a1", b"a2"),  # one shared picture: the same person, out
+        pictures("Single", b"only one"),
     ]
     taken = {hashlib.sha256(shared).hexdigest()}
     kept, dropped = pool_candidates(pool, ["Tom Hanks", "Emma Stone"], taken)
-    assert dropped == {"same_name": ["Tom_Hanks"], "shared_pictures": 1, "too_few_pictures": 1}
+    assert dropped == {
+        "same_name": ["Tom_Hanks"],
+        "shared_a_picture": ["Alias"],
+        "too_few_pictures": 1,
+    }
     (stranger,) = kept
     assert stranger["name"] == "Stranger"
     assert stranger["select"] == tmp_path / "Stranger-0.jpg"
