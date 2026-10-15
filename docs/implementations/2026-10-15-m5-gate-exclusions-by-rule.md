@@ -34,8 +34,9 @@
 - `tests/unit/test_assisted_gate.py`: five tests. They cover the enrolment rule order, the query
   rule order (cascade first; strangers judged by their faces only), the full by-rule listing on
   fake inputs (with both causes of too few enrolled faces), the empty case, and `enrol()` itself
-  through a fake gate (a no-face, a crowd and a failed-run photograph). One test checks that the listed known queries add up to
-  `metrics()["ineligible_or_no_subject"]`.
+  through a fake gate (a no-face, a crowd and a failed-run photograph, and a failed run that still
+  shows a subject face, which is enrolled as before). One test checks that the listed known
+  queries add up to `metrics()["ineligible_or_no_subject"]`.
 
 ## Why
 
