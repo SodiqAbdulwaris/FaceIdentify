@@ -456,6 +456,24 @@ def test_other_riff_files_are_unsupported_not_corrupt() -> None:
         read_header(b"RIFF" + bytes(4) + b"WAVEfmt " + bytes(20))
 
 
+def avif_under_the_generic_brand() -> bytes:
+    """An AVIF whose `ftyp` names the generic HEIF brand first and avif only among its compatible
+    brands (Pillow writes avif first: major brand, minor version, then the compatible ones)."""
+    data = encoded("AVIF")
+    assert data[4:12] == b"ftypavif"
+    assert data[16:20] == b"avif"
+    return data[:8] + b"mif1" + data[12:]
+
+
+def test_an_avif_under_the_generic_brand_is_read_and_when_cut_short_is_corrupt() -> None:
+    data = avif_under_the_generic_brand()
+    ftyp_end = int.from_bytes(data[:4], "big")
+
+    assert decode_image(data, max_pixels=LIMIT).header.format == "AVIF"
+    with pytest.raises(CorruptImageError):
+        read_header(data[: ftyp_end + 8])  # the brands are all there, the rest is not
+
+
 def test_an_avif_with_damaged_pixels_is_corrupt() -> None:
     data = bytearray(encoded("AVIF"))
     start = data.index(b"mdat") + 4
