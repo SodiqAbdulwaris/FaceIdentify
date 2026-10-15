@@ -65,7 +65,31 @@ pool was imported for the second run.
 
 ### Pool: all of LFW with two or more pictures (1,680 people, up to 4 each), `gate-celebs-commons-hard-wide.json`
 
-Result: see below (being filled in when the run finishes).
+First attempt (2026-10-15, on battery, before the review fixes): it finished enrolment, selection,
+queries and the workflow, then was killed with the application during the restart phase, so its report
+is **partial** (`gate-celebs-commons-hard-wide-partial.json`); the retrieval, selection and open-set
+figures below come from it and are complete for those phases. A full re-run, detached from the
+application, was started to record the workflow and restart checks with these strangers.
+
+| Measure | Value |
+|---|---|
+| Closed set and counts | Recall@1 0.983, Recall@5 0.992, MRR 0.986 (118 queries); counts unchanged (453 / 40 / 453) including 1,662 selection queries |
+| Pool left out by name | 18 enrolled people who are also in LFW (Tom Hanks, Angelina Jolie, Matt Damon, Nicole Kidman, Meryl Streep and 13 more) |
+| Candidates ranked / without a score | 1,662 / 131 |
+| Candidate selection similarity | min 0.099, median 0.166, max 0.305 |
+| Chosen (selection photograph's nearest enrolled person) | Emma Thompson (Cate Blanchett, 0.305), Keira Knightley (Natalie Portman), Jada Pinkett Smith (Zoe Saldana), Ethan Hawke (Benedict Cumberbatch), Michael Winterbottom, Naomi Watts (Nicole Kidman), Arnold Schwarzenegger (Tom Hanks), Daisy Fuentes, Daniel Radcliffe (Jake Gyllenhaal), Brian Heidik, Ian McKellen, Natalie Coughlin (Scarlett Johansson), Vivica Fox, Azra Akin (Gal Gadot), Bruce Springsteen |
+| Hard-negative queries evaluated | 31 of 34 (the pool keeps up to 4 pictures a person, one of them selects) |
+| Accepted by the real policy | 0 |
+| Hard-negative top-1 similarity | min 0.130, median 0.215, max 0.320 (Azra Akin against Gal Gadot) |
+| Cut-off read-out | 0.30: 3 accepted (Azra Akin 0.320 to Gal Gadot; Natalie Coughlin 0.305 and 0.301 to Scarlett Johansson); 0.35 and above: none (Wilson 95% 0 to 0.11), known accepted correctly 97.5% at 0.35 |
+| Time on battery | enrolment 1,483 s, selection 5,815 s, queries 962 s |
+
+**Reading:** the wide pool does find recognisable look-alikes (several pairs a person would also call
+similar), and they come closer than random strangers at the top (0.320 against 0.309), but **none
+reaches 0.35**, the lowest cut-off at which no stranger was accepted on this verified set (random or
+look-alike); at 0.30 three would be. Earlier unverified runs had strangers higher (LFW 0.402, CelebA
+0.383), so 0.35 is not a safe cut-off in general. The sample is small (31 queries from 15 people, not independent), so this narrows
+nothing to a rate: it says the best look-alikes LFW offers for these 40 people stay below 0.33.
 
 ## Limits
 
