@@ -61,4 +61,4 @@ recorded decisions are in [`CONTEXT.md`](../../.agents/CONTEXT.md).
 | Label review: mark which face carries a label | [#181](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/181) |
 | Gate reports: exclusions by rule, including the enrolment cascade | [#182](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/182) |
 | LFW and CelebA terms to read at source | [#183](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/183) |
-| AVIF pictures were refused: now accepted everywhere images are (import, processing, face search); the spec notes await the owner ([entry](../implementations/2026-10-15-avif-images.md)) | [#188](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/188) |
+| AVIF pictures were refused: now accepted everywhere images are (import, processing, face search); spec updated on the owner's decision ([entry](../implementations/2026-10-15-avif-images.md)) | [#188](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/188) |
