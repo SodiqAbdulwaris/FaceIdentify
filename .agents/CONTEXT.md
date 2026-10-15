@@ -441,6 +441,8 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 
 ## Next steps
 
+**Test race fixed (2026-10-15):** a run reads `COMPLETED` before acceptance wakes the index coordinator, which then saves the index on the scheduler thread; API tests that process an image (`processed()` in `tests/integration/test_api_memory.py`) now run one serialized coordinator pass before returning, so nothing is still being written. `docs/implementations/2026-10-15-face-search-snapshot-index-race.md`.
+
 **Commons collector (2026-10-14):** `evaluation/collect_commons_portraits.py` (from the owner's `facescrape.py`, fixed) collects free-licence portraits by person from Wikimedia Commons into `evaluation/datasets/celebs-commons/`; `--dry-run` reads metadata only; `docs/implementations/2026-10-14-commons-portrait-collector.md`.
 
 **Review tool (2026-10-14):** `evaluation/label_review.py serve ... --people "Name,Name"` limits the review page to the named people (a view filter; counts and export stay whole-dataset), `docs/implementations/2026-10-14-label-review-people-filter.md`.
