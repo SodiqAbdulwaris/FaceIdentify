@@ -156,6 +156,7 @@ and this overstatement; both are fixed.
   (the CPU wheel's official Windows build is the same). Whether the worker should call
   `onnxruntime.disable_telemetry_events()` is a privacy decision for the owner.
 - **The operating point** was measured on the CPU; re-measure on DirectML before relying on it
-  (embeddings agree to 2.4e-7 here, so no change is expected).
+  (embeddings agree to 2.4e-7 here, so no change is expected). **Done 2026-10-16:** identical
+  decisions and metrics ([entry](2026-10-16-directml-remeasure.md)).
 - The `DirectML.dll` terms were read from the `Microsoft.AI.DirectML` 1.15.4 NuGet package; the
   wheel does not carry them, so that they govern the wheel's copy is an inference.
