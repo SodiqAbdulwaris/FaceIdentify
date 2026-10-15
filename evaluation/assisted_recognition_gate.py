@@ -358,6 +358,7 @@ async def enrol(
             faces = await faces_of(gate, source_id)
             chosen = subject(faces, "bounding_box")
             if chosen is None:
+                # (never None here: with no subject a rule applies; `or` is for the type checker)
                 rule = skip_reason(faces, states[runs[source_id]]) or "no_subject"
                 skipped[rule] += 1
                 excluded.append({"person": person["name"], "file": path.name, "rule": rule})

@@ -558,6 +558,7 @@ async def test_enrolment_records_each_photograph_it_leaves_out_and_why() -> None
         "s-none": [],
         "s-crowd": [box(0.4), box(0.3)],
         "s-failed": [],
+        "s-failedface": [box(0.5)],  # a failed run that still shows a subject: enrolled as before
     }
 
     class Gate:
@@ -577,7 +578,7 @@ async def test_enrolment_records_each_photograph_it_leaves_out_and_why() -> None
 
         async def get(self, path: str) -> dict[str, object]:
             if path.startswith("/processing-runs/"):
-                failed = path.endswith("s-failed")
+                failed = path.endswith(("s-failed", "s-failedface"))
                 return {"state": "FAILED" if failed else "COMPLETED"}
             source = path.split("/")[2]
             if path.endswith("unresolved-faces"):
@@ -589,11 +590,12 @@ async def test_enrolment_records_each_photograph_it_leaves_out_and_why() -> None
             return {"items": []}
 
     log: dict[str, object] = {}
-    files = [Path(f"{stem}.jpg") for stem in ("ok", "none", "crowd", "failed")]
+    files = [Path(f"{stem}.jpg") for stem in ("ok", "none", "crowd", "failed", "failedface")]
 
     enrolled = await enrol(Gate(), [{"name": "Ada", "enrol": files}], log)  # type: ignore[arg-type]
 
-    assert enrolled["Ada"]["faces"] == 1
+    assert enrolled["Ada"]["faces"] == 2
+    assert [p.name for p in enrolled["Ada"]["photos"]] == ["ok.jpg", "failedface.jpg"]
     enrolment = log["enrolment"]
     assert isinstance(enrolment, dict)
     assert enrolment["excluded_photographs"] == [
@@ -606,4 +608,4 @@ async def test_enrolment_records_each_photograph_it_leaves_out_and_why() -> None
         "no_face": 1,
         "no_subject": 1,
     }
-    assert enrolment["planned"] == {"Ada": 4}
+    assert enrolment["planned"] == {"Ada": 5}
