@@ -2,9 +2,10 @@
 
 The weights are developer-supplied local files, never committed. This module turns a folder that
 holds them into the package a `RuntimePackageStore` installs: it measures the files (size and
-SHA-256, never copied from a claim), declares one CUDA and one CPU variant per model (the
-preferred provider first, the CPU as the fallback), and records the provenance mandatory for every
-export. Which models, from where and under what terms is the caller's record, not guessed here.
+SHA-256, never copied from a claim), declares a DirectML, a CUDA and a CPU variant per model (the
+caller's provider list decides which run and in what order: DirectML then the CPU on Windows, CUDA
+only for a developer who asks for it), and records the provenance mandatory for every export.
+Which models, from where and under what terms is the caller's record, not guessed here.
 """
 
 import hashlib
@@ -16,6 +17,7 @@ from typing import Any
 DETECTOR_CONTRACT = "scrfd-letterbox-v1"
 EMBEDDER_CONTRACT = "arcface-112-similarity-v1"
 _PROVIDERS = (
+    ("DmlExecutionProvider", "GPU", "dml"),
     ("CUDAExecutionProvider", "GPU", "cuda"),
     ("CPUExecutionProvider", "CPU", "cpu"),
 )
