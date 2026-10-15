@@ -32,7 +32,7 @@ research-licensed and never committed; this is a **local** procedure on your mac
 5. **Pytest e2e** (local): `uv run pytest -m e2e tests/e2e/test_real_models.py` after installing the models and putting pictures in `local-models/images`
    (named `<person>N.jpg`; same letters means same person).
 
-> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (TST-057B). The real profile now also admits a matching policy that equals an owner-approved operating point in `APPROVED_MATCHING` (`require_approved_policy`, `backend/api/real.py`); a policy file alone still cannot enable matching. The point is pending owner confirmation, and the installed policy is abstain-only until then. Evidence: [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md).
+> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (TST-057B). The real profile now also admits a matching policy that equals an owner-approved operating point in `APPROVED_MATCHING` (`require_approved_policy`, `backend/api/real.py`); a policy file alone still cannot enable matching. The owner confirmed option A on 2026-10-15: "A: threshold 0.45, margin 0.10, no automatic new identity." Evidence: [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md).
 
 ## 4. Try it
 
