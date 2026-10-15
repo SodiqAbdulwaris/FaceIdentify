@@ -20,7 +20,11 @@ from backend.infrastructure.media.image import (
 
 LIMIT = 10**6
 WIDTH, HEIGHT = 60, 40
-ENCODE_OPTIONS: dict[str, dict[str, Any]] = {"WEBP": {"lossless": True}, "JPEG": {"quality": 95}}
+ENCODE_OPTIONS: dict[str, dict[str, Any]] = {
+    "WEBP": {"lossless": True},
+    "JPEG": {"quality": 95},
+    "AVIF": {"quality": 95},
+}
 
 
 def picture(width: int = WIDTH, height: int = HEIGHT) -> np.ndarray[Any, Any]:
@@ -80,6 +84,21 @@ def test_a_jpeg_is_close_to_the_picture_it_was_made_from() -> None:
     decoded = decode_image(encoded("JPEG", smooth), max_pixels=LIMIT)
 
     assert np.abs(decoded.pixels.astype(int) - smooth.astype(int)).mean() < 6  # (lossy)
+
+
+def test_an_avif_is_identified_and_close_to_the_picture_it_was_made_from() -> None:
+    data = encoded("AVIF", smooth_picture())
+
+    header = read_header(data)
+    decoded = decode_image(data, max_pixels=LIMIT)
+
+    assert (header.format, header.mime_type) == ("AVIF", "image/avif")
+    assert (header.width, header.height) == (WIDTH, HEIGHT)
+    assert decoded.header == header
+    assert decoded.pixels.shape == (HEIGHT, WIDTH, 3)
+    assert decoded.pixels.dtype == np.uint8
+    assert decoded.pixels.flags["C_CONTIGUOUS"]
+    assert np.abs(decoded.pixels.astype(int) - smooth_picture()).mean() < 6  # (lossy)
 
 
 def test_channels_are_in_rgb_order() -> None:
@@ -188,6 +207,19 @@ def test_orientation_is_applied_in_the_other_formats_too(fmt: str, orientation: 
     assert np.array_equal(decoded.pixels, UPRIGHT[orientation](picture()))
 
 
+@pytest.mark.parametrize("orientation", range(1, 9))
+def test_orientation_is_applied_in_an_avif(orientation: int) -> None:
+    exif = Image.Exif()
+    exif[0x0112] = orientation
+    data = encode(Image.fromarray(smooth_picture()), "AVIF", exif=exif, quality=95)
+
+    decoded = decode_image(data, max_pixels=LIMIT)
+
+    expected = UPRIGHT[orientation](smooth_picture())
+    assert decoded.pixels.shape == expected.shape
+    assert np.abs(decoded.pixels.astype(int) - expected).mean() < 6  # (lossy)
+
+
 @pytest.mark.parametrize("value", [0, 9, 65535])
 def test_an_orientation_that_means_nothing_leaves_the_picture_as_stored(value: int) -> None:
     decoded = decode_image(with_orientation("JPEG", value), max_pixels=LIMIT)
@@ -227,6 +259,19 @@ def test_an_animated_webp_yields_its_first_frame() -> None:
     decoded = decode_image(out.getvalue(), max_pixels=LIMIT)
 
     assert np.array_equal(decoded.pixels, first)
+
+
+def test_an_animated_avif_yields_its_first_frame() -> None:
+    first, second = smooth_picture(), smooth_picture()[::-1]
+    out = io.BytesIO()
+    Image.fromarray(first).save(
+        out, "AVIF", save_all=True, append_images=[Image.fromarray(second)], quality=95
+    )
+
+    decoded = decode_image(out.getvalue(), max_pixels=LIMIT)
+
+    assert np.abs(decoded.pixels.astype(int) - first).mean() < 6  # (lossy; the second is far off)
+    assert np.abs(decoded.pixels.astype(int) - second).mean() > 30
 
 
 def test_an_animated_png_yields_its_first_frame() -> None:
@@ -288,16 +333,26 @@ def test_the_tripwire_does_fire_when_a_real_decode_happens(
 
 
 def test_reading_a_header_decodes_nothing(arm_tripwire: Callable[[], None]) -> None:
-    data = [encoded(fmt) for fmt in ("PNG", "JPEG", "BMP", "WEBP")]
+    data = [encoded(fmt) for fmt in ("PNG", "JPEG", "BMP", "WEBP", "AVIF")]
     arm_tripwire()
 
-    assert [read_header(d).format for d in data] == ["PNG", "JPEG", "BMP", "WEBP"]
+    assert [read_header(d).format for d in data] == ["PNG", "JPEG", "BMP", "WEBP", "AVIF"]
 
 
 def test_an_image_over_the_limit_is_refused_before_anything_is_decoded(
     arm_tripwire: Callable[[], None],
 ) -> None:
     data = encoded("PNG")
+    arm_tripwire()
+
+    with pytest.raises(ImageTooLargeError, match="more than the 2399 allowed"):
+        decode_image(data, max_pixels=WIDTH * HEIGHT - 1)
+
+
+def test_an_avif_over_the_limit_is_refused_before_anything_is_decoded(
+    arm_tripwire: Callable[[], None],
+) -> None:
+    data = encoded("AVIF")
     arm_tripwire()
 
     with pytest.raises(ImageTooLargeError, match="more than the 2399 allowed"):
@@ -345,10 +400,11 @@ def test_pillows_global_decompression_guard_is_left_as_it_was() -> None:
         b"%PDF-1.7\n" + bytes(40),
         b"<svg xmlns='http://www.w3.org/2000/svg'/>",
         b"\x00\x00\x00\x18ftypheic" + bytes(40),  # HEIC
+        b"\x00\x00\x00\x18ftypmif1" + bytes(40),  # HEIF, a brand Pillow's AVIF reader also tries
     ],
-    ids=["empty", "text", "gif", "tiff", "pdf", "svg", "heic"],
+    ids=["empty", "text", "gif", "tiff", "pdf", "svg", "heic", "heif"],
 )
-def test_anything_that_is_not_one_of_the_four_formats_is_unsupported(data: bytes) -> None:
+def test_anything_that_is_not_one_of_the_five_formats_is_unsupported(data: bytes) -> None:
     with pytest.raises(UnsupportedImageError):
         read_header(data)
     with pytest.raises(UnsupportedImageError):
@@ -362,7 +418,7 @@ def test_a_gif_is_refused_even_though_pillow_can_read_gifs() -> None:
         decode_image(gif, max_pixels=LIMIT)
 
 
-@pytest.mark.parametrize("fmt", ["PNG", "JPEG", "BMP", "WEBP"])
+@pytest.mark.parametrize("fmt", ["PNG", "JPEG", "BMP", "WEBP", "AVIF"])
 def test_a_file_cut_short_is_corrupt(fmt: str) -> None:
     data = encoded(fmt)
 
@@ -370,9 +426,9 @@ def test_a_file_cut_short_is_corrupt(fmt: str) -> None:
         decode_image(data[: len(data) // 2], max_pixels=LIMIT)
 
 
-@pytest.mark.parametrize("fmt", ["PNG", "JPEG", "BMP", "WEBP"])
+@pytest.mark.parametrize("fmt", ["PNG", "JPEG", "BMP", "WEBP", "AVIF"])
 def test_a_file_with_only_its_signature_is_corrupt(fmt: str) -> None:
-    signature = {"PNG": 8, "JPEG": 2, "BMP": 2, "WEBP": 12}[fmt]
+    signature = {"PNG": 8, "JPEG": 2, "BMP": 2, "WEBP": 12, "AVIF": 12}[fmt]
 
     with pytest.raises(CorruptImageError):
         read_header(encoded(fmt)[:signature])
@@ -398,6 +454,16 @@ def test_something_that_only_begins_like_a_bmp_is_corrupt_not_unsupported() -> N
 def test_other_riff_files_are_unsupported_not_corrupt() -> None:
     with pytest.raises(UnsupportedImageError):
         read_header(b"RIFF" + bytes(4) + b"WAVEfmt " + bytes(20))
+
+
+def test_an_avif_with_damaged_pixels_is_corrupt() -> None:
+    data = bytearray(encoded("AVIF"))
+    start = data.index(b"mdat") + 4
+    data[start:] = bytes(len(data) - start)
+
+    assert read_header(bytes(data)).format == "AVIF"  # the header is fine...
+    with pytest.raises(CorruptImageError):
+        decode_image(bytes(data), max_pixels=LIMIT)  # ...the pixels are not
 
 
 def test_an_error_message_does_not_pass_on_the_decoders_own_words() -> None:

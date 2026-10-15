@@ -292,7 +292,9 @@ def import_source(
         raise ApiError(400, "REFERENCED_FILE_INVALID", "The file cannot be referenced.") from None
     except UnsupportedImageError:
         raise ApiError(
-            415, "MEDIA_FORMAT_UNSUPPORTED", "Only JPEG, PNG, BMP and WebP images are supported."
+            415,
+            "MEDIA_FORMAT_UNSUPPORTED",
+            "Only JPEG, PNG, BMP, WebP and AVIF images are supported.",
         ) from None
     except CorruptImageError:
         raise ApiError(422, "MEDIA_CORRUPT", "The image could not be read.") from None
