@@ -72,6 +72,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-15 | [M5: hard-negative strangers chosen inside the gate (issue 177)](2026-10-15-m5-gate-hard-negatives.md) | done; 15 look-alikes from all of LFW: 0 accepted by the real policy, best 0.320; acceptance stays off |
 | 2026-10-16 | [M5 close-out: coverage measured and the definition of done audited](2026-10-16-m5-coverage-and-dod-audit.md) | done; documentation only; M5 not done yet |
 | 2026-10-16 | [The operating point and the hard-negative gate re-measured on DirectML](2026-10-16-directml-remeasure.md) | done; identical decisions and metrics; measurement only |
+| 2026-10-16 | [A missing original comes back: on-access recheck, Recheck file and Locate original (issue #179)](2026-10-16-missing-originals-recheck-and-relink.md) | done; backend and source screen |
 | 2026-10-15 | [M5: the owner's close-up photographs (issue 173) and the finished CelebA gate run](2026-10-15-m5-myfaces-closeups-and-celeba-rerun.md) | measured; MyFaces 0 of 29 lost; CelebA 10 of 10 workflow checks, same rankings after a restart; #173 stays open |
 | 2026-10-16 | [M5 close-out: the weights' provenance re-checked (issue #69) and a Windows install guide](2026-10-16-m5-weights-provenance-and-install-guide.md) | done; documentation only |
 | 2026-10-16 | [M6 plan draft: movies and scheduling](2026-10-16-m6-plan-draft.md) | draft; not approved; documentation only |
