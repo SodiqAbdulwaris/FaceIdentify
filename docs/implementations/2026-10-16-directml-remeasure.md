@@ -73,6 +73,7 @@ included) on DirectML.
 | Hard-negative selection | 4,573.6 s | 1,072.5 s |
 | Queries / after workflow / restart and queries | 888.3 / 836.8 / 785.0 s | 184.4 / 186.3 / 192.5 s |
 | Total | about 2 h 8 min | about 36 min |
+| Provider that ran (readiness after enrolment) | not recorded (the CPU run predates the field) | `DmlExecutionProvider`, fallback `NONE` |
 
 The only differences are in the tail of the candidate lists: near-ties among low similarities (around
 0.1, deltas about 1e-4) swap places, and in two queries the approximate index shortlist surfaced a
@@ -86,7 +87,10 @@ decision, top-1 answer or metric changed.
 
 ## Verification
 
-The comparisons above were made field by field on the two pairs of JSON reports and on the two
+The gate report's `readiness_after_enrolment` shows DirectML ran with no fallback (`execution_provider`
+`DmlExecutionProvider`, `provider_fallback` `NONE`); the operating-point script records only the
+provider it was asked for, so for that run the DirectML timings (71 s) are the evidence. The
+comparisons above were made field by field on the two pairs of JSON reports and on the two
 embedding caches (scripts kept outside the repository; the reports are Git-ignored data). The
 enrolment time is dominated by import and the database, which is why it barely moves.
 
@@ -96,7 +100,4 @@ enrolment time is dominated by import and the database, which is why it barely m
   provider, so a run on another provider silently reuses the first provider's vectors (harmless here,
   since the vectors agree, but the report then names a provider that did not run). Keying the cache by
   provider, or recording which provider made it, is a small fix.
-- The gate report records the providers asked for, not the one that ran (its readiness snapshot is
-  taken before any job); the DirectML timings show the GPU ran. Recording `execution_provider` after
-  the queries would make that explicit.
 - AMD GPUs and machines without DirectX 12 remain unverified (TST-074 stays partial).
