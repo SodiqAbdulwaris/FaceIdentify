@@ -35,6 +35,7 @@ from backend.app.runtime.worker_config import PerceptionPlan
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
 from backend.infrastructure.media.image import decode_image
+from backend.ml.supervisor.lease import interactive
 
 # A query belongs to no processing run; this is the id retrieval is told when it needs one (it only
 # matters to a run-local pool, which a query does not have).
@@ -105,12 +106,14 @@ class FaceQuery:
 
         frozen, plan = self._uow.read(configure)
         client = self._client_for(plan)
-        detected = client.detect(pixels)
+        with interactive():  # a person is waiting: served before background work (#175)
+            detected = client.detect(pixels)
         policy = frozen.decision_policy
         if not detected.detections:
             empty = FaceQueryResult((), policy.version, INTERPRETATION)
             return self._uow.read(lambda session: present(session, empty))
-        represented = client.represent(pixels, detected.detections)
+        with interactive():
+            represented = client.represent(pixels, detected.detections)
         space_id = frozen.representation_space_id
 
         def decide(session: Session) -> T:

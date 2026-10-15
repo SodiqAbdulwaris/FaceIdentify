@@ -32,6 +32,7 @@ from backend.infrastructure.indexing.representation_index import IndexUnusableEr
 from backend.infrastructure.storage import local_path
 from backend.ml.contracts.messages import Detection
 from backend.ml.contracts.protocol import ContractError, MLErrorCode
+from backend.ml.supervisor.lease import is_interactive
 from backend.ml.supervisor.supervisor import MLUnavailableError
 from tests.fixtures.api import Api, error, imported, processing_app
 from tests.fixtures.links import link_directory
@@ -152,6 +153,34 @@ async def test_a_search_writes_nothing_and_repeating_it_changes_nothing(
     assert first == second
     assert raw.status_code == 200
     assert snapshot(api) == before  # no Source, Observation, Identity, Evidence, job, run or file
+
+
+async def test_a_face_search_asks_the_worker_as_interactive_and_processing_does_not(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #175: a face search is served before background processing at the worker's next safe
+    boundary, so its perception must be marked interactive, and processing's must not be."""
+    api = processing_api
+    assert api.perception is not None
+    marks: list[tuple[str, bool]] = []
+    for stage in ("detect", "represent"):
+        real = getattr(api.perception, stage)
+
+        def spy(*args: Any, _real: Any = real, _stage: str = stage, **kwargs: Any) -> Any:
+            marks.append((_stage, is_interactive()))
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(api.perception, stage, spy)
+    api.perception.vector = FACES[0]
+    await processed(api, "p.png")
+    processing = list(marks)
+    marks.clear()
+
+    searched = await api.client.post(FACE_SEARCH, json={"path": str(api.image("q.png"))})
+
+    assert searched.status_code == 200, searched.text
+    assert processing == [("detect", False), ("represent", False)]
+    assert marks == [("detect", True), ("represent", True)]
 
 
 async def test_the_picture_can_be_sent_as_bytes_or_named_by_path(processing_api: Api) -> None:
