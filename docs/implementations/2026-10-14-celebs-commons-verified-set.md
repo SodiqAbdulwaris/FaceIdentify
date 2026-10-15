@@ -79,12 +79,55 @@ the review drops some. **They are unreviewed:** nothing is verified until the ow
 (`label_review.py serve --dataset evaluation/datasets/celebs-commons --reviewer sodiq --people "<the 12
 names>"`); then a new export and a gate re-run follow.
 
+**Reviewed (2026-10-15).** The owner reviewed the 12 people: 2 EXCLUDED, 1 UNCERTAIN (AMBIGUOUS), 7
+VERIFIED with a flag (5 LOW_QUALITY, 2 MULTI_PERSON; flagged pictures are kept out of the verified set
+by the tool), and stated that every photograph left unmarked is verified. The agent confirmed that
+the 170 unmarked photographs all belong to those 12 people and recorded 170 `VERIFIED` decisions
+through `Review.decide`, reviewer `sodiq`, note "bulk-recorded 2026-10-15 by the agent from the owner's
+statement that every unmarked photograph of the 12 new people is verified". Status: 716 photographs,
+all reviewed (693 verified, 9 uncertain, 14 excluded, none stale).
+
+**New export:** `review/exports/verified-20261015T073439095195Z.json`: **48 identities with enough
+images and 142 held-out queries; shortfall 0** against the owner's targets (40 identities, 80 queries).
+23 photographs left out as not verified and 7 as flagged.
+
+## Gate on the 48-identity verified set (2026-10-15, 07:35 to 07:58 UTC)
+
+Same command as above with that export, `--people 40 --unknown 8`, workdir
+`evaluation/datasets/gate-celebs-commons-48`, report `evaluation/datasets/reports/gate-celebs-commons-48.json`
+(final, not partial).
+
+| Measure | Value | Owner's threshold |
+|---|---|---|
+| Enrolled people / photographs placed | 40 / 453 (none lost) | 40+ identities |
+| Held-out queries | 118 (at least 2 per person) | 80+, 2+ each |
+| Recall@1 | 0.983 (Wilson 95% 0.940 to 0.995) | 0.85 |
+| Recall@5 | 0.992 (0.954 to 0.999) | 0.95 |
+| MRR | 0.986 | 0.90 |
+| Same rankings after a restart | yes | 100% |
+| Workflow checks | 10 of 10 | 100% |
+| Library counts unchanged by the queries | yes: 453 sources, 40 identities, 453 runs (counts only) | zero unintended mutations |
+| Stranger queries / accepted by the real policy | 115 from 8 people / 0 (best similarity 0.309) | |
+| Cut-off read-out | 0.30: 3 strangers accepted; 0.35 to 0.55: none, known accepted correctly 97.5% at 0.35 and 0.40, 95.8% at 0.45, 91.5% at 0.50, 89.0% at 0.55 | |
+| Recall@1 after the workflow and restart | 0.958: the forgotten person's queries (Denzel Washington) no longer match, by design, plus the two misses | |
+
+The two misses: Morgan Freeman `015.jpg` (again; own identity not offered, top 0.115) and Kevin Hart
+`014.jpg` (ranked third; top candidate 0.162). Both have low similarities everywhere, so the real policy
+abstains rather than answering wrongly. Strangers: Brad Pitt, Chris Evans, Kristen Stewart, Margot Robbie,
+Matt Damon, Meryl Streep, Michael B. Jordan, Will Smith (random, not look-alikes).
+
+**Reading.** For the first time a **verified set meets the owner's dataset targets and every measured
+provisional threshold**. This is the assisted-recognition quality bar. **TST-057B stays `BLOCKED`**: it is
+*automatic* recognition, which stays off under the decision of 2026-10-14 until hard negatives (issue 177)
+are measured and an owner-approved code change is made. "Zero unintended mutations" is only shown for
+counts. The limits below still apply.
+
 ## Limits to carry into any claim
 
 - The labels are Commons categories checked by one reviewer. The set is celebrity photographs (many
   likely in the recogniser's training data: a possibility, not measured) and only pictures where
   SCRFD found one dominant face, so it cannot show detector recall or unfiltered performance.
-- 36 identities are below the owner's 40.
+- 36 identities were below the owner's 40 in the first run; the second run (48 verified, 40 enrolled) meets it.
 - Rights are unreviewed (`rights_reviewed: false`); files stay local and are never redistributed.
 
 ## Next
