@@ -28,13 +28,14 @@ decision policy (M5 track R; the development profile is `backend.api.development
   `NOT_STARTED` until a job starts one, then `READY`, `FAILED`...), `execution_provider` (the
   provider that last ran, `NOT_STARTED` before any) and `provider_fallback` (`ACTIVE` when that was
   not the preferred provider, else `NONE`). A change of provider is logged, a fallback as a warning:
-  asking for CUDA on a machine where it cannot start is never a silent CPU run.
+  asking for DirectML or CUDA on a machine where it cannot start is never a silent CPU run.
 """
 
 import json
 import logging
 import os
 import re
+import sys
 import threading
 import uuid
 from collections.abc import Callable, Mapping
@@ -73,6 +74,9 @@ from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy
 PACKAGE_KEY: Final = "insightface-buffalo-l"
 POLICY_DIRECTORY: Final = "policies"
 PROVIDERS: Final = ("CPUExecutionProvider",)
+# The shipped Windows build (onnxruntime-windowsml) runs DirectML on any DirectX 12 GPU, then the
+# CPU (owner decision 2026-10-15). CUDA stays a developer option: named explicitly, never a default.
+WINDOWS_PROVIDERS: Final = ("DmlExecutionProvider", "CPUExecutionProvider")
 # Provisional worker limits (the first real load takes seconds; nothing has measured these).
 WORKER_POLICY: Final = SupervisorPolicy(120, 120, 10, 10, 1, 600)
 READY: Final = "READY"
@@ -83,16 +87,17 @@ _SAFE_KEY: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 LOG: Final = logging.getLogger("faceidentify.runtime")
 
 PROVIDERS_ENV: Final = "FACEIDENTIFY_PROVIDERS"
-KNOWN_PROVIDERS: Final = ("CUDAExecutionProvider", "CPUExecutionProvider")
+KNOWN_PROVIDERS: Final = ("DmlExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider")
 
 
-def providers_from(environ: Mapping[str, str]) -> tuple[str, ...]:
+def providers_from(environ: Mapping[str, str], platform: str = sys.platform) -> tuple[str, ...]:
     """The execution providers to try, preferred first, from `FACEIDENTIFY_PROVIDERS` (a comma list,
-    for example `CUDAExecutionProvider,CPUExecutionProvider`). Unset means the CPU alone. A name
-    this application does not know is an error, never ignored: a typo must not silently mean CPU."""
+    for example `CUDAExecutionProvider,CPUExecutionProvider`). Unset means DirectML then the CPU on
+    Windows, the CPU alone elsewhere. A name this application does not know is an error, never
+    ignored: a typo must not silently mean CPU."""
     value = environ.get(PROVIDERS_ENV)
     if value is None or not value.strip():
-        return PROVIDERS
+        return WINDOWS_PROVIDERS if platform == "win32" else PROVIDERS
     names = tuple(part.strip() for part in value.split(","))
     unknown = [name for name in names if name not in KNOWN_PROVIDERS]
     if unknown or len(set(names)) != len(names):

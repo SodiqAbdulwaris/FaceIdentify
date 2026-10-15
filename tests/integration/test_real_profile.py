@@ -29,6 +29,7 @@ from backend.api.real import (
     PACKAGE_KEY,
     PROVIDERS,
     PROVIDERS_ENV,
+    WINDOWS_PROVIDERS,
     ClientPool,
     load_policy,
     policy_path,
@@ -95,7 +96,18 @@ ABSTAIN_ONLY = {
 def test_the_providers_come_from_the_environment_cpu_by_default(
     value: str | None, expected: tuple[str, ...]
 ) -> None:
-    assert providers_from({} if value is None else {PROVIDERS_ENV: value}) == expected
+    assert providers_from({} if value is None else {PROVIDERS_ENV: value}, "linux") == expected
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_windows_defaults_to_directml_then_the_cpu_and_cuda_only_when_named(
+    value: str | None,
+) -> None:
+    unset = {} if value is None else {PROVIDERS_ENV: value}
+    assert providers_from(unset, "win32") == ("DmlExecutionProvider", "CPUExecutionProvider")
+    assert WINDOWS_PROVIDERS == ("DmlExecutionProvider", "CPUExecutionProvider")
+    named = {PROVIDERS_ENV: "CUDAExecutionProvider,CPUExecutionProvider"}
+    assert providers_from(named, "win32") == ("CUDAExecutionProvider", "CPUExecutionProvider")
 
 
 @pytest.mark.parametrize(

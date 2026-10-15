@@ -27,7 +27,7 @@ def models(tmp_path: Path) -> tuple[ReferenceModel, ReferenceModel]:
     return ReferenceModel("det", detector, "scrfd"), ReferenceModel("emb", embedder, "arcface")
 
 
-def test_the_manifest_parses_and_declares_cuda_first_then_cpu(models, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_the_manifest_parses_and_declares_directml_cuda_and_cpu(models, tmp_path) -> None:  # type: ignore[no-untyped-def]
     manifest = reference_manifest(
         "ref-pack", "1.0.0", *models, dimension=512, provenance=PROVENANCE
     )
@@ -37,6 +37,7 @@ def test_the_manifest_parses_and_declares_cuda_first_then_cpu(models, tmp_path) 
         hashlib.sha256(b"embedder bytes").hexdigest(),
     ]
     assert [v.provider for v in parsed.variants if v.export_file == "models/det.onnx"] == [
+        "DmlExecutionProvider",
         "CUDAExecutionProvider",
         "CPUExecutionProvider",
     ]
@@ -82,7 +83,11 @@ def test_the_package_registers_in_the_catalog_as_one_space_with_both_variants(  
         session.commit()
         assert len(session.scalars(select(ModelExport)).all()) == 2
         providers = sorted(v.provider for v in session.scalars(select(RuntimeVariant)))
-        assert providers == ["CPUExecutionProvider"] * 2 + ["CUDAExecutionProvider"] * 2
+        assert providers == (
+            ["CPUExecutionProvider"] * 2
+            + ["CUDAExecutionProvider"] * 2
+            + ["DmlExecutionProvider"] * 2
+        )
         (space,) = session.scalars(select(RepresentationSpace)).all()
         assert space.dimension == 512
         embedder = next(e for e in registered.exports if e.representation_space_id is not None)
