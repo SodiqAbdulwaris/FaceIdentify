@@ -7,6 +7,7 @@ to say on demand (an initialisation failure, an answer for the wrong variant, a 
 """
 
 import hashlib
+import logging
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -15,6 +16,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
+from backend.api.real import ClientPool
 from backend.app.runtime.perception_client import (
     PROVIDER_UNAVAILABLE,
     PerceptionClient,
@@ -42,6 +44,7 @@ from backend.ml.contracts.messages import (
 )
 from backend.ml.contracts.protocol import ContractError, MLErrorCode, MLOperation, MLStatus
 from backend.ml.perception import alignment, detection
+from backend.ml.supervisor.process import ProcessWorker
 from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy, WorkerFailedError
 from backend.ml.worker.perception_handlers import DETECTOR, EMBEDDER
 from tests.fixtures.deterministic import SeededUUIDs
@@ -54,6 +57,8 @@ from tests.fixtures.onnx_models import (
 
 CPU = "CPUExecutionProvider"
 MISSING = "NoSuchExecutionProvider"
+DIRECTML = "DmlExecutionProvider"
+NO_DIRECTML = "tests.fixtures.directml_cannot_start:build_handlers"
 FACE = PlantedFace(level=0, column=40, row=30)
 POLICY = SupervisorPolicy(
     handshake_timeout=120,
@@ -158,6 +163,53 @@ def test_detect_then_represent_runs_the_variant_whose_provider_exists(
         picture(), found.detections
     )  # (deterministic, and the worker is reused)
     assert np.array_equal(again.vectors[0].vector, vector.vector)
+
+
+def test_directml_that_cannot_start_falls_back_to_the_cpu_visibly(
+    models: dict[str, tuple[Path, bytes]], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The Windows default plan (DirectML, then the CPU) on a machine where DirectML is listed
+    but its session cannot start: a real worker, the real session loader. The job runs on the CPU,
+    the fallback is recorded with DirectML's own error, logged once per stage and shown by
+    readiness."""
+    (dpath, ddata), (epath, edata) = models["detector"], models["embedder"]
+    dcomp, ecomp = uuid.uuid4(), uuid.uuid4()
+    plan = plan_of(
+        (
+            planned(dpath, ddata, DETECTOR, DIRECTML, component=dcomp),
+            planned(dpath, ddata, DETECTOR, CPU, component=dcomp),
+        ),
+        (
+            planned(epath, edata, EMBEDDER, DIRECTML, component=ecomp),
+            planned(epath, edata, EMBEDDER, CPU, component=ecomp),
+        ),
+    )
+
+    def supervise(plan: PerceptionPlan, policy: SupervisorPolicy) -> MLSupervisor:
+        return MLSupervisor(lambda: ProcessWorker(NO_DIRECTML, plan.worker_config()), policy)
+
+    pool = ClientPool(uuid.uuid4, policy=POLICY, supervise=supervise)
+    try:
+        with caplog.at_level(logging.WARNING, logger="faceidentify.runtime"):
+            client = pool.client_for(plan)
+            found = client.detect(picture())
+            result = client.represent(picture(), found.detections)
+    finally:
+        pool.close()
+    assert found.ran is plan.detector[1]
+    assert result.ran is plan.embedder[1]
+    assert len(result.vectors) == 1
+    (fallback,) = found.fallbacks
+    (failed,) = fallback.failed
+    assert failed.variant is plan.detector[0]
+    assert failed.code is MLErrorCode.RUNTIME_INITIALIZATION_FAILED
+    assert "887A0002" in failed.message
+    assert pool.provider_state() == {
+        "execution_provider": CPU,
+        "provider_fallback": "ACTIVE",
+    }
+    assert len(caplog.records) == 2  # one warning per stage
+    assert f"preferred {DIRECTML} is not available" in caplog.records[0].getMessage()
 
 
 def test_a_picture_with_no_face_is_a_result_and_nothing_is_embedded(

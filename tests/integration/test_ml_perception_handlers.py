@@ -660,6 +660,55 @@ def test_a_session_that_runs_on_another_provider_than_asked_is_refused(
     assert refused.value.code is MLErrorCode.RUNTIME_INITIALIZATION_FAILED
 
 
+@pytest.mark.parametrize(
+    ("provider", "code"),
+    [
+        ("DmlExecutionProvider", MLErrorCode.RUNTIME_INITIALIZATION_FAILED),
+        ("CUDAExecutionProvider", MLErrorCode.RUNTIME_INITIALIZATION_FAILED),
+        (CPU, MLErrorCode.COMPONENT_LOAD_FAILED),
+    ],
+)
+def test_an_accelerator_that_cannot_start_is_a_provider_failure_the_cpu_a_model_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, code: MLErrorCode
+) -> None:
+    data = embedder_model()
+    path = tmp_path / "m.onnx"
+    path.write_bytes(data)
+
+    def no_adapter(*args: Any, **kwargs: Any) -> Any:  # DirectML with no DirectX 12 adapter
+        raise RuntimeError("887A0002 The object was not found")
+
+    monkeypatch.setattr(ort, "get_available_providers", lambda: [provider])
+    monkeypatch.setattr(ort, "InferenceSession", no_adapter)
+    with pytest.raises(WorkerError, match="887A0002") as refused:
+        load_session(path, hashlib.sha256(data).digest(), provider)
+    assert refused.value.code is code
+
+
+@pytest.mark.parametrize(("provider", "patterns"), [("DmlExecutionProvider", False), (CPU, True)])
+def test_directml_sessions_run_sequentially_without_memory_patterns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, patterns: bool
+) -> None:
+    data = embedder_model()
+    path = tmp_path / "m.onnx"
+    path.write_bytes(data)
+    seen: list[Any] = []
+
+    class Spy:
+        def __init__(self, model: Any, *, sess_options: Any, providers: list[str]) -> None:
+            seen.append(sess_options)
+
+        def get_providers(self) -> list[str]:
+            return [provider]
+
+    monkeypatch.setattr(ort, "get_available_providers", lambda: [provider])
+    monkeypatch.setattr(ort, "InferenceSession", Spy)
+    load_session(path, hashlib.sha256(data).digest(), provider)
+    (options,) = seen
+    assert options.enable_mem_pattern is patterns
+    assert options.execution_mode == ort.ExecutionMode.ORT_SEQUENTIAL
+
+
 # --- in a real worker process, behind the supervisor ---------------------------------------------
 
 POLICY = SupervisorPolicy(
