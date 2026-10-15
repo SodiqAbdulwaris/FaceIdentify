@@ -56,9 +56,11 @@ The package is installed into a **local state root**, never into a library:
 | A developer host, gate or script | any folder you pass as `--local-state-root`, conventionally `local-models/state` |
 
 ```bash
-uv run python scripts/install_reference_models.py --models-dir local-models/buffalo_l \
+PYTHONPATH=. uv run python scripts/install_reference_models.py --models-dir local-models/buffalo_l \
     --detector det_10g.onnx --embedder w600k_r50.onnx --local-state-root <state root>
 ```
+
+Run the scripts from the repository root: they import `backend` from the checkout, so `PYTHONPATH=.` is needed (in PowerShell, `$env:PYTHONPATH = "."` first, then the command without the prefix).
 
 It measures the files again, writes a manifest with their sizes and hashes (and
 `redistributable: false`), and installs it as `runtime/packages/insightface-buffalo-l` under the
@@ -103,20 +105,21 @@ a copy of the abstain-only file beside the live one, so you can go back by copyi
 
 The CUDA path needs a machine-local `onnxruntime-gpu` plus NVIDIA's CUDA 12 and cuDNN 9 libraries in
 `local-models/ort-gpu` (installed by hand on 2026-10-07; NVIDIA's licences govern those files, see the
-licensing record). Without `FACEIDENTIFY_ORT_GPU_DIR`, asking for CUDA silently ends on the CPU
-([research](../research/onnx-runtime-gpu-packaging.md)).
+licensing record). Without `FACEIDENTIFY_ORT_GPU_DIR`, asking for CUDA ends on the CPU: the backend logs the provider
+fallback and readiness shows it (section 6;
+[research](../research/onnx-runtime-gpu-packaging.md)).
 
 ## 6. Checking it runs where you think
 
 ```bash
-uv run python scripts/smoke_real_models.py --local-state-root <state root> \
+PYTHONPATH=. uv run python scripts/smoke_real_models.py --local-state-root <state root> \
     --providers DmlExecutionProvider,CPUExecutionProvider <a few .jpg files>
 ```
 
 It loads the installed package through the real worker, detects and embeds every face and prints
 the timings (on a recent NVIDIA laptop GPU about 0.02 s per picture on DirectML, about 0.5 s on the
 CPU). In the running app, `GET /readiness` reports `execution_provider` and
-`provider_fallback`: on the GPU they read `DmlExecutionProvider` and `NONE`; `ACTIVE` means a GPU
+`provider_fallback` under `capabilities`: on the GPU they read `DmlExecutionProvider` and `NONE`; `ACTIVE` means a GPU
 start failed and the CPU took over (the worker's log says why).
 
 ## 7. The desktop app on the real models
