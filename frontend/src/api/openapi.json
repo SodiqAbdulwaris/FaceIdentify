@@ -1400,6 +1400,20 @@
         "title": "Reassign",
         "type": "object"
       },
+      "RelinkRequest": {
+        "properties": {
+          "path": {
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "RelinkRequest",
+        "type": "object"
+      },
       "RenamePerson": {
         "properties": {
           "display_name": {
@@ -1511,6 +1525,17 @@
           "availability": {
             "title": "Availability",
             "type": "string"
+          },
+          "availability_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availability Reason"
           },
           "created_at": {
             "format": "date-time",
@@ -1655,6 +1680,7 @@
           "updated_at",
           "state",
           "storage_mode",
+          "availability_reason",
           "original",
           "width",
           "height",
@@ -3751,6 +3777,104 @@
         "summary": "List Source Runs",
         "tags": [
           "processing"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}/recheck": {
+      "post": {
+        "description": "Recheck File: verify a missing original again, where it was. A file that differs from the\nrecorded one is not the original and the source stays missing (`availability_reason` says\nwhy). A repeat is harmless; an original that is not missing is left as it is.",
+        "operationId": "recheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Recheck",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}/relink": {
+      "post": {
+        "description": "Locate Original: point a missing referenced original at the file the user selected. The\nfile must be the recorded media exactly (size and SHA-256); a matching name proves nothing, and\ndifferent media is a replacement, which is refused (API section 59). Managed originals are not\nrelinked: they are rechecked where the library keeps them.",
+        "operationId": "relink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Relink",
+        "tags": [
+          "sources"
         ]
       }
     },

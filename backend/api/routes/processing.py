@@ -34,7 +34,7 @@ from backend.api.pagination import (
     older_than,
     paginate,
 )
-from backend.api.routes.sources import gone_sources, require_visible_source
+from backend.api.routes.sources import gone_sources, recheck_if_missing, require_visible_source
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
 from backend.app.jobs.models import Job, JobPriority, JobType
 from backend.app.processing.cancel import (
@@ -215,6 +215,7 @@ def process_source(
     backend: Annotated[Backend, Depends(get_backend)],
 ) -> ProcessingRunDetail:
     library.unit_of_work.read(lambda session: _require_source(session, source_id))
+    recheck_if_missing(library, backend, source_id)  # a missing original is verified on use (#179)
     settings = processing_settings(backend)  # (after the Source: a gone one is 404, not 503)
     try:
         request = library.unit_of_work.read(settings.request_for)

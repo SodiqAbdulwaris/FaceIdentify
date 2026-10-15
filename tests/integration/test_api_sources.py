@@ -259,7 +259,10 @@ async def test_media_for_a_missing_original_is_a_stable_error(api: Api) -> None:
     with api.backend.library.session_factory() as session:  # and recovery has marked one MISSING
         artifact = session.scalars(select(Artifact).where(Artifact.storage_key.is_not(None))).one()
         artifact.state = ArtifactState.MISSING
+        assert artifact.storage_key is not None
+        managed_path = api.backend.library.store.roots.path_for(artifact.storage_key)
         session.commit()
+    managed_path.unlink()  # genuinely gone (opening a source verifies a missing original again)
 
     gone = error(await api.client.get(referenced["original"]["url"]), 404, "SOURCE_FILE_MISSING")
     flagged = error(
