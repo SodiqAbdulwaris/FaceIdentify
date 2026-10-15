@@ -199,6 +199,8 @@ Referenced originals are never deleted by the application.
 
 > **Decision 2026-10-02 (agent, M3 step 6; the spec leaves these open): how an image import behaves.** `ImportSourceUseCase` (`backend/app/sources/import_source.py`) reads the file once, into memory and up to a byte limit the caller sets, and decodes it (a JPEG, PNG, BMP or WebP, up to a pixel limit the caller sets) before anything is written, so a file that is not a usable image leaves no trace and what is validated is what is stored. A managed import then reserves a `PENDING` artifact, writes the bytes to its key, and in ONE transaction makes the artifact `AVAILABLE` and adds the Source; a crash leaves only what startup recovery already settles (a reservation without a file becomes `MISSING`, a written file without a Source becomes an `AVAILABLE` artifact nothing refers to; never a half-made Source). A referenced import checks the file's size first (inspecting hashes the whole file), then hashes and reads it and refuses it if the bytes read are not the bytes hashed. The Source records the size as shown (the orientation applied), has no thumbnail yet, and no Job or run is created: import is not processing. Importing the same file twice makes two Sources (no deduplication: a Source is the user's own entry). The blank-name check comes before the file is looked at.
 
+> **Decision 2026-10-15 (owner; issue 188):** an image import also accepts an AVIF, through the same decoder and under the same byte and pixel limits as the other four formats, so the import formats are JPEG, PNG, BMP, WebP and AVIF. It is decoded by Pillow's built-in AVIF support (no new dependency). Authoritative source: `backend/infrastructure/media/image.py` and `docs/implementations/2026-10-15-avif-images.md`.
+
 ---
 
 ## 5.2 Source queries
@@ -651,6 +653,10 @@ Repeating the same face search must not grow memory.
 > `503 PERCEPTION_UNAVAILABLE`, `503 SEARCH_INDEX_UNAVAILABLE`, `429 FACE_SEARCH_BUSY` (at most three in flight). A path may name any readable local file (the
 > bearer token already grants import of any file) except a network path; the body is size-checked as it
 > arrives and the answer is built in the same read transaction that validated the candidates.
+
+> **Decision 2026-10-15 (owner; issue 188):** face search also accepts an AVIF, under the same size and
+> pixel limits as import, so the accepted query formats are JPEG, PNG, BMP, WebP and AVIF (PDF still is not).
+> Decoded by Pillow's built-in AVIF support (no new dependency); see the import note of the same date.
 
 ---
 

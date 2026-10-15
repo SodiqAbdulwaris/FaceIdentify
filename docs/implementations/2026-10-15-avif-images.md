@@ -3,9 +3,10 @@
 - **Date:** 2026-10-15
 - **Milestone / tracker IDs:** M5 follow-up · TST-037, TST-056 · issue
   [#188](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/188)
-- **Status:** built; the spec notes await the owner's approval
+- **Status:** done (awaiting merge)
 - **Commits:** PR (this branch, `feat/avif-image-support`): `feat(media): accept AVIF images`,
-  `feat(ui): offer AVIF in the pickers and face search`, `docs: record AVIF support (#188)`
+  `feat(ui): offer AVIF in the pickers and face search`, `docs: record AVIF support (#188)`,
+  `docs(specs): accept AVIF images (owner decision)`
 
 ## What changed
 
@@ -38,9 +39,11 @@ common on the web.
   their old answer. A genuine AVIF whose major brand is `mif1` decodes; only if it is also damaged
   is it called unsupported rather than corrupt.
 - **The spec.** `API and Contracts.md` lists the accepted formats in two decision notes (import,
-  2026-10-02; face search, 2026-10-10). Editing a spec needs the owner's approval; the supervising
-  session asked the owner on 2026-10-15. Until the answer, the notes are unchanged and the
-  conflict is recorded in `.agents/CONTEXT.md` (item 32).
+  2026-10-02; face search, 2026-10-10). Editing a spec needs the owner's approval; asked through the
+  supervising session, the owner approved on 2026-10-15: "add AVIF to the accepted formats ...
+  with dated Decision 2026-10-15 notes after the two existing format notes ..., keeping the
+  original text. Pillow's built-in AVIF support, no new dependency." Both notes are added;
+  `.agents/CONTEXT.md` item 32 is marked resolved.
 - An AVIF's orientation (EXIF orientation, carried by libavif as `irot`/`imir`) is applied exactly
   once: all eight orientations come out upright (tested).
 
@@ -60,5 +63,4 @@ common on the web.
 
 ## Open issues / follow-ups
 
-- The two spec notes, once the owner answers.
 - Writing AVIF (thumbnails, exports) is not needed and not done.
