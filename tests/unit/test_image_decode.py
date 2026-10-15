@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from PIL import Image, ImageFile
+from PIL import AvifImagePlugin, Image, ImageFile
 
 from backend.infrastructure.media.image import (
     CorruptImageError,
@@ -472,6 +472,25 @@ def test_an_avif_under_the_generic_brand_is_read_and_when_cut_short_is_corrupt()
     assert decode_image(data, max_pixels=LIMIT).header.format == "AVIF"
     with pytest.raises(CorruptImageError):
         read_header(data[: ftyp_end + 8])  # the brands are all there, the rest is not
+
+
+def test_an_avif_is_decoded_on_one_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    real: Any = vars(AvifImagePlugin)["_avif"]  # (the native reader Pillow calls)
+    threads: list[int] = []
+
+    class Spy:
+        def __getattr__(self, name: str) -> Any:
+            return getattr(real, name)
+
+        def AvifDecoder(self, data: bytes, codec: str, max_threads: int) -> Any:  # noqa: N802
+            threads.append(max_threads)
+            return real.AvifDecoder(data, codec, max_threads)
+
+    monkeypatch.setattr(AvifImagePlugin, "_avif", Spy())
+
+    decode_image(encoded("AVIF"), max_pixels=LIMIT)
+
+    assert threads == [1]
 
 
 def test_an_avif_with_damaged_pixels_is_corrupt() -> None:
