@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -51,6 +51,7 @@ from backend.app.runtime.perception_client import Detected, FaceVector, Represen
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.ml.contracts.messages import Detection
 from backend.ml.contracts.protocol import MLErrorCode, MLOperation
+from backend.ml.supervisor.supervisor import MLSupervisor
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, imported, library_settings, serving
 from tests.fixtures.catalog_packages import manifest_dict, package_files
@@ -262,6 +263,9 @@ class Machine:
             return detected(request)
         return self.side.answer(request)
 
+    def supervise(self, _plan: PerceptionPlan, _policy: Any) -> MLSupervisor:
+        return cast(MLSupervisor, self.script)
+
 
 def job(pool: ClientPool, accelerated: PerceptionPlan) -> None:
     """What one processing job asks of its client: detect, then represent."""
@@ -282,7 +286,7 @@ def test_readiness_reports_the_provider_that_ran_and_a_fallback_is_logged_once(
         (embed_cuda, variant(4, "FACE_REPRESENTATION")),
     )
     machine = Machine({str(cuda.runtime_variant_id), str(embed_cuda.runtime_variant_id)})
-    pool = ClientPool(uuid.uuid4, supervise=lambda _plan, _policy: machine.script)
+    pool = ClientPool(uuid.uuid4, supervise=machine.supervise)
     assert pool.provider_state() == {
         "execution_provider": "NOT_STARTED",
         "provider_fallback": "NONE",
@@ -313,7 +317,7 @@ def test_readiness_reports_the_provider_that_ran_and_a_fallback_is_logged_once(
 
 def test_a_stage_with_one_variant_is_never_a_fallback() -> None:
     machine = Machine(set())
-    pool = ClientPool(uuid.uuid4, supervise=lambda _plan, _policy: machine.script)
+    pool = ClientPool(uuid.uuid4, supervise=machine.supervise)
     single = PerceptionPlan(
         uuid.UUID(int=2),
         EMBEDDING_DIMENSION,
