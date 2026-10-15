@@ -32,6 +32,7 @@ from backend.ml.contracts.messages import Detection
 from backend.ml.contracts.protocol import ContractError, MLErrorCode
 from backend.ml.supervisor.supervisor import MLUnavailableError
 from tests.fixtures.api import Api, error, imported, processing_app
+from tests.fixtures.links import link_directory
 from tests.integration.test_api_memory import index_caught_up, processed
 from tests.integration.test_api_processing_routes import finished, process
 from tests.integration.test_api_search import FACES, face, name_identity
@@ -392,8 +393,36 @@ async def test_limits_are_kept_while_the_picture_arrives(
         error(
             await api.client.post(FACE_SEARCH, json={"path": network}),
             400,
-            "QUERY_IMAGE_UNREADABLE",
+            "QUERY_PATH_NOT_LOCAL",
         )
+
+
+async def test_a_path_that_leads_to_a_network_share_through_a_link_is_refused(
+    processing_api: Api, tmp_path: Path
+) -> None:
+    """Issue #174: a link or junction that looks local but points at a share is refused before
+    anything is read (the `.invalid` host cannot resolve, so nothing is contacted either way); a
+    junction to a local folder is followed as before."""
+    api = processing_api
+    assert api.perception is not None
+    api.perception.vector = FACES[0]
+    share = r"\\faceidentify-test.invalid\share"
+    (tmp_path / "remote.png").symlink_to(share + r"\q.png")
+    (tmp_path / "mounted").symlink_to(share, target_is_directory=True)
+    real = tmp_path / "real"
+    real.mkdir()
+    api.image("q.png").replace(real / "q.png")
+    link_directory(tmp_path / "pictures", real)
+
+    for path in (tmp_path / "remote.png", tmp_path / "mounted" / "q.png"):
+        refused = error(
+            await api.client.post(FACE_SEARCH, json={"path": str(path)}),
+            400,
+            "QUERY_PATH_NOT_LOCAL",
+        )
+        assert str(path) not in str(refused)  # the path is not echoed back
+    local = await api.client.post(FACE_SEARCH, json={"path": str(tmp_path / "pictures" / "q.png")})
+    assert local.status_code == 200, local.text
 
 
 async def test_the_search_index_or_worker_being_unavailable_is_said_plainly(

@@ -11,7 +11,6 @@ nobody resembles is `UNKNOWN`.
 
 import json
 import uuid
-from pathlib import Path
 from typing import Annotated, Literal
 
 import anyio
@@ -43,6 +42,7 @@ from backend.infrastructure.media.image import (
     ImageTooLargeError,
     UnsupportedImageError,
 )
+from backend.infrastructure.storage.local_path import local_target
 from backend.ml.contracts.protocol import ContractError
 from backend.ml.supervisor.supervisor import MLUnavailableError, WorkerFailedError
 
@@ -95,18 +95,29 @@ def _read_query(raw: bytes, content_type: str, limits: MediaLimits) -> bytes:
     """The picture's bytes: the body itself, or the file a JSON body names.
 
     Trust boundary: the bearer token already lets its holder read any file on this computer
-    through import, so a path is accepted as is, except that a network path (UNC or device) is
-    refused: it could make this computer reach out and authenticate to another one. The file is
-    read through one handle and never more than the limit, whatever it grows into after a check.
+    through import, so a local path is accepted, but one that leads off this computer is refused
+    before anything is read: a UNC or device form, a mapped network drive, or a link or junction
+    along the way that points at one (issue #174; `local_target`). It could make this computer
+    reach out and authenticate to another one, and no network location is approved. The resolved
+    local file is what is opened, through one handle and never more than the limit, whatever it
+    grows into after a check.
     """
     if "json" not in content_type:
         return raw
     try:
         path = json.loads(raw)["path"]
-        # (Windows reads / as \ too, so //server and \\/server are network paths as well)
-        if not isinstance(path, str) or path.replace("/", "\\").startswith("\\\\"):
+        if not isinstance(path, str):
             raise ValueError
-        with Path(path).open("rb") as handle:
+        target = local_target(path)
+        if target is None:
+            raise ApiError(
+                400, "QUERY_PATH_NOT_LOCAL",
+                "A picture on another computer or a network drive cannot be searched by its path. "
+                "Copy it to this computer, or choose it again so it is sent as bytes.",
+            )  # fmt: skip
+        # ponytail: a link planted in `target` between this check and the open would still be
+        # followed; opening without following reparse points needs CreateFileW, add it if needed
+        with target.open("rb") as handle:
             data = handle.read(limits.max_bytes + 1)
     except (ValueError, KeyError, TypeError, OSError):
         raise ApiError(400, "QUERY_IMAGE_UNREADABLE", "The image could not be read.") from None
