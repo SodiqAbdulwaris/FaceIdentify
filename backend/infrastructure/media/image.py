@@ -40,16 +40,28 @@ MIME_TYPES = {
     "AVIF": "image/avif",
 }
 _SIXTEEN_BIT_GREY = "I;16"  # (what Pillow calls a 16-bit grey PNG, the only such input)
-# How each of the five formats begins (a WebP is a RIFF container naming WEBP at byte 8; an AVIF
-# is an ISO-BMFF file whose first box, `ftyp`, names the avif or avis brand at byte 8). A file
-# that begins like one of them but cannot be opened is damaged; any other is simply not ours. (A
-# HEIF photograph also starts with `ftyp`, under other brands, so it stays "not ours".)
-_SIGNATURES = re.compile(rb"\x89PNG\r\n\x1a\n|\xff\xd8|BM|RIFF....WEBP|....ftypavi[fs]", re.DOTALL)
+# How four of the formats begin (a WebP is a RIFF container naming WEBP at byte 8). A file that
+# begins like one of them, or like an AVIF (`_names_avif`), but cannot be opened is damaged; any
+# other is simply not ours.
+_SIGNATURES = re.compile(rb"\x89PNG\r\n\x1a\n|\xff\xd8|BM|RIFF....WEBP", re.DOTALL)
+_AVIF_BRANDS = (b"avif", b"avis")
+_FTYP_READ_LIMIT = 4096  # (a real `ftyp` box lists a handful of brands)
 
 
 # What Pillow raises for a damaged image. The AVIF reader (libavif) reports a failed decode as a
 # RuntimeError, which the others never raise.
 _DECODER_ERRORS = (OSError, ValueError, SyntaxError, RuntimeError)
+
+
+def _names_avif(data: bytes) -> bool:
+    """Whether `data` begins with an ISO-BMFF `ftyp` box listing the avif or avis brand, as its
+    major brand (byte 8) or as a compatible one (4-byte names after the 4-byte minor version). A
+    HEIF photograph has an `ftyp` box too, without these brands, so it stays "not ours"."""
+    if data[4:8] != b"ftyp":
+        return False
+    end = min(int.from_bytes(data[:4], "big"), len(data), _FTYP_READ_LIMIT)
+    brands = [data[8:12]] + [data[at : at + 4] for at in range(16, end - 3, 4)]
+    return any(brand in _AVIF_BRANDS for brand in brands)
 
 
 class ImageError(ValueError):
@@ -112,7 +124,7 @@ def _open(data: bytes) -> Image.Image:
     except UnidentifiedImageError:
         # Pillow says this both for a format it does not know and for one of the five whose header
         # is cut short or damaged, so the signature decides which it was.
-        if _SIGNATURES.match(data):
+        if _SIGNATURES.match(data) or _names_avif(data):
             raise CorruptImageError("the image header is cut short or damaged") from None
         raise UnsupportedImageError("not a JPEG, PNG, BMP, WebP or AVIF image") from None
     except _DECODER_ERRORS as error:
