@@ -78,7 +78,7 @@ marked.
    ```
 
    Expected: uv downloads Python 3.12 if needed, creates `.venv/` and installs the packages
-   (`fastapi`, `sqlalchemy`, `alembic`, `usearch`, `onnxruntime`, `numpy`, `pillow`, `uvicorn`,
+   (`fastapi`, `sqlalchemy`, `alembic`, `usearch`, `onnxruntime-windowsml` (`onnxruntime` off Windows), `numpy`, `pillow`, `uvicorn`,
    `websockets` and the dev tools: `pytest`, `ruff`, `mypy`, `httpx`, `hypothesis`, `onnx`).
 5. **Install the JavaScript side** with `npm ci`, not `npm install`:
 

@@ -19,7 +19,7 @@ The project's settings that come from the environment, and who reads them (all v
 | `FACEIDENTIFY_LAUNCH_TOKEN` | `backend/api/host.py` (`read_launch_token`); set by `desktop/src-tauri/src/sidecar.rs` | the per-launch secret (43 characters of URL-safe base64) |
 | `FACEIDENTIFY_LIBRARY_ROOT` | `backend/alembic/env.py` (command-line migrations) and the shell (`config.rs`) | the library folder, a development/test override |
 | `FACEIDENTIFY_LOCAL_STATE_ROOT` | `backend/infrastructure/storage/library_root.py` | the machine-local folder (indexes, temp, logs) when `LOCALAPPDATA` is not available |
-| `FACEIDENTIFY_PROVIDERS` | `backend/api/real.py` (`providers_from`) | comma list of ONNX Runtime providers to try, preferred first, for the real profile (default CPU) |
+| `FACEIDENTIFY_PROVIDERS` | `backend/api/real.py` (`providers_from`) | comma list of ONNX Runtime providers to try, preferred first, for the real profile (default DirectML then the CPU on Windows, the CPU alone elsewhere) |
 | `FACEIDENTIFY_ORT_GPU_DIR` | `backend/ml/worker/gpu_path.py` | folder of a machine-local `onnxruntime-gpu` so CUDA can run |
 | `FACEIDENTIFY_PROVIDER` | `tests/e2e/test_real_models.py` | the single provider for that local-only test |
 | `FACEIDENTIFY_PYTHON` | the shell (`config.rs`, `sidecar.rs`) | which Python runs the backend (default `.venv`) |

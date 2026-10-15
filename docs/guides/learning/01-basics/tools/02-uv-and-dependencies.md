@@ -17,8 +17,8 @@ and the right package versions, and runs commands inside it. You never "activate
 | `uv.lock` | The exact version of every package (51 of them) so every machine installs the same thing |
 | `.venv/` | The installed packages (Git-ignored; recreated by `uv sync`) |
 
-The runtime dependencies (what the application needs): `alembic`, `fastapi`, `numpy`, `onnxruntime`,
-`pillow`, `sqlalchemy`, `usearch`, `uvicorn`, `websockets`. The dev dependencies (what building and
+The runtime dependencies (what the application needs): `alembic`, `fastapi`, `numpy`, ONNX Runtime
+(`onnxruntime-windowsml` on Windows, `onnxruntime` elsewhere, chosen by an environment marker), `pillow`, `sqlalchemy`, `usearch`, `uvicorn`, `websockets`. The dev dependencies (what building and
 checking it needs): `httpx`, `hypothesis`, `mypy`, `onnx`, `pytest`, `pytest-asyncio`, `pytest-cov`,
 `ruff`.
 

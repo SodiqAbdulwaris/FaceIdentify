@@ -6,6 +6,13 @@
   conflicts, item 32)
 - **Implementation entry:** [`2026-10-15-gpu-provider-visibility.md`](../implementations/2026-10-15-gpu-provider-visibility.md)
 
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** option D was chosen, in the
+> owner's words: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then
+> CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start
+> failure fall back to CPU." Implemented by
+> [`2026-10-15-ship-onnxruntime-windowsml.md`](../implementations/2026-10-15-ship-onnxruntime-windowsml.md);
+> what it found is in *Implementation* at the end of this document.
+
 ## The question
 
 The owner wants the GPU used for speed on this machine (RTX 4070 Laptop, driver 576.83, plus an
@@ -120,3 +127,48 @@ variants (the representation space is unchanged, since the provider is not part 
 the start-failure classification above; a licensing row; a test of the fallback on a machine or VM
 without a DX12 GPU; the tech-stack sections 7 and 12 amended for NVIDIA; and re-running the
 operating-point measurement on DirectML before relying on it.
+
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the recommendation above (D)
+> is adopted as written, CUDA developer-only.
+
+## Implementation (2026-10-15)
+
+What changed is in the implementation entry
+([`2026-10-15-ship-onnxruntime-windowsml.md`](../implementations/2026-10-15-ship-onnxruntime-windowsml.md)).
+What it found that this research did not know:
+
+- **The pin.** The wheel's version is `1.30.0.202609102321` (a build suffix), so `==1.30.0` matches
+  nothing; `pyproject.toml` pins `==1.30.0.*`. Wheels exist for CPython 3.11 to 3.14 on `win_amd64` and
+  `win_arm64` only.
+- **ONNX Runtime's own Python fallback.** `InferenceSession` itself catches a provider that fails to
+  start, prints an `EP Error ... Falling back to ['CPUExecutionProvider'] and retrying.` banner on
+  standard output, and quietly builds a CPU session. Seen on this machine with a DirectML adapter that
+  does not exist (`device_id` 99: `887A0002 ... there is no adapter with the specified ordinal`). The
+  worker's existing check (`session.get_providers()[0]` must be the provider asked for) catches that
+  case and answers `RUNTIME_INITIALIZATION_FAILED`, so it falls back correctly; the start failures that
+  still raise (ONNX Runtime does not retry every exception type, and the retry itself can fail) are now
+  classified as a provider failure too. The printed banner goes to the worker's standard output, not to
+  the pipe the worker talks on.
+- **Measurements through the real worker** (probe: the installed package with the new manifest, a
+  scratch local state root, the first 30 LFW `*_0001.jpg` pictures, one worker per provider). **Heavily
+  contended:** a CelebA evaluation gate from another session was running on the CPU throughout, so
+  these are not comparable with the table above:
+
+  | Provider | First picture | Steady detect, median / p90 | Steady embed, median / p90 |
+  |---|---|---|---|
+  | DirectML (default adapter) | 2.6 s + 1.9 s | 0.122 / 0.195 s | 0.044 / 0.066 s |
+  | CPU | 1.5 s + 0.8 s | 0.170 / 0.695 s | 0.671 / 1.460 s |
+
+  A second run gave the same picture (DirectML 0.133 / 0.055 s, CPU 0.190 / 0.797 s). The model alone on
+  DirectML's default adapter (`det_10g`, 640 × 640, median of 20) took 0.006 s, which is the RTX
+  (the Intel UHD took 0.067 s in the earlier model-only test), so the extra time per picture is the
+  worker's CPU-side work starved by the gate, not the GPU. Re-measure uncontended before quoting speed.
+- **Agreement:** DirectML and CPU embeddings of the same 30 faces agree to 1 − cos ≤ 2.4e-7.
+- **Forced start failure on the real build:** with DirectML asked for adapter 99 in the real worker,
+  both stages ran on the CPU, each ruled-out variant was recorded as `RUNTIME_INITIALIZATION_FAILED`,
+  one warning per stage was logged, and readiness reported `execution_provider`
+  `CPUExecutionProvider`, `provider_fallback` `ACTIVE`.
+- **Still unverified:** an AMD GPU; a machine with no DirectX 12 GPU (the failure above was a missing
+  adapter on a machine that has two, not a missing DirectX 12); a crash of DirectML during inference
+  (only start failures fall back; a failure mid-run is the operation's error); Windows ML on the
+  Intel UHD (the Intel figure is from `onnxruntime-directml` 1.23.0).

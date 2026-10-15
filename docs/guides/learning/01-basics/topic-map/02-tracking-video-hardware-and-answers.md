@@ -37,8 +37,8 @@ and recorded in history).
 
 - **FFmpeg/ffprobe and PyAV are the chosen video foundation** for M6; **OpenCV is not a dependency** (owner
   decision 2026-10-02: Pillow and NumPy handle still images). Nothing video-related is built.
-- **ONNX Runtime is the chosen runtime; CUDA and cuDNN are verified** on the owner's GPU; DirectML is the
-  documented Windows-GPU option; **TensorRT and OpenVINO are [researched]**. The worker uses spawned processes and
+- **ONNX Runtime is the chosen runtime; the shipped Windows build runs DirectML on any DirectX 12 GPU, then
+  the CPU** (owner decision 2026-10-15); CUDA and cuDNN are verified on the owner's GPU but developer-only; **TensorRT and OpenVINO are [researched]**. The worker uses spawned processes and
   shared memory; batching, pinned memory and zero-copy GPU transfers are future optimisations.
 - CPU SIMD, multithreading, multiprocessing, asynchronous pipelines, heterogeneous CPU/GPU pipelines: general
   techniques named in the specs; see [the vocabulary](../recognition-ideas/06-nearest-neighbour-and-video-vocabulary.md).
@@ -52,7 +52,7 @@ and recorded in history).
 | Tracking: ByteTrack, DeepSORT, StrongSORT, BoT-SORT? | open; M6 and M7 |
 | Vector search: FAISS, HNSW, pgvector? Is an index even needed for thousands of identities? | **USearch (HNSW)**, kept rebuildable; FAISS and Voyager are documented alternatives. For thousands of vectors an exact scan would also work; the index is built so the design scales and the rebuildable-index discipline is exercised early |
 | Video: FFmpeg, OpenCV, PyAV? | FFmpeg + PyAV; OpenCV not baseline |
-| Local GPU inference: PyTorch, ONNX Runtime, TensorRT, CUDA? | **ONNX Runtime** with CUDA on the RTX 4070 and the CPU as the planned fallback; PyTorch is not a dependency of this repository (the stack decision allows it only for experimentation and export outside the shipped app) |
+| Local GPU inference: PyTorch, ONNX Runtime, TensorRT, CUDA? | **ONNX Runtime** with DirectML (any DirectX 12 GPU, the RTX 4070 included) and the CPU as the fallback, CUDA for the developer only; PyTorch is not a dependency of this repository (the stack decision allows it only for experimentation and export outside the shipped app) |
 | Storage: PostgreSQL or SQLite? | **SQLite in WAL mode**; PostgreSQL only if measured write contention demands it |
 | Desktop: web UI + local server, Electron, Tauri, native? | **Tauri** shell + React front end + a local FastAPI sidecar |
 | Clustering for unknown identities? | not built |

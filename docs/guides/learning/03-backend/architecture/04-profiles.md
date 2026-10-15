@@ -50,7 +50,7 @@ margin 0.1, new-identity ceiling 0.5) is chosen only so those two cases separate
 - **`ml_worker`**: the workers' own state, `NOT_STARTED` until a job starts one. `ClientPool` keeps one supervised worker per
   plan for the life of the process (loading models takes seconds) and gives every job a fresh client (so each job records
   its own provider fallbacks).
-- **Providers** come from `FACEIDENTIFY_PROVIDERS` (a comma list, default CPU only; `allow_fallback` is on only when more
+- **Providers** come from `FACEIDENTIFY_PROVIDERS` (a comma list, default DirectML then the CPU on Windows, the CPU alone elsewhere; `allow_fallback` is on only when more
   than one provider is named, because a lone accelerator must never silently become the CPU).
 - With no package or no usable policy, `POST .../process` and `POST /search/face` answer `503 PROCESSING_UNAVAILABLE`. It
   never invents numbers.

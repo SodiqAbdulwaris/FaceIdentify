@@ -60,6 +60,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-14 | [M5: the CelebA run, and the decision on automatic acceptance](2026-10-14-m5-celeba-gate-and-acceptance-decision.md) | evidence recorded; acceptance stays off; TST-057B not claimed |
 | 2026-10-15 | [AVIF pictures are accepted (issue 188)](2026-10-15-avif-images.md) | done; spec notes added on the owner's decision |
 | 2026-10-15 | [The GPU on this machine, a visible CPU fallback, and which ONNX Runtime build to ship](2026-10-15-gpu-provider-visibility.md) | partial; fallback visible, GPU verified; the shipped build is the owner's decision |
+| 2026-10-15 | [Ship ONNX Runtime with DirectML on Windows (Windows ML), CPU fallback](2026-10-15-ship-onnxruntime-windowsml.md) | done on this machine; AMD and no-DirectX 12 machines unverified |
 | 2026-10-15 | [LFW and CelebA terms read at source](2026-10-15-lfw-celeba-terms-read.md) | partial; CelebA read, LFW page unreachable (#183) |
 | 2026-10-14 | [Label review: serve only named people (`--people`)](2026-10-14-label-review-people-filter.md) | done |
 | 2026-10-14 | [The celebrity set from Commons: reviewed, exported and gated](2026-10-14-celebs-commons-verified-set.md) | two verified gate runs: 36 identities (historical, below 40) and 48 identities (40 enrolled, 118 queries: Recall@1 0.983, 10 of 10 workflow checks, 0 of 115 strangers accepted, every measured threshold met); TST-057B stays blocked (automatic acceptance off) |

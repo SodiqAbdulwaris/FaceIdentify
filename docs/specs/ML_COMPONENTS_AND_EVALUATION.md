@@ -373,6 +373,8 @@ Possible policy actions are attach to an existing identity, create a new identit
 
 ONNX Runtime is the proposed production inference framework. CUDA is the initial preferred provider; CPU and DirectML are alternatives pending model-specific operator, numerical, operational, and performance validation. Neither the proposed provider nor hardware availability is a validated compatibility claim.
 
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the shipped ONNX Runtime build is decided: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start failure fall back to CPU." NVIDIA machines therefore run DirectML, not CUDA, and CUDA is never shipped (a developer-only `onnxruntime-gpu` named by `FACEIDENTIFY_ORT_GPU_DIR`, used only when `FACEIDENTIFY_PROVIDERS` names it); every other machine falls back to the CPU, logged and shown by readiness. Measurements and options: `docs/research/onnx-runtime-gpu-packaging.md`.
+
 The worker loads only validated model/export/provider combinations. FastAPI selects an approved plan and records explicit fallback; it must not silently substitute a different export, precision, or representation space. Validate fallback at three levels: numerical output, retrieval behavior, and decision behavior.
 
 Processing provenance is explicit: `ProcessingRun` identifies logical work, `Job` schedules work, and `ExecutionSegment` records what actually executed. A run can have more than one segment when a documented fallback occurs. Each segment records runtime variant, provider, artifact, component versions, resource observations, and reason for transition.
@@ -464,6 +466,8 @@ Before any automatic new identity: all relevant gates plus a separately approved
 - **Proposed for locking:** componentized perception/retrieval/decision/policy architecture; representation-space isolation; deterministic V1 estimator; independently versioned policy; ONNX Runtime with CUDA as the initial candidate; one active recognition space; bounded pipeline/backpressure; benchmark-gated automation.
 - **Provisional:** SCRFD versus RetinaFace; ArcFace-family versus AdaFace artifacts; CUDA/CPU/DirectML provider compatibility; K, aggregation, batching, queues, calibration, and all decision thresholds.
 - **Deferred:** learned estimator, joint-candidate model, video tracking evidence, multi-space normal search, complex adaptive scheduling, automatic merge/irreversible action, and exact evaluation procedures/results.
+
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the shipped ONNX Runtime build is decided: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start failure fall back to CPU." NVIDIA machines therefore run DirectML, not CUDA, and CUDA is never shipped (a developer-only `onnxruntime-gpu` named by `FACEIDENTIFY_ORT_GPU_DIR`, used only when `FACEIDENTIFY_PROVIDERS` names it); every other machine falls back to the CPU, logged and shown by readiness. Measurements and options: `docs/research/onnx-runtime-gpu-packaging.md`.
 
 ## 18.2 Recognition-safety invariants
 

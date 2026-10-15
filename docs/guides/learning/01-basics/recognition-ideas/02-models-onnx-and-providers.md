@@ -4,8 +4,8 @@
 
 The "intelligence" in the product is two ready-made **neural networks**. This lesson explains what a
 network is in one page, what the project does and does not do with it (it **never trains**), how a model
-file is run (**ONNX Runtime**) and on what hardware (**execution providers**: CPU or an NVIDIA GPU via
-**CUDA**), and a rule you will see everywhere: the worker never silently falls back from one to the other.
+file is run (**ONNX Runtime**) and on what hardware (**execution providers**: the CPU, any DirectX 12 GPU
+via **DirectML**, or, for the developer only, an NVIDIA GPU via **CUDA**), and a rule you will see everywhere: the worker never silently falls back from one to the other.
 
 ## 2. Where it lives
 
@@ -41,9 +41,14 @@ PyTorch can be run by other software. **ONNX Runtime** loads an `.onnx` file and
 
 | Provider | Runs on | Status here |
 |---|---|---|
-| `CPUExecutionProvider` | your processor | always available; the default |
-| `CUDAExecutionProvider` | an NVIDIA graphics card, via CUDA and cuDNN | verified on the owner's RTX 4070 (2026-10-07) |
-| `TensorrtExecutionProvider`, OpenVINO, DirectML | NVIDIA optimiser, Intel, any Windows GPU | [researched]; not used |
+| `CPUExecutionProvider` | your processor | always available; the fallback everywhere and the default off Windows |
+| `DmlExecutionProvider` | any DirectX 12 graphics card (NVIDIA, AMD, Intel), via DirectML | the Windows default, tried before the CPU (owner decision 2026-10-15); verified on the owner's RTX 4070 and Intel UHD, not on AMD |
+| `CUDAExecutionProvider` | an NVIDIA graphics card, via CUDA and cuDNN | developer-only, never shipped; verified on the owner's RTX 4070 (2026-10-07) |
+| `TensorrtExecutionProvider`, OpenVINO | NVIDIA optimiser, Intel | [researched]; not used |
+
+The project installs **one** ONNX Runtime build, and only one can be installed at a time: on Windows
+`onnxruntime-windowsml` (DirectML and the CPU in one wheel), elsewhere the plain CPU `onnxruntime`
+(`pyproject.toml` chooses with an environment marker).
 
 **CUDA** is NVIDIA's platform for general computation on its GPUs; **cuDNN** its library of neural-network
 building blocks; **cuBLAS** fast matrix maths. They are separate proprietary downloads, which is why the GPU
@@ -75,14 +80,17 @@ each result** (provenance). A silent change of hardware would make that record a
    uv run python -c "import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())"
    ```
 
-   Expected on the writing machine: `1.30.0 ['AzureExecutionProvider', 'CPUExecutionProvider']`. Yours has
-   `CPUExecutionProvider`; it lists CUDA only if a GPU build is active.
+   Expected on Windows (verified 2026-10-15): `1.30.0 ['DmlExecutionProvider', 'CPUExecutionProvider']`,
+   after a harmless "Init provider bridge failed" warning. On Linux the CPU build lists
+   `CPUExecutionProvider` (and `AzureExecutionProvider`). CUDA is listed only if the developer's GPU build is
+   active. DirectML being *listed* does not mean it can *start*: a machine without a DirectX 12 GPU lists it
+   and fails when a session is created.
 2. How the application reads your provider choice:
 
    ```python
    >>> from backend.api.real import providers_from
-   >>> providers_from({})
-   ('CPUExecutionProvider',)
+   >>> providers_from({})  # on Windows; elsewhere ('CPUExecutionProvider',)
+   ('DmlExecutionProvider', 'CPUExecutionProvider')
    >>> providers_from({"FACEIDENTIFY_PROVIDERS": "CUDAExecutionProvider, CPUExecutionProvider"})
    ('CUDAExecutionProvider', 'CPUExecutionProvider')
    >>> providers_from({"FACEIDENTIFY_PROVIDERS": "CPU"})
@@ -128,6 +136,12 @@ tries the next provider in your list (the CPU) and records that a fallback happe
 Only an actual backend-approved fallback closes one execution segment and starts another (owner decision
 2026-10-05). Verified by reading `perception_client.py` and `tests/integration/test_runtime_perception_client.py`
 (a real worker process that skips a variant whose provider does not exist and runs the next).
+
+The other way an accelerator fails is to be listed but unable to start: DirectML on a machine with no
+DirectX 12 adapter. Creating the session raises, and `load_session` reports that as
+`RUNTIME_INITIALIZATION_FAILED` (a provider failure, so the CPU runs next); only a load failure on the CPU
+itself is `COMPONENT_LOAD_FAILED`, so a broken model is never hidden by the fallback.
+`test_directml_that_cannot_start_falls_back_to_the_cpu_visibly` shows it end to end, readiness included.
 
 ## 7. Exercises
 
