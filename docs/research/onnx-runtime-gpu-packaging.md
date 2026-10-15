@@ -6,7 +6,7 @@
   conflicts, item 32)
 - **Implementation entry:** [`2026-10-15-gpu-provider-visibility.md`](../implementations/2026-10-15-gpu-provider-visibility.md)
 
-> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** option D was chosen, in the
+> **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) option D was chosen, in the
 > owner's words: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then
 > CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start
 > failure fall back to CPU." Implemented by
@@ -128,7 +128,7 @@ the start-failure classification above; a licensing row; a test of the fallback 
 without a DX12 GPU; the tech-stack sections 7 and 12 amended for NVIDIA; and re-running the
 operating-point measurement on DirectML before relying on it.
 
-> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the recommendation above (D)
+> **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) the recommendation above (D)
 > is adopted as written, CUDA developer-only.
 
 ## Implementation (2026-10-15)

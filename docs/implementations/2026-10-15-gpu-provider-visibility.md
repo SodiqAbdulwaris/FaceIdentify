@@ -10,7 +10,7 @@
   fallback claim after review`, `test(runtime): type the scripted worker as a supervisor for mypy`,
   `docs: record the re-review of the GPU provider change`
 
-> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the shipped build is decided: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start failure fall back to CPU." Implemented in [`2026-10-15-ship-onnxruntime-windowsml.md`](2026-10-15-ship-onnxruntime-windowsml.md).
+> **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) the shipped build is decided: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start failure fall back to CPU." Implemented in [`2026-10-15-ship-onnxruntime-windowsml.md`](2026-10-15-ship-onnxruntime-windowsml.md).
 
 ## What changed
 

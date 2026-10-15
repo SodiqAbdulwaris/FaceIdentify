@@ -8,7 +8,8 @@
 - **Commits:** PR (number recorded when merged): `build(deps): ship onnxruntime-windowsml on
   Windows`, `fix(runtime): fall back to the CPU when DirectML cannot start`, `feat(runtime): prefer
   DirectML then the CPU on Windows`, `fix(scripts): map DirectML to a GPU device in the model
-  probes`, `docs: record the decision to ship ONNX Runtime with DirectML`
+  probes`, `docs: record the decision to ship ONNX Runtime with DirectML`, `fix(runtime): keep a
+  broken model a load failure on an accelerator`, `docs: address the review of the DirectML change`
 
 ## What changed
 
@@ -59,6 +60,11 @@ failure fall back to CPU." The measurements and options are in
   so a genuine model error is never retried away. An accelerator's start failure is a provider
   failure; the CPU variant that runs next would hit a broken model too and report it as
   `COMPONENT_LOAD_FAILED`.
+- **A broken model stays a model failure on every provider** (found by the review): ONNX Runtime
+  raises its own types for the model itself (`InvalidProtobuf`, `InvalidGraph`, `NoModel`,
+  `NotImplemented`), and those stay `COMPONENT_LOAD_FAILED` even on an accelerator, so a plan with no
+  CPU variant still says the model is broken. Checked on the real DirectML build with bytes that are
+  not a model: `COMPONENT_LOAD_FAILED ... INVALID_PROTOBUF`.
 - **ONNX Runtime falls back by itself.** Its Python `InferenceSession` catches a provider that will
   not start, prints an `EP Error ... Falling back to ['CPUExecutionProvider']` banner on standard
   output and builds a CPU session. The worker's existing check (the session's first provider must be
@@ -108,6 +114,19 @@ failure fall back to CPU." The measurements and options are in
   --platform linux && uv run pytest -q` (result recorded in the PR description). No full evaluation
   gate was run (not asked).
 
+## Review
+
+Codex CLI (`codex exec -s read-only`, disposable worktree, clean afterwards) reviewed the first five
+commits and asked for changes: (high) installed packages and registered libraries have no upgrade
+path to the new manifest; (medium) a broken model on an accelerator became a provider failure;
+(low) the decision notes put the source inside the bold date, one note split the licensing table,
+the benchmark protocol's section 2 still said "CUDA is primary" without a note, and the status page
+said "the installer ships" although no installer exists. The medium and low findings are fixed. The
+high one is answered on the PR and kept below as a follow-up: no long-lived library uses the real
+profile today (the desktop shell starts the development profile; evaluation gates and the real-host
+e2e test make fresh libraries), and a new package key would also orphan the measured policy file
+(`policies/<package key>.json`), so the upgrade path belongs with M8's package management.
+
 ## Open issues / follow-ups
 
 - **Not verified:** an AMD GPU; a machine with no DirectX 12 GPU (the forced failure was a missing
@@ -123,7 +142,9 @@ failure fall back to CPU." The measurements and options are in
   `scripts/install_reference_models.py` again; and a library that registered the old manifest
   refuses the new one ("a different package is registered under this key"), so its processing would
   report the runtime package unavailable. Evaluation gates make fresh libraries, so they are not
-  affected; any long-lived library would be.
+  affected; any long-lived library would be. **An upgrade path for a changed package manifest**
+  (a new key or version that shares the catalog rows, with the policy file following it) is needed
+  before the real profile serves a library that must survive a package change (M8).
 - **Telemetry:** `onnxruntime-windowsml`'s `Privacy.md` says official builds send trace events
   through Windows' ETW telemetry by default, subject to the user's Windows diagnostic-data setting
   (the CPU wheel's official Windows build is the same). Whether the worker should call

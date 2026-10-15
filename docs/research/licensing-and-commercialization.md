@@ -20,7 +20,7 @@ a row here in the same change (`.agents/rules/documentation.md`).
 | 4b | **Microsoft DirectML** (since 2026-10-15) | The shipped Windows build bundles `DirectML.dll` under Microsoft's proprietary DirectML terms (section 4). They permit distribution inside an application for Windows (read 2026-10-15). | Ship the terms with the installer and keep Microsoft's notices; confirm the wheel's copy is covered (section 4). |
 | 5 | **Unverified Rust crates and the build tools of M8** | `cargo-license` has not been run; the installer, signing and any bundled FFmpeg are not chosen yet. | Run the inventory in section 8 and fill sections 5 to 7. |
 
-> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** CUDA is developer-only and never shipped (the shipped Windows build is `onnxruntime-windowsml`, DirectML then the CPU), so blocker 4 no longer applies to a release; blocker 4b replaces it.
+> **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) CUDA is developer-only and never shipped (the shipped Windows build is `onnxruntime-windowsml`, DirectML then the CPU), so blocker 4 no longer applies to a release; blocker 4b replaces it.
 
 ## 2. The models
 
@@ -78,9 +78,9 @@ of that training data must be checked before anyone relies on it.
 | ONNX Runtime GPU (`onnxruntime-gpu` 1.23.2) | MIT (its own files) | optional CUDA path, installed as a machine-local runtime library | the CUDA/cuDNN files it needs are NVIDIA's, next row |
 | NVIDIA CUDA runtime 12.9, cuDNN 9.27, cuBLAS, cuFFT, cuRAND, NVRTC, nvJitLink (pip `nvidia-*-cu12`, installed 2026-10-07 into the Git-ignored `local-models/ort-gpu`) | NVIDIA proprietary licences (not verified in detail) | GPU inference only (`FACEIDENTIFY_ORT_GPU_DIR`) | redistribution inside an installer is governed by NVIDIA's terms; read them per file before shipping |
 | ONNX Runtime DirectML builds (`onnxruntime-directml` 1.23.0, `onnxruntime-windowsml` 1.30.0) | MIT (wheel `LICENSE`); each bundles Microsoft's `DirectML.dll`, whose redistribution terms are not verified | **evaluated only** (2026-10-15, installed into a scratch folder outside the repository, never a dependency) | candidate shipped build, owner decision pending (`docs/research/onnx-runtime-gpu-packaging.md`); read the `DirectML.dll` terms before shipping |
-
-> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** `onnxruntime-windowsml` 1.30.0 is the shipped Windows build and a dependency (rows above); `onnxruntime-directml` stays evaluated only. The `DirectML.dll` terms were read (row above); CUDA is developer-only and never shipped, so the NVIDIA libraries are not part of a release (blocker 4).
 | USearch (`usearch` 2.26.2) | Apache-2.0 | the vector index | verified |
+
+> **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) `onnxruntime-windowsml` 1.30.0 is the shipped Windows build and a dependency (rows above); `onnxruntime-directml` stays evaluated only. The `DirectML.dll` terms were read (row above); CUDA is developer-only and never shipped, so the NVIDIA libraries are not part of a release (blocker 4).
 
 ## 5. Python dependencies (verified from installed metadata, 2026-10-07)
 
