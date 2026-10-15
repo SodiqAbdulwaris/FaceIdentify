@@ -14,6 +14,8 @@ from evaluation.assisted_recognition_gate import (
     open_set,
     partition_people,
     per_identity,
+    pick_hard_negatives,
+    pool_candidates,
     positive_seconds,
     ranking,
     subject,
@@ -330,3 +332,38 @@ def test_a_wait_must_be_a_finite_number_above_zero() -> None:
     for bad in ("0", "-5", "nan", "inf", "soon"):
         with pytest.raises(argparse.ArgumentTypeError):
             positive_seconds(bad)
+
+
+def test_hard_negatives_are_the_closest_ranked_candidates_in_a_stable_order() -> None:
+    scored = [("Far", 0.10), ("Near", 0.40), ("NoFace", None), ("Close", 0.30), ("Tie", 0.30)]
+    assert pick_hard_negatives(scored, 1) == ["Near"]
+    two = pick_hard_negatives(scored, 3)
+    assert two[0] == "Near"
+    assert set(two[1:]) == {"Close", "Tie"}  # NoFace cannot be ranked
+    assert pick_hard_negatives(list(reversed(scored)), 3) == two  # listing order never matters
+    assert "NoFace" not in pick_hard_negatives(scored, 10)
+
+
+def test_a_pool_person_selects_on_one_picture_and_is_scored_on_the_others(tmp_path: Path) -> None:
+    def pictures(name: str, *contents: bytes) -> dict[str, object]:
+        paths = []
+        for i, content in enumerate(contents):
+            path = tmp_path / f"{name}-{i}.jpg"
+            path.write_bytes(content)
+            paths.append(path)
+        return {"name": name, "enrol": paths[1:], "query": paths[:1]}
+
+    shared = b"a picture also in the main dataset"
+    pool = [
+        pictures("Tom_Hanks", b"t0", b"t1"),  # the same name as an enrolled person
+        pictures("Stranger", b"s0", b"s1", b"s2"),
+        pictures("Copied", shared, b"c1"),  # one picture shared: one left, too few
+    ]
+    taken = {hashlib.sha256(shared).hexdigest()}
+    kept, dropped = pool_candidates(pool, ["Tom Hanks", "Emma Stone"], taken)
+    assert dropped == {"same_name": ["Tom_Hanks"], "shared_pictures": 1, "too_few_pictures": 1}
+    (stranger,) = kept
+    assert stranger["name"] == "Stranger"
+    assert stranger["select"] == tmp_path / "Stranger-0.jpg"
+    assert stranger["score"] == [tmp_path / "Stranger-1.jpg", tmp_path / "Stranger-2.jpg"]
+    assert stranger["select"] not in stranger["score"]

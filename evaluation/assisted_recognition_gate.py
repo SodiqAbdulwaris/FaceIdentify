@@ -25,6 +25,17 @@ it only through its HTTP API, as the desktop app does:
    give the
    same rankings, and name search still works.
 
+Hard negatives (`--hard-negatives N --hard-negative-pool <dataset>`, issue 177): random strangers
+rarely resemble anyone enrolled, so they say little about look-alikes. After enrolment, each person
+of a second dataset (the pool) offers one *selection* photograph, searched against the enrolled
+library; the N people whose selection photograph came closest to an enrolled person become
+strangers, and only their *other* photographs are scored, so the photograph that chose a person
+never counts for them. A pool person with the same name as anyone in the main dataset, or a pool
+picture byte-identical to one of its pictures, is left out (the same person under another name is
+still possible: the pool's labels are its creators'). The selection queries run inside the
+before/after count check. Their results get their own open-set table: they are chosen to be hard,
+so it is a deliberately pessimistic read, not an estimate of the rate for random strangers.
+
 The identity labels are the Commons categories of the photographs, a human-curated label that is NOT
 verified: a mislabelled photograph can make the numbers look better or worse, with no direction. The
 report says so and records the configuration, environment, exclusions and the dataset manifest hash.
@@ -391,6 +402,7 @@ async def run_queries(
                     "person": person["name"],
                     "file": path.name,
                     "unknown": bool(person.get("unknown")),
+                    "hard_negative": bool(person.get("hard_negative")),
                     "eligible": enrolled[person["name"]]["faces"] >= 2,
                     "offered": ranking(answer),
                     "status": subject_status(answer),
@@ -413,6 +425,98 @@ def wilson(k: int, n: int) -> list[float] | None:
 # Candidate similarity cut-offs the open-set table is read at: what a policy that accepted any
 # top candidate at or above the cut-off would have done, known and unknown people alike.
 THRESHOLDS = tuple(round(0.30 + 0.05 * step, 2) for step in range(11))
+
+
+def same_name(name: str) -> str:
+    """A name compared across datasets: underscores as spaces, case and spacing ignored."""
+    return " ".join(name.replace("_", " ").casefold().split())
+
+
+def digest_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def pool_candidates(
+    pool: list[dict[str, Any]], taken_names: list[str], taken_digests: set[str]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The pool people who can be strangers: a name nobody in the main dataset has, and at least
+    two pictures not byte-identical to any of its pictures (the first, in sorted order, selects;
+    the rest are scored)."""
+    names = {same_name(name) for name in taken_names}
+    kept: list[dict[str, Any]] = []
+    dropped: dict[str, Any] = {"same_name": [], "shared_pictures": 0, "too_few_pictures": 0}
+    for person in pool:
+        if same_name(person["name"]) in names:
+            dropped["same_name"].append(person["name"])
+            continue
+        files = sorted(person["enrol"] + person["query"])
+        usable = [path for path in files if digest_of(path) not in taken_digests]
+        dropped["shared_pictures"] += len(files) - len(usable)
+        if len(usable) < 2:
+            dropped["too_few_pictures"] += 1
+            continue
+        kept.append({"name": person["name"], "select": usable[0], "score": usable[1:]})
+    return kept, dropped
+
+
+def pick_hard_negatives(scored: list[tuple[str, float | None]], count: int) -> list[str]:
+    """The `count` names whose selection score is highest (ties broken by a hash of the name, so
+    the order the pool lists people in never matters). A candidate without a score (no subject
+    face, or nobody offered) cannot be ranked and is left out."""
+    ranked = sorted(
+        ((score, name) for name, score in scored if score is not None),
+        key=lambda item: (-item[0], hashlib.sha256(item[1].encode()).hexdigest()),
+    )
+    return [name for _, name in ranked[:count]]
+
+
+async def choose_hard_negatives(
+    gate: Gate, candidates: list[dict[str, Any]], count: int
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Search each candidate's selection photograph against the enrolled library and keep the
+    `count` closest as never-enrolled people, scored on their other photographs only."""
+    scored: list[tuple[str, float | None]] = []
+    nearest: dict[str, Any] = {}
+    for candidate in candidates:
+        offered = ranking(await ask(gate, candidate["select"]))
+        top = offered[0] if offered else None
+        scored.append((candidate["name"], top["similarity"] if top else None))
+        nearest[candidate["name"]] = top
+    chosen = pick_hard_negatives(scored, count)
+    if len(chosen) < count:
+        raise SystemExit(f"only {len(chosen)} pool people could be ranked; asked for {count}")
+    by_name = {c["name"]: c for c in candidates}
+    people = [
+        {
+            "name": name,
+            "enrol": [],
+            "query": by_name[name]["score"],
+            "unknown": True,
+            "hard_negative": True,
+        }
+        for name in chosen
+    ]
+    scores = sorted(s for _, s in scored if s is not None)
+    log = {
+        "candidates": len(candidates),
+        "candidates_without_a_score": sum(1 for _, s in scored if s is None),
+        "candidate_selection_similarity": {
+            "min": scores[0] if scores else None,
+            "median": statistics.median(scores) if scores else None,
+            "max": scores[-1] if scores else None,
+        },
+        "chosen": [
+            {
+                "name": name,
+                "selection_photograph": by_name[name]["select"].name,
+                "nearest_enrolled_person": nearest[name]["person"],
+                "selection_similarity": nearest[name]["similarity"],
+                "scored_photographs": len(by_name[name]["score"]),
+            }
+            for name in chosen
+        ],
+    }
+    return people, log
 
 
 def partition_people(
@@ -671,8 +775,22 @@ async def main_async(args: argparse.Namespace) -> int:
         max_index_passes=PROVISIONAL_INDEX_PASSES,
     )
     providers = providers_from(os.environ)
+    everyone = choose_people(manifest, dataset, 10**6, 1)
+    candidates: list[dict[str, Any]] = []
+    pool_dropped: dict[str, Any] = {}
+    pool_manifest_sha256 = None
+    if args.hard_negatives:
+        pool = guard(Path(args.hard_negative_pool))
+        pool_manifest = pool / "manifest.json"
+        pool_manifest_sha256 = hashlib.sha256(pool_manifest.read_bytes()).hexdigest()
+        candidates, pool_dropped = pool_candidates(
+            choose_people(json.loads(pool_manifest.read_text(encoding="utf-8")), pool, 10**6, 1),
+            # (everyone the main dataset names, not only the people the manifest in use keeps)
+            list(manifest) + list(json.loads((dataset / "manifest.json").read_text("utf-8"))),
+            {digest_of(path) for p in everyone for path in p["enrol"] + p["query"]},
+        )
     people = partition_people(
-        choose_people(manifest, dataset, 10**6, 1),
+        everyone,
         known_count=args.people,
         minimum=args.minimum_photographs,
         unknown_count=args.unknown,
@@ -684,14 +802,26 @@ async def main_async(args: argparse.Namespace) -> int:
         log["readiness"] = (await gate.client.get("/readiness")).json()
         enrolled = await enrol(gate, people, log, args.run_timeout)
         before = await gate.counts()
+        if args.hard_negatives:  # (inside the count check: the selection queries write nothing)
+            hard, log["hard_negatives"] = await choose_hard_negatives(
+                gate, candidates, args.hard_negatives
+            )
+            log["hard_negatives"]["pool_left_out"] = pool_dropped
+            for person in hard:
+                enrolled[person["name"]] = {"identity_id": None, "sources": [], "faces": 0}
+            people += hard
         results = await run_queries(gate, people, enrolled)
         after = await gate.counts()
         log["queries_wrote_nothing"] = before == after
         log["counts"] = {"before_queries": before, "after_queries": after}
         log["metrics"] = metrics(results)
         log["per_identity"] = per_identity(results)
-        if args.unknown:
-            log["open_set"] = open_set(results)
+        if args.unknown:  # random strangers only
+            log["open_set"] = open_set([r for r in results if not r["hard_negative"]])
+        if args.hard_negatives:  # known people and the hard negatives
+            log["open_set_hard_negatives"] = open_set(
+                [r for r in results if not r["unknown"] or r["hard_negative"]]
+            )
         log["queries"] = results
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
@@ -756,6 +886,8 @@ async def main_async(args: argparse.Namespace) -> int:
             "package": PACKAGE_KEY,
             "people": len(people),
             "unknown_people": args.unknown,
+            "hard_negatives": args.hard_negatives,
+            "hard_negative_pool_manifest_sha256": pool_manifest_sha256,
             "minimum_photographs": args.minimum_photographs,
             "dominance": DOMINANCE,
             "run_timeout_seconds": args.run_timeout,
@@ -791,6 +923,13 @@ def main() -> int:
         default=0,
         help="people never enrolled: their photographs are open-set queries (TST-057B)",
     )
+    parser.add_argument(
+        "--hard-negatives",
+        type=int,
+        default=0,
+        help="strangers chosen from --hard-negative-pool by similarity to the enrolled people",
+    )
+    parser.add_argument("--hard-negative-pool", help="a second dataset folder (with manifest.json)")
     parser.add_argument("--minimum-photographs", type=int, default=5)
     parser.add_argument(
         "--run-timeout",
@@ -798,7 +937,10 @@ def main() -> int:
         default=RUN_TIMEOUT,
         help="seconds to wait for the enrolment processing runs (a larger set needs longer)",
     )
-    return asyncio.run(main_async(parser.parse_args()))
+    args = parser.parse_args()
+    if args.hard_negatives < 0 or bool(args.hard_negatives) != bool(args.hard_negative_pool):
+        parser.error("--hard-negatives N (N > 0) and --hard-negative-pool go together")
+    return asyncio.run(main_async(args))
 
 
 if __name__ == "__main__":
