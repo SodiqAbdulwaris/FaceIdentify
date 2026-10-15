@@ -31,8 +31,9 @@ from backend.infrastructure.indexing.representation_index import IndexUnusableEr
 from backend.ml.contracts.messages import Detection
 from backend.ml.contracts.protocol import ContractError, MLErrorCode
 from backend.ml.supervisor.supervisor import MLUnavailableError
-from tests.fixtures.api import Api, error, processing_app
-from tests.integration.test_api_memory import processed
+from tests.fixtures.api import Api, error, imported, processing_app
+from tests.integration.test_api_memory import index_caught_up, processed
+from tests.integration.test_api_processing_routes import finished, process
 from tests.integration.test_api_search import FACES, face, name_identity
 
 FACE_SEARCH = "/api/v1/search/face"
@@ -164,6 +165,56 @@ async def test_the_picture_can_be_sent_as_bytes_or_named_by_path(processing_api:
 
     assert by_path.status_code == by_bytes.status_code == 200
     assert by_path.json() == by_bytes.json()
+
+
+async def test_an_avif_is_imported_processed_and_searched_with_like_any_picture(
+    processing_api: Api,
+) -> None:
+    api = processing_api
+    assert api.perception is not None
+    api.perception.vector = FACES[0]
+    picture = api.image("ada.avif", (40, 30), fmt="AVIF")
+    source = await imported(api, path=str(picture), display_name="Ada")
+    await finished(api, (await process(api, source))["id"])
+    await index_caught_up(api)
+    await name_identity(api, source, "Ada")
+
+    by_path = await api.client.post(FACE_SEARCH, json={"path": str(picture)})
+    by_bytes = await api.client.post(
+        FACE_SEARCH, content=picture.read_bytes(), headers={"content-type": "image/avif"}
+    )
+
+    assert (source["width"], source["height"]) == (40, 30)
+    assert by_path.status_code == by_bytes.status_code == 200
+    assert by_path.json() == by_bytes.json()
+    [only] = by_path.json()["faces"]
+    assert only["possible_people"][0]["identity"]["person"]["display_name"] == "Ada"
+
+
+async def test_a_damaged_avif_is_refused_as_corrupt_everywhere(processing_api: Api) -> None:
+    api = processing_api
+    data = bytearray(api.image("whole.avif", (40, 30), fmt="AVIF").read_bytes())
+    start = data.index(b"mdat") + 4
+    data[start:] = bytes(len(data) - start)  # the header is fine, the pixels are not
+    damaged = api.folder / "damaged.avif"
+    damaged.write_bytes(bytes(data))
+    before = snapshot(api)
+
+    error(await api.client.post(FACE_SEARCH, json={"path": str(damaged)}), 422, "MEDIA_CORRUPT")
+    error(
+        await api.client.post(
+            FACE_SEARCH, content=bytes(data), headers={"content-type": "image/avif"}
+        ),
+        422,
+        "MEDIA_CORRUPT",
+    )
+    error(
+        await api.client.post(f"{SOURCES}/import", json={"path": str(damaged)}),
+        422,
+        "MEDIA_CORRUPT",
+    )
+
+    assert snapshot(api) == before
 
 
 async def test_a_bad_picture_is_refused_plainly(processing_api: Api, tmp_path: Path) -> None:
