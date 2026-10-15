@@ -119,7 +119,7 @@ Matt Damon, Meryl Streep, Michael B. Jordan, Will Smith (random, not look-alikes
 
 **Reading.** For the first time a **verified set meets the owner's dataset targets and every measured
 provisional threshold**. This is the assisted-recognition quality bar. **TST-057B stays `BLOCKED`**: it is
-*automatic* recognition, which stays off under the decision of 2026-10-14 until the remaining conditions of the 2026-10-14 decision are met: hard negatives (issue 177), the conservative rule run on the verified manifest with zero false accepts (issue 178: run on the 36-identity export in PR 195, to be repeated on the 48-identity export), then an owner-approved code change. "Zero unintended mutations" is only shown for
+*automatic* recognition, which stays off under the decision of 2026-10-14 until the remaining conditions of the 2026-10-14 decision are met: hard negatives (issue 177), the conservative rule run on the verified manifest with zero false accepts (issue 178: run in PR 195 on the 36- and 48-identity exports, 0 false accepts on both final halves; to be repeated with hard negatives), then an owner-approved code change. "Zero unintended mutations" is only shown for
 counts. The limits below still apply.
 
 ## Limits to carry into any claim
