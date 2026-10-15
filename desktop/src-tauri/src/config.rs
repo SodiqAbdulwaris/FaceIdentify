@@ -121,7 +121,10 @@ mod tests {
 
     #[test]
     fn the_picker_offers_exactly_the_formats_the_backend_imports() {
-        assert_eq!(IMAGE_EXTENSIONS, ["jpg", "jpeg", "png", "bmp", "webp", "avif"]);
+        assert_eq!(
+            IMAGE_EXTENSIONS,
+            ["jpg", "jpeg", "png", "bmp", "webp", "avif"]
+        );
     }
 
     #[test]
