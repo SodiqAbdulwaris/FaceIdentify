@@ -26,6 +26,7 @@ from PIL import Image
 from sqlalchemy import select
 
 from backend.api.real import (
+    APPROVED_MATCHING,
     PACKAGE_KEY,
     PROVIDERS,
     PROVIDERS_ENV,
@@ -74,6 +75,11 @@ ABSTAIN_ONLY = {
     "new_identity_ceiling": -1.0,
     "match_threshold": 2.0,
     "margin": 2.0,
+}
+APPROVED: dict[str, Any] = {
+    "schema_version": 1,
+    "version": next(iter(APPROVED_MATCHING)),
+    **next(iter(APPROVED_MATCHING.values())),
 }
 
 
@@ -504,6 +510,39 @@ def test_a_policy_file_that_enables_matching_or_creation_is_refused_whatever_its
     assert processing.capabilities()["processing_policy"] == "UNAVAILABLE"  # and readiness says so
 
 
+@pytest.mark.parametrize(
+    "edit",
+    [
+        {"match_threshold": APPROVED["match_threshold"] - 0.01},  # below the approved point
+        {"margin": APPROVED["margin"] / 2},
+        {"min_detection_score": 0.3},
+        {"new_identity_ceiling": 0.0},  # an automatic new identity is not approved
+        {"version": "buffalo-l-conservative-provisional-v1"},  # what a measurement writes
+    ],
+)
+def test_an_approved_operating_point_is_admitted_only_exactly(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs, edit: dict[str, Any]
+) -> None:
+    install_package(world, clock, new_id)
+    processing = real_processing(world.settings, package_key=KEY)
+    assert processing.prepare is not None
+    assert processing.capabilities is not None
+    with opened(world, clock, new_id) as library:
+        processing.prepare(library)
+        write_policy(world, APPROVED)
+        request = library.unit_of_work.read(processing.request_for)
+        assert (
+            ProcessingRequestV1.parse(request).decision_policy["match_threshold"]
+            == (APPROVED["match_threshold"])
+        )
+        assert processing.capabilities()["processing_policy"] == "READY"
+
+        write_policy(world, {**APPROVED, **edit})  # read on every request: no restart needed
+        with pytest.raises(ProcessingUnavailableError, match="not permitted"):
+            library.unit_of_work.read(processing.request_for)
+        assert processing.capabilities()["processing_policy"] == "UNAVAILABLE"
+
+
 def test_a_package_removed_after_start_is_not_used_and_prepare_forgets_it(
     world: World, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
@@ -676,6 +715,30 @@ async def test_the_real_profile_runs_the_abstain_only_policy_through_the_applica
         assert pool.closed == 0
 
     assert pool.closed == 1  # the workers are stopped when the application shuts down
+
+
+async def test_under_the_approved_operating_point_the_same_face_is_matched_automatically(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    install_package(world, clock, new_id)
+    write_policy(world, APPROVED)
+    app, secret = application(world, RecordingPool())
+
+    async with serving(app, secret, world.folder.parent / "files", clock) as api:
+        assert (await api.client.get("/readiness")).json()["capabilities"][
+            "processing_policy"
+        ] == "READY"
+        first = await imported(api, path=picture(world.folder, "a.png"))
+        run = await process_and_wait(api, first["id"])
+        assert run["policy"]["decision_policy_version"] == APPROVED["version"]
+        assert run["policy"]["automatic_matching"] is True  # what the screen says: matching on
+
+        second = await imported(api, path=picture(world.folder, "b.png"))
+        await process_and_wait(api, second["id"])
+        identities = (await api.client.get("/api/v1/identities")).json()["items"]
+        assert len(identities) == 1  # matched, not a second identity
+        waiting = await api.client.get(f"/api/v1/sources/{second['id']}/unresolved-faces")
+        assert waiting.json()["items"] == []  # nothing left for the owner to resolve
 
 
 async def test_the_real_profile_without_a_policy_refuses_to_process_and_says_why(

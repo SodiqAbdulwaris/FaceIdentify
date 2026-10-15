@@ -18,11 +18,13 @@ decision policy (M5 track R; the development profile is `backend.api.development
   decided under invented numbers. The file holds the `decision_policy` object of the request
   (schema 1) and nothing else; the run is frozen under it and reports the mode `UNCALIBRATED` (raw
   cosine scores, never probabilities).
-* **Until a verified evaluation exists, only an abstain-first policy is accepted** (owner decisions
-  2026-10-07 and 2026-10-08): a `match_threshold` above 1 (no automatic matching) and a
-  `new_identity_ceiling` of -1 (no identity from a weak score). A file that enables matching is
-  refused, however plausible its numbers, because nothing binds it to a measurement; a verified
-  policy will be admitted by a later, explicit change (the label-review work, track R5).
+* **A policy file cannot enable matching on its own** (owner decisions 2026-10-07, 2026-10-08 and
+  2026-10-15): it is admitted when it abstains first (a `match_threshold` above 1) or when it
+  equals, version and numbers, an operating point the owner approved in `APPROVED_MATCHING`,
+  which only a code change can extend. Either way the `new_identity_ceiling` is -1: no identity is
+  ever created from a weak score (an automatic new identity needs its own approved budget, ML spec
+  17.2). Any other file is refused, however plausible its numbers, because nothing binds it to a
+  measurement.
 * Readiness: `runtime_package` (the package this profile runs is installed and registered),
   `processing_policy` (a usable policy file exists) and `ml_worker` (the supervisors' own state:
   `NOT_STARTED` until a job starts one, then `READY`, `FAILED`...), `execution_provider` (the
@@ -127,17 +129,34 @@ def load_policy(local_state_root: Path, package_key: str) -> dict[str, Any]:
     return value
 
 
-def require_abstain_first(request: Mapping[str, Any]) -> None:
-    """Refuse a request whose policy could match or create from a score: only an abstain-first
-    policy is admitted until a verified evaluation exists (see the module docstring)."""
+# The automatic-matching operating points the owner approved, by policy version. The evidence for
+# each is in its implementation entry
+# (docs/implementations/2026-10-15-enable-automatic-acceptance.md).
+APPROVED_MATCHING: Final[Mapping[str, Mapping[str, float]]] = {
+    "buffalo-l-verified-match-v1": {
+        "min_detection_score": 0.5,
+        "match_threshold": 0.45,
+        "margin": 0.10,
+        "new_identity_ceiling": -1.0,
+    },
+}
+
+
+def require_approved_policy(request: Mapping[str, Any]) -> None:
+    """Refuse a request whose policy could create an identity from a score, or match under an
+    operating point the owner has not approved (see the module docstring)."""
     try:
         policy = ProcessingRequestV1.parse(request).decision_policy
     except ProcessingConfigurationError:
         raise ProcessingUnavailableError("the measured decision policy is invalid") from None
-    if policy["match_threshold"] <= MAX_SIMILARITY or policy["new_identity_ceiling"] != -1.0:
+    if policy["new_identity_ceiling"] == -1.0 and policy["match_threshold"] > MAX_SIMILARITY:
+        return  # abstain first: nothing is matched or created from a score
+    approved = APPROVED_MATCHING.get(policy["version"])
+    if approved is None or any(policy[key] != value for key, value in approved.items()):
         raise ProcessingUnavailableError(
-            "automatic matching is not permitted until a verified evaluation exists: the policy "
-            "must have a match threshold above 1 and a new-identity ceiling of -1"
+            "automatic matching is not permitted except at an owner-approved operating point: "
+            "the policy must abstain first (a match threshold above 1 and a new-identity ceiling "
+            "of -1) or equal an approved one"
         )
 
 
@@ -287,12 +306,12 @@ def real_processing(
         if not installed():
             raise ProcessingUnavailableError(f"{package_key} is no longer installed")
         request = _request(package, load_policy(settings.local_state_root, package_key), providers)
-        require_abstain_first(request)
+        require_approved_policy(request)
         return request
 
     def capabilities() -> dict[str, str]:
         try:
-            require_abstain_first(
+            require_approved_policy(
                 _policy_probe(load_policy(settings.local_state_root, package_key), providers)
             )
             policy = READY
