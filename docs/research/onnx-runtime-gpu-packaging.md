@@ -11,8 +11,9 @@
 The owner wants the GPU used for speed on this machine (RTX 4070 Laptop, driver 576.83, plus an
 Intel UHD integrated GPU), and the application shipped later as an installer that is easy to install
 and runs on CPU-only machines and on machines without an NVIDIA GPU (AMD, Intel). ONNX Runtime (ORT)
-is locked; `tech-stack.md` section 6 already names the direction: CUDA for NVIDIA, DirectML for other
-Windows GPUs, the CPU as the universal fallback. Which ORT *build* the application ships is still open.
+is locked; `tech-stack.md` section 7 already names the direction: CUDA for NVIDIA, DirectML for other
+Windows GPUs, the CPU as the universal fallback (section 12 plans a hardware-aware bootstrapper that
+gives NVIDIA machines the CUDA path). Which ORT *build* the application ships is still open.
 
 Only one ORT build can be installed at a time: `onnxruntime`, `onnxruntime-gpu`,
 `onnxruntime-directml` and `onnxruntime-windowsml` all provide the same `onnxruntime` module and
@@ -64,7 +65,7 @@ on DirectML would need its own validation.
 |---|---|---|---|---|
 | GPU on this machine | no | CUDA | CUDA, if the pack is installed | DirectML on the RTX (as fast as CUDA here) |
 | AMD / Intel GPUs | no | no | no | yes (any DirectX 12 GPU; Windows 10 1903 or later per Microsoft, not checked here); not tested on AMD |
-| CPU-only machine | yes | yes in principle (the CPU provider is inside; CUDA fails to start, then the planned CPU fallback), still ships 2.9 GB | yes | yes (CPU provider inside); a machine with no DX12 adapter should fail DirectML at session start and fall back; not tested |
+| CPU-only machine | yes | expected but not tested (the CPU provider is inside; CUDA should fail to start, then the planned CPU fallback), still ships 2.9 GB | yes | expected but not tested (CPU provider inside); see the fallback caveat below |
 | Install size | ~41 MB | ~2.9 GB | 41 MB, plus 2.9 GB for NVIDIA users | ~74 MB |
 | One wheel covers every case | yes, CPU only | no (2.9 GB for everyone, NVIDIA only) | two installs | **yes on Windows** |
 | ORT version | 1.30.0 | 1.23.2 here (1.31.0 exists; it needs CUDA 12/13 matching the driver) | 1.30.0 + 1.2x | **1.30.0, the locked version** (`onnxruntime-directml` stopped at 1.24.4) |
@@ -90,12 +91,21 @@ and the run was correct, but a production change would set them explicitly for t
 
 **D: ship `onnxruntime-windowsml` as the application's ORT on Windows** (keep `onnxruntime` for
 Linux CI through an environment marker), with variants ordered DirectML first and the CPU second.
-The backend's existing fallback then makes every case work from one install: any DirectX 12 GPU
-(NVIDIA, AMD, Intel) runs DirectML, and anything else gets the CPU, logged and shown in readiness.
+The intent is one install for every case: any DirectX 12 GPU (NVIDIA, AMD, Intel) runs DirectML,
+and anything else falls back to the CPU, logged and shown in readiness. **That is the intended
+behaviour, not yet a verified one:** AMD and machines without a DirectX 12 GPU were not tested, and
+the fallback works only for the two errors that mean "this provider cannot run here". If DirectML
+cannot start, `InferenceSession` may raise, and `load_session` reports any exception from it as
+`COMPONENT_LOAD_FAILED`. The `PerceptionClient` treats that as a real model failure and does not
+fall back, so the job would fail rather than run on the CPU. Adopting D therefore needs that start
+failure classified as `RUNTIME_INITIALIZATION_FAILED` for an accelerator provider, without hiding
+genuine model-load errors, and tested on a machine or VM without a DirectX 12 GPU.
 It is 74 MB rather than 2.9 GB, it is the locked ORT version (1.30.0), it needs no NVIDIA licence
 review, and on this machine it matched CUDA's speed and agreed with the CPU more closely than CUDA
-does. It is also the direction `tech-stack.md` section 6 already locks ("supported Windows GPU →
-DirectML").
+does. For AMD and Intel it is the direction `tech-stack.md` section 7 already locks ("supported
+Windows GPU → DirectML"). **For NVIDIA it changes that section:** it says "NVIDIA → CUDA EP", and
+section 12's bootstrapper would deliver CUDA to NVIDIA machines. Under D, NVIDIA machines run
+DirectML, and CUDA is not shipped at all. That change is part of the owner's decision.
 
 **Keep CUDA as a developer-only option**, as it is today (`local-models/ort-gpu` +
 `FACEIDENTIFY_ORT_GPU_DIR`): useful for comparison, never shipped. Revisit an NVIDIA pack (option
@@ -107,5 +117,6 @@ change; `DmlExecutionProvider` in `KNOWN_PROVIDERS` and in the reference package
 (`backend/app/runtime/reference_package.py` declares CUDA and CPU today); the DirectML session
 options in `load_session`; reinstalling the runtime package so its catalogue gains the DirectML
 variants (the representation space is unchanged, since the provider is not part of its identity);
-a licensing row; a test of the fallback on a machine or VM without a DX12 GPU; and re-running the
+the start-failure classification above; a licensing row; a test of the fallback on a machine or VM
+without a DX12 GPU; the tech-stack sections 7 and 12 amended for NVIDIA; and re-running the
 operating-point measurement on DirectML before relying on it.

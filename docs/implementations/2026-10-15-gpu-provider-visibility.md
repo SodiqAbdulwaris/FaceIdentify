@@ -10,7 +10,8 @@
 ## What changed
 
 - `backend/app/runtime/perception_client.py`: an optional `on_ran` callback hears the variant that
-  actually ran after every successful worker call (never after a refused provider or a failure).
+  actually ran after every successful `detect` and `represent` (never after a refused provider or a
+  failure), called once the call has released what it holds.
 - `backend/api/real.py`: `ClientPool` passes that callback to every client. It remembers, per
   stage, the provider that last ran and whether that was the stage's preferred one. It logs a change
   (`faceidentify.runtime`; a fallback is a WARNING naming the preferred provider, once per change,
@@ -80,6 +81,15 @@ An evaluation gate run (another session) was using the CPU throughout, so CPU ti
   stage, and clears the fallback when the preferred provider is back; readiness starts at
   `NOT_STARTED`/`NONE`) and `tests/integration/test_runtime_perception_client.py` (`on_ran` hears
   the variant that ran, not the refused one, and nothing on a failure): 81 passed.
+- Independent review (Codex CLI, read-only, disposable worktree; posted on the PR): no high
+  findings; five addressed. (1) An `on_ran` that raised could leave the embedding output
+  allocated: the hook now runs after the release, and a regression test fails without the fix
+  and passes with it. (2) The research note claimed the fallback "makes every case work": now
+  stated as intended and unverified, with the `COMPONENT_LOAD_FAILED` gap named. (3) CONTEXT
+  credited Windows ML with the Intel run: corrected (it was `onnxruntime-directml`). (4) The pool
+  test called the hook directly: it now drives `detect` and `represent` through a scripted worker,
+  and a single-variant stage is covered. (5) The tech-stack reference is section 7, and the NVIDIA
+  change from section 7 and 12 is now part of the owner's question.
 - Gate: see the PR description for the full gate result on the final head.
 
 ## Open issues / follow-ups
@@ -87,8 +97,11 @@ An evaluation gate run (another session) was using the CPU throughout, so CPU ti
 - **Owner decision (Known conflicts 32):** which ONNX Runtime build the application ships.
 - If D is chosen: the dependency swap with an environment marker, `DmlExecutionProvider` in
   `KNOWN_PROVIDERS` and the reference package's variants, DirectML session options in
-  `load_session`, a reinstall of the runtime package, a licensing row for `DirectML.dll`, a fallback
-  test on a machine or VM without a DirectX 12 GPU, and the operating point re-measured on DirectML.
+  `load_session`, classifying a DirectML start failure as `RUNTIME_INITIALIZATION_FAILED` (today an
+  exception from `InferenceSession` is `COMPONENT_LOAD_FAILED`, which does not fall back), a
+  reinstall of the runtime package, a licensing row for `DirectML.dll`, a fallback test on a
+  machine or VM without a DirectX 12 GPU, `tech-stack.md` sections 7 and 12 amended for NVIDIA, and
+  the operating point re-measured on DirectML.
 - DirectML refused a batch of four faces in ArcFace (`BatchNormalization`); the worker embeds one
   face per call, so the application is unaffected, but batching would need validation.
 - To use the GPU here today: set `FACEIDENTIFY_ORT_GPU_DIR` to the absolute path of
