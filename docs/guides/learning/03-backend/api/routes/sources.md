@@ -46,7 +46,7 @@ Response: a `SourceDetail`:
 Never a filesystem path, only a media reference. Publishes the event `source.created`.
 
 Errors (all observed unless marked): `400 SOURCE_FILE_UNREADABLE` (no such file, or a folder), `400
-REFERENCED_FILE_INVALID`, `415 MEDIA_FORMAT_UNSUPPORTED` (a text file; only JPEG, PNG, BMP, WebP), `422 MEDIA_CORRUPT`
+REFERENCED_FILE_INVALID`, `415 MEDIA_FORMAT_UNSUPPORTED` (a text file; only JPEG, PNG, BMP, WebP, AVIF), `422 MEDIA_CORRUPT`
 (a truncated PNG), `413 MEDIA_TOO_LARGE` (more than 100,000,000 pixels) and `413 SOURCE_FILE_TOO_LARGE` (more than
 512 MiB): those two limits are *provisional*, `PROVISIONAL_MAX_PIXELS` and `PROVISIONAL_MAX_BYTES` in
 `backend/api/startup.py`; `422 VALIDATION_ERROR` for a relative path or blank name; `503 IMPORT_UNAVAILABLE` if import

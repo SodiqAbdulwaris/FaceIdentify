@@ -78,7 +78,9 @@ of that training data must be checked before anyone relies on it.
 
 Runtime: `alembic` 1.20.0 MIT; `fastapi` 0.142.2 MIT (with `starlette` 1.7.0 BSD-3-Clause and
 `pydantic` 2.13.5 MIT); `numpy` 2.5.3 BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0; `pillow`
-12.3.0 MIT-CMU; `sqlalchemy` 2.0.54 MIT; `uvicorn` 0.54.0 BSD-3-Clause; `websockets` 17.2
+12.3.0 MIT-CMU (its wheel bundles libavif 1.4.2 BSD-2-Clause with the dav1d 1.5.3 decoder,
+BSD-2-Clause, used to read AVIF pictures since 2026-10-15, issue 188; the bundled aom 3.14.1,
+BSD-2-Clause with the AOMedia patent licence, is only an encoder, which the application never calls); `sqlalchemy` 2.0.54 MIT; `uvicorn` 0.54.0 BSD-3-Clause; `websockets` 17.2
 BSD-3-Clause; `usearch` Apache-2.0; `onnxruntime` MIT.
 Development only (not shipped): `pytest` 9.1.1 MIT; `pytest-asyncio` 1.4.0 Apache-2.0; `pytest-cov`
 7.1.0 MIT (with `coverage` 7.16.1 Apache-2.0); `httpx` 0.28.1 BSD-3-Clause; `hypothesis` 6.168.1
