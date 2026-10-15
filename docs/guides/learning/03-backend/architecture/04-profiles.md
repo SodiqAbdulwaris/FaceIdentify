@@ -17,7 +17,7 @@ can never be mixed. This lesson shows exactly what each needs and what each refu
 | Thing | Where |
 |---|---|
 | The development profile | `backend/api/development.py` (`development_processing`, `register_development_catalog`, `DevelopmentPerception`, `development_request`) |
-| The real profile | `backend/api/real.py` (`real_processing`, `ClientPool`, `load_policy`, `require_abstain_first`, `providers_from`) |
+| The real profile | `backend/api/real.py` (`real_processing`, `ClientPool`, `load_policy`, `require_approved_policy`, `APPROVED_MATCHING`, `providers_from`) |
 | The guard | `backend/api/library_profile.py` (`claim_library_profile`, `LibraryProfile`, `LibraryProfileMismatchError`) |
 | The choice | the host flag `--development-profile`; the shell passes it in debug builds (`desktop/src-tauri/src/config.rs`, `FACEIDENTIFY_DEVELOPMENT_PROFILE`) |
 | Settings both share | `ProcessingSettings` in `backend/api/startup.py` |
@@ -44,7 +44,7 @@ margin 0.1, new-identity ceiling 0.5) is chosen only so those two cases separate
   The file holds the `decision_policy` object of a processing request: `schema_version`, `version`,
   `min_detection_score`, `match_threshold`, `margin`, `new_identity_ceiling`. It is read on **every** request, so a newly
   measured policy applies without a restart.
-- **Abstain-first only (`require_abstain_first`).** Until a verified evaluation exists, a policy is accepted only if its
+- **Abstain-first only (`require_approved_policy`, formerly `require_abstain_first`).** Until a verified evaluation exists, a policy is accepted only if its
   `match_threshold` is above 1 (no automatic matching) **and** its `new_identity_ceiling` is `-1` (no identity from a weak
   score). A file that enables matching is refused however plausible its numbers, because nothing binds it to a measurement.
 - **`ml_worker`**: the workers' own state, `NOT_STARTED` until a job starts one. `ClientPool` keeps one supervised worker per
@@ -54,6 +54,8 @@ margin 0.1, new-identity ceiling 0.5) is chosen only so those two cases separate
   than one provider is named, because a lone accelerator must never silently become the CPU).
 - With no package or no usable policy, `POST .../process` and `POST /search/face` answer `503 PROCESSING_UNAVAILABLE`. It
   never invents numbers.
+
+> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (automatic cross-source recognition, TST-057B): "the we're enabling auto-acceptance, we can do that". The 2026-10-14 conditions 1 to 4 were met on 2026-10-15 (48-identity verified set, hard negatives, the conservative rule on a verified manifest with zero false accepts); this is the code change of condition 5: `require_abstain_first` became `require_approved_policy` in `backend/api/real.py`, which admits a matching policy only when it equals an operating point in `APPROVED_MATCHING` (a policy file alone still cannot enable matching; automatic new identities stay off). **The operating point is pending owner confirmation** (recommended: threshold 0.45, margin 0.10; options and evidence in [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md)); until it is confirmed and the policy file is installed, the running application stays abstain-only and TST-057B stays `BLOCKED`.
 
 ### The guard
 

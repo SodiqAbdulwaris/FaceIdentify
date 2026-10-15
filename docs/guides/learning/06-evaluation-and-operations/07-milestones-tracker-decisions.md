@@ -37,6 +37,8 @@ stops you from trusting a stale one.
 - **Honesty rules** for every document: separate verified from assumed, record failures and skips, use absolute dates, cite commits by PR
   number and subject (not SHA).
 
+> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (automatic cross-source recognition, TST-057B): "the we're enabling auto-acceptance, we can do that". The 2026-10-14 conditions 1 to 4 were met on 2026-10-15 (48-identity verified set, hard negatives, the conservative rule on a verified manifest with zero false accepts); this is the code change of condition 5: `require_abstain_first` became `require_approved_policy` in `backend/api/real.py`, which admits a matching policy only when it equals an operating point in `APPROVED_MATCHING` (a policy file alone still cannot enable matching; automatic new identities stay off). **The operating point is pending owner confirmation** (recommended: threshold 0.45, margin 0.10; options and evidence in [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md)); until it is confirmed and the policy file is installed, the running application stays abstain-only and TST-057B stays `BLOCKED`.
+
 ## 4. Try it
 
 **Works with no models. Verified 2026-10-12.** Answer four questions using only these documents and `grep` (each is a minute's work):

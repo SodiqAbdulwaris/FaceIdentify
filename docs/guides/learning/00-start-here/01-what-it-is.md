@@ -56,6 +56,8 @@ The vocabulary is taught properly in [03-backend/domain](../03-backend/domain/RE
 | Calibrated **automatic** matching | [designed]; blocked until a verified evaluation set exists (TST-057B) |
 | Movies (M6), cameras (M7), installer and packaged runtime (M8) | [designed]; not started |
 
+> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (automatic cross-source recognition, TST-057B): "the we're enabling auto-acceptance, we can do that". The 2026-10-14 conditions 1 to 4 were met on 2026-10-15 (48-identity verified set, hard negatives, the conservative rule on a verified manifest with zero false accepts); this is the code change of condition 5: `require_abstain_first` became `require_approved_policy` in `backend/api/real.py`, which admits a matching policy only when it equals an operating point in `APPROVED_MATCHING` (a policy file alone still cannot enable matching; automatic new identities stay off). **The operating point is pending owner confirmation** (recommended: threshold 0.45, margin 0.10; options and evidence in [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md)); until it is confirmed and the policy file is installed, the running application stays abstain-only and TST-057B stays `BLOCKED`.
+
 > The owner decided on 2026-10-08 that cross-source recognition is *assisted* first: the system ranks
 > possible matches and you confirm. *Automatic* recognition is a separate, later claim.
 

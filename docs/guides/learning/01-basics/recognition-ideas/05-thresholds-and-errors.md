@@ -67,6 +67,8 @@ with candidates abstains and waits for you; only a face with nothing to compare 
 numbers describe one small set of public-domain portraits and nothing wider
 (`docs/research/measured-operating-point.md`).
 
+> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (automatic cross-source recognition, TST-057B): "the we're enabling auto-acceptance, we can do that". The 2026-10-14 conditions 1 to 4 were met on 2026-10-15 (48-identity verified set, hard negatives, the conservative rule on a verified manifest with zero false accepts); this is the code change of condition 5: `require_abstain_first` became `require_approved_policy` in `backend/api/real.py`, which admits a matching policy only when it equals an operating point in `APPROVED_MATCHING` (a policy file alone still cannot enable matching; automatic new identities stay off). **The operating point is pending owner confirmation** (recommended: threshold 0.45, margin 0.10; options and evidence in [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md)); until it is confirmed and the policy file is installed, the running application stays abstain-only and TST-057B stays `BLOCKED`.
+
 ## 4. Try it
 
 **Works with no models. Verified 2026-10-12.** The evaluation script's own arithmetic runs on made-up numbers,
@@ -102,8 +104,8 @@ So `(2, 1)`: two accepted, one correct. Raise the margin to 0.30 and `dee` (lead
 stays: `(1, 1)`.
 
 The real host refuses a policy that could match automatically until a verified evaluation exists:
-`require_abstain_first` in `backend/api/real.py` rejects a measured policy file whose `match_threshold` is 1.0
-or less or whose `new_identity_ceiling` is not `-1.0`. Try the policy classes, in `uv run python`:
+`require_approved_policy` (formerly `require_abstain_first`) in `backend/api/real.py` rejects a measured policy file whose `match_threshold` is 1.0
+or less (unless it equals an owner-approved operating point in `APPROVED_MATCHING`) or whose `new_identity_ceiling` is not `-1.0`. Try the policy classes, in `uv run python`:
 
 ```python
 >>> from backend.app.recognition.reasoner import DecisionPolicy
