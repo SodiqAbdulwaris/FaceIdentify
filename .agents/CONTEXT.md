@@ -455,7 +455,7 @@ needs an answer to start):
    same-rankings-after-restart check (stability 100%), `queries_wrote_nothing`, the workflow checks, and the open-set table
    (strangers accepted at each cut-off, best stranger similarity). Record it (entry, tracker TST-057B row, status page,
    this file). **It cannot pass TST-057B: 36 identities are below 40.** State both facts.
-2. **Collected 2026-10-15, awaiting the owner's review:** 180 pictures for 12 more people (names in the celebrity-set entry); next the owner reviews them with `label_review.py serve ... --people`, then export and re-run the gate. Original instruction kept: **Close the identity gap automatically.** Make a people file of about 10 more well-known people not in the set (one
+2. **Done 2026-10-15:** 12 more people collected and reviewed by the owner (unmarked ones bulk-recorded VERIFIED from the owner's statement); export `verified-20261015T073439095195Z.json` has 48 identities and 142 queries; the gate with 40 enrolled met every measured provisional threshold (Recall@1 0.983, Recall@5 0.992, MRR 0.986, 10 of 10 workflow, same rankings, 0 of 115 strangers). TST-057B stays blocked: automatic acceptance is off until hard negatives (issue 177; PR 196 open, not mergeable as is) and an owner-approved change. Original instruction kept: **Close the identity gap automatically.** Make a people file of about 10 more well-known people not in the set (one
    per line; `Display = Category` when the Commons category differs) and run
    `collect_commons_portraits.py --out evaluation/datasets/celebs-commons --licence free --people-file <file>`
    (it resumes: existing pictures are kept). Then the owner reviews only the new people
