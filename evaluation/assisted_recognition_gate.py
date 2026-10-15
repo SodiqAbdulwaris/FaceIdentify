@@ -54,6 +54,7 @@ import secrets
 import shutil
 import statistics
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -477,7 +478,9 @@ async def choose_hard_negatives(
     `count` closest as never-enrolled people, scored on their other photographs only."""
     scored: list[tuple[str, float | None]] = []
     nearest: dict[str, Any] = {}
-    for candidate in candidates:
+    for done, candidate in enumerate(candidates, 1):
+        if done % 100 == 0:
+            print(f"hard negatives: {done} of {len(candidates)} candidates searched", flush=True)
         offered = ranking(await ask(gate, candidate["select"]))
         top = offered[0] if offered else None
         scored.append((candidate["name"], top["similarity"] if top else None))
@@ -797,10 +800,21 @@ async def main_async(args: argparse.Namespace) -> int:
     )
     known_names = [p["name"] for p in people if not p.get("unknown")]
     log: dict[str, Any] = {"started": datetime.now(UTC).isoformat(), "providers": list(providers)}
+    timings: dict[str, float] = {}  # seconds per phase: a long run shows where its time went
+    log["timings_seconds"] = timings
+    clock = time.monotonic()
+
+    def phase(name: str) -> None:
+        nonlocal clock
+        now = time.monotonic()
+        timings[name] = round(now - clock, 1)
+        clock = now
+        print(f"{name}: {timings[name]} s", flush=True)
 
     async with running(settings, providers) as gate:
         log["readiness"] = (await gate.client.get("/readiness")).json()
         enrolled = await enrol(gate, people, log, args.run_timeout)
+        phase("enrolment")
         before = await gate.counts()
         if args.hard_negatives:  # (inside the count check: the selection queries write nothing)
             hard, log["hard_negatives"] = await choose_hard_negatives(
@@ -810,7 +824,9 @@ async def main_async(args: argparse.Namespace) -> int:
             for person in hard:
                 enrolled[person["name"]] = {"identity_id": None, "sources": [], "faces": 0}
             people += hard
+            phase("hard_negative_selection")
         results = await run_queries(gate, people, enrolled)
+        phase("queries")
         after = await gate.counts()
         log["queries_wrote_nothing"] = before == after
         log["counts"] = {"before_queries": before, "after_queries": after}
@@ -840,9 +856,11 @@ async def main_async(args: argparse.Namespace) -> int:
             flush=True,
         )
         checks = await workflow(gate, people, enrolled, log)
+        phase("workflow")
         settled = await run_queries(
             gate, people, enrolled
         )  # (after the workflow, before the restart)
+        phase("queries_after_workflow")
 
     # restart: the same library, a new application
     async with running(settings, providers) as gate:
@@ -854,6 +872,7 @@ async def main_async(args: argparse.Namespace) -> int:
             r["offered"] for r in again
         ]
         log["restart_metrics_after_workflow"] = metrics(again)
+    phase("restart_and_queries")
 
     used = hashlib.sha256(
         b"".join(
