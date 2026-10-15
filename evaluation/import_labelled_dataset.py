@@ -17,9 +17,9 @@ the shape `assisted_recognition_gate.py` and `label_review.py` read:
 * **Selection is deterministic**: people with at least `--minimum` distinct pictures, ordered by a
   hash of their name, at most `--people` of them and `--maximum` pictures each. A byte-identical
   picture is used once.
-* **Nothing is downloaded and nothing leaves the machine.** The terms of these datasets are *not
-  verified* here (see `docs/research/licensing-and-commercialization.md` section 10); they are for
-  local research use and are never committed or redistributed.
+* **Nothing is downloaded and nothing leaves the machine.** CelebA's agreement was read at
+  source and LFW's page could not be (see `docs/research/licensing-and-commercialization.md`
+  section 10.3); both are for local research use and are never committed or redistributed.
 """
 
 import argparse
@@ -40,13 +40,19 @@ TERMS: Final = {
         "name": "Labeled Faces in the Wild (LFW)",
         "source": "http://vis-www.cs.umass.edu/lfw/",
         "labels_by": "the dataset creators (names from the captions the photographs came with)",
-        "terms": "research use; terms not verified by this project",
+        "terms": (
+            "research use; the LFW page could not be read by this project (2026-10-15); the images "
+            "are third-party news photographs"
+        ),
     },
     "celeba": {
         "name": "CelebFaces Attributes (CelebA)",
         "source": "https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html",
         "labels_by": "the dataset creators (identity_CelebA.txt)",
-        "terms": "stated as non-commercial research only; not verified by this project",
+        "terms": (
+            "non-commercial research purposes only, no redistribution, images not the creators' "
+            "property (CelebA agreement read at source 2026-10-15)"
+        ),
     },
 }
 

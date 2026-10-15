@@ -117,7 +117,8 @@ def test_the_selection_is_stable_and_the_output_is_a_manifest_with_provenance(
     entry = manifest["Ada Lovelace"][0]
     assert (datasets / "lfw" / entry["file"]).is_file()
     assert len(entry["sha256"]) == 64
-    assert "not verified" in entry["licence"]
+    assert "research use" in entry["licence"]
+    assert "could not be read" in entry["licence"]  # the unread-terms caveat must survive
     assert provenance["photographs"] == 11
     saved = json.loads((datasets / "lfw" / "PROVENANCE.json").read_text(encoding="utf-8"))
     assert "NOT verified" in saved["label_status"]
