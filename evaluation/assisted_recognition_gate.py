@@ -441,10 +441,20 @@ def pool_candidates(
     pool: list[dict[str, Any]], taken_names: list[str], taken_digests: set[str]
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """The pool people who can be strangers: a name nobody in the main dataset has, no picture
-    byte-identical to any of its pictures (one shared picture suggests the same person under
-    another name, so the whole person is left out), and at least two pictures (the first, in
-    sorted order, selects; the rest are scored)."""
+    byte-identical to one of the main dataset's or to another pool person's (one shared picture
+    suggests the same person under another name, so the whole person is left out, whichever
+    comes first), and at least two pictures (the first, in sorted order, selects; the rest are
+    scored). `pool` must list each person's own pictures before any deduplication across people
+    (`load_pool`), or a picture taken by one entry would hide it from the other."""
     names = {same_name(name) for name in taken_names}
+    digests = {
+        person["name"]: {digest_of(path) for path in person["enrol"] + person["query"]}
+        for person in pool
+    }
+    owners: dict[str, int] = {}
+    for held in digests.values():
+        for digest in held:
+            owners[digest] = owners.get(digest, 0) + 1
     kept: list[dict[str, Any]] = []
     dropped: dict[str, Any] = {"same_name": [], "shared_a_picture": [], "too_few_pictures": 0}
     for person in pool:
@@ -452,7 +462,8 @@ def pool_candidates(
             dropped["same_name"].append(person["name"])
             continue
         files = sorted(person["enrol"] + person["query"])
-        if any(digest_of(path) in taken_digests for path in files):
+        held = digests[person["name"]]
+        if held & taken_digests or any(owners[digest] > 1 for digest in held):
             dropped["shared_a_picture"].append(person["name"])
             continue
         if len(files) < 2:
@@ -460,6 +471,21 @@ def pool_candidates(
             continue
         kept.append({"name": person["name"], "select": files[0], "score": files[1:]})
     return kept, dropped
+
+
+def load_pool(
+    pool: Path, taken_names: list[str], taken_digests: set[str]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The candidates of a pool dataset (`pool_candidates`), each person's pictures read on their
+    own (the same path and digest checks as `choose_people`) so no picture is deduplicated away
+    before the shared-picture check sees it."""
+    manifest = json.loads((pool / "manifest.json").read_text(encoding="utf-8"))
+    people = [
+        person
+        for name, entries in manifest.items()
+        for person in choose_people({name: entries}, pool, 1, 1)
+    ]
+    return pool_candidates(people, taken_names, taken_digests)
 
 
 def pick_hard_negatives(scored: list[tuple[str, float | None]], count: int) -> list[str]:
@@ -794,8 +820,8 @@ async def main_async(args: argparse.Namespace) -> int:
         # keeps: a person or picture left out of a verified export is still the same person.
         full = json.loads((dataset / "manifest.json").read_text(encoding="utf-8"))
         main_people = everyone + choose_people(full, dataset, 10**6, 1)
-        candidates, pool_dropped = pool_candidates(
-            choose_people(json.loads(pool_manifest.read_text(encoding="utf-8")), pool, 10**6, 1),
+        candidates, pool_dropped = load_pool(
+            pool,
             list(manifest) + list(full),
             {digest_of(path) for p in main_people for path in p["enrol"] + p["query"]},
         )
