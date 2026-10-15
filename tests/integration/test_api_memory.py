@@ -10,11 +10,16 @@ from typing import Any
 
 import anyio
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from backend.api.pagination import encode_cursor
 from backend.app.identities.models import Identity
-from backend.app.memory.models import Observation, Occurrence
+from backend.app.memory.models import (
+    IndexOperation,
+    IndexOperationState,
+    Observation,
+    Occurrence,
+)
 from backend.app.runtime.perception_client import Detected
 from backend.ml.contracts.messages import Detection
 from tests.fixtures.api import Api, error, imported
@@ -34,16 +39,23 @@ async def processed(api: Api, name: str, *, tick: bool = True) -> dict[str, Any]
 
 
 async def index_caught_up(api: Api) -> None:
-    """Wait until the index holds what the accepted run queued.
+    """Wait until the index holds what the accepted run queued, and check that it does.
 
     A run reads COMPLETED as soon as acceptance commits, but acceptance only then wakes the index
     coordinator, which persists the index on the scheduler thread. Passes are serialized, so this
     one either waits for that pass to finish or does its work first and leaves it nothing to write.
+    One pass is bounded and skips backed-off work, so every operation must be APPLIED afterwards:
+    anything left would let a later pass write the index again.
     """
     library = api.backend.library
     assert library is not None
     limit = api.backend.settings.index_batch
     await anyio.to_thread.run_sync(partial(library.coordinator.apply_pending, limit=limit))
+    with library.session_factory() as session:
+        left = session.scalars(
+            select(IndexOperation.state).where(IndexOperation.state != IndexOperationState.APPLIED)
+        ).all()
+    assert not left, f"index operations not applied: {left}"
 
 
 def set_state(api: Api, model: Any, state: str) -> None:
