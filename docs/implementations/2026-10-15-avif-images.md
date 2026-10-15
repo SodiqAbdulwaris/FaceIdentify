@@ -6,13 +6,19 @@
 - **Status:** done (awaiting merge)
 - **Commits:** PR (this branch, `feat/avif-image-support`): `feat(media): accept AVIF images`,
   `feat(ui): offer AVIF in the pickers and face search`, `docs: record AVIF support (#188)`,
-  `docs(specs): accept AVIF images (owner decision)`
+  `docs(specs): accept AVIF images (owner decision)`, `docs: record the AVIF gate results`, and
+  after the Codex review `fix(media): find the AVIF brand anywhere in the ftyp box`,
+  `fix(media): decode each AVIF on one thread`, `test(ui): use the five-format message in the
+  library test`, `docs: record the AVIF review fixes`
 
 ## What changed
 
 - `backend/infrastructure/media/image.py`: AVIF is a fifth accepted format (`image/avif`). Its
-  signature (an ISO-BMFF `ftyp` box naming the `avif` or `avis` brand at byte 8) makes a damaged
-  AVIF `CorruptImageError`, not `UnsupportedImageError`. libavif reports a failed pixel decode as
+  signature (an ISO-BMFF `ftyp` box listing the `avif` or `avis` brand, as its major brand or a
+  compatible one, read within the box's own size and at most 4 KiB) makes a damaged AVIF
+  `CorruptImageError`, not `UnsupportedImageError`. libavif decodes on one thread
+  (`AvifImagePlugin.DEFAULT_MAX_THREADS = 1`), like every other decoder here; Pillow's default is
+  one thread per CPU for every image. libavif reports a failed pixel decode as
   `RuntimeError`, which Pillow's other readers never raise; it is now caught with the others and
   becomes `CorruptImageError` (without this, a damaged AVIF would have been a 500 on every route).
 - One decoder serves import (`ImportSourceUseCase`), processing (`ExecuteProcessingJob`) and face
@@ -36,8 +42,11 @@ common on the web.
   `docs/research/licensing-and-commercialization.md`.
 - **HEIF stays refused.** Pillow's AVIF reader also tries the generic `mif1`/`msf1` brands; such a
   file that is not an AVIF is still "not ours" (`UnsupportedImageError`), so HEIC photographs keep
-  their old answer. A genuine AVIF whose major brand is `mif1` decodes; only if it is also damaged
-  is it called unsupported rather than corrupt.
+  their old answer. A genuine AVIF whose major brand is `mif1` and lists `avif` among its
+  compatible brands decodes, and when damaged is corrupt (the Codex review's finding 1).
+- **One decoding thread per AVIF** (the Codex review's finding 2): Pillow's default asked libavif
+  for 32 threads on a 32-CPU machine for each image, which would let concurrent imports go past
+  the architecture's bounded CPU work.
 - **The spec.** `API and Contracts.md` lists the accepted formats in two decision notes (import,
   2026-10-02; face search, 2026-10-10). Editing a spec needs the owner's approval; asked through the
   supervising session, the owner approved on 2026-10-15: "add AVIF to the accepted formats ...
@@ -49,10 +58,12 @@ common on the web.
 
 ## Verification
 
-- `uv run pytest tests/unit/test_image_decode.py`: 88 passed (73 before). New: an AVIF identified
+- `uv run pytest tests/unit/test_image_decode.py`: 90 passed (73 before). New: an AVIF identified
   and close to its source (lossy), all eight orientations, an animated AVIF's first frame, a header
   read decodes nothing, an AVIF over the limit refused before decoding, cut short and
-  signature-only AVIFs corrupt, damaged pixels corrupt, a `mif1` HEIF unsupported.
+  signature-only AVIFs corrupt, damaged pixels corrupt, a `mif1` HEIF unsupported, an AVIF
+  under the `mif1` brand read and (cut short) corrupt, the decoder asked for one thread. The last
+  two failed before their fixes.
 - `tests/integration/test_api_face_search.py`: an AVIF imported, processed, indexed and found by a
   face search with an AVIF (by path and by bytes); a damaged AVIF `422 MEDIA_CORRUPT` from face
   search (path and bytes) and from import, writing nothing.
