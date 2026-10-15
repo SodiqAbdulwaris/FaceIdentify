@@ -72,6 +72,7 @@ of that training data must be checked before anyone relies on it.
 | ONNX Runtime (`onnxruntime` 1.30.0, CPU) | MIT | the ML worker | verified from package metadata |
 | ONNX Runtime GPU (`onnxruntime-gpu` 1.23.2) | MIT (its own files) | optional CUDA path, installed as a machine-local runtime library | the CUDA/cuDNN files it needs are NVIDIA's, next row |
 | NVIDIA CUDA runtime 12.9, cuDNN 9.27, cuBLAS, cuFFT, cuRAND, NVRTC, nvJitLink (pip `nvidia-*-cu12`, installed 2026-10-07 into the Git-ignored `local-models/ort-gpu`) | NVIDIA proprietary licences (not verified in detail) | GPU inference only (`FACEIDENTIFY_ORT_GPU_DIR`) | redistribution inside an installer is governed by NVIDIA's terms; read them per file before shipping |
+| ONNX Runtime DirectML builds (`onnxruntime-directml` 1.23.0, `onnxruntime-windowsml` 1.30.0) | MIT (wheel `LICENSE`); each bundles Microsoft's `DirectML.dll`, whose redistribution terms are not verified | **evaluated only** (2026-10-15, installed into a scratch folder outside the repository, never a dependency) | candidate shipped build, owner decision pending (`docs/research/onnx-runtime-gpu-packaging.md`); read the `DirectML.dll` terms before shipping |
 | USearch (`usearch` 2.26.2) | Apache-2.0 | the vector index | verified |
 
 ## 5. Python dependencies (verified from installed metadata, 2026-10-07)

@@ -15,7 +15,7 @@ research-licensed and never committed; this is a **local** procedure on your mac
 | Smoke test on pictures | `scripts/smoke_real_models.py` |
 | Real-worker pytest (local only) | `tests/e2e/test_real_models.py`, `tests/e2e/test_real_host.py` (`-m e2e`) |
 | Package key / policy file | `insightface-buffalo-l`; `<local state>/policies/insightface-buffalo-l.json` |
-| Providers | `FACEIDENTIFY_PROVIDERS` (for example `CUDAExecutionProvider,CPUExecutionProvider`); GPU libraries via `FACEIDENTIFY_ORT_GPU_DIR` |
+| Providers | `FACEIDENTIFY_PROVIDERS` (for example `CUDAExecutionProvider,CPUExecutionProvider`); GPU libraries via `FACEIDENTIFY_ORT_GPU_DIR`; `/readiness` says what actually ran (`execution_provider`, and `provider_fallback: ACTIVE` when the preferred provider could not start) |
 
 ## 3. How it works
 
