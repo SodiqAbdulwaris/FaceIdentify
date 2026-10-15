@@ -13,7 +13,7 @@ evaluation, never constants in the code.
 | Thing | Where |
 |---|---|
 | `IdentityReasoner`, `DecisionPolicy`, `RecognitionOutcome`, `Reason`, `RecognitionDecision` | `backend/app/recognition/reasoner.py` |
-| The abstain-only gate for the real profile | `require_abstain_first` in `backend/api/real.py` |
+| The policy gate for the real profile (abstain-first or an owner-approved operating point) | `require_approved_policy` and `APPROVED_MATCHING` in `backend/api/real.py` |
 | Tests | `tests/unit/test_recognition_reasoner.py` (37) |
 | Measuring the numbers | [evaluation lessons](../../06-evaluation-and-operations/02-measure-operating-point.md) |
 
@@ -43,6 +43,8 @@ A match needs a strictly positive margin so two identities at the same similarit
 `match_threshold` above 1 **and** `new_identity_ceiling` of exactly `-1` ([profiles](../architecture/04-profiles.md)). Rules 4 to 7
 then never fire: every face abstains, **except** the empty-library case (rule 3): with nothing to compare against, a first face
 is still a valid unknown and creates an identity.
+
+> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (automatic cross-source recognition, TST-057B): "the we're enabling auto-acceptance, we can do that". The 2026-10-14 conditions 1 to 4 were met on 2026-10-15 (48-identity verified set, hard negatives, the conservative rule on a verified manifest with zero false accepts); this is the code change of condition 5: `require_abstain_first` became `require_approved_policy` in `backend/api/real.py`, which admits a matching policy only when it equals an operating point in `APPROVED_MATCHING` (a policy file alone still cannot enable matching; automatic new identities stay off). **The operating point is pending owner confirmation** (recommended: threshold 0.45, margin 0.10; options and evidence in [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md)); until it is confirmed and the policy file is installed, the running application stays abstain-only and TST-057B stays `BLOCKED`.
 
 ## 4. Try it
 

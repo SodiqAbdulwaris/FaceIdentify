@@ -19,7 +19,7 @@ merge must be atomic" lives in exactly one place, so fixing or auditing it is on
 | ML runs outside database transactions | `backend/app/processing/execute_job.py` | `tests/integration/test_execute_processing_job.py` |
 | Each side effect is recorded as intent first (outbox) | `PERSISTENCE_IMPLEMENTATION.md` section 17 | `tests/integration/test_index_coordinator.py` |
 | Time and ids are injected (`clock`, `new_id`) | `.agents/rules/testing.md` | tests use `FrozenClock` and `SeededUUIDs` |
-| Fail closed at trust boundaries | module docstrings (`validate_launch_token`, `require_abstain_first`, safe storage keys) | the tests named in each |
+| Fail closed at trust boundaries | module docstrings (`validate_launch_token`, `require_approved_policy`, safe storage keys) | the tests named in each |
 
 ## 3. How it works
 

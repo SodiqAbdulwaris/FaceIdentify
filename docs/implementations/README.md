@@ -67,6 +67,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-14 | [The Commons portrait collector (from the owner's `facescrape.py`)](2026-10-14-commons-portrait-collector.md) | built and dry-run; pictures unverified |
 | 2026-10-15 | [Flaky face-search test: the index was still being saved](2026-10-15-face-search-snapshot-index-race.md) | done; test-only |
 | 2026-10-15 | [M5: the operating point on a verified manifest (issue 178)](2026-10-15-m5-verified-operating-point.md) | done; conservative rule on 36 verified identities: 0 false accepts on the final half, recall 0.988; acceptance stays off |
+| 2026-10-15 | [M5: enabling automatic acceptance at an owner-approved operating point](2026-10-15-enable-automatic-acceptance.md) | partial; code and tests done, operating point pending owner confirmation, live policy untouched |
 | 2026-10-15 | [M5: hard-negative strangers chosen inside the gate (issue 177)](2026-10-15-m5-gate-hard-negatives.md) | done; 15 look-alikes from all of LFW: 0 accepted by the real policy, best 0.320; acceptance stays off |
 | 2026-10-12 | [The learning guide restructured into `docs/guides/learning/`](2026-10-12-learning-guide-restructure.md) | done; documentation only |
 | 2026-10-09 | [M5 step 4c, part 1: revision 0010](2026-10-09-m5-revision-0010.md) | done; TST-059, TST-032 |
