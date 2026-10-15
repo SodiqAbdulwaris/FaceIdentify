@@ -39,6 +39,10 @@ so it is a deliberately pessimistic read, not an estimate of the rate for random
 The identity labels are the Commons categories of the photographs, a human-curated label that is NOT
 verified: a mislabelled photograph can make the numbers look better or worse, with no direction. The
 report says so and records the configuration, environment, exclusions and the dataset manifest hash.
+Exclusions are listed by rule (`log.exclusions`, issue 182): each enrolment photograph that placed
+no face, each known person those losses left with too few enrolled faces, and each query not
+evaluated, with why; a photograph with several faces and no dominant one is "not evaluated
+(ambiguous subject)", not a loss of the pipeline.
 This is a local run (the weights are not in CI) and is recorded in the tracker with its evidence.
 """
 
@@ -84,6 +88,21 @@ DATASETS_ROOT = (Path(__file__).resolve().parent / "datasets").resolve()
 API = "/api/v1"
 DOMINANCE = 2.5  # a subject face is at least this many times larger than any other in the picture
 RUN_TIMEOUT = 900.0  # default seconds to wait for the processing runs (`--run-timeout`)
+MINIMUM_ENROLLED = 2  # a known person's queries are evaluated only with this many enrolled faces
+# Why a photograph was left out (the report's `exclusions` keys, listed in this order): an enrolment
+# photograph by the first three, tested in order; a query by `query_exclusion`.
+EXCLUSION_RULES = {
+    "processing_failed": "not evaluated: the photograph's processing run did not complete",
+    "no_face": "not evaluated: no face was found in the photograph",
+    "no_subject": (
+        f"not evaluated (ambiguous subject): several faces and none {DOMINANCE} times larger "
+        "than the rest"
+    ),
+    "too_few_enrolled_faces": (
+        f"not evaluated: the person was left with fewer than {MINIMUM_ENROLLED} enrolled faces "
+        "after the enrolment exclusions (the enrolment cascade)"
+    ),
+}
 
 
 def positive_seconds(text: str) -> float:
@@ -242,6 +261,17 @@ def subject(faces: list[dict[str, Any]], box: str) -> dict[str, Any] | None:
     return None
 
 
+def skip_reason(faces: list[dict[str, Any]], run_state: str) -> str | None:
+    """Why an enrolment photograph places no face (an `EXCLUSION_RULES` key), or None."""
+    if run_state != "COMPLETED":
+        return "processing_failed"
+    if not faces:
+        return "no_face"
+    if subject(faces, "bounding_box") is None:
+        return "no_subject"
+    return None
+
+
 async def wait_for_runs(
     gate: Gate, run_ids: list[str], timeout: float = RUN_TIMEOUT
 ) -> dict[str, str]:
@@ -309,7 +339,8 @@ async def enrol(
     }
 
     enrolled: dict[str, dict[str, Any]] = {}
-    skipped: dict[str, int] = {"no_face": 0, "no_subject": 0}
+    skipped: dict[str, int] = {"processing_failed": 0, "no_face": 0, "no_subject": 0}
+    excluded: list[dict[str, str]] = []
     for person in people:
         record: dict[str, Any] = {
             "identity_id": None,
@@ -321,9 +352,12 @@ async def enrol(
         for path in person["enrol"]:
             source_id = sources[path]
             faces = await faces_of(gate, source_id)
+            reason = skip_reason(faces, states[runs[source_id]])
             chosen = subject(faces, "bounding_box")
-            if chosen is None:
-                skipped["no_face" if not faces else "no_subject"] += 1
+            if reason is not None or chosen is None:
+                rule = reason or "no_subject"
+                skipped[rule] += 1
+                excluded.append({"person": person["name"], "file": path.name, "rule": rule})
                 continue
             if chosen["occurrence"] is None:  # not placed by the application: place it
                 placed = await gate.post(
@@ -356,6 +390,7 @@ async def enrol(
         "photographs_imported": len(sources),
         "faces_placed": sum(r["faces"] for r in enrolled.values()),
         "skipped_photographs": skipped,
+        "excluded_photographs": excluded,
         "people": {n: r["faces"] for n, r in enrolled.items()},
     }
     return enrolled
@@ -404,7 +439,8 @@ async def run_queries(
                     "file": path.name,
                     "unknown": bool(person.get("unknown")),
                     "hard_negative": bool(person.get("hard_negative")),
-                    "eligible": enrolled[person["name"]]["faces"] >= 2,
+                    "eligible": enrolled[person["name"]]["faces"] >= MINIMUM_ENROLLED,
+                    "faces": len(answer["faces"]),
                     "offered": ranking(answer),
                     "status": subject_status(answer),
                 }
@@ -689,6 +725,69 @@ def metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def query_exclusion(result: dict[str, Any]) -> str | None:
+    """Why a query is not evaluated (an `EXCLUSION_RULES` key), or None if it is.
+
+    The cascade comes first: a known person with too few enrolled faces is not evaluated whatever
+    their query photograph holds. A stranger is never enrolled, so only their faces count."""
+    if not result.get("unknown") and not result["eligible"]:
+        return "too_few_enrolled_faces"
+    if result["offered"] is None:
+        return "no_face" if result["faces"] == 0 else "no_subject"
+    return None
+
+
+def exclusions(
+    excluded_photographs: list[dict[str, str]],
+    enrolled_faces: dict[str, int],
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Every photograph and person left out, listed under the rule that left it out.
+
+    Enrolment photographs that placed no face, the known people those losses left with too few
+    enrolled faces (the cascade), then the queries not evaluated: known people's (their total is
+    `metrics()["ineligible_or_no_subject"]`) and strangers' (random and hard negatives) apart."""
+
+    def by_rule(entries: list[tuple[str, dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for rule in EXCLUSION_RULES:
+            listed = [entry for found, entry in entries if found == rule]
+            if listed:
+                grouped[rule] = listed
+        return grouped
+
+    enrolment = by_rule(
+        [(e["rule"], {"person": e["person"], "file": e["file"]}) for e in excluded_photographs]
+    )
+    known: list[tuple[str, dict[str, Any]]] = []
+    strangers: list[tuple[str, dict[str, Any]]] = []
+    for r in results:
+        if (rule := query_exclusion(r)) is None:
+            continue
+        if r.get("unknown"):
+            entry = {"person": r["person"], "file": r["file"]}
+            strangers.append((rule, entry | {"hard_negative": bool(r.get("hard_negative"))}))
+        else:
+            known.append((rule, {"person": r["person"], "file": r["file"]}))
+    cascade = sorted({r["person"] for r in results if not r.get("unknown") and not r["eligible"]})
+    known_queries, stranger_queries = by_rule(known), by_rule(strangers)
+    return {
+        "rules": EXCLUSION_RULES,
+        "enrolment_photographs": enrolment,
+        "people_with_too_few_enrolled_faces": [
+            {"person": name, "enrolled_faces": enrolled_faces.get(name, 0)} for name in cascade
+        ],
+        "known_queries": known_queries,
+        "stranger_queries": stranger_queries,
+        "counts": {
+            "enrolment_photographs": {k: len(v) for k, v in enrolment.items()},
+            "people_with_too_few_enrolled_faces": len(cascade),
+            "known_queries": {k: len(v) for k, v in known_queries.items()},
+            "stranger_queries": {k: len(v) for k, v in stranger_queries.items()},
+        },
+    }
+
+
 async def workflow(
     gate: Gate,
     people: list[dict[str, Any]],
@@ -866,6 +965,9 @@ async def main_async(args: argparse.Namespace) -> int:
         log["queries_wrote_nothing"] = before == after
         log["counts"] = {"before_queries": before, "after_queries": after}
         log["metrics"] = metrics(results)
+        log["exclusions"] = exclusions(
+            log["enrolment"]["excluded_photographs"], log["enrolment"]["people"], results
+        )
         log["per_identity"] = per_identity(results)
         if args.unknown:  # random strangers only
             log["open_set"] = open_set([r for r in results if not r["hard_negative"]])
@@ -887,7 +989,14 @@ async def main_async(args: argparse.Namespace) -> int:
             encoding="utf-8",
         )
         print(
-            json.dumps({"metrics": log["metrics"], "enrolment": log["enrolment"]}, indent=1),
+            json.dumps(
+                {
+                    "metrics": log["metrics"],
+                    "enrolment": log["enrolment"],
+                    "exclusions": log["exclusions"]["counts"],
+                },
+                indent=1,
+            ),
             flush=True,
         )
         checks = await workflow(gate, people, enrolled, log)

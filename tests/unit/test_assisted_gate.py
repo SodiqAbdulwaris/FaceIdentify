@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from evaluation.assisted_recognition_gate import (
+    EXCLUSION_RULES,
+    MINIMUM_ENROLLED,
     choose_people,
+    exclusions,
     faces_of,
     load_pool,
     load_provenance,
@@ -18,7 +21,9 @@ from evaluation.assisted_recognition_gate import (
     pick_hard_negatives,
     pool_candidates,
     positive_seconds,
+    query_exclusion,
     ranking,
+    skip_reason,
     subject,
     wilson,
 )
@@ -418,3 +423,108 @@ def test_two_pool_people_sharing_a_picture_are_both_left_out(tmp_path: Path) -> 
     kept, dropped = pool_candidates(pool, [], set())
     assert [c["name"] for c in kept] == ["Three"]
     assert dropped["shared_a_picture"] == ["One", "Two"]
+
+
+def asked(
+    person: str,
+    file: str,
+    *,
+    faces: int = 1,
+    offered: list[str] | None = None,
+    eligible: bool = True,
+    unknown: bool = False,
+    hard_negative: bool = False,
+) -> dict[str, object]:
+    """One query result as `run_queries` records it."""
+    return {
+        "person": person,
+        "file": file,
+        "unknown": unknown,
+        "hard_negative": hard_negative,
+        "eligible": eligible,
+        "faces": faces,
+        "offered": None if offered is None else [{"person": p, "similarity": 0.5} for p in offered],
+        "status": None,
+    }
+
+
+def test_an_enrolment_photograph_is_left_out_for_the_first_rule_it_meets() -> None:
+    crowd = [face(0.4, 0.4), face(0.3, 0.3)]  # no face 2.5 times larger than the other
+
+    assert skip_reason([face(0.2, 0.2)], "COMPLETED") is None
+    assert skip_reason([face(0.5, 0.5), face(0.2, 0.2)], "COMPLETED") is None
+    assert skip_reason([], "COMPLETED") == "no_face"
+    assert skip_reason(crowd, "COMPLETED") == "no_subject"
+    assert skip_reason([], "FAILED") == "processing_failed"  # not blamed on the detector
+    assert skip_reason([face(0.2, 0.2)], "CANCELLED") == "processing_failed"
+
+
+def test_a_query_is_left_out_for_too_few_enrolled_faces_before_its_own_faces_count() -> None:
+    assert query_exclusion(asked("a", "1.jpg", offered=["a"])) is None
+    assert query_exclusion(asked("a", "1.jpg", offered=[])) is None  # evaluated, nobody offered
+    assert query_exclusion(asked("a", "1.jpg", faces=0)) == "no_face"
+    assert query_exclusion(asked("a", "1.jpg", faces=3)) == "no_subject"
+    cascade = asked("b", "1.jpg", faces=0, eligible=False)
+    assert query_exclusion(cascade) == "too_few_enrolled_faces"
+    # a stranger is never enrolled, so `eligible` says nothing about them: only their faces count
+    assert query_exclusion(asked("z", "1.jpg", offered=["a"], eligible=False, unknown=True)) is None
+    stranger = asked("z", "2.jpg", faces=2, eligible=False, unknown=True)
+    assert query_exclusion(stranger) == "no_subject"
+
+
+def test_the_report_lists_every_exclusion_by_rule_including_the_enrolment_cascade() -> None:
+    excluded = [
+        {"person": "B", "file": "b1.jpg", "rule": "no_subject"},  # B keeps one face: the cascade
+        {"person": "A", "file": "a3.jpg", "rule": "no_face"},
+        {"person": "A", "file": "a4.jpg", "rule": "processing_failed"},
+    ]
+    enrolled = {"A": 2, "B": 1, "Z": 0}
+    results = [
+        asked("A", "a8.jpg", offered=["A"]),
+        asked("A", "a9.jpg", faces=2),  # ambiguous subject
+        asked("B", "b9.jpg", offered=["A"], eligible=False),  # the cascade
+        asked("Z", "z1.jpg", offered=["A"], eligible=False, unknown=True),
+        asked("Z", "z2.jpg", faces=0, eligible=False, unknown=True),
+        asked("H", "h1.jpg", faces=4, eligible=False, unknown=True, hard_negative=True),
+    ]
+
+    found = exclusions(excluded, enrolled, results)
+
+    assert found["rules"] == EXCLUSION_RULES
+    assert "ambiguous subject" in found["rules"]["no_subject"]
+    assert str(MINIMUM_ENROLLED) in found["rules"]["too_few_enrolled_faces"]
+    assert found["enrolment_photographs"] == {  # listed in rule order, each once
+        "processing_failed": [{"person": "A", "file": "a4.jpg"}],
+        "no_face": [{"person": "A", "file": "a3.jpg"}],
+        "no_subject": [{"person": "B", "file": "b1.jpg"}],
+    }
+    assert list(found["enrolment_photographs"]) == ["processing_failed", "no_face", "no_subject"]
+    assert found["people_with_too_few_enrolled_faces"] == [{"person": "B", "enrolled_faces": 1}]
+    assert found["known_queries"] == {
+        "no_subject": [{"person": "A", "file": "a9.jpg"}],
+        "too_few_enrolled_faces": [{"person": "B", "file": "b9.jpg"}],
+    }
+    assert found["stranger_queries"] == {
+        "no_face": [{"person": "Z", "file": "z2.jpg", "hard_negative": False}],
+        "no_subject": [{"person": "H", "file": "h1.jpg", "hard_negative": True}],
+    }
+    assert found["counts"] == {
+        "enrolment_photographs": {"processing_failed": 1, "no_face": 1, "no_subject": 1},
+        "people_with_too_few_enrolled_faces": 1,
+        "known_queries": {"no_subject": 1, "too_few_enrolled_faces": 1},
+        "stranger_queries": {"no_face": 1, "no_subject": 1},
+    }
+    # the known queries listed are exactly the ones the retrieval totals leave out
+    assert (
+        sum(found["counts"]["known_queries"].values())
+        == (metrics(results)["ineligible_or_no_subject"])
+    )
+
+
+def test_nothing_left_out_gives_empty_lists_not_missing_keys() -> None:
+    found = exclusions([], {"A": 3}, [asked("A", "a9.jpg", offered=["A"])])
+
+    assert found["enrolment_photographs"] == {}
+    assert found["people_with_too_few_enrolled_faces"] == []
+    assert found["known_queries"] == found["stranger_queries"] == {}
+    assert found["counts"]["people_with_too_few_enrolled_faces"] == 0
