@@ -1,10 +1,11 @@
 # The celebrity set from Commons: reviewed, exported and gated
 
 - **Date:** 2026-10-14
-- **Milestone / tracker IDs:** M5 track R; TST-057B (stays `BLOCKED`: 36 of the 40 identities)
-- **Status:** the verified manifest is exported and the gate run on it finished (2026-10-14 23:50):
-  retrieval, stability and workflow figures meet the owner's thresholds, but **TST-057B is not passed**
-  (36 of 40 identities); no threshold, policy or model changed
+- **Milestone / tracker IDs:** M5 track R; TST-057B (stays `BLOCKED`: automatic acceptance off)
+- **Status:** two gate runs on verified exports: 36 identities (2026-10-14, historical: below the
+  target of 40) and **48 identities (2026-10-15): every measured provisional threshold met at the
+  dataset targets**. **TST-057B is not passed** (automatic acceptance stays off); no threshold, policy
+  or model changed
 - **Commits:** PR to be recorded when merged
 
 ## What was done
@@ -118,8 +119,7 @@ Matt Damon, Meryl Streep, Michael B. Jordan, Will Smith (random, not look-alikes
 
 **Reading.** For the first time a **verified set meets the owner's dataset targets and every measured
 provisional threshold**. This is the assisted-recognition quality bar. **TST-057B stays `BLOCKED`**: it is
-*automatic* recognition, which stays off under the decision of 2026-10-14 until hard negatives (issue 177)
-are measured and an owner-approved code change is made. "Zero unintended mutations" is only shown for
+*automatic* recognition, which stays off under the decision of 2026-10-14 until the remaining conditions of the 2026-10-14 decision are met: hard negatives (issue 177), the conservative rule run on the verified manifest with zero false accepts (issue 178: run on the 36-identity export in PR 195, to be repeated on the 48-identity export), then an owner-approved code change. "Zero unintended mutations" is only shown for
 counts. The limits below still apply.
 
 ## Limits to carry into any claim
