@@ -67,9 +67,13 @@ pool was imported for the second run.
 
 First attempt (2026-10-15, on battery, before the review fixes): it finished enrolment, selection,
 queries and the workflow, then was killed with the application during the restart phase, so its report
-is **partial** (`gate-celebs-commons-hard-wide-partial.json`); the retrieval, selection and open-set
-figures below come from it and are complete for those phases. A full re-run, detached from the
-application, was started to record the workflow and restart checks with these strangers.
+is partial (`gate-celebs-commons-hard-wide-partial.json`). **A full re-run (2026-10-15, 16:35 to 18:43,
+plugged in, started detached from the application, with the review fixes) completed** with exit code 0:
+it chose the same 15 people, both open-set tables are identical to the first attempt's, no pool person
+shared a picture with the main dataset, **10 of 10 workflow checks** passed and **the same rankings came
+back after a restart** (all queries, the hard negatives included). Recall@1 after the workflow and
+restart 0.958 (the forgotten person's queries no longer match, by design). The figures below are the
+completed run's.
 
 | Measure | Value |
 |---|---|
@@ -82,7 +86,7 @@ application, was started to record the workflow and restart checks with these st
 | Accepted by the real policy | 0 |
 | Hard-negative top-1 similarity | min 0.130, median 0.215, max 0.320 (Azra Akin against Gal Gadot) |
 | Cut-off read-out | 0.30: 3 accepted (Azra Akin 0.320 to Gal Gadot; Natalie Coughlin 0.305 and 0.301 to Scarlett Johansson); 0.35 and above: none (Wilson 95% 0 to 0.11), known accepted correctly 97.5% at 0.35 |
-| Time on battery | enrolment 1,483 s, selection 5,815 s, queries 962 s |
+| Time (completed run, plugged in, CPU shared with other sessions) | enrolment 613 s, selection 4,574 s, queries 888 s, workflow 8 s, queries after the workflow 837 s, restart and queries 785 s: 2.1 hours (the first attempt, on battery: selection alone 5,815 s) |
 
 **Reading:** the wide pool does find recognisable look-alikes (several pairs a person would also call
 similar), and they come closer than random strangers at the top (0.320 against 0.309), but **none
@@ -110,4 +114,5 @@ nothing to a rate: it says the best look-alikes LFW offers for these 40 people s
 - The first real run finished with all workflow checks true and `queries_wrote_nothing` true. It ran
   the code before the review fixes (whole-person exclusion on a shared picture, digests from the full
   manifest, the pool caveat); checked afterwards, no picture in either LFW pool (150 or 1,680 people) is byte-identical to any of the 716 pictures the celebrity set lists, so neither run's selection changes.
-  The wide-pool run is still in progress and is not claimed here.
+  The wide-pool run completed on the fixed code (exit code 0, 10 of 10 workflow checks, the same
+  rankings after a restart, counts unchanged including the 1,662 selection queries).
