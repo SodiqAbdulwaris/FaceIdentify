@@ -70,6 +70,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-15 | [M5: the operating point on a verified manifest (issue 178)](2026-10-15-m5-verified-operating-point.md) | done; conservative rule on 36 verified identities: 0 false accepts on the final half, recall 0.988; acceptance stays off |
 | 2026-10-15 | [M5: enabling automatic acceptance at an owner-approved operating point](2026-10-15-enable-automatic-acceptance.md) | partial; option A (0.45 / 0.10) confirmed by the owner, verified with real weights; the owner installs the live policy |
 | 2026-10-15 | [M5: hard-negative strangers chosen inside the gate (issue 177)](2026-10-15-m5-gate-hard-negatives.md) | done; 15 look-alikes from all of LFW: 0 accepted by the real policy, best 0.320; acceptance stays off |
+| 2026-10-16 | [Face search goes before background processing on the one worker (issue #175)](2026-10-16-worker-priority-lease.md) | partial; priority with starvation protection built; yields for long runs and the measured parameter not |
 | 2026-10-16 | [Test fix: `break_run` no longer races the index pass for the database lock](2026-10-16-break-run-index-race.md) | done; test-only |
 | 2026-10-16 | [The overnight run report of 2026-10-16](2026-10-16-overnight-run-report.md) ([report](../plans/OVERNIGHT_RUN_2026-10-16.md)) | done; documentation only |
 | 2026-10-16 | [M5 close-out: coverage measured and the definition of done audited](2026-10-16-m5-coverage-and-dod-audit.md) | done; documentation only; M5 not done yet |
