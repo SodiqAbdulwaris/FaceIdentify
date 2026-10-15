@@ -848,6 +848,8 @@ async def main_async(args: argparse.Namespace) -> int:
         log["readiness"] = (await gate.client.get("/readiness")).json()
         enrolled = await enrol(gate, people, log, args.run_timeout)
         phase("enrolment")
+        # (what actually ran: `execution_provider` and `provider_fallback`, not just what was asked)
+        log["readiness_after_enrolment"] = (await gate.client.get("/readiness")).json()
         before = await gate.counts()
         if args.hard_negatives:  # (inside the count check: the selection queries write nothing)
             hard, log["hard_negatives"] = await choose_hard_negatives(

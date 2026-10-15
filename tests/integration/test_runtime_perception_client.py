@@ -320,6 +320,30 @@ def test_a_fallback_records_every_unavailable_provider_before_the_selected_varia
     )
 
 
+def test_on_ran_hears_the_variant_that_actually_ran_and_only_on_success(
+    new_id: SeededUUIDs,
+) -> None:
+    first, second = variant(MISSING), variant(CPU)
+    plan = plan_of((first, second), ())
+    script = Scripted(
+        lambda r: (
+            error_response(r, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE)
+            if len(script.requests) == 1
+            else detected(r)
+        )
+    )
+    heard: list[PlannedVariant] = []
+    client = PerceptionClient(cast(MLSupervisor, script), plan, new_id=new_id, on_ran=heard.append)
+
+    client.detect(picture(64, 64))
+    assert heard == [second]  # not the provider that was refused
+
+    script.answer = lambda r: error_response(r, MLErrorCode.INFERENCE_FAILED)
+    with pytest.raises(PerceptionError):
+        client.detect(picture(64, 64))
+    assert heard == [second]  # a failure is not a run
+
+
 def test_the_two_provider_codes_are_exactly_these() -> None:
     assert PROVIDER_UNAVAILABLE == {
         MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE,

@@ -121,6 +121,9 @@ async def test_real_photographs_through_the_real_host_rank_the_right_identity_fi
         assert run["policy"]["automatic_matching"] is False
         ready = (await api.client.get("/readiness")).json()
         assert ready["capabilities"]["ml_worker"] == "READY"  # started by the job, handshake done
+        # what ran, as readiness tells it: the preferred provider, with no fallback
+        assert ready["capabilities"]["execution_provider"] == providers_from(os.environ)[0]
+        assert ready["capabilities"]["provider_fallback"] == "NONE"
         assert run["policy"]["decision_policy_version"] == "buffalo-l-abstain-only-v1"
         (identity,) = (await api.client.get("/api/v1/identities")).json()["items"]
         assert (await unresolved(api, first["id"])) == []  # the first face made the identity
