@@ -9,6 +9,7 @@ import pytest
 from evaluation.assisted_recognition_gate import (
     choose_people,
     faces_of,
+    load_pool,
     load_provenance,
     metrics,
     open_set,
@@ -372,3 +373,48 @@ def test_a_pool_person_selects_on_one_picture_and_is_scored_on_the_others(tmp_pa
     assert stranger["select"] == tmp_path / "Stranger-0.jpg"
     assert stranger["score"] == [tmp_path / "Stranger-1.jpg", tmp_path / "Stranger-2.jpg"]
     assert stranger["select"] not in stranger["score"]
+
+
+@pytest.mark.parametrize("alias_first", [True, False])
+def test_a_pool_alias_is_left_out_whatever_order_the_pool_lists_people_in(
+    tmp_path: Path, alias_first: bool
+) -> None:
+    pool = tmp_path / "pool"
+    shared = b"a picture also in the main dataset"
+    pictures = {
+        "Holder": [shared, b"h1"],
+        "Alias": [shared, b"a1", b"a2"],  # keeps two other pictures if the shared one is taken
+        "Stranger": [b"s0", b"s1"],
+    }
+    order = ["Alias", "Holder", "Stranger"] if alias_first else ["Holder", "Alias", "Stranger"]
+    manifest: dict[str, list[dict[str, str]]] = {}
+    for name in order:
+        (pool / name).mkdir(parents=True)
+        manifest[name] = []
+        for i, content in enumerate(pictures[name]):
+            (pool / name / f"{i}.jpg").write_bytes(content)
+            manifest[name].append({"file": f"{name}/{i}.jpg"})
+    (pool / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    kept, dropped = load_pool(pool, ["Someone Else"], {hashlib.sha256(shared).hexdigest()})
+    assert [c["name"] for c in kept] == ["Stranger"]
+    assert sorted(dropped["shared_a_picture"]) == ["Alias", "Holder"]
+
+
+def test_two_pool_people_sharing_a_picture_are_both_left_out(tmp_path: Path) -> None:
+    def person(name: str, *contents: bytes) -> dict[str, object]:
+        paths = []
+        for i, content in enumerate(contents):
+            path = tmp_path / f"{name}-{i}.jpg"
+            path.write_bytes(content)
+            paths.append(path)
+        return {"name": name, "enrol": paths[1:], "query": paths[:1]}
+
+    pool = [
+        person("One", b"same", b"o1"),
+        person("Two", b"same", b"t1"),
+        person("Three", b"x", b"y"),
+    ]
+    kept, dropped = pool_candidates(pool, [], set())
+    assert [c["name"] for c in kept] == ["Three"]
+    assert dropped["shared_a_picture"] == ["One", "Two"]

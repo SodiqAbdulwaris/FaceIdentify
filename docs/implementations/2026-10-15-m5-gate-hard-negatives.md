@@ -113,6 +113,6 @@ nothing to a rate: it says the best look-alikes LFW offers for these 40 people s
 - Full backend gate before the PR: results in the PR description.
 - The first real run finished with all workflow checks true and `queries_wrote_nothing` true. It ran
   the code before the review fixes (whole-person exclusion on a shared picture, digests from the full
-  manifest, the pool caveat); checked afterwards, no picture in either LFW pool (150 or 1,680 people) is byte-identical to any of the 716 pictures the celebrity set lists, so neither run's selection changes.
+  manifest, the pool caveat); checked afterwards, no picture in either LFW pool (150 or 1,680 people) is byte-identical to any of the 716 pictures the celebrity set lists, so neither run's selection changes. A second review found that the pool loader removed duplicate pictures across pool people before the shared-picture check, so an alias could keep two other pictures and stay eligible; the pool is now read person by person (`load_pool`) and two pool people sharing a picture are both left out. The 1,680-person pool has no picture shared between people, so the completed run is unaffected.
   The wide-pool run completed on the fixed code (exit code 0, 10 of 10 workflow checks, the same
   rankings after a restart, counts unchanged including the 1,662 selection queries).
