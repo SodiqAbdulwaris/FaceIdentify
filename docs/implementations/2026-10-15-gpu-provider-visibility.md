@@ -4,8 +4,11 @@
 - **Milestone / tracker IDs:** M5 track R (R2 follow-up); TST-038 / TST-039 (real path, GPU)
 - **Status:** partial: the fallback is visible and the GPU path is verified on this machine; **the
   shipped build is the owner's decision** (`.agents/CONTEXT.md`, Known conflicts, item 32)
-- **Commits:** PR to be recorded when merged: `feat(runtime): report the execution provider and
-  fallback in readiness`, `docs: compare ONNX Runtime GPU builds and record the decision owed`
+- **Commits:** PR #200 (to be recorded when merged): `feat(runtime): report the execution provider
+  and fallback in readiness`, `docs: compare ONNX Runtime GPU builds and record the decision owed`,
+  `fix(runtime): notify the provider observer after releasing output`, `docs: qualify the DirectML
+  fallback claim after review`, `test(runtime): type the scripted worker as a supervisor for mypy`,
+  `docs: record the re-review of the GPU provider change`
 
 ## What changed
 
@@ -90,6 +93,9 @@ An evaluation gate run (another session) was using the CPU throughout, so CPU ti
   test called the hook directly: it now drives `detect` and `represent` through a scripted worker,
   and a single-variant stage is covered. (5) The tech-stack reference is section 7, and the NVIDIA
   change from section 7 and 12 is now part of the owner's question.
+- Re-review (Codex CLI, same isolation): the five fixes confirmed correct; one new finding, the
+  rewritten pool tests handed `ClientPool` a test double mypy refuses (four errors, also caught by
+  the full gate). Fixed with a `cast(MLSupervisor, ...)` as in the perception-client tests.
 - Gate: see the PR description for the full gate result on the final head.
 
 ## Open issues / follow-ups
