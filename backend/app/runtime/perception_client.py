@@ -146,6 +146,7 @@ class PerceptionClient:
             )
         assert isinstance(response.output, DetectFacesOutput)  # (the operation's own output)
         # (a detection makes no worker segments, so there is nothing to release_output here)
+        self._heard(ran)
         return Detected(response.output.detections, ran, fallbacks)
 
     def represent(
@@ -173,11 +174,17 @@ class PerceptionClient:
                 ),
             )
             try:
-                return Represented(self._read(response, asked), ran, fallbacks)
+                represented = Represented(self._read(response, asked), ran, fallbacks)
             finally:
                 self._supervisor.release_output(request.request_id)
+        self._heard(ran)  # (after the release: an observer that fails cannot leak the output)
+        return represented
 
     # --- internals -------------------------------------------------------------------------
+
+    def _heard(self, ran: PlannedVariant) -> None:
+        if self._on_ran is not None:
+            self._on_ran(ran)
 
     def _request(
         self,
@@ -210,8 +217,6 @@ class PerceptionClient:
             response = self._supervisor.execute(request)
             if response.status is MLStatus.SUCCESS:
                 self._check_it_was_that_variant(request, response, variant)
-                if self._on_ran is not None:
-                    self._on_ran(variant)
                 return (
                     request,
                     response,

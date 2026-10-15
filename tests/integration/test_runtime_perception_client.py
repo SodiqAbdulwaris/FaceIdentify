@@ -529,6 +529,22 @@ def test_vectors_come_back_per_face_in_the_order_asked_and_outputs_are_released(
     assert all(f.input_index == 0 for f in request.input.faces)  # type: ignore[union-attr]
 
 
+def test_an_observer_that_fails_cannot_keep_the_output_from_being_released(
+    new_id: SeededUUIDs,
+) -> None:
+    plan = plan_of((), (variant(CPU, EMBEDDER),))
+    side = Embedder(new_id)
+    script = Scripted(side.answer)
+
+    def broken(_ran: PlannedVariant) -> None:
+        raise RuntimeError("the observer failed")
+
+    client = PerceptionClient(cast(MLSupervisor, script), plan, new_id=new_id, on_ran=broken)
+    with side.ledger, pytest.raises(RuntimeError, match="observer failed"):
+        client.represent(picture(64, 64), three_faces())
+    assert script.released == [script.requests[0].request_id]
+
+
 @pytest.mark.parametrize(
     "answer",
     [
