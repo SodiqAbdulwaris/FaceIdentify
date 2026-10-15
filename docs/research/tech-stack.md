@@ -108,6 +108,8 @@ WINDOWS DESKTOP APPLICATION
         └── baseline-assets/
 ```
 
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the shipped ONNX Runtime build is decided: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start failure fall back to CPU." NVIDIA machines therefore run DirectML, not CUDA, and CUDA is never shipped (a developer-only `onnxruntime-gpu` named by `FACEIDENTIFY_ORT_GPU_DIR`, used only when `FACEIDENTIFY_PROVIDERS` names it); every other machine falls back to the CPU, logged and shown by readiness. Measurements and options: `docs/research/onnx-runtime-gpu-packaging.md`.
+
 ## 1. Desktop and UI
 
 The V1 frontend is **Tauri + React + TypeScript + Vite + Tailwind CSS + shadcn/ui**.
@@ -229,6 +231,8 @@ Hardware / capability detection
 
 CPU is the universal fallback. Provider combinations must be supported and validated for the relevant ComponentVersion rather than assumed numerically identical.
 
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the shipped ONNX Runtime build is decided: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start failure fall back to CPU." NVIDIA machines therefore run DirectML, not CUDA, and CUDA is never shipped (a developer-only `onnxruntime-gpu` named by `FACEIDENTIFY_ORT_GPU_DIR`, used only when `FACEIDENTIFY_PROVIDERS` names it); every other machine falls back to the CPU, logged and shown by readiness. Measurements and options: `docs/research/onnx-runtime-gpu-packaging.md`.
+
 Fallback to a PyTorch runtime is permitted only when a required component cannot be faithfully exported/executed through ONNX Runtime without unacceptable semantic or functional degradation.
 
 ## 8. ML Export Provenance
@@ -312,6 +316,8 @@ Launch
 ```
 
 NVIDIA systems receive the appropriate CUDA path; supported AMD/Intel Windows GPUs may receive DirectML; unsupported/CPU-only systems retain ORT CPU fallback.
+
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the shipped ONNX Runtime build is decided: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start failure fall back to CPU." NVIDIA machines therefore run DirectML, not CUDA, and CUDA is never shipped (a developer-only `onnxruntime-gpu` named by `FACEIDENTIFY_ORT_GPU_DIR`, used only when `FACEIDENTIFY_PROVIDERS` names it); every other machine falls back to the CPU, logged and shown by readiness. Measurements and options: `docs/research/onnx-runtime-gpu-packaging.md`.
 
 An optional **offline full bundle** may package baseline dependencies and models for installations without internet.
 
@@ -539,6 +545,8 @@ No derived technology may override authoritative state.
 | Model management | Component Manager | LOCKED concept |
 | Large-file storage | Managed filesystem | LOCKED |
 | End-user Docker | None | LOCKED |
+
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** the shipped ONNX Runtime build is decided: "Ship onnxruntime-windowsml 1.30.0 on Windows (DirectML for NVIDIA, AMD and Intel, then CPU), keep onnxruntime on Linux CI through a marker, keep CUDA developer-only, and make a DirectML start failure fall back to CPU." NVIDIA machines therefore run DirectML, not CUDA, and CUDA is never shipped (a developer-only `onnxruntime-gpu` named by `FACEIDENTIFY_ORT_GPU_DIR`, used only when `FACEIDENTIFY_PROVIDERS` names it); every other machine falls back to the CPU, logged and shown by readiness. Measurements and options: `docs/research/onnx-runtime-gpu-packaging.md`.
 
 ## 21. Implementation Rule
 

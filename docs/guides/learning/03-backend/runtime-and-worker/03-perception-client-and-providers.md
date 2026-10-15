@@ -33,7 +33,7 @@ next variant. It also reports which variant **actually ran**, which becomes the 
   this machine's runtime-package directory; the path is a file the installed package's manifest declares, with the
   manifest's digest; the package still verifies against its manifest; and the variant's provider is one the caller allows. A
   missing required component is `RuntimeUnavailableError`; the **detector and embedder are required separately**.
-- **Providers**: `FACEIDENTIFY_PROVIDERS` is a comma list in order of preference (default CPU only). `allow_fallback` is on only
+- **Providers**: `FACEIDENTIFY_PROVIDERS` is a comma list in order of preference (default DirectML then the CPU on Windows, the CPU alone elsewhere). `allow_fallback` is on only
   when more than one is named, so a lone accelerator never silently becomes the CPU.
 
 ## 4. Try it
@@ -54,7 +54,7 @@ next variant. It also reports which variant **actually ran**, which becomes the 
    EOF
    ```
 
-   Observed: `{}` gives `('CPUExecutionProvider',)`; the two-provider list is kept in order; `"cuda"` is
+   Observed: `{}` gives `('DmlExecutionProvider', 'CPUExecutionProvider')` on Windows (`('CPUExecutionProvider',)` elsewhere); the two-provider list is kept in order; `"cuda"` is
    `ValueError: FACEIDENTIFY_PROVIDERS must list distinct known providers, not 'cuda'`. A duplicate also fails. A typo never
    means CPU.
 2. The behaviour tests: `uv run pytest tests/integration/test_runtime_perception_client.py tests/integration/test_runtime_worker_config.py -q`.

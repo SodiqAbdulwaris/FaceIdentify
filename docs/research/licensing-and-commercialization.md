@@ -17,7 +17,10 @@ a row here in the same change (`.agents/rules/documentation.md`).
 | 2 | **No licence for our own code** | The repository has no `LICENSE` file, so no licence grants anyone else rights to the code: by default all rights stay with the rightsholder(s), who may still grant permission by contract. | The owner chooses a licence (or keeps it proprietary) and adds the file. See section 3. |
 | 3 | **Biometric-privacy law** | Face recognition of identifiable people is regulated separately from copyright (section 9). | Legal review per market, consent flows, retention and deletion. |
 | 4 | **NVIDIA runtime libraries** | The GPU path uses NVIDIA's CUDA and cuDNN runtime libraries, which are proprietary and have their own redistribution terms (section 4). | Read the current NVIDIA licence for every file that would be shipped; or ship the CPU path only. |
+| 4b | **Microsoft DirectML** (since 2026-10-15) | The shipped Windows build bundles `DirectML.dll` under Microsoft's proprietary DirectML terms (section 4). They permit distribution inside an application for Windows (read 2026-10-15). | Ship the terms with the installer and keep Microsoft's notices; confirm the wheel's copy is covered (section 4). |
 | 5 | **Unverified Rust crates and the build tools of M8** | `cargo-license` has not been run; the installer, signing and any bundled FFmpeg are not chosen yet. | Run the inventory in section 8 and fill sections 5 to 7. |
+
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** CUDA is developer-only and never shipped (the shipped Windows build is `onnxruntime-windowsml`, DirectML then the CPU), so blocker 4 no longer applies to a release; blocker 4b replaces it.
 
 ## 2. The models
 
@@ -69,10 +72,14 @@ of that training data must be checked before anyone relies on it.
 
 | Component | Licence | Where used | Note |
 |---|---|---|---|
-| ONNX Runtime (`onnxruntime` 1.30.0, CPU) | MIT | the ML worker | verified from package metadata |
+| ONNX Runtime (`onnxruntime` 1.30.0, CPU) | MIT | the ML worker off Windows (Linux CI), through an environment marker since 2026-10-15 | verified from package metadata |
+| ONNX Runtime Windows ML (`onnxruntime-windowsml` 1.30.0.202609102321) | MIT (wheel metadata `License: MIT License` and its `LICENSE`, "Copyright (c) Microsoft Corporation", read 2026-10-15) | **the shipped Windows build** (owner decision 2026-10-15): the ML worker, DirectML then the CPU | 74 MB installed. Ships `ThirdPartyNotices.txt` and a `Privacy.md` stating that official builds send ONNX Runtime trace events through Windows' ETW telemetry, on by default and subject to the user's Windows diagnostic-data consent; whether the worker should turn it off (`onnxruntime.disable_telemetry_events()`) is a follow-up, not decided here |
+| Microsoft DirectML (`DirectML.dll` 1.15.4, "DirectML Redistributable Library", bundled in `onnxruntime-windowsml`) | Microsoft Software License Terms for DirectML (proprietary), read 2026-10-15 from the `LICENSE.txt` of the matching `Microsoft.AI.DirectML` 1.15.4 NuGet package | GPU inference on Windows | Section 1a permits copying and distributing the software "in applications and services you develop" that run on Windows and Xbox; no reverse engineering, no removing Microsoft's notices, no stand-alone redistribution (3e); section 2 says the software may collect usage data. The wheel itself does not carry these terms (they were read from the NuGet package of the same version), so whether they are the terms that govern the copy inside the wheel is an inference, not verified; ship the terms file with the installer |
 | ONNX Runtime GPU (`onnxruntime-gpu` 1.23.2) | MIT (its own files) | optional CUDA path, installed as a machine-local runtime library | the CUDA/cuDNN files it needs are NVIDIA's, next row |
 | NVIDIA CUDA runtime 12.9, cuDNN 9.27, cuBLAS, cuFFT, cuRAND, NVRTC, nvJitLink (pip `nvidia-*-cu12`, installed 2026-10-07 into the Git-ignored `local-models/ort-gpu`) | NVIDIA proprietary licences (not verified in detail) | GPU inference only (`FACEIDENTIFY_ORT_GPU_DIR`) | redistribution inside an installer is governed by NVIDIA's terms; read them per file before shipping |
 | ONNX Runtime DirectML builds (`onnxruntime-directml` 1.23.0, `onnxruntime-windowsml` 1.30.0) | MIT (wheel `LICENSE`); each bundles Microsoft's `DirectML.dll`, whose redistribution terms are not verified | **evaluated only** (2026-10-15, installed into a scratch folder outside the repository, never a dependency) | candidate shipped build, owner decision pending (`docs/research/onnx-runtime-gpu-packaging.md`); read the `DirectML.dll` terms before shipping |
+
+> **Decision 2026-10-15 (owner; `.agents/CONTEXT.md` Known conflicts 32):** `onnxruntime-windowsml` 1.30.0 is the shipped Windows build and a dependency (rows above); `onnxruntime-directml` stays evaluated only. The `DirectML.dll` terms were read (row above); CUDA is developer-only and never shipped, so the NVIDIA libraries are not part of a release (blocker 4).
 | USearch (`usearch` 2.26.2) | Apache-2.0 | the vector index | verified |
 
 ## 5. Python dependencies (verified from installed metadata, 2026-10-07)
@@ -82,7 +89,7 @@ Runtime: `alembic` 1.20.0 MIT; `fastapi` 0.142.2 MIT (with `starlette` 1.7.0 BSD
 12.3.0 MIT-CMU (its wheel bundles libavif 1.4.2 BSD-2-Clause with the dav1d 1.5.3 decoder,
 BSD-2-Clause, used to read AVIF pictures since 2026-10-15, issue 188; the bundled aom 3.14.1,
 BSD-2-Clause with the AOMedia patent licence, is only an encoder, which the application never calls); `sqlalchemy` 2.0.54 MIT; `uvicorn` 0.54.0 BSD-3-Clause; `websockets` 17.2
-BSD-3-Clause; `usearch` Apache-2.0; `onnxruntime` MIT.
+BSD-3-Clause; `usearch` Apache-2.0; `onnxruntime` MIT (off Windows); `onnxruntime-windowsml` MIT with Microsoft's `DirectML.dll` (on Windows, since 2026-10-15; section 4).
 Development only (not shipped): `pytest` 9.1.1 MIT; `pytest-asyncio` 1.4.0 Apache-2.0; `pytest-cov`
 7.1.0 MIT (with `coverage` 7.16.1 Apache-2.0); `httpx` 0.28.1 BSD-3-Clause; `hypothesis` 6.168.1
 **MPL-2.0** (file-level copyleft; fine as a test tool, do not bundle); `ruff` 0.16.8 MIT; `mypy` 2.3.1
