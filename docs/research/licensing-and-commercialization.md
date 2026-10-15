@@ -193,12 +193,12 @@ Honest limits of the Commons set, which matter for any claim built on it:
 - **LFW and CelebA (both downloaded and evaluated 2026-10-13):** ready-labelled research datasets the owner
   downloads and imports locally with `evaluation/import_labelled_dataset.py` (labels by their creators, not
   verified here). **Sources (owner, 2026-10-13):** LFW from the Kaggle mirror
-  <https://www.kaggle.com/datasets/jessicali9530/lfw-dataset> (the original is the UMass LFW page; the mirror's own
-  licence and terms were not retrievable from the agent's environment); CelebA from the creators'
+  <https://www.kaggle.com/datasets/jessicali9530/lfw-dataset> (the original is the UMass LFW page; the mirror's
+  licence field was read on 2026-10-15 and grants nothing, section 10.3); CelebA from the creators'
   page <https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html> (its `README.txt` states non-commercial research use).
   **Terms: see section 10.3**; both are research datasets; they stay local, are never committed or
   redistributed, and their people may also appear in the recogniser's training data (evaluation
-  leakage). Reading each dataset's terms at its source is issue 183 (CelebA done 2026-10-15; LFW's page still to read, section 10.3).
+  leakage). Reading each dataset's terms at its source is issue 183 (CelebA done 2026-10-15; the Kaggle mirror read 2026-10-15; LFW's own page still to read, section 10.3).
 - **Celebrity portraits from Wikimedia Commons (`evaluation/datasets/celebs-commons`, from 2026-10-14):**
   read with `collect_commons_portraits.py --licence free` (the owner's script, reviewed and fixed). Each
   file's licence (public domain, CC0, CC BY or CC BY-SA 2.0 to 4.0; never NC or ND), licence URL, author,
@@ -232,8 +232,10 @@ to a few words; everything else is a summary.
 **LFW** (official page <http://vis-www.cs.umass.edu/lfw/>: **could not be read**)
 
 - The host did not resolve from this machine or from the fetch tool on 2026-10-15 (DNS failure, tried
-  http and https and the README path; the Wayback copy is blocked). **The page's own terms, if any,
-  remain unread.** Reading it, and the Kaggle mirror's licence field, are the two open steps of issue 183.
+  http and https and the README path; the Wayback copy is blocked). Tried again on 2026-10-15 from a
+  cloud session: the egress proxy refused the connection to the host (502), the fetch tool could not
+  resolve it, and the Wayback copy was refused there too. **The page's own terms, if any, remain
+  unread.** Reading it is the one open step of issue 183.
 - What was read instead: the official technical report by Huang, Ramesh, Berg and Learned-Miller
   (<https://people.cs.umass.edu/~elm/papers/lfw.pdf>). It states no licence or conditions of use. It
   says the database is "an aid in studying" unconstrained face recognition, built from pre-existing
@@ -241,8 +243,18 @@ to a few words; everything else is a summary.
   that results should state which of its protocols was used. So the images were not made for the
   dataset and carry **their original photographers' and publishers' rights**; the creators' consent
   to anything beyond research use is not documented there.
+- **The Kaggle mirror** the owner downloaded from
+  (<https://www.kaggle.com/datasets/jessicali9530/lfw-dataset>, read 2026-10-15 through Kaggle's public
+  dataset metadata): uploaded by a third party (Jessica Li, not the LFW creators), version 4 of
+  2018-05-17, the deep-funneled images plus CSV metadata. Its licence field reads "Other (specified in
+  description)", but the description specifies **no licence and no conditions**: it says the data
+  came from the UMass LFW page, points readers there, and asks for the LFW technical report (and, for
+  the deep-funneled images, Huang, Mattar, Lee and Learned-Miller, NIPS 2012) to be cited. So the
+  mirror grants nothing beyond what the creators grant, and an uploader could not grant rights in
+  the news photographs anyway; *who may use it and for what*, *redistribution* and *third-party
+  rights* all fall back to the official page (unread) and the photographs' own rights holders.
 - Third-party listings (a catalogue showing "Other"; scikit-learn's BSD marking covers its loader code
-  only) are not terms and were not relied on. The Kaggle mirror's licence field is also still unread.
+  only) are not terms and were not relied on.
 
 **What this means for the project**
 
