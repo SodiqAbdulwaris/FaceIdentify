@@ -61,7 +61,8 @@ failure fall back to CPU." The measurements and options are in
   failure; the CPU variant that runs next would hit a broken model too and report it as
   `COMPONENT_LOAD_FAILED`.
 - **A broken model stays a model failure on every provider** (found by the review): ONNX Runtime
-  raises its own types for the model itself (`InvalidProtobuf`, `InvalidGraph`, `NoModel`,
+  raises its own types for the model itself (`InvalidProtobuf`, `InvalidArgument` for a model that
+  fails validation such as one with no graph (found by the re-review), `InvalidGraph`, `NoModel`,
   `NotImplemented`), and those stay `COMPONENT_LOAD_FAILED` even on an accelerator, so a plan with no
   CPU variant still says the model is broken. Checked on the real DirectML build with bytes that are
   not a model: `COMPONENT_LOAD_FAILED ... INVALID_PROTOBUF`.
@@ -122,10 +123,15 @@ path to the new manifest; (medium) a broken model on an accelerator became a pro
 (low) the decision notes put the source inside the bold date, one note split the licensing table,
 the benchmark protocol's section 2 still said "CUDA is primary" without a note, and the status page
 said "the installer ships" although no installer exists. The medium and low findings are fixed. The
-high one is answered on the PR and kept below as a follow-up: no long-lived library uses the real
-profile today (the desktop shell starts the development profile; evaluation gates and the real-host
-e2e test make fresh libraries), and a new package key would also orphan the measured policy file
-(`policies/<package key>.json`), so the upgrade path belongs with M8's package management.
+high one is answered on the PR and kept below as a follow-up. The answer rests on an
+**assumption, not confirmed with the owner**: that no long-lived library uses the real profile
+today. A debug desktop build starts the development profile by default, but a release build uses
+the real profile, and `FACEIDENTIFY_DEVELOPMENT_PROFILE=0` turns it on in a debug build
+(`desktop/src-tauri/src/config.rs`); evaluation gates and the real-host e2e test make fresh
+libraries. A new package key would also orphan the measured policy file
+(`policies/<package key>.json`), so the upgrade path belongs with M8's package management. A
+Codex re-review of the fixes found a second model error (`InvalidArgument`, a model with no graph)
+and this overstatement; both are fixed.
 
 ## Open issues / follow-ups
 
