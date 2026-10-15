@@ -115,5 +115,7 @@ badge above the cut-off while still requiring one click) is possible without any
 
 ## Open issues / follow-ups
 
-- Finish or repeat the CelebA run to record its workflow checks and restart comparison.
+- Finish or repeat the CelebA run to record its workflow checks and restart comparison. Done 2026-10-15:
+  re-run to completion, 10 of 10 workflow checks, same rankings after a restart
+  ([entry](2026-10-15-m5-myfaces-closeups-and-celeba-rerun.md)); the partial figures above stand.
 - Issues 177, 178 and 181 are on the path above; issue 188 (AVIF) is new.
