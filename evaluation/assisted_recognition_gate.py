@@ -671,12 +671,36 @@ async def main_async(args: argparse.Namespace) -> int:
         max_index_passes=PROVISIONAL_INDEX_PASSES,
     )
     providers = providers_from(os.environ)
-    people = partition_people(
-        choose_people(manifest, dataset, 10**6, 1),
-        known_count=args.people,
-        minimum=args.minimum_photographs,
-        unknown_count=args.unknown,
-    )
+    everyone = choose_people(manifest, dataset, 10**6, 1)
+    selection = (provenance or {}).get("selection") or {}
+    if selection.get("mode") == "hard-negatives":
+        known_names = selection.get("known_names")
+        unknown_names = selection.get("unknown_names")
+        if not isinstance(known_names, list) or not isinstance(unknown_names, list):
+            raise SystemExit("hard-negative provenance needs known_names and unknown_names")
+        if len(set(known_names + unknown_names)) != len(known_names + unknown_names):
+            raise SystemExit("hard-negative cohort identities overlap")
+        if args.people != len(known_names) or args.unknown != len(unknown_names):
+            raise SystemExit("gate --people and --unknown must match imported hard-negative cohorts")
+        found = {person["name"]: person for person in everyone}
+        if set(found) != set(known_names + unknown_names):
+            raise SystemExit("imported manifest differs from hard-negative cohort provenance")
+        if any(len(found[n]["enrol"]) + len(found[n]["query"]) < args.minimum_photographs
+               for n in known_names):
+            raise SystemExit("a hard-negative known identity has too few photographs")
+        people = [found[name] for name in known_names]
+        people += [
+            {"name": name, "enrol": [], "query": sorted(found[name]["enrol"] + found[name]["query"]),
+             "unknown": True}
+            for name in unknown_names
+        ]
+    else:
+        people = partition_people(
+            everyone,
+            known_count=args.people,
+            minimum=args.minimum_photographs,
+            unknown_count=args.unknown,
+        )
     known_names = [p["name"] for p in people if not p.get("unknown")]
     log: dict[str, Any] = {"started": datetime.now(UTC).isoformat(), "providers": list(providers)}
 
