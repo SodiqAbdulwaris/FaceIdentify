@@ -11,34 +11,41 @@
 - `backend/app/sources/recheck.py` (new): `recheck_original` verifies a `MISSING` original again
   through the existing verifiers (`reverify_managed_artifact`, `reverify_referenced_artifact`), which
   accept only the recorded size and SHA-256. An original in any other state is left alone. A file
-  that is there but cannot be read raises `OriginalUnreadableError` and changes nothing; a concurrent
-  recheck or relink is settled by reading the state again.
+  that is there but cannot be read raises `OriginalUnreadableError` and changes nothing. An original
+  with no recorded fingerprint raises `OriginalUnverifiableError` and stays missing (the referenced
+  verifier alone would accept any file by its mere presence; found by the review). A managed file
+  that is back but different is recorded as `MANAGED_CONTENT_CHANGED`, and as `MANAGED_FILE_MISSING`
+  again once it is gone. A concurrent recheck or relink is settled by reading the state again.
 - `backend/api/routes/sources.py`:
-  - **On access:** `GET /sources/{id}` verifies a missing original again before answering;
-    `POST /sources/{id}/process` does too (`recheck_if_missing`, best effort: an unreadable file or
-    a source deleted meanwhile leaves the answer to the route's own checks). The library listing
-    verifies nothing (no library-wide scan).
+  - **On access:** `GET /sources/{id}` verifies a missing original again before answering
+    (`recheck_if_missing`, best effort: an unreadable or unverifiable file leaves the answer to the
+    route's own read). The library listing verifies nothing (no library-wide scan).
   - `POST /sources/{id}/recheck` ("Recheck file"): `200` with the source; `409
-    SOURCE_FILE_UNREADABLE` when the file is there but unreadable; `404` for an unknown source.
+    SOURCE_FILE_UNREADABLE` when the file is there but unreadable; `409 SOURCE_FILE_UNVERIFIABLE`
+    when the original has no recorded fingerprint; `404` for an unknown source.
   - `POST /sources/{id}/relink` `{"path": ...}` ("Locate original", referenced originals only):
     `200` with the source; `409 SOURCE_RELINK_MISMATCH` (different media), `409
     SOURCE_NOT_REFERENCED` (a managed original), `409 SOURCE_STATE_CONFLICT` (not missing), `409
     SOURCE_RELINK_UNVERIFIABLE` (no recorded fingerprint), `400 REFERENCED_FILE_INVALID` (inside the
     library's own storage, not a file, unreadable), `422` for a relative path.
   - `SourceDetail.availability_reason`: the original's failure code when it is not available
-    (`MANAGED_FILE_MISSING`, `REFERENCED_FILE_MISSING`, `REFERENCED_CONTENT_CHANGED`), else `null`.
+    (`MANAGED_FILE_MISSING`, `MANAGED_CONTENT_CHANGED`, `REFERENCED_FILE_MISSING`,
+    `REFERENCED_CONTENT_CHANGED`), else `null`.
   - A recovered or relinked original is announced as `source.updated`. Answers never contain a path.
-- `backend/api/routes/processing.py`: the process route calls `recheck_if_missing` first.
+- `backend/api/routes/processing.py`: `POST /sources/{id}/process` and
+  `POST /processing-runs/{id}/retry` call `recheck_if_missing` first.
 - Desktop (`frontend/src/features/source/`): `MissingOriginal.tsx` shows **Recheck file** and, for a
   referenced original in the desktop app, **Locate original…** (the shell's existing native picture
   dialog); the outcome goes to the page notice ("The file is back." or "Still missing." with the
-  reason); `missing.ts` words the reason ("A different file is now where this image was…").
-  `openapi.json` and `schema.d.ts` regenerated; `endpoints.ts` gains `recheckSource`,
-  `relinkSource`.
-- Tests: `tests/integration/test_api_source_recheck.py` (16, two of them on the use case's own race and unknown-source edges); two existing tests that marked a
-  present file `MISSING` by hand now really remove it, since opening or processing such a source
-  rightly finds the file and brings it back (`test_api_sources.py`,
-  `test_api_processing_routes.py`); `MissingOriginal.test.tsx` (7).
+  reason); `missing.ts` words the reason (a changed file, referenced or managed, is said to have
+  changed; otherwise the user is asked to put the file back). `openapi.json` and `schema.d.ts`
+  regenerated; `endpoints.ts` gains `recheckSource`, `relinkSource`.
+- Tests: `tests/integration/test_api_source_recheck.py` (19: the routes, the use case's own race and
+  unknown-source edges, and the review's three cases: no fingerprint, a managed file back but
+  different, retry without opening the source); two existing tests that marked a present file
+  `MISSING` by hand now really remove it, since opening or processing such a source rightly finds the
+  file and brings it back (`test_api_sources.py`, `test_api_processing_routes.py`);
+  `MissingOriginal.test.tsx` (7) and `missing.test.ts` (2).
 
 ## Why
 
@@ -53,8 +60,8 @@ blocking of unrelated browsing, idempotent, trust boundary kept, restart persist
 
 - **"Opened" means the source detail read** (`GET /sources/{id}`), the request the source screen
   makes first; the media route is not used by the screen while the original is missing, and the
-  listing deliberately verifies nothing. "Used" means processing. Retry of a failed run does not
-  recheck (it is reached only from a run whose source the screen has already opened).
+  listing deliberately verifies nothing. "Used" means processing and retrying a run (the review
+  showed a retry must not rely on the screen having opened the source first).
 - **A recheck only acts on `MISSING`.** An `AVAILABLE` original is not re-hashed on request; the
   existing media route already reports a file lost behind the application's back.
 - **Managed originals are rechecked where the library keeps them, never relinked** (the decision's
