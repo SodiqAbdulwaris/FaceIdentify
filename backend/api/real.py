@@ -25,10 +25,14 @@ decision policy (M5 track R; the development profile is `backend.api.development
   policy will be admitted by a later, explicit change (the label-review work, track R5).
 * Readiness: `runtime_package` (the package this profile runs is installed and registered),
   `processing_policy` (a usable policy file exists) and `ml_worker` (the supervisors' own state:
-  `NOT_STARTED` until a job starts one, then `READY`, `FAILED`...).
+  `NOT_STARTED` until a job starts one, then `READY`, `FAILED`...), `execution_provider` (the
+  provider that last ran, `NOT_STARTED` before any) and `provider_fallback` (`ACTIVE` when that was
+  not the preferred provider, else `NONE`). A change of provider is logged, a fallback as a warning:
+  asking for CUDA on a machine where it cannot start is never a silent CPU run.
 """
 
 import json
+import logging
 import os
 import re
 import threading
@@ -62,7 +66,7 @@ from backend.app.runtime.registration import (
     missing_dependencies,
     register_package,
 )
-from backend.app.runtime.worker_config import PerceptionPlan
+from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.ml.contracts.protocol import WorkerState
 from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy
 
@@ -73,7 +77,10 @@ PROVIDERS: Final = ("CPUExecutionProvider",)
 WORKER_POLICY: Final = SupervisorPolicy(120, 120, 10, 10, 1, 600)
 READY: Final = "READY"
 NOT_STARTED: Final = "NOT_STARTED"
+NONE: Final = "NONE"
 _SAFE_KEY: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+LOG: Final = logging.getLogger("faceidentify.runtime")
 
 PROVIDERS_ENV: Final = "FACEIDENTIFY_PROVIDERS"
 KNOWN_PROVIDERS: Final = ("CUDAExecutionProvider", "CPUExecutionProvider")
@@ -145,6 +152,8 @@ class ClientPool:
         self._supervise = supervise
         self._lock = threading.Lock()
         self._supervisors: dict[object, MLSupervisor] = {}
+        # stage -> (the provider that last ran it, whether that was a fallback)
+        self._ran: dict[str, tuple[str, bool]] = {}
 
     def client_for(self, plan: PerceptionPlan) -> PerceptionClient:
         key = (
@@ -159,7 +168,39 @@ class ClientPool:
                 self._supervisors[key] = supervisor
         # A client remembers which providers it has ruled out; a new one per job means each job
         # tries its preferred provider and records its own fallbacks.
-        return PerceptionClient(supervisor, plan, new_id=self._new_id)
+        return PerceptionClient(
+            supervisor, plan, new_id=self._new_id, on_ran=lambda ran: self._record(plan, ran)
+        )
+
+    def _record(self, plan: PerceptionPlan, ran: PlannedVariant) -> None:
+        """Remember the provider a stage ran on; log when it changes, a fallback as a warning."""
+        stage = plan.detector if ran.kind == plan.detector[0].kind else plan.embedder
+        now = (ran.provider, ran.provider != stage[0].provider)
+        with self._lock:
+            before = self._ran.get(ran.kind)
+            self._ran[ran.kind] = now
+        if now == before:
+            return
+        if now[1]:
+            LOG.warning(
+                "%s is running on %s: the preferred %s is not available (see the run's segments)",
+                ran.kind,
+                ran.provider,
+                stage[0].provider,
+            )
+        else:
+            LOG.info("%s is running on %s", ran.kind, ran.provider)
+
+    def provider_state(self) -> dict[str, str]:
+        """The provider in use for readiness: what last ran, and whether it was a fallback."""
+        with self._lock:
+            ran = list(self._ran.values())
+        if not ran:
+            return {"execution_provider": NOT_STARTED, "provider_fallback": NONE}
+        return {
+            "execution_provider": ",".join(sorted({provider for provider, _ in ran})),
+            "provider_fallback": "ACTIVE" if any(fell for _, fell in ran) else NONE,
+        }
 
     def close(self) -> None:
         """Stop every worker. One that will not stop does not keep the others running; it stays in
@@ -257,6 +298,7 @@ def real_processing(
             "processing_policy": policy,
             "library_packages": UNAVAILABLE if dependencies() else READY,
             "ml_worker": clients.worker_state(),
+            **clients.provider_state(),
         }
 
     return ProcessingSettings(

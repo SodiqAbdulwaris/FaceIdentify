@@ -15,7 +15,9 @@ fails (dies, times out) raises `WorkerFailedError` from the supervisor, unchange
 restarts it on the next call, and whether to retry the request is the caller's decision.
 
 What comes back says which variant **actually ran** (`ran`): that is what the writer records as the
-output's provenance (Persistence 5 and 6.2), not the variant that was preferred.
+output's provenance (Persistence 5 and 6.2), not the variant that was preferred. An optional
+`on_ran` callback hears the same thing after every successful call, so the host can report the
+provider in use (readiness) without reading the run's records.
 
 A client belongs to one thread (one processing run): the record of ruled-out variants is not
 locked, and releasing a worker's output is a separate call from the request that made it.
@@ -121,10 +123,12 @@ class PerceptionClient:
         plan: PerceptionPlan,
         *,
         new_id: Callable[[], uuid.UUID],
+        on_ran: Callable[[PlannedVariant], None] | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._plan = plan
         self._new_id = new_id
+        self._on_ran = on_ran
         # (stage, variant) -> why this provider cannot run; a stage never inherits another's
         self._ruled_out: dict[tuple[str, uuid.UUID], str] = {}
 
@@ -206,6 +210,8 @@ class PerceptionClient:
             response = self._supervisor.execute(request)
             if response.status is MLStatus.SUCCESS:
                 self._check_it_was_that_variant(request, response, variant)
+                if self._on_ran is not None:
+                    self._on_ran(variant)
                 return (
                     request,
                     response,

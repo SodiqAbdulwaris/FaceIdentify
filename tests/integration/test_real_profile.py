@@ -9,12 +9,13 @@ the local `-m e2e` test; the abstain-only behavior over HTTP is pinned in
 import asyncio
 import base64
 import json
+import logging
 import secrets
 import shutil
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -234,6 +235,52 @@ def test_the_worker_state_reported_to_readiness_is_the_supervisors_own(
         made[-1].state = state
 
     assert pool.worker_state() == expected
+
+
+def test_readiness_reports_the_provider_that_ran_and_a_fallback_is_logged_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _, supervise = supervised()
+    pool = ClientPool(uuid.uuid4, supervise=supervise)
+    cuda = replace(variant(1, "FACE_DETECTOR"), provider="CUDAExecutionProvider", device="GPU")
+    cpu = variant(2, "FACE_DETECTOR")
+    embed_cuda = replace(variant(3, "FACE_REPRESENTATION"), provider="CUDAExecutionProvider")
+    embed_cpu = variant(4, "FACE_REPRESENTATION")
+    accelerated = PerceptionPlan(uuid.UUID(int=1), 4, (cuda, cpu), (embed_cuda, embed_cpu))
+    assert pool.provider_state() == {
+        "execution_provider": "NOT_STARTED",
+        "provider_fallback": "NONE",
+    }
+
+    with caplog.at_level(logging.INFO, logger="faceidentify.runtime"):
+        for _ in range(3):  # three jobs on a machine where CUDA cannot start
+            client = pool.client_for(accelerated)
+            assert client._on_ran is not None
+            client._on_ran(cpu)
+            client._on_ran(embed_cpu)
+    assert pool.provider_state() == {
+        "execution_provider": "CPUExecutionProvider",
+        "provider_fallback": "ACTIVE",
+    }
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 2  # once per stage, not once per job
+    assert "preferred CUDAExecutionProvider is not available" in warnings[0].getMessage()
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="faceidentify.runtime"):
+        client = pool.client_for(accelerated)
+        assert client._on_ran is not None
+        client._on_ran(cuda)  # CUDA came back for the detector only
+    assert pool.provider_state() == {
+        "execution_provider": "CPUExecutionProvider,CUDAExecutionProvider",
+        "provider_fallback": "ACTIVE",  # the embedder still runs on its fallback
+    }
+    assert [r.levelno for r in caplog.records] == [logging.INFO]
+    client._on_ran(embed_cuda)
+    assert pool.provider_state() == {
+        "execution_provider": "CUDAExecutionProvider",
+        "provider_fallback": "NONE",
+    }
 
 
 @pytest.mark.parametrize("key", ["../x", "a/b", "a\\b", "", ".hidden", "a..b", "x y"])
@@ -544,6 +591,8 @@ async def test_the_real_profile_runs_the_abstain_only_policy_through_the_applica
         assert ready["capabilities"]["runtime_package"] == "READY"
         assert ready["capabilities"]["processing_policy"] == "READY"
         assert ready["capabilities"]["ml_worker"] == "NOT_STARTED"  # no job has started one yet
+        assert ready["capabilities"]["execution_provider"] == "NOT_STARTED"
+        assert ready["capabilities"]["provider_fallback"] == "NONE"
         assert ready["capabilities"]["scheduler"] == "READY"
 
         first = await imported(api, path=picture(world.folder, "a.png"))
