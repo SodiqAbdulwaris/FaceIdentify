@@ -56,14 +56,33 @@ No `--write-policy`: the installed policy is untouched. Report Git-ignored.
 | Verdict | `provisional-conservative` ("no false accept on the final half") |
 | Non-conservative point (for comparison) | threshold 0.2622, margin 0.10: precision 0.993 on the selection half (2 wrong of 282); 86 of 86 on the final half |
 
+## Repeated on the 48-identity verified export (2026-10-15)
+
+After the owner reviewed 12 more people, the same command on
+`verified-20261015T073439095195Z.json` (report `operating-point-celebs-commons-48-conservative.json`):
+
+| Measure | Value |
+|---|---|
+| People / photographs used | 48 / 686 (none excluded, no byte-identical copies) |
+| Halves (people, known, queries) | selection 30, 24, 428; final 18, 11, 258 (157 of known people, 101 of strangers from 7 people) |
+| Genuine / impostor pairs | 4,582 / 230,373 |
+| Conservative point chosen on the selection half | threshold 0.3314, margin 0.02 (the same point): 336 of 336 correct, recall 0.985 |
+| Reported on the final half | 156 accepted, 156 correct, **0 false accepts**, recall 0.994, precision 95% interval 0.976 to 1.000, abstention rate 0.395 |
+| Non-conservative point (comparison) | threshold 0.257, margin 0.10: 3 wrong of 340 on the selection half |
+
+The same point was chosen from a larger set, which is mildly reassuring about its stability. The
+limits below still apply (random strangers, the final half's strangers are 7 people), and hard
+negatives (issue 177) are not measured yet.
+
 ## What this does and does not show
 
 - The conservative rule meets its own requirement on human-verified labels: zero false accepts on a
   half that took no part in the choice.
 - **It does not re-open automatic acceptance.** The final half is small (11 people; the 73 stranger
-  queries come from 5 people, so they are not independent trials), the strangers are random
-  celebrities rather than look-alikes (issue 177 is not done), the set is 36 of the required 40
-  identities, and the photographs are filtered to one dominant face and likely overlap the
+  queries come from 5 people, so they are not independent trials; in the 48-identity repeat, 18
+  people and 101 stranger queries from 7), the strangers are random celebrities rather than
+  look-alikes (issue 177 is not done), the first set was 36 of the required 40 identities (the repeat
+  has 48), and the photographs are filtered to one dominant face and likely overlap the
   recogniser's training data (a possibility, not measured). The decision of 2026-10-14 stands; any
   change needs the remaining conditions and an explicit owner-approved code change.
 - The non-conservative point made 2 false accepts on the selection half, which is why the owner's
