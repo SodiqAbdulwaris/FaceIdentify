@@ -11,12 +11,12 @@ import { personLabel } from '../identities/label'
 import { errorMessage } from '../library/messages'
 import { useObjectUrl } from '../useSourceImage'
 
-const SUPPORTED = ['image/jpeg', 'image/png', 'image/bmp', 'image/webp']
+const SUPPORTED = ['image/jpeg', 'image/png', 'image/bmp', 'image/webp', 'image/avif']
 // Unique across visits to the screen: an answer still on its way for an earlier picture can never be
 // taken for the answer to a later one that happens to reuse a number.
 let pictures = 0
 const nextPictureId = () => (pictures += 1)
-const NOT_SUPPORTED = 'Only JPEG, PNG, BMP and WebP pictures can be searched with.'
+const NOT_SUPPORTED = 'Only JPEG, PNG, BMP, WebP and AVIF pictures can be searched with.'
 
 /**
  * Search the library with a picture: who might the faces in it be? The picture can be chosen, dropped

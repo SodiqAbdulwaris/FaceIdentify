@@ -109,7 +109,7 @@ describe('face search', () => {
 
     await choose(picture('application/pdf'))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Only JPEG, PNG, BMP and WebP')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Only JPEG, PNG, BMP, WebP and AVIF')
     expect(calls.filter((c) => c.path === FACE)).toHaveLength(0)
   })
 
@@ -217,5 +217,7 @@ describe('face search', () => {
 
     await waitFor(() => expect(calls.filter((c) => c.path === FACE)).toHaveLength(2))
     expect(event.defaultPrevented).toBe(true)
+    fireEvent.drop(zone, { dataTransfer: { files: [picture('image/avif')] } })
+    await waitFor(() => expect(calls.filter((c) => c.path === FACE)).toHaveLength(3))
   })
 })
