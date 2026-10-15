@@ -66,6 +66,19 @@ worker on `CPUExecutionProvider` over four public-domain NASA photographs from W
 vectors came back, and cosine similarity separated people: same person across photographs 0.59 to
 0.69, different people 0.03 to 0.21. These are smoke results, not calibration (R4).
 
+## Provenance re-checked (2026-10-16, issue #69)
+
+The exact files in use were hashed again on this machine and match the table above byte for byte:
+the download `local-models/_download/buffalo_l.zip`, the unpacked `local-models/buffalo_l/det_10g.onnx`
+and `w600k_r50.onnx`, and the copies the application loads from the installed package
+(`local-models/state/runtime/packages/insightface-buffalo-l/models/`). The installed manifest records
+the same SHA-256 and byte size for each export, the source
+`https://github.com/deepinsight/insightface/releases/tag/v0.7`, the licence "InsightFace pretrained
+models: non-commercial research purposes only" and `redistributable: false`. The licence itself is
+unchanged: an owner-accepted risk for personal, local use and a release blocker (section *Intended
+use*). How to install the same files from scratch:
+[`docs/guides/INSTALLING_MODELS_WINDOWS.md`](../guides/INSTALLING_MODELS_WINDOWS.md).
+
 ## Not yet verified
 
 CUDA on the RTX 4070, CPU/CUDA agreement, and restart and catalog registration with the real package
