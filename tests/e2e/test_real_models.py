@@ -41,7 +41,11 @@ STATE = ROOT / "state"
 IMAGES = ROOT / "images"
 KEY = "insightface-buffalo-l"
 PROVIDER = os.environ.get("FACEIDENTIFY_PROVIDER", "CPUExecutionProvider")
-DEVICES = {"CUDAExecutionProvider": "GPU", "CPUExecutionProvider": "CPU"}
+DEVICES = {
+    "DmlExecutionProvider": "GPU",
+    "CUDAExecutionProvider": "GPU",
+    "CPUExecutionProvider": "CPU",
+}
 POLICY = SupervisorPolicy(120, 120, 10, 10, 1, 600)
 
 pytestmark = pytest.mark.e2e

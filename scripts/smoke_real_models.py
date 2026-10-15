@@ -25,7 +25,11 @@ from backend.infrastructure.storage.layout import StorageRoots
 from backend.ml.supervisor.supervisor import SupervisorPolicy
 
 POLICY = SupervisorPolicy(120, 120, 10, 10, 1, 600)
-DEVICES = {"CUDAExecutionProvider": "GPU", "CPUExecutionProvider": "CPU"}
+DEVICES = {
+    "DmlExecutionProvider": "GPU",
+    "CUDAExecutionProvider": "GPU",
+    "CPUExecutionProvider": "CPU",
+}
 
 
 def plan_from(store: RuntimePackageStore, key: str, providers: list[str]) -> PerceptionPlan:

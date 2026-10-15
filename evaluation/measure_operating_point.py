@@ -60,7 +60,11 @@ from backend.ml.supervisor.supervisor import SupervisorPolicy
 
 KEY = "insightface-buffalo-l"
 POLICY = SupervisorPolicy(120, 120, 10, 10, 1, 600)
-DEVICES = {"CUDAExecutionProvider": "GPU", "CPUExecutionProvider": "CPU"}
+DEVICES = {
+    "DmlExecutionProvider": "GPU",
+    "CUDAExecutionProvider": "GPU",
+    "CPUExecutionProvider": "CPU",
+}
 TARGET_PRECISION = 0.99
 MARGINS = (0.0, 0.02, 0.05, 0.1)
 TAIL_FLOOR = (
