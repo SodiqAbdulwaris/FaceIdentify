@@ -11,6 +11,7 @@ export const detail = (over: Record<string, unknown> = {}) => ({
   updated_at: '2026-01-01T00:00:00Z',
   state: 'ACTIVE',
   storage_mode: 'MANAGED',
+  availability_reason: null,
   original: {
     id: 's1',
     kind: 'ORIGINAL',

@@ -12,6 +12,8 @@ import { errorMessage } from '../library/messages'
 import { useRunActions } from '../processing/useRunActions'
 import { FaceCorrection } from './FaceCorrection'
 import { FaceOverlay } from './FaceOverlay'
+import { MissingOriginal } from './MissingOriginal'
+import { missingReason } from './missing'
 import { RecycleControl } from './RecycleControl'
 import { UnresolvedFaces } from './UnresolvedFaces'
 import { labelFaces } from './faces'
@@ -94,7 +96,7 @@ export function SourcePage() {
           ) : (
             <p className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
               {missing
-                ? 'The file for this image is missing. Put it back where it was to see it again.'
+                ? missingReason(detail.availability_reason)
                 : image.isError
                   ? 'The image could not be loaded.'
                   : 'Loading the image…'}
@@ -124,6 +126,8 @@ export function SourcePage() {
               </Button>
             ) : null}
           </div>
+
+          {missing ? <MissingOriginal source={detail} onNotice={setNotice} /> : null}
 
           <RecycleControl source={detail} onNotice={setNotice} />
 

@@ -570,6 +570,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{source_id}/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recheck
+         * @description Recheck File: verify a missing original again, where it was. A file that differs from the
+         *     recorded one is not the original and the source stays missing (`availability_reason` says
+         *     why). A repeat is harmless; an original that is not missing is left as it is.
+         */
+        post: operations["recheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{source_id}/relink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relink
+         * @description Locate Original: point a missing referenced original at the file the user selected. The
+         *     file must be the recorded media exactly (size and SHA-256); a matching name proves nothing, and
+         *     different media is a replacement, which is refused (API section 59). Managed originals are not
+         *     relinked: they are rechecked where the library keeps them.
+         */
+        post: operations["relink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{source_id}/restore": {
         parameters: {
             query?: never;
@@ -1136,6 +1181,11 @@ export interface components {
             /** Identity Id */
             identity_id: string | null;
         };
+        /** RelinkRequest */
+        RelinkRequest: {
+            /** Path */
+            path: string;
+        };
         /** RenamePerson */
         RenamePerson: {
             /** Display Name */
@@ -1171,6 +1221,8 @@ export interface components {
         SourceDetail: {
             /** Availability */
             availability: string;
+            /** Availability Reason */
+            availability_reason: string | null;
             /**
              * Created At
              * Format: date-time
@@ -2442,6 +2494,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_ProcessingRunDetail_"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    recheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceDetail"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    relink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceDetail"];
                 };
             };
             /** @description The one error shape. */

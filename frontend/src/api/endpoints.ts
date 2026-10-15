@@ -37,6 +37,9 @@ export const endpoints = (api: ApiClient) => ({
   sourceRuns: (id: string, cursor?: string) =>
     api.get<Page<ProcessingRun>>(`${V1}/sources/${id}/processing-runs`, { cursor, limit: 50 }),
   processSource: (id: string) => api.post<ProcessingRun>(`${V1}/sources/${id}/process`),
+  recheckSource: (id: string) => api.post<SourceDetail>(`${V1}/sources/${id}/recheck`),
+  relinkSource: (id: string, path: string) =>
+    api.post<SourceDetail>(`${V1}/sources/${id}/relink`, { path }),
 
   search: (q: string, recycled: 'include' | 'exclude' = 'exclude') =>
     api.get<SearchResponse>(`${V1}/search`, { q, recycled }),

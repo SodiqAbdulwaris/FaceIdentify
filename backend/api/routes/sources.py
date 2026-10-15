@@ -13,6 +13,10 @@ database and file work in a worker thread and the event loop stays free.
 * `GET /sources/{id}/media` streams the source's own original, with a content type and an ETag (its
   SHA-256), and answers `304` to a matching `If-None-Match`. It serves nothing else: the bytes come
   from the source's original artifact, never from a path the client names.
+* A missing original is verified again when its source is opened (`GET /sources/{id}`) or processed,
+  and on request (`POST /sources/{id}/recheck`); `POST /sources/{id}/relink` points a missing
+  referenced original at the file the user located (issue #179, owner decision 2026-10-14). A
+  recheck never scans the library and never accepts a file that differs from the recorded one.
 """
 
 import uuid
@@ -39,6 +43,7 @@ from backend.api.pagination import (
 )
 from backend.api.startup import Backend, MediaLimits
 from backend.app.processing.models import ProcessingRun
+from backend.app.sources.artifact_storage import ArtifactStateError, ArtifactStorageError
 from backend.app.sources.import_source import (
     ImportedSource,
     ImportFileError,
@@ -57,6 +62,8 @@ from backend.app.sources.permanent_delete import (
     SourceMissingError,
     SourceNotRecycledError,
 )
+from backend.app.sources.recheck import OriginalUnreadableError, recheck_original
+from backend.app.sources.referenced_artifacts import RelinkMismatchError, relink_referenced_artifact
 from backend.app.sources.repository import LibraryCursor, SourceRepository
 from backend.infrastructure.media.image import (
     CorruptImageError,
@@ -103,6 +110,7 @@ class SourceSummary(BaseModel):
 class SourceDetail(SourceSummary):
     state: str
     storage_mode: str
+    availability_reason: str | None  # why the original is not available; None when it is
     original: MediaReference | None
     width: int | None
     height: int | None
@@ -118,6 +126,17 @@ class DeletionPending(BaseModel):
 
     state: str
     outstanding: list[str]
+
+
+class RelinkRequest(BaseModel):
+    path: str = Field(min_length=1)
+
+    @field_validator("path")
+    @classmethod
+    def _absolute(cls, value: str) -> str:
+        if not Path(value).is_absolute():
+            raise ValueError("a relink path must be absolute")
+        return value
 
 
 class ImportRequest(BaseModel):
@@ -177,6 +196,9 @@ def _detail(source: Source, artifact: Artifact, run: ProcessingRun | None) -> So
         **_summary(source, artifact.state, run),
         state=source.state,
         storage_mode=artifact.storage_mode,
+        availability_reason=None
+        if artifact.state == ArtifactState.AVAILABLE
+        else artifact.failure_code,
         original=_original_reference(source, artifact),
         width=source.width,
         height=source.height,
@@ -416,8 +438,107 @@ def permanent_delete(
     return JSONResponse(pending.model_dump(), status_code=202)
 
 
+def recheck_if_missing(library: Library, backend: Backend, source_id: uuid.UUID) -> None:
+    """On access: verify a `MISSING` original again before the source is treated as unavailable.
+    Best effort: an unreadable file leaves the answer to the caller's own read (the caller has
+    already checked that the source exists; Source rows are never deleted, only tombstoned). An
+    original that came back is announced as `source.updated`."""
+    try:
+        recheck = recheck_original(
+            library.session_factory, library.store, source_id, clock=backend.settings.clock
+        )
+    except OriginalUnreadableError:
+        return
+    if recheck.recovered:
+        backend.announce("source.updated", "source", str(source_id))
+
+
 @router.get("/{source_id}")
-def get_source(source_id: uuid.UUID, library: Library) -> SourceDetail:
+def get_source(
+    source_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> SourceDetail:
+    detail = library.unit_of_work.read(lambda session: _source_detail(session, source_id))
+    if detail.availability != ArtifactState.MISSING:
+        return detail
+    recheck_if_missing(library, backend, source_id)  # (it may also learn a better reason)
+    return library.unit_of_work.read(lambda session: _source_detail(session, source_id))
+
+
+@router.post("/{source_id}/recheck")
+def recheck(
+    source_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> SourceDetail:
+    """Recheck File: verify a missing original again, where it was. A file that differs from the
+    recorded one is not the original and the source stays missing (`availability_reason` says
+    why). A repeat is harmless; an original that is not missing is left as it is."""
+    library.unit_of_work.read(lambda session: require_visible_source(session, source_id))
+    try:
+        result = recheck_original(
+            library.session_factory, library.store, source_id, clock=backend.settings.clock
+        )
+    except OriginalUnreadableError:
+        raise ApiError(
+            409, "SOURCE_FILE_UNREADABLE",
+            "The file is there but could not be read. Close any program using it and try again.",
+            details={"source_id": str(source_id)},
+        ) from None  # fmt: skip
+    if result.recovered:
+        backend.announce("source.updated", "source", str(source_id))
+    return library.unit_of_work.read(lambda session: _source_detail(session, source_id))
+
+
+@router.post("/{source_id}/relink")
+def relink(
+    source_id: uuid.UUID,
+    body: RelinkRequest,
+    library: Library,
+    backend: Annotated[Backend, Depends(get_backend)],
+) -> SourceDetail:
+    """Locate Original: point a missing referenced original at the file the user selected. The
+    file must be the recorded media exactly (size and SHA-256); a matching name proves nothing, and
+    different media is a replacement, which is refused (API section 59). Managed originals are not
+    relinked: they are rechecked where the library keeps them."""
+
+    def original(session: Session) -> Artifact:
+        source = require_visible_source(session, source_id)
+        artifact = session.get(Artifact, source.original_artifact_id)
+        assert artifact is not None  # a visible Source always has its original artifact row
+        session.expunge(artifact)
+        return artifact
+
+    artifact = library.unit_of_work.read(original)
+    if artifact.storage_mode != StorageMode.REFERENCED:
+        raise ApiError(
+            409, "SOURCE_NOT_REFERENCED",
+            "Only a referenced original can be located; recheck a managed one instead.",
+            details={"source_id": str(source_id)},
+        )  # fmt: skip
+    try:
+        relink_referenced_artifact(
+            library.session_factory, library.roots, artifact.id, Path(body.path),
+            clock=backend.settings.clock,
+        )  # fmt: skip
+    except RelinkMismatchError:
+        raise ApiError(
+            409, "SOURCE_RELINK_MISMATCH",
+            "That file is not the original: its contents differ from the file that was imported.",
+            details={"source_id": str(source_id)},
+        ) from None  # fmt: skip
+    except ReferencedFileError:
+        raise ApiError(400, "REFERENCED_FILE_INVALID", "The file cannot be referenced.") from None
+    except ArtifactStateError:
+        raise ApiError(
+            409, "SOURCE_STATE_CONFLICT",
+            "The original is not missing, so there is nothing to locate.",
+            details={"source_id": str(source_id), "availability": artifact.state},
+        ) from None  # fmt: skip
+    except ArtifactStorageError:  # no recorded fingerprint: nothing to verify a candidate against
+        raise ApiError(
+            409, "SOURCE_RELINK_UNVERIFIABLE",
+            "This original has no recorded fingerprint, so a located file cannot be verified.",
+            details={"source_id": str(source_id)},
+        ) from None  # fmt: skip
+    backend.announce("source.updated", "source", str(source_id))
     return library.unit_of_work.read(lambda session: _source_detail(session, source_id))
 
 

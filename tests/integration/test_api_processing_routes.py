@@ -10,13 +10,13 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from backend.api.pagination import encode_cursor
 from backend.api.startup import ProcessingUnavailableError
 from backend.app.jobs.models import Job
 from backend.app.processing.models import ProcessingRun
-from backend.app.sources.models import Artifact
+from backend.app.sources.models import Artifact, Source
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, error, imported
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
@@ -109,6 +109,12 @@ async def test_a_source_whose_original_is_gone_cannot_be_processed(processing_ap
     with api.backend.library.session_factory() as session:
         session.execute(update(Artifact).values(state="MISSING"))
         session.commit()
+        key = session.scalars(
+            select(Artifact.storage_key).join(Source, Source.original_artifact_id == Artifact.id)
+        ).one()
+    assert key is not None
+    api.backend.library.store.roots.path_for(key).unlink()  # genuinely gone: processing verifies
+    # a missing original again before it refuses (#179)
 
     body = error(
         await api.client.post(f"/api/v1/sources/{source['id']}/process"),
