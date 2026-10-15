@@ -1,8 +1,8 @@
 # M5: enabling automatic acceptance at an owner-approved operating point (TST-057B)
 
 - **Date:** 2026-10-15
-- **Milestone / tracker IDs:** M5 track R; TST-057B (stays `BLOCKED` until the owner confirms the point and the policy is installed)
-- **Status:** partial: code, tests and analysis done; **the operating point is pending owner confirmation**; the live policy file is untouched (still `buffalo-l-abstain-only-v1`)
+- **Milestone / tracker IDs:** M5 track R; TST-057B (`IN_PROGRESS`: built and verified, the live policy not yet installed)
+- **Status:** partial: code, tests and analysis done; **the owner confirmed option A** (0.45 / 0.10) on 2026-10-15; verified with the real weights in a private state; the owner's installed policy file is not yet replaced (command below)
 - **Commits:** PR to be recorded when merged (`feat(api): admit an owner-approved matching policy`, docs commits)
 
 ## The owner's decision
@@ -11,8 +11,11 @@
 > recognition, TST-057B), in their words: "the we're enabling auto-acceptance, we can do that". This is
 > step 5 of the 2026-10-14 decision ("an explicit, owner-approved code change"); steps 1 to 4 were met
 > on 2026-10-15 (the 48-identity verified set, hard negatives, the conservative rule on a verified
-> manifest with zero false accepts). The exact operating point below is **pending owner confirmation**;
-> the recommended one is threshold 0.45, margin 0.10.
+> manifest with zero false accepts). The exact operating point was brought back for confirmation;
+> the recommended one was threshold 0.45, margin 0.10.
+
+> **Decision 2026-10-15:** the owner confirmed option A: "A: threshold 0.45, margin 0.10, no automatic new identity." (relayed by the
+> supervising session). `APPROVED_MATCHING` already held it, so no number changed.
 
 ## What changed
 
@@ -37,8 +40,12 @@
     detection floor, a ceiling of 0, or another version is refused and readiness says `UNAVAILABLE`;
     through the whole application, a second identical face is matched automatically (one identity,
     nothing left unresolved, the run reports `automatic_matching: true`).
-- No policy file was written. The proposed live file (to replace
-  `local-models/state/policies/insightface-buffalo-l.json` only after the owner confirms):
+- `tests/e2e/test_real_host.py` (local, real weights, `-m e2e`): each test now writes its own policy
+  into its private state instead of copying the installed file, so it no longer depends on what the
+  machine has installed. The assisted test keeps the abstain-only policy; a new test runs the
+  approved point: the second photograph of the same person is matched automatically to the first
+  person's identity, and a different person's photograph scores below 0.45 and waits.
+- The live policy, `local-models/state/policies/insightface-buffalo-l.json`. The live file is installed by the owner (this session's tools may not write to the main checkout), with the abstain-only file kept beside it to restore:
 
 ```json
 {
@@ -51,8 +58,16 @@
 }
 ```
 
-  The policy is read on every request, so installing it needs no restart; runs already made keep the
-  policy they were frozen under, so faces processed before it stay abstained.
+  ```bash
+  cd local-models/state/policies
+  cp insightface-buffalo-l.json insightface-buffalo-l.abstain-only-v1.json
+  printf '%s\n' '{"schema_version": 1, "version": "buffalo-l-verified-match-v1", "min_detection_score": 0.5, "new_identity_ceiling": -1.0, "match_threshold": 0.45, "margin": 0.1}' > insightface-buffalo-l.json
+  ```
+
+  To go back to abstain-only, copy `insightface-buffalo-l.abstain-only-v1.json` over
+  `insightface-buffalo-l.json`; only that one name is ever read. The policy is read on every request,
+  so neither step needs a restart; runs already made keep the policy they were frozen under, so faces
+  processed before it stay abstained (reprocessing them is a separate, later decision).
 
 ## The analysis
 
@@ -153,11 +168,14 @@ and news photographs, many likely in the recogniser's training data (a possibili
   `APPROVED_MATCHING` constant, 6 tests failed (the five refusal cases and the application test; the
   reasoner tests pass on the old code, as they test the existing rule at the new numbers).
 - Full backend gate: see the PR description.
+- `uv run pytest -m e2e tests/e2e/test_real_host.py` with the real `buffalo_l` weights on CPU
+  (2026-10-15, after the confirmation): 2 passed. Three photographs only: it shows the real path
+  matches and abstains under the approved point, not a rate.
 - **Not verified:** any recognition on the owner's own photographs; the `commons-pd` label errors by eye.
 
 ## Open issues / follow-ups
 
-- **Owner:** confirm the operating point (A, B or C); then install the policy file and mark TST-057B.
+- **Owner:** install the live policy (the command above); then TST-057B can be marked `PASSING`.
 - A review list of automatic matches (a filter or badge "matched automatically") so a wrong one is
   noticed; not built.
 - Measure relatives and age gaps on the owner's own labelled photographs before relying on the point

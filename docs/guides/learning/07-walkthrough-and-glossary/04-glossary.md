@@ -16,7 +16,7 @@ This file. The authoritative vocabulary of the product is `docs/specs/identity-a
 
 **Abstain-first policy**: the rule that a policy file is accepted only if it can never match automatically (threshold above 1, ceiling -1) ([lesson](../03-backend/architecture/04-profiles.md)).
 
-> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (TST-057B). The real profile now also admits a matching policy that equals an owner-approved operating point in `APPROVED_MATCHING` (`require_approved_policy`, `backend/api/real.py`); a policy file alone still cannot enable matching. The point is pending owner confirmation, and the installed policy is abstain-only until then. Evidence: [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md).
+> **Decision 2026-10-15:** the owner decided to enable automatic acceptance (TST-057B). The real profile now also admits a matching policy that equals an owner-approved operating point in `APPROVED_MATCHING` (`require_approved_policy`, `backend/api/real.py`); a policy file alone still cannot enable matching. The owner confirmed option A on 2026-10-15: "A: threshold 0.45, margin 0.10, no automatic new identity." Evidence: [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md).
 
 **Acceptance**: the single transaction that makes a finished run's private output authoritative ([lesson](../03-backend/processing/04-checkpoints-and-acceptance.md)).
 
