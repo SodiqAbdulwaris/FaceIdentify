@@ -3,13 +3,14 @@
 - **Date:** 2026-10-15
 - **Milestone / tracker IDs:** M5 step 5b (TST-056); test-only fix, no tracker row changes
 - **Status:** done
-- **Commits:** PR to be recorded when merged
+- **Commits:** PR #198: `fix(tests): wait for the index save before processed() returns`, `docs: record the face-search snapshot race and its fix`, plus the review follow-ups
 
 ## What changed
 
 `tests/integration/test_api_memory.py`: `processed()` now ends with `index_caught_up()`, which runs one
-`IndexCoordinator.apply_pending` pass (the backend's own `index_batch`) on a worker thread. No backend
-code changed and no assertion changed.
+`IndexCoordinator.apply_pending` pass (the backend's own `index_batch`) on a worker thread, then
+asserts that every `IndexOperation` is `APPLIED`. No backend code changed and no existing assertion
+changed.
 
 ## Why
 
@@ -31,8 +32,11 @@ their operations under it. If the scheduler's pass is running, the test's pass w
 finds nothing due; if it has not started, the test's pass applies and persists the operations, and the
 scheduler's pass then finds nothing due and opens no index (`apply_pending` only touches spaces with
 claimed operations), so it writes no file. Either way, when `processed()` returns, nothing is left to
-write. No sleep, no polling, and the snapshot still covers every file, `*.tmp` and index files
-included.
+write. That holds only if the pass finished everything: one pass is bounded by `index_batch` and
+skips operations that failed and are backed off, so the helper asserts no operation is left
+`PENDING` or `FAILED` and fails fast otherwise (today's callers queue one or two operations and inject
+no indexing failure). No sleep, no polling, and the snapshot still covers every file, `*.tmp` and
+index files included.
 
 Fixed in the shared helper because every caller of `processed()` (directly or through
 `test_api_search.face`) has the same gap; none of them depends on the index lagging. The other
@@ -45,7 +49,16 @@ synchronously and do not go through the scheduler, so they do not share the race
   both times (at 0.2 s and above the save fell after the second snapshot, so it passed). With the fix,
   the same delays (0, 0.05, 0.1, 0.2 and 1.0 s) all passed. The probe was removed.
 - The test run 60 times in a row with the fix: 60 passed.
-- Full backend gate: see the PR (ruff format, ruff check, mypy, mypy `--platform linux`, pytest).
+- Full backend gate on the first fix commit: `uv run ruff format --check .` (304 files already
+  formatted), `uv run ruff check .` (all checks passed), `uv run mypy` and
+  `uv run mypy --platform linux` (no issues in 295 source files), `uv run pytest -q` (3017 passed,
+  2 deselected, 11 min 58 s).
+- After the review's postcondition check was added: ruff and mypy clean; the nine test files that use
+  `processed()` (directly or through `face`/`name_identity`): 158 passed.
+- Review (Codex, read-only): diagnosis and lock analysis confirmed; it asked for the postcondition
+  check and these results. It also suggested an event-controlled regression test for both orderings;
+  not added, because the ordering guarantee is the coordinator's lock, which
+  `test_index_coordinator.py::test_passes_are_serialized` already covers.
 
 ## Open issues / follow-ups
 
