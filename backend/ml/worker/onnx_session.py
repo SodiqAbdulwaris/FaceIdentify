@@ -11,21 +11,31 @@ first, is an error with a code the backend can act on.
 
 An accelerator that is listed but cannot start (DirectML with no DirectX 12 adapter, a GPU driver
 too old for CUDA) makes `InferenceSession` raise. For an accelerator that is a provider failure
-(`RUNTIME_INITIALIZATION_FAILED`), so the backend falls back to the next variant; a model that is
-genuinely broken then fails there too, on the CPU, as `COMPONENT_LOAD_FAILED`, so the fallback
-never hides it. Only the CPU's own load failure is the model's failure.
+(`RUNTIME_INITIALIZATION_FAILED`), so the backend falls back to the next variant. A broken model is
+not: ONNX Runtime reports it with its own exception types (unparseable bytes, an invalid graph, an
+operator nothing implements) on every provider, and those stay `COMPONENT_LOAD_FAILED`, so no
+fallback is tried and a plan without a CPU variant still says what is wrong. On the CPU every load
+failure is the model's.
 """
 
 import hashlib
 from pathlib import Path
 
 import onnxruntime as ort
+from onnxruntime.capi import onnxruntime_pybind11_state as ort_errors
 
 from backend.ml.contracts.protocol import MLErrorCode
 from backend.ml.worker.loop import WorkerError
 
 CPU = "CPUExecutionProvider"
 DIRECTML = "DmlExecutionProvider"
+# What ONNX Runtime raises for the model itself, whichever provider was asked for.
+MODEL_ERRORS = (
+    ort_errors.InvalidProtobuf,
+    ort_errors.InvalidGraph,
+    ort_errors.NoModel,
+    ort_errors.NotImplemented,
+)
 
 
 def load_session(path: Path, sha256: bytes, provider: str) -> ort.InferenceSession:
@@ -52,7 +62,7 @@ def load_session(path: Path, sha256: bytes, provider: str) -> ort.InferenceSessi
     try:
         session = ort.InferenceSession(data, sess_options=options, providers=[provider])
     except Exception as error:  # ONNX Runtime raises its own exception types for a bad model
-        if provider != CPU:
+        if provider != CPU and not isinstance(error, MODEL_ERRORS):
             raise WorkerError(
                 MLErrorCode.RUNTIME_INITIALIZATION_FAILED, f"{provider} cannot start ({error})"
             ) from error
