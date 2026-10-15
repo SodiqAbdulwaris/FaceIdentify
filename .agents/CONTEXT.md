@@ -117,7 +117,8 @@ _Last updated: 2026-10-16 (issue #179: a missing original is verified again when
   stale leases from any job, removes
   workspaces of finished jobs whose run is over too, marks a managed artifact whose file is gone
   `MISSING` (and refuses to run at all if the library root is not there; `reverify_managed_artifact`
-  brings one back, but nothing calls it yet; `open_library` calls recovery at startup), validates every active space's index (a stale one is rebuilt from SQLite, not just a
+  brings one back, called since 2026-10-16 when the source is opened, processed or retried and by
+  Recheck file, #179; `open_library` calls recovery at startup), validates every active space's index (a stale one is rebuilt from SQLite, not just a
   missing or corrupt one), gives
   `FAILED` `IndexOperation`s one fresh set of attempts and catches up pending ones in bounded
   passes; idempotent, survives a crash after any step, and reports what is `unresolved`. It relies

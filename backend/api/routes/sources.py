@@ -62,7 +62,11 @@ from backend.app.sources.permanent_delete import (
     SourceMissingError,
     SourceNotRecycledError,
 )
-from backend.app.sources.recheck import OriginalUnreadableError, recheck_original
+from backend.app.sources.recheck import (
+    OriginalUnreadableError,
+    OriginalUnverifiableError,
+    recheck_original,
+)
 from backend.app.sources.referenced_artifacts import RelinkMismatchError, relink_referenced_artifact
 from backend.app.sources.repository import LibraryCursor, SourceRepository
 from backend.infrastructure.media.image import (
@@ -447,7 +451,7 @@ def recheck_if_missing(library: Library, backend: Backend, source_id: uuid.UUID)
         recheck = recheck_original(
             library.session_factory, library.store, source_id, clock=backend.settings.clock
         )
-    except OriginalUnreadableError:
+    except (OriginalUnreadableError, OriginalUnverifiableError):
         return
     if recheck.recovered:
         backend.announce("source.updated", "source", str(source_id))
@@ -476,6 +480,13 @@ def recheck(
         result = recheck_original(
             library.session_factory, library.store, source_id, clock=backend.settings.clock
         )
+    except OriginalUnverifiableError:
+        raise ApiError(
+            409, "SOURCE_FILE_UNVERIFIABLE",
+            "This original has no recorded fingerprint, so a file in its place cannot be confirmed "
+            "to be it. Import the file again instead.",
+            details={"source_id": str(source_id)},
+        ) from None  # fmt: skip
     except OriginalUnreadableError:
         raise ApiError(
             409, "SOURCE_FILE_UNREADABLE",

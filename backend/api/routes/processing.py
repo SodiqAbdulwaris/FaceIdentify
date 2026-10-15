@@ -340,15 +340,16 @@ def cancel_run(
 def retry_run(
     run_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
 ) -> ProcessingRunDetail:
-    def find_job(session: Session) -> uuid.UUID | None:
-        visible_run(session, run_id)
-        return session.scalar(
+    def find_job(session: Session) -> tuple[uuid.UUID, uuid.UUID | None]:
+        run = visible_run(session, run_id)
+        return run.source_id, session.scalar(
             select(Job.id).where(
                 Job.processing_run_id == run_id, Job.type == JobType.PROCESS_SOURCE
             )
         )
 
-    job_id = library.unit_of_work.read(find_job)
+    source_id, job_id = library.unit_of_work.read(find_job)
+    recheck_if_missing(library, backend, source_id)  # a missing original is verified on use (#179)
     try:
         if job_id is None:
             raise ProcessSourceError(f"run {run_id} has no processing job")
