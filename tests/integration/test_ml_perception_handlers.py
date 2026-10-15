@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import onnx
 import onnxruntime as ort
 import pytest
-from onnxruntime.capi import onnxruntime_pybind11_state as ort_errors
 
 from backend.infrastructure.resources.shared_memory import AttachedSegment, SegmentLedger
 from backend.ml.contracts.messages import (
@@ -686,23 +686,32 @@ def test_an_accelerator_that_cannot_start_is_a_provider_failure_the_cpu_a_model_
     assert refused.value.code is code
 
 
+BROKEN_MODELS = {
+    "not a model": b"this is not an ONNX model",
+    "no graph": onnx.ModelProto(ir_version=8).SerializeToString(),
+}
+
+
+@pytest.mark.parametrize("broken", sorted(BROKEN_MODELS))
 @pytest.mark.parametrize("provider", ["DmlExecutionProvider", "CUDAExecutionProvider", CPU])
 def test_a_broken_model_is_a_load_failure_on_every_provider(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, broken: str
 ) -> None:
-    """A broken model is never mistaken for an accelerator that cannot start: ONNX Runtime's own
-    parse error, raised whatever provider was asked for, is not a reason to fall back."""
-    junk = b"this is not an ONNX model"
-    path = tmp_path / "j.onnx"
-    path.write_bytes(junk)
+    """A broken model is never mistaken for an accelerator that cannot start. ONNX Runtime parses
+    and validates the model before any provider starts, so its real error is the same whatever
+    provider is asked for; the session is made on the CPU here so this runs on any machine."""
+    data = BROKEN_MODELS[broken]
+    path = tmp_path / "broken.onnx"
+    path.write_bytes(data)
+    real = ort.InferenceSession
 
-    def parse(*args: Any, **kwargs: Any) -> Any:  # what ONNX Runtime raises for these bytes
-        raise ort_errors.InvalidProtobuf("INVALID_PROTOBUF : protobuf parsing failed")
+    def parse(model: Any, *, sess_options: Any, providers: list[str]) -> Any:
+        return real(model, sess_options=sess_options, providers=[CPU])
 
     monkeypatch.setattr(ort, "get_available_providers", lambda: [provider])
     monkeypatch.setattr(ort, "InferenceSession", parse)
     with pytest.raises(WorkerError, match="cannot be loaded") as refused:
-        load_session(path, hashlib.sha256(junk).digest(), provider)
+        load_session(path, hashlib.sha256(data).digest(), provider)
     assert refused.value.code is MLErrorCode.COMPONENT_LOAD_FAILED
 
 
