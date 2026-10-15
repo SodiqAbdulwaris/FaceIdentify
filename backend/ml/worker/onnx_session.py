@@ -12,10 +12,10 @@ first, is an error with a code the backend can act on.
 An accelerator that is listed but cannot start (DirectML with no DirectX 12 adapter, a GPU driver
 too old for CUDA) makes `InferenceSession` raise. For an accelerator that is a provider failure
 (`RUNTIME_INITIALIZATION_FAILED`), so the backend falls back to the next variant. A broken model is
-not: ONNX Runtime reports it with its own exception types (unparseable bytes, an invalid graph, an
-operator nothing implements) on every provider, and those stay `COMPONENT_LOAD_FAILED`, so no
-fallback is tried and a plan without a CPU variant still says what is wrong. On the CPU every load
-failure is the model's.
+not: ONNX Runtime reports it with its own exception types (unparseable bytes, a model with no
+graph, an invalid graph, an operator nothing implements) on every provider, and those stay
+`COMPONENT_LOAD_FAILED`, so no fallback is tried and a plan without a CPU variant still says what is
+wrong. On the CPU every load failure is the model's.
 """
 
 import hashlib
@@ -32,6 +32,7 @@ DIRECTML = "DmlExecutionProvider"
 # What ONNX Runtime raises for the model itself, whichever provider was asked for.
 MODEL_ERRORS = (
     ort_errors.InvalidProtobuf,
+    ort_errors.InvalidArgument,  # a model that fails validation, such as one with no graph
     ort_errors.InvalidGraph,
     ort_errors.NoModel,
     ort_errors.NotImplemented,
