@@ -5,8 +5,10 @@ the pipeline made authoritative. Anything still private (`PENDING`) must never b
 """
 
 import uuid
+from functools import partial
 from typing import Any
 
+import anyio
 import pytest
 from sqlalchemy import update
 
@@ -27,7 +29,21 @@ async def processed(api: Api, name: str, *, tick: bool = True) -> dict[str, Any]
     source = await imported(api, path=str(api.image(name)), display_name=name)
     run = await process(api, source, tick=tick)
     await finished(api, run["id"])
+    await index_caught_up(api)
     return source
+
+
+async def index_caught_up(api: Api) -> None:
+    """Wait until the index holds what the accepted run queued.
+
+    A run reads COMPLETED as soon as acceptance commits, but acceptance only then wakes the index
+    coordinator, which persists the index on the scheduler thread. Passes are serialized, so this
+    one either waits for that pass to finish or does its work first and leaves it nothing to write.
+    """
+    library = api.backend.library
+    assert library is not None
+    limit = api.backend.settings.index_batch
+    await anyio.to_thread.run_sync(partial(library.coordinator.apply_pending, limit=limit))
 
 
 def set_state(api: Api, model: Any, state: str) -> None:
