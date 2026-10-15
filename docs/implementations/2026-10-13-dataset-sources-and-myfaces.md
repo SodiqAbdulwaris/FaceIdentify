@@ -23,3 +23,5 @@ photographs of their own face must not be one `git add -A` away from being publi
 - `git check-ignore -v MyFaces` matches the new line. Nothing else changed.
 - **Not verified:** the Kaggle mirror's licence and terms (the page could not be read from the agent's
   environment) and the original sites' terms: still issue 183.
+  (2026-10-15: the Kaggle mirror's licence field was read and grants no licence of its own; see
+  `docs/research/licensing-and-commercialization.md` section 10.3.)

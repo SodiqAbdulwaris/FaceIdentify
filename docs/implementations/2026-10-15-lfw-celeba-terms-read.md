@@ -4,7 +4,7 @@
 - **Milestone / tracker IDs:** licensing record, issue #183
 - **Status:** partial (CelebA and the Kaggle mirror read; LFW's own page could not be reached)
 - **Commits:** PR for #183: `docs(licensing): record the LFW and CelebA terms read at source`,
-  `fix(evaluation): say what was read in the dataset provenance`; follow-up PR:
+  `fix(evaluation): say what was read in the dataset provenance`; follow-up PR #204:
   `docs(licensing): record the LFW Kaggle mirror's licence field`
 
 ## What changed

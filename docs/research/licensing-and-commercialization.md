@@ -231,7 +231,7 @@ to a few words; everything else is a summary.
 
 **LFW** (official page <http://vis-www.cs.umass.edu/lfw/>: **could not be read**)
 
-- The host did not resolve from this machine or from the fetch tool on 2026-10-15 (DNS failure, tried
+- The host did not resolve from the owner's machine (local session) or from the fetch tool on 2026-10-15 (DNS failure, tried
   http and https and the README path; the Wayback copy is blocked). Tried again on 2026-10-15 from a
   cloud session: the egress proxy refused the connection to the host (502), the fetch tool could not
   resolve it, and the Wayback copy was refused there too. **The page's own terms, if any, remain
@@ -250,8 +250,8 @@ to a few words; everything else is a summary.
   description)", but the description specifies **no licence and no conditions**: it says the data
   came from the UMass LFW page, points readers there, and asks for the LFW technical report (and, for
   the deep-funneled images, Huang, Mattar, Lee and Learned-Miller, NIPS 2012) to be cited. So the
-  mirror grants nothing beyond what the creators grant, and an uploader could not grant rights in
-  the news photographs anyway; *who may use it and for what*, *redistribution* and *third-party
+  mirror grants nothing beyond what the creators grant, and, on this reading, an uploader could not
+  grant rights in the news photographs anyway; *who may use it and for what*, *redistribution* and *third-party
   rights* all fall back to the official page (unread) and the photographs' own rights holders.
 - Third-party listings (a catalogue showing "Other"; scikit-learn's BSD marking covers its loader code
   only) are not terms and were not relied on.
@@ -260,7 +260,7 @@ to a few words; everything else is a summary.
 
 | Question | CelebA | LFW |
 |---|---|---|
-| Use here (local evaluation of recognition) | within "non-commercial research" | research evaluation; page terms unread |
+| Use here (local evaluation of recognition) | within "non-commercial research" | research evaluation; page terms unread; the Kaggle mirror grants none of its own |
 | Redistribute, commit, publish, bundle in an installer | **No** | **No** (treat as not allowed until the page is read) |
 | Commercial product or any commercial use of the images or derived data | **No** | Not established; assume **no** |
 | Images carry third-party rights | Yes (stated) | Yes (news photographs) |

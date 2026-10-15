@@ -480,7 +480,7 @@ needs an answer to start):
 4. **Issue 177** (medium): a hard-negatives selection mode (strangers chosen by similarity to enrolled people), then
    repeat the open-set evaluation with it.
 5. **Smaller, any time:** the unfinished CelebA workflow and restart phases (about an hour on CPU), #173 (the owner's
-   own close-ups in `MyFaces/`), #183 (LFW and CelebA terms at their sources), #188 (AVIF), the remaining Commons
+   own close-ups in `MyFaces/`), #183 (LFW's own page; CelebA and the Kaggle mirror read 2026-10-15), #188 (AVIF), the remaining Commons
    public-domain review (14 people short, `label_review.py --people`).
 
 Working rules that cost time before: work from the repository root and do not `cd` elsewhere in a command (the shell
