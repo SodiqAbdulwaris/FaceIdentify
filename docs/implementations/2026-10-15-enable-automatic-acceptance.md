@@ -97,22 +97,27 @@ wrong crew member gives. That is strong evidence of label error but **not verifi
 owner can open those files to settle it. The verified 48-identity set has no different-person pair
 above 0.333 at all (686 photographs).
 
-So "zero false accepts in every recorded run" is literally true only above 0.615 (option C). Treating
-the `commons-pd` pairs as label errors, every run is clean at 0.45.
+**No threshold is clean on every recorded run.** The table above covers the six gate runs since the
+LFW import (2026-10-13 onwards). The earlier gate runs on `commons-pd` (2026-10-10:
+`gate-before-review.json`, `gate-k5.json`, `gate-k50-first.json`) offered `Bruce_McCandless_II/21.jpg`
+as Kathryn D. Sullivan at 1.000 with a margin of 0.74: the duplicate file above, which every threshold
+and margin accepts, because it *is* the same picture under another name. Leaving that set out as
+mislabelled (one proven duplicate, the other pairs unchecked by eye), every run is clean at 0.45;
+keeping it, 0.62 clears the conservative rule's 0.567 to 0.615 pairs but not the duplicate.
 
 ## Options for the owner
 
 | Option | Threshold / margin | False accepts recorded | Known people accepted automatically | Headroom over the highest stranger |
 |---|---|---|---|---|
-| **A (recommended)** | **0.45 / 0.10** | 0 in all six gate runs; `commons-pd` pairs at 0.567 to 0.615 left (label errors, not eye-checked) | 95.8% verified set, 96.5% CelebA, 99.4% LFW | 0.048 over LFW's 0.402; 0.13 over the verified sets' 0.32 |
+| **A (recommended)** | **0.45 / 0.10** | 0 in the six gate runs since 2026-10-13; on `commons-pd` (unverified, a proven duplicate label) the 0.567 to 0.615 pairs and the 1.000 duplicate remain | 95.8% verified set, 96.5% CelebA, 99.4% LFW | 0.048 over LFW's 0.402; 0.13 over the verified sets' 0.32 |
 | B | 0.50 / 0.10 | the same as A | 91.5% verified set, 95.4% CelebA, 99.4% LFW | 0.098 over 0.402 |
-| C | 0.62 / 0.10 | 0 in every run, `commons-pd` included | 81.4% verified set, 82.3% CelebA, 96.0% LFW | above everything ever recorded |
+| C | 0.62 / 0.10 | as A, and also above the `commons-pd` conservative-rule pairs (0.567 to 0.615); the 1.000 duplicate remains, as at any point | 81.4% verified set, 82.3% CelebA, 96.0% LFW | above every different-person score except the duplicate file |
 
 - **A** is the point the 2026-10-14 decision named as the candidate, and the lowest threshold clean on
   every gate run with any label source. About 1 face in 25 of a known person still waits for a click.
 - **B** buys twice the headroom for faces harder than celebrities (the owner's family) at the cost of
   roughly 1 extra click per 25 faces.
-- **C** removes the last caveat but makes about 1 face in 5 wait, which gives back much of what
+- **C** clears the unexplained `commons-pd` pairs (not the duplicate file, which no point can) but makes about 1 face in 5 wait, which gives back much of what
   automatic acceptance is for.
 
 Cost asymmetry, as on 2026-10-14: a wrong automatic match silently puts a face into the wrong person's
@@ -124,8 +129,11 @@ None of the evaluation sets resembles a family library; the numbers above are ab
 and news photographs, many likely in the recogniser's training data (a possibility, not measured).
 
 - **Siblings, twins, parents and children.** Relatives can score as high as the same person, and
-  identical twins are beyond any face model. When both are enrolled the margin makes the face abstain;
-  when only one is enrolled, the other can be matched to them. No measurement here covers relatives.
+  identical twins are beyond any face model. When both are enrolled the margin makes the face abstain
+  only if the other relative is retrieved and scores within 0.10 of the best (at 0.8 against 0.6 it is
+  still matched to the nearer one, which may be the wrong one; with five shortlisted faces of one person
+  the other may not be retrieved at all); when only one is enrolled, the other can be matched to them.
+  A wrong match between relatives stays possible either way. No measurement here covers relatives.
 - **Children growing up.** Recognition across ages is weaker: a child's photographs from different
   years mostly fall *below* the threshold and abstain (safe, more clicks). The dangerous case is a
   younger sibling at the age the enrolled child's photographs were taken.
