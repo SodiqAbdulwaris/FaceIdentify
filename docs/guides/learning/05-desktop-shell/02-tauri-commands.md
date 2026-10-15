@@ -23,7 +23,7 @@ your computer, so it is deliberately short and each one is explained here.
 | `backend_status` | `{state: "starting"}`, `{state: "ready", connection: {base_url, events_url, token, protocol}}` or `{state: "failed", error}` | `BackendGate`, polled every 500 ms while starting |
 | `library_info` | `{library_root}` | `libraryRoot()` in `native/backend.ts` (no screen shows it yet) |
 | `choose_library` | the folder the user picked, saved for the **next** start | **not called by any screen today** (found by `grep` on 2026-10-12) |
-| `choose_images` | file paths the user picked (jpg, jpeg, png, bmp, webp) | library import |
+| `choose_images` | file paths the user picked (jpg, jpeg, png, bmp, webp, avif) | library import |
 | `choose_picture` | one picture path for face search | face search |
 
 - **Only paths cross**, never pixels: the backend runs on the same machine and reads the file itself (`POST /sources/import {path}`).
