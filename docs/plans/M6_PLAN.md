@@ -80,7 +80,8 @@ shutdown at boundaries, release in `finally`, no database transaction or file lo
 inference. Measured, not invented: per-class wait and execution times and queue depth are logged, and
 the fairness parameter is chosen from a benchmark (D5). Needed before long videos, useful for images
 now (a face search during a large import).
-- Tracker: TST-068, TST-069 (first half).
+- Tracker: TST-069 (first half). (TST-068, one heavy movie pipeline at a time, is a job-admission rule, not
+  this lease: step 7 owns it.)
 
 ### Step 3. Video sources: import and probe
 
@@ -128,7 +129,14 @@ now (a face search during a large import).
 - End to end: import a movie, process it, pause, restart the app, resume, finish, and check identity
   memory (Roadmap section 70), with the process killed at each stage as in M3.
 - Reprocessing a video (step 1's rules on video).
-- Tracker: TST-060, TST-062, TST-065, TST-066, TST-067, TST-070.
+- One heavy movie job at a time (processing spec section 8) enforced at job admission, not only by the
+  worker lease: a second movie stays `QUEUED` while the first runs, tested with two queued movies
+  (and with an image job and a face search running alongside, which may).
+- Retry of a failed video run (the video half of TST-064): today `RetryProcessingUseCase` refuses video
+  and starts a fresh run. Decide (D10) whether a video retry resumes from the last valid checkpoint or
+  starts over, and test that neither path duplicates committed observations, occurrences or index
+  operations.
+- Tracker: TST-060, TST-062, TST-064 (video half), TST-065, TST-066, TST-067, TST-068, TST-070.
 
 ### M6 real-world check
 
@@ -170,14 +178,15 @@ process at each stage.
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | Approve the spec changes M6 needs: a generation pointer and supersession link (identity model, ERD, persistence spec), `REPROCESS_SOURCE` and pause/resume routes (API spec), video source metadata | Approve per step, as each step's PR proposes the exact text |
-| D2 | How FFmpeg is obtained: PyAV's own wheels (bundle an LGPL FFmpeg) or a separately installed FFmpeg | PyAV wheels (one dependency, LGPL FFmpeg inside, pinned); record the licence in the licensing record; ffprobe metadata through PyAV, so no separate binary is needed |
-| D3 | Reprocessing: what counts as a trustworthy face correspondence between V1 and V2 for carrying human decisions over | Same source, box IoU >= 0.7 and embedding cosine >= 0.9 between the old and new face, one-to-one; anything else goes to review |
+| D2 | How FFmpeg and ffprobe are obtained (both are locked in `tech-stack.md` section 6 and Roadmap section 68): a pinned FFmpeg build with its ffprobe shipped as a runtime package, plus PyAV for frame access; or PyAV's own wheels only, which would replace ffprobe and need a tech-stack change | Keep the locked stack: a pinned LGPL FFmpeg build (ffmpeg + ffprobe) as a runtime package, PyAV for frames. The licence of the exact builds (PyAV's bundled FFmpeg included) is **unverified** until inspected and recorded in the licensing record |
+| D3 | Reprocessing: what counts as a trustworthy face correspondence between V1 and V2 for carrying human decisions over | Only when V1 and V2 are in the same compatible `RepresentationSpace` (processing invariant 36.9: vectors of different spaces are never compared): same source, box IoU >= 0.7 and embedding cosine >= 0.9, one-to-one. Across spaces (a new model or preprocessing), or with a vector missing, box geometry alone is not proof: every carried-over decision goes to review |
 | D4 | Default video sampling rate | 2 frames per second for detection, configurable; adaptive sampling later, if measured to help |
 | D5 | Worker fairness parameter | Benchmark first; start with at most 3 consecutive interactive grants before one background unit |
 | D6 | Tracker: NumPy-only association, or OpenCV for tracking | NumPy-only first (IoU plus landmarks plus embedding when available); OpenCV only for a measured need |
 | D7 | Track-level automatic acceptance: reuse the per-face 0.45 / 0.10 point, or measure a track-level rule | Reuse the per-face point on each selected observation and require agreement; measure a track rule later on owner-verified video |
 | D8 | Test videos: which videos may be used for the real-world check | The owner's own videos, kept local and Git-ignored like the photographs |
 | D9 | Whether reprocessing (step 1) ships in M6 or as a separate milestone before it | In M6, as step 1 (the Roadmap order and #180's decision both put it before video) |
+| D10 | Retry of a failed video run: resume from its last valid checkpoint, or start a new run | Resume from the last valid checkpoint when the run's frozen snapshot is still runnable (same models and settings); otherwise a new run, with the old run's committed output left as it is |
 
 ## 8. Not in this plan
 

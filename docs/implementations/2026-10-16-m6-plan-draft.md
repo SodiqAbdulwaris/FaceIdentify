@@ -11,7 +11,7 @@
   seven steps (reprocessing images under #180's locked design, worker arbitration under #175's,
   video import and probe, decode and chunk, detect/track/select, recognition and occurrences over
   time, pause/resume/cancel and the end-to-end workflow), dependencies, the definition of done, risks,
-  and nine open decisions with recommendations.
+  and ten open decisions with recommendations.
 - `.agents/CONTEXT.md`, `docs/plans/PROJECT_STATUS.md` (the M6 row links the draft), this entry and
   its README row.
 
@@ -46,4 +46,4 @@ owner can approve M6's scope and order after M5 closes.
 
 ## Open issues / follow-ups
 
-- The owner's decisions D1 to D9 in `M6_PLAN.md` section 7.
+- The owner's decisions D1 to D10 in `M6_PLAN.md` section 7.
