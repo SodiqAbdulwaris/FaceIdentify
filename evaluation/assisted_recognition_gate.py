@@ -440,23 +440,25 @@ def digest_of(path: Path) -> str:
 def pool_candidates(
     pool: list[dict[str, Any]], taken_names: list[str], taken_digests: set[str]
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """The pool people who can be strangers: a name nobody in the main dataset has, and at least
-    two pictures not byte-identical to any of its pictures (the first, in sorted order, selects;
-    the rest are scored)."""
+    """The pool people who can be strangers: a name nobody in the main dataset has, no picture
+    byte-identical to any of its pictures (one shared picture suggests the same person under
+    another name, so the whole person is left out), and at least two pictures (the first, in
+    sorted order, selects; the rest are scored)."""
     names = {same_name(name) for name in taken_names}
     kept: list[dict[str, Any]] = []
-    dropped: dict[str, Any] = {"same_name": [], "shared_pictures": 0, "too_few_pictures": 0}
+    dropped: dict[str, Any] = {"same_name": [], "shared_a_picture": [], "too_few_pictures": 0}
     for person in pool:
         if same_name(person["name"]) in names:
             dropped["same_name"].append(person["name"])
             continue
         files = sorted(person["enrol"] + person["query"])
-        usable = [path for path in files if digest_of(path) not in taken_digests]
-        dropped["shared_pictures"] += len(files) - len(usable)
-        if len(usable) < 2:
+        if any(digest_of(path) in taken_digests for path in files):
+            dropped["shared_a_picture"].append(person["name"])
+            continue
+        if len(files) < 2:
             dropped["too_few_pictures"] += 1
             continue
-        kept.append({"name": person["name"], "select": usable[0], "score": usable[1:]})
+        kept.append({"name": person["name"], "select": files[0], "score": files[1:]})
     return kept, dropped
 
 
@@ -782,15 +784,20 @@ async def main_async(args: argparse.Namespace) -> int:
     candidates: list[dict[str, Any]] = []
     pool_dropped: dict[str, Any] = {}
     pool_manifest_sha256 = None
+    pool_provenance = None
     if args.hard_negatives:
         pool = guard(Path(args.hard_negative_pool))
         pool_manifest = pool / "manifest.json"
         pool_manifest_sha256 = hashlib.sha256(pool_manifest.read_bytes()).hexdigest()
+        pool_provenance = load_provenance(pool / "PROVENANCE.json")
+        # Everyone and every picture the main dataset lists, not only what the manifest in use
+        # keeps: a person or picture left out of a verified export is still the same person.
+        full = json.loads((dataset / "manifest.json").read_text(encoding="utf-8"))
+        main_people = everyone + choose_people(full, dataset, 10**6, 1)
         candidates, pool_dropped = pool_candidates(
             choose_people(json.loads(pool_manifest.read_text(encoding="utf-8")), pool, 10**6, 1),
-            # (everyone the main dataset names, not only the people the manifest in use keeps)
-            list(manifest) + list(json.loads((dataset / "manifest.json").read_text("utf-8"))),
-            {digest_of(path) for p in everyone for path in p["enrol"] + p["query"]},
+            list(manifest) + list(full),
+            {digest_of(path) for p in main_people for path in p["enrol"] + p["query"]},
         )
     people = partition_people(
         everyone,
@@ -900,6 +907,18 @@ async def main_async(args: argparse.Namespace) -> int:
                 else "Identity labels are Commons categories, not verified; a mislabelled "
                 "photograph can move the numbers either way. Not ground truth."
             )
+        ),
+        "hard_negative_caveat": (
+            "Hard negatives come from "
+            + (
+                f"{pool_provenance['dataset']}, whose labels were {pool_provenance['labels_by']}"
+                if pool_provenance
+                else "a pool without provenance"
+            )
+            + "; they are not verified by this project, so the same person under another name "
+            "is possible, and the main dataset's label verification does not extend to them."
+            if args.hard_negatives
+            else None
         ),
         "configuration": {
             "package": PACKAGE_KEY,
