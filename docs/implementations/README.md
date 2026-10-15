@@ -76,6 +76,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-16 | [The operating point and the hard-negative gate re-measured on DirectML](2026-10-16-directml-remeasure.md) | done; identical decisions and metrics; measurement only |
 | 2026-10-16 | [A missing original comes back: on-access recheck, Recheck file and Locate original (issue #179)](2026-10-16-missing-originals-recheck-and-relink.md) | done; backend and source screen |
 | 2026-10-16 | [M5 tracker catch-up: TST-054, TST-058, TST-059 and SEC-006 rows from re-run evidence](2026-10-16-m5-tracker-catch-up.md) | done; tracker only |
+| 2026-10-16 | [Face search by path: links, junctions and mapped drives that lead to a share are refused (issue #174)](2026-10-16-face-search-network-paths.md) | partial; default deny built, approved network roots not |
 | 2026-10-15 | [M5: the owner's close-up photographs (issue 173) and the finished CelebA gate run](2026-10-15-m5-myfaces-closeups-and-celeba-rerun.md) | measured; MyFaces 0 of 29 lost; CelebA 10 of 10 workflow checks, same rankings after a restart; #173 stays open |
 | 2026-10-16 | [M5 close-out: the weights' provenance re-checked (issue #69) and a Windows install guide](2026-10-16-m5-weights-provenance-and-install-guide.md) | done; documentation only |
 | 2026-10-16 | [M6 plan draft: movies and scheduling](2026-10-16-m6-plan-draft.md) | draft; not approved; documentation only |
