@@ -8,6 +8,12 @@ The provider is exactly the one asked for. ONNX Runtime will quietly run on the 
 requested accelerator cannot start; the worker never decides that (Architecture 9: the backend
 decides fallback), so a provider that is not available, or one that did not become the session's
 first, is an error with a code the backend can act on.
+
+An accelerator that is listed but cannot start (DirectML with no DirectX 12 adapter, a GPU driver
+too old for CUDA) makes `InferenceSession` raise. For an accelerator that is a provider failure
+(`RUNTIME_INITIALIZATION_FAILED`), so the backend falls back to the next variant; a model that is
+genuinely broken then fails there too, on the CPU, as `COMPONENT_LOAD_FAILED`, so the fallback
+never hides it. Only the CPU's own load failure is the model's failure.
 """
 
 import hashlib
@@ -17,6 +23,9 @@ import onnxruntime as ort
 
 from backend.ml.contracts.protocol import MLErrorCode
 from backend.ml.worker.loop import WorkerError
+
+CPU = "CPUExecutionProvider"
+DIRECTML = "DmlExecutionProvider"
 
 
 def load_session(path: Path, sha256: bytes, provider: str) -> ort.InferenceSession:
@@ -37,9 +46,16 @@ def load_session(path: Path, sha256: bytes, provider: str) -> ort.InferenceSessi
         )
     options = ort.SessionOptions()
     options.log_severity_level = 3  # errors only: the worker's stderr is for the worker's own words
+    if provider == DIRECTML:  # DirectML supports neither memory patterns nor parallel execution
+        options.enable_mem_pattern = False
+        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
     try:
         session = ort.InferenceSession(data, sess_options=options, providers=[provider])
     except Exception as error:  # ONNX Runtime raises its own exception types for a bad model
+        if provider != CPU:
+            raise WorkerError(
+                MLErrorCode.RUNTIME_INITIALIZATION_FAILED, f"{provider} cannot start ({error})"
+            ) from error
         raise WorkerError(
             MLErrorCode.COMPONENT_LOAD_FAILED, f"the model cannot be loaded ({error})"
         ) from error
