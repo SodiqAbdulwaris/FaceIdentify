@@ -189,9 +189,9 @@ Honest limits of the Commons set, which matter for any claim built on it:
   <https://www.kaggle.com/datasets/jessicali9530/lfw-dataset> (the original is the UMass LFW page; the mirror's own
   licence and terms were not retrievable from the agent's environment); CelebA from the creators'
   page <https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html> (its `README.txt` states non-commercial research use).
-  **Terms not verified**: both are research datasets; they stay local, are never committed or
+  **Terms: see section 10.3**; both are research datasets; they stay local, are never committed or
   redistributed, and their people may also appear in the recogniser's training data (evaluation
-  leakage). Reading each dataset's terms at its source (and the Kaggle mirror's licence field) is issue 183.
+  leakage). Reading each dataset's terms at its source is issue 183 (CelebA done 2026-10-15; LFW's page still to read, section 10.3).
 - **Celebrity portraits from Wikimedia Commons (`evaluation/datasets/celebs-commons`, from 2026-10-14):**
   read with `collect_commons_portraits.py --licence free` (the owner's script, reviewed and fixed). Each
   file's licence (public domain, CC0, CC BY or CC BY-SA 2.0 to 4.0; never NC or ND), licence URL, author,
@@ -204,6 +204,54 @@ Honest limits of the Commons set, which matter for any claim built on it:
   own pictures as supplied by the owner (who took them and under what rights is not verified here),
   and biometric data like the others.
 - The Commons set above is **parked**, not removed: its review log and exports stay for later.
+
+### 10.3 LFW and CelebA terms, read at source (2026-10-15)
+
+This is a **reading of published terms by an engineer's assistant, not legal advice.** Quotes are kept
+to a few words; everything else is a summary.
+
+**CelebA** (<https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html>, "Agreement" section, read 2026-10-15)
+
+- *Who and what for:* available for "non-commercial research purposes only". Access can be terminated
+  by MMLAB at any time.
+- *Redistribution:* users agree not to copy, publish or distribute any portion of the dataset; copies
+  for internal use at a single site within the same organisation are allowed. Selling, trading or
+  exploiting the images or derived data commercially is excluded.
+- *Third-party rights:* the images are stated not to be MMLAB's property; MMLAB is not responsible for
+  their content. The page names no open licence (no Creative Commons or similar).
+- *Citation:* Liu, Luo, Wang, Tang, "Deep Learning Face Attributes in the Wild", ICCV 2015.
+- *Identities:* the identity labels are released on request, for research only.
+
+**LFW** (official page <http://vis-www.cs.umass.edu/lfw/>: **could not be read**)
+
+- The host did not resolve from this machine or from the fetch tool on 2026-10-15 (DNS failure, tried
+  http and https and the README path; the Wayback copy is blocked). **The page's own terms, if any,
+  remain unread.** Reading it, and the Kaggle mirror's licence field, are the two open steps of issue 183.
+- What was read instead: the official technical report by Huang, Ramesh, Berg and Learned-Miller
+  (<https://people.cs.umass.edu/~elm/papers/lfw.pdf>). It states no licence or conditions of use. It
+  says the database is "an aid in studying" unconstrained face recognition, built from pre-existing
+  photographs gathered from news articles on the web (images detected by Viola-Jones, 250x250), and
+  that results should state which of its protocols was used. So the images were not made for the
+  dataset and carry **their original photographers' and publishers' rights**; the creators' consent
+  to anything beyond research use is not documented there.
+- Third-party listings (a catalogue showing "Other"; scikit-learn's BSD marking covers its loader code
+  only) are not terms and were not relied on. The Kaggle mirror's licence field is also still unread.
+
+**What this means for the project**
+
+| Question | CelebA | LFW |
+|---|---|---|
+| Use here (local evaluation of recognition) | within "non-commercial research" | research evaluation; page terms unread |
+| Redistribute, commit, publish, bundle in an installer | **No** | **No** (treat as not allowed until the page is read) |
+| Commercial product or any commercial use of the images or derived data | **No** | Not established; assume **no** |
+| Images carry third-party rights | Yes (stated) | Yes (news photographs) |
+
+Consequences: both stay under the Git-ignored `evaluation/datasets/`, are never committed, uploaded,
+shipped or used to tune a shipped model, and the repository holds none (checked by the ignore rule
+and `git ls-files`, 2026-10-15). A shared or commercial release cannot use them, and a release must
+not depend on numbers measured only on them without the owner accepting that. Their people may also
+appear in the recogniser's training data (evaluation leakage). Recorded here, not decided:
+whether results measured on them may be published (a question for the licence holders or a lawyer).
 
 ## 11. Before any release: checklist
 
