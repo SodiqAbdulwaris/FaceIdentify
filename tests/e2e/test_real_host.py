@@ -217,6 +217,11 @@ async def test_real_photographs_under_the_approved_point_match_the_same_person_o
         assert await unresolved(api, second["id"]) == []  # matched automatically
         (still,) = (await api.client.get("/api/v1/identities")).json()["items"]
         assert still["id"] == identity["id"]  # to the same person, not a new one
+        (placed,) = (await api.client.get(f"/api/v1/sources/{second['id']}/occurrences")).json()[
+            "items"
+        ]
+        assert placed["identity_id"] == identity["id"]  # a face was found and placed on them
+        assert still["occurrence_count"] == 2
 
         other = await imported(api, path=str(IMAGES / "other1.jpg"))
         await process_and_wait(api, other["id"])

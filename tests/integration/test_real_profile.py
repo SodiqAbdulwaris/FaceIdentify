@@ -735,8 +735,12 @@ async def test_under_the_approved_operating_point_the_same_face_is_matched_autom
 
         second = await imported(api, path=picture(world.folder, "b.png"))
         await process_and_wait(api, second["id"])
-        identities = (await api.client.get("/api/v1/identities")).json()["items"]
-        assert len(identities) == 1  # matched, not a second identity
+        (identity,) = (await api.client.get("/api/v1/identities")).json()["items"]
+        (placed,) = (await api.client.get(f"/api/v1/sources/{second['id']}/occurrences")).json()[
+            "items"
+        ]
+        assert placed["identity_id"] == identity["id"]  # matched, not a second identity
+        assert identity["occurrence_count"] == 2
         waiting = await api.client.get(f"/api/v1/sources/{second['id']}/unresolved-faces")
         assert waiting.json()["items"] == []  # nothing left for the owner to resolve
 
