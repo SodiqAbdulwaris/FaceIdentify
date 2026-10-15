@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort
 import pytest
+from onnxruntime.capi import onnxruntime_pybind11_state as ort_errors
 
 from backend.infrastructure.resources.shared_memory import AttachedSegment, SegmentLedger
 from backend.ml.contracts.messages import (
@@ -683,6 +684,26 @@ def test_an_accelerator_that_cannot_start_is_a_provider_failure_the_cpu_a_model_
     with pytest.raises(WorkerError, match="887A0002") as refused:
         load_session(path, hashlib.sha256(data).digest(), provider)
     assert refused.value.code is code
+
+
+@pytest.mark.parametrize("provider", ["DmlExecutionProvider", "CUDAExecutionProvider", CPU])
+def test_a_broken_model_is_a_load_failure_on_every_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str
+) -> None:
+    """A broken model is never mistaken for an accelerator that cannot start: ONNX Runtime's own
+    parse error, raised whatever provider was asked for, is not a reason to fall back."""
+    junk = b"this is not an ONNX model"
+    path = tmp_path / "j.onnx"
+    path.write_bytes(junk)
+
+    def parse(*args: Any, **kwargs: Any) -> Any:  # what ONNX Runtime raises for these bytes
+        raise ort_errors.InvalidProtobuf("INVALID_PROTOBUF : protobuf parsing failed")
+
+    monkeypatch.setattr(ort, "get_available_providers", lambda: [provider])
+    monkeypatch.setattr(ort, "InferenceSession", parse)
+    with pytest.raises(WorkerError, match="cannot be loaded") as refused:
+        load_session(path, hashlib.sha256(junk).digest(), provider)
+    assert refused.value.code is MLErrorCode.COMPONENT_LOAD_FAILED
 
 
 @pytest.mark.parametrize(("provider", "patterns"), [("DmlExecutionProvider", False), (CPU, True)])
