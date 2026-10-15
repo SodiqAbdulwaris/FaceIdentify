@@ -59,7 +59,10 @@ common on the web.
 - Both damaged-AVIF tests were run without the `RuntimeError` mapping and failed; they pass with it.
 - `FaceSearch.test.tsx`: a dropped `image/avif` is sent; the refusal names AVIF.
 - `cargo test config` (desktop): 9 passed.
-- Full gate: see the PR description for the final results.
+- Full gate on the code commits, 2026-10-15: `ruff format --check`, `ruff check`, `mypy` and
+  `mypy --platform linux` clean; `pytest -q` 3034 passed, 2 deselected; `npm test` 193 passed,
+  `npm run typecheck`, `npm run lint -- --deny-warnings` and `npm run build` clean;
+  `npx tauri build --debug --no-bundle` built.
 
 ## Open issues / follow-ups
 
