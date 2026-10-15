@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import AvifImagePlugin, Image, ImageOps, UnidentifiedImageError
 
 FORMATS = ("JPEG", "PNG", "BMP", "WEBP", "AVIF")
 MIME_TYPES = {
@@ -46,6 +46,11 @@ _SIXTEEN_BIT_GREY = "I;16"  # (what Pillow calls a 16-bit grey PNG, the only suc
 _SIGNATURES = re.compile(rb"\x89PNG\r\n\x1a\n|\xff\xd8|BM|RIFF....WEBP", re.DOTALL)
 _AVIF_BRANDS = (b"avif", b"avis")
 _FTYP_READ_LIMIT = 4096  # (a real `ftyp` box lists a handful of brands)
+
+# libavif would otherwise start one decoding thread per CPU for every image; every other decoder
+# here uses one thread, and the callers bound how many images are decoded at once. (Pillow reads
+# this setting each time it opens an AVIF.)
+AvifImagePlugin.DEFAULT_MAX_THREADS = 1
 
 
 # What Pillow raises for a damaged image. The AVIF reader (libavif) reports a failed decode as a
