@@ -284,7 +284,7 @@ describe('importing', () => {
             return failure(
               415,
               'MEDIA_FORMAT_UNSUPPORTED',
-              'Only JPEG, PNG, BMP and WebP images are supported.',
+              'Only JPEG, PNG, BMP, WebP and AVIF images are supported.',
             )
           }
           imported = true
@@ -296,7 +296,7 @@ describe('importing', () => {
     await user.click(await screen.findByRole('button', { name: 'Import images' }))
 
     expect(await screen.findByRole('status', { name: 'Library notice' })).toHaveTextContent(
-      'Imported 1 image. 1 could not be imported (b.gif: Only JPEG, PNG, BMP and WebP images are supported.).',
+      'Imported 1 image. 1 could not be imported (b.gif: Only JPEG, PNG, BMP, WebP and AVIF images are supported.).',
     )
     const imports = calls.filter((c) => c.path === `${SOURCES}/import`)
     expect(imports.map((c) => c.body)).toEqual([
