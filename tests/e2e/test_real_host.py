@@ -222,6 +222,8 @@ async def test_real_photographs_under_the_approved_point_match_the_same_person_o
         ]
         assert placed["identity_id"] == identity["id"]  # a face was found and placed on them
         assert still["occurrence_count"] == 2
+        assert placed["placement"] == "AUTOMATIC_MATCH"  # shown as automatic, with its score
+        assert placed["match_similarity"] >= APPROVED["match_threshold"]
 
         other = await imported(api, path=str(IMAGES / "other1.jpg"))
         await process_and_wait(api, other["id"])
