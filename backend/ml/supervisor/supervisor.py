@@ -36,7 +36,6 @@ from backend.ml.contracts.protocol import (
     MLErrorCode,
     WorkerState,
 )
-from backend.ml.supervisor.lease import WorkerLease
 from backend.ml.supervisor.process import WorkerHandle
 
 
@@ -73,11 +72,8 @@ class MLSupervisor:
         policy: SupervisorPolicy,
         *,
         clock: Callable[[], float] = time.monotonic,
-        lease: WorkerLease | None = None,
     ) -> None:
         self._spawn = spawn
-        # Which request runs next: interactive first, without starving background work (#175).
-        self._lease = lease or WorkerLease()
         self._policy = policy
         self._clock = clock
         self._lock = threading.RLock()  # one request at a time; start/stop/ping wait their turn
@@ -126,9 +122,8 @@ class MLSupervisor:
 
     def execute(self, request: MLRequest) -> MLResponse:
         """Run one request. The response may be an ERROR response (returned, not raised). A
-        failure of the worker itself raises `WorkerFailedError`. Waits for its turn on the worker
-        (`WorkerLease`), which is held only while the request runs."""
-        with self._lease.held(), self._lock:
+        failure of the worker itself raises `WorkerFailedError`."""
+        with self._lock:
             worker = self._ensure_ready()
             self._state = WorkerState.BUSY
             try:
