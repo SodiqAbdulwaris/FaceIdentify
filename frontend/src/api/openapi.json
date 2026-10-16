@@ -801,6 +801,28 @@
             "title": "Kind",
             "type": "string"
           },
+          "match_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Margin"
+          },
+          "match_similarity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Similarity"
+          },
           "person": {
             "anyOf": [
               {
@@ -810,6 +832,22 @@
                 "type": "null"
               }
             ]
+          },
+          "placement": {
+            "anyOf": [
+              {
+                "enum": [
+                  "AUTOMATIC_MATCH",
+                  "AUTOMATIC_NEW",
+                  "USER"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement"
           },
           "representative_observation": {
             "anyOf": [
@@ -843,6 +881,9 @@
           "representative_observation",
           "person",
           "source_recycled",
+          "placement",
+          "match_similarity",
+          "match_margin",
           "created_at"
         ],
         "title": "OccurrenceSummary",

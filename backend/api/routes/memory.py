@@ -10,6 +10,7 @@ is always `null` (the field is in the contract so it does not change when they d
 import uuid
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -27,8 +28,21 @@ from backend.api.pagination import (
     paginate,
 )
 from backend.api.routes.sources import MediaReference, require_visible_source
-from backend.app.identities.models import Identity, IdentityState
-from backend.app.memory.models import Observation, ObservationState, Occurrence, OccurrenceState
+from backend.app.identities.models import (
+    Evidence,
+    EvidenceKind,
+    EvidenceRepresentation,
+    EvidenceRepresentationRole,
+    Identity,
+    IdentityState,
+)
+from backend.app.memory.models import (
+    Observation,
+    ObservationState,
+    Occurrence,
+    OccurrenceState,
+    Representation,
+)
 from backend.app.people.models import AssociationState, IdentityPersonAssociation, Person
 from backend.app.sources.models import Source, SourceState
 
@@ -55,6 +69,10 @@ class PersonReference(BaseModel):
     revision: int
 
 
+Placement = Literal["AUTOMATIC_MATCH", "AUTOMATIC_NEW", "USER"]
+_NOT_PLACED: tuple[Placement | None, float | None, float | None] = (None, None, None)
+
+
 class OccurrenceSummary(BaseModel):
     id: str
     source_id: str
@@ -65,6 +83,13 @@ class OccurrenceSummary(BaseModel):
     person: PersonReference | None
     # The Source is in the Recycle Bin: its faces stay in memory, counts and search, marked.
     source_recycled: bool
+    # How the face got here: "AUTOMATIC_MATCH" (recognition matched it to this identity),
+    # "AUTOMATIC_NEW" (the first face, which made this identity), "USER" (a person confirmed,
+    # moved or placed it; this wins over any automatic decision). None: no recorded decision.
+    placement: Placement | None
+    # The score behind an AUTOMATIC_MATCH, from its Evidence (no margin with one candidate).
+    match_similarity: float | None
+    match_margin: float | None
     created_at: datetime
 
 
@@ -114,9 +139,65 @@ def _brief(
 # --- occurrences ----------------------------------------------------------------------------
 
 
+_DECIDING = (
+    EvidenceKind.IDENTITY_CREATED,
+    EvidenceKind.IDENTITY_MATCHED,
+    EvidenceKind.USER_CORRECTION,
+)
+
+
+def _placements(
+    session: Session, occurrences: Sequence[Occurrence]
+) -> dict[uuid.UUID, tuple[Placement | None, float | None, float | None]]:
+    """How each occurrence was placed, read from the Evidence that cites its representative face.
+
+    A user correction outranks an automatic decision whatever their timestamps: a person's word is
+    the later fact by definition, and equal clock readings must not decide it."""
+    observation_of = {
+        o.id: o.representative_observation_id
+        for o in occurrences
+        if o.representative_observation_id is not None
+    }
+    rows = session.execute(
+        select(Representation.observation_id, Evidence)
+        .join(EvidenceRepresentation, EvidenceRepresentation.representation_id == Representation.id)
+        .join(Evidence, Evidence.id == EvidenceRepresentation.evidence_id)
+        .where(
+            Representation.observation_id.in_(set(observation_of.values())),
+            EvidenceRepresentation.role == EvidenceRepresentationRole.SUBJECT,
+            Evidence.kind.in_(_DECIDING),
+        )
+        .order_by(Evidence.created_at, Evidence.id)
+    ).tuples()
+    by_observation: dict[uuid.UUID, list[Evidence]] = {}
+    for observation_id, evidence in rows:
+        by_observation.setdefault(observation_id, []).append(evidence)
+    placements: dict[uuid.UUID, tuple[Placement | None, float | None, float | None]] = {}
+    for occurrence_id, observation_id in observation_of.items():
+        decided = by_observation.get(observation_id, [])
+        if any(e.kind == EvidenceKind.USER_CORRECTION for e in decided):
+            placements[occurrence_id] = ("USER", None, None)
+            continue
+        for evidence in reversed(decided):
+            if evidence.kind == EvidenceKind.IDENTITY_MATCHED:
+                payload = evidence.payload_json
+                chosen = [
+                    c for c in payload["candidates"] if c["identity_id"] == payload["identity_id"]
+                ]
+                placements[occurrence_id] = (
+                    "AUTOMATIC_MATCH", chosen[0]["similarity"], payload["margin"],
+                )  # fmt: skip
+                break
+            if evidence.kind == EvidenceKind.IDENTITY_CREATED:
+                placements[occurrence_id] = ("AUTOMATIC_NEW", None, None)
+                break
+    return placements
+
+
 def occurrence_summaries(
     session: Session, rows: Sequence[tuple[Occurrence, Source]]
 ) -> list[OccurrenceSummary]:
+    placements = _placements(session, [occ for occ, _ in rows])
     observations = _representatives(session, [occ.representative_observation_id for occ, _ in rows])
     people = person_references(session, [occ.identity_id for occ, _ in rows])
     return [
@@ -129,6 +210,9 @@ def occurrence_summaries(
             representative_observation=_brief(observations, occ.representative_observation_id),
             person=people.get(occ.identity_id),
             source_recycled=source.state == SourceState.RECYCLED,
+            placement=placements.get(occ.id, _NOT_PLACED)[0],
+            match_similarity=placements.get(occ.id, _NOT_PLACED)[1],
+            match_margin=placements.get(occ.id, _NOT_PLACED)[2],
             created_at=occ.created_at,
         )
         for occ, source in rows

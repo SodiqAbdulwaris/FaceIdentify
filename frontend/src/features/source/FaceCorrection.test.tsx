@@ -26,6 +26,45 @@ async function check(user: ReturnType<typeof userEvent.setup>) {
   return screen.getByRole('group', { name: 'Check Person I1' })
 }
 
+describe('how a face was placed', () => {
+  it('says nothing about a face placed as the first of a person', async () => {
+    open([])
+    expect(await screen.findByRole('button', { name: 'Check this face' })).toBeInTheDocument()
+    expect(screen.queryByText(/Matched automatically/)).not.toBeInTheDocument()
+  })
+
+  it('shows the similarity score and the lead of an automatic match', async () => {
+    renderApp('/library/source/s1', [
+      { path: SOURCE, respond: detail({ processing_status: 'COMPLETED' }) },
+      { path: `${SOURCE}/media`, respond: 'bytes' },
+      {
+        path: `${SOURCE}/occurrences`,
+        respond: page([
+          occurrence({ placement: 'AUTOMATIC_MATCH', match_similarity: 0.9712, match_margin: 0.31 }),
+        ]),
+      },
+      { path: `${SOURCE}/processing-runs`, respond: page([]) },
+      { path: '/api/v1/identities', respond: page([identity({ id: 'i1' })]) },
+    ])
+
+    expect(
+      await screen.findByText(/Matched automatically \(similarity score 0\.97, lead 0\.31\)/),
+    ).toBeInTheDocument()
+  })
+
+  it('says a face a person has checked was checked by them', async () => {
+    renderApp('/library/source/s1', [
+      { path: SOURCE, respond: detail({ processing_status: 'COMPLETED' }) },
+      { path: `${SOURCE}/media`, respond: 'bytes' },
+      { path: `${SOURCE}/occurrences`, respond: page([occurrence({ placement: 'USER' })]) },
+      { path: `${SOURCE}/processing-runs`, respond: page([]) },
+      { path: '/api/v1/identities', respond: page([identity({ id: 'i1' })]) },
+    ])
+
+    expect(await screen.findByText('Checked by you.')).toBeInTheDocument()
+  })
+})
+
 describe('checking a face', () => {
   it('confirms that it is the person it was recognised as', async () => {
     const user = userEvent.setup()
