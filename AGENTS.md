@@ -12,6 +12,9 @@ authoritative, USearch is a rebuildable index, ONNX Runtime runs inference.
    mandatory.
 3. Read the specs in [`docs/specs/`](docs/specs/) that cover the area you are touching. They are
    authoritative. If code, tests or a request conflicts with a spec, stop and ask.
+4. Switching between agents (Claude Code and Codex share this repository): read
+   [`docs/guides/AGENT_HANDOFF.md`](docs/guides/AGENT_HANDOFF.md) for where the work stands, the
+   traps that cost time and how reviews work when Codex wrote the change.
 
 ## Non-negotiable rules
 
