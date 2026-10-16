@@ -24,7 +24,8 @@
     `LPT1-9`, the superscript variants, `CONIN$`, `CONOUT$`, with an extension, trailing dots or
     spaces) or an **alternate data stream** (any `:`);
   - a drive letter whose DOS device (`QueryDosDeviceW`: reads the object manager, opens nothing) is
-    not `\Device\HarddiskVolume*` or `\Device\CdRom*`. A `\??\X:\dir` alias (`subst`) is walked
+    exactly a bare `\Device\HarddiskVolumeN` or `\Device\CdRomN` (a folder suffix would hide
+    components from the walk). A `\??\X:\dir` alias (`subst`) is walked
     again from its target so the components it hides are checked; every other device
     (`\Device\Mup`, the redirectors, an unresolved letter) is refused. This replaces the
     `GetDriveTypeW` check, which can open the file system;
