@@ -1,8 +1,8 @@
 # M5: enabling automatic acceptance at an owner-approved operating point (TST-057B)
 
 - **Date:** 2026-10-15
-- **Milestone / tracker IDs:** M5 track R; TST-057B (`IN_PROGRESS`: built and verified, the live policy not yet installed)
-- **Status:** partial: code, tests and analysis done; **the owner confirmed option A** (0.45 / 0.10) on 2026-10-15; verified with the real weights in a private state; the owner's installed policy file is not yet replaced (command below)
+- **Milestone / tracker IDs:** M5 track R; TST-057B (`IN_PROGRESS`: built and verified; the live policy installed by the owner on 2026-10-15, the real-host check on it still to record)
+- **Status:** partial: code, tests and analysis done; **the owner confirmed option A** (0.45 / 0.10) on 2026-10-15; verified with the real weights in a private state; the owner installed the live policy file on 2026-10-15 at 23:58 (command below; the restore copy beside it was checked to load)
 - **Commits:** PR to be recorded when merged (`feat(api): admit an owner-approved matching policy`, docs commits)
 
 ## The owner's decision

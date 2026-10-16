@@ -84,8 +84,9 @@ error, and the review was redone with a subagent.
 
 **When Codex is the author.** The reviewer must still be a context that did not write the change:
 a separate `codex exec -s read-only` run in a disposable worktree, given only the review prompt,
-counts (it has no memory of the authoring conversation); Claude Code (a CLI run or a subagent) is a
-reviewer when it is available.
+counts (it has no memory of the authoring conversation). A Claude Code subagent (the approved
+*Subagent* row above) is a reviewer when Claude Code is available; a Claude Code CLI run may be used only
+after its read-only invocation has been tested and added to the table, like any other reviewer.
 
 > **Decision 2026-10-16:** (delegated by the owner: "I'll leave all other decisions to your recommendations") Codex may author changes when Claude Code is out of usage; a fresh read-only Codex run counts as the independent review of a Codex-authored PR, as above. Source: [`docs/guides/AGENT_HANDOFF.md`](../../docs/guides/AGENT_HANDOFF.md).
 
