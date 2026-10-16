@@ -32,6 +32,7 @@ happened, and what waits for the owner.
 | [#211](https://github.com/SodiqAbdulwaris/FaceIdentify/pull/211) | DirectML re-measure: identical results to the CPU, about 3.5 times faster |
 | [#210](https://github.com/SodiqAbdulwaris/FaceIdentify/pull/210) | A missing original comes back: rechecked on open, process and retry; Recheck file and Locate original (closes #179) |
 | [#214](https://github.com/SodiqAbdulwaris/FaceIdentify/pull/214) | M5 tracker caught up from re-run suites (TST-058, SEC-006, TST-059 4a/4b passing; TST-054 needs an end-to-end correction test) |
+| [#217](https://github.com/SodiqAbdulwaris/FaceIdentify/pull/217) | Test fix: a `database is locked` flake from #210's retry test; `finished()` now waits for the index pass |
 | this PR | This report, and a correction to PR 207's note on the policy backup |
 
 ## Open, and why
