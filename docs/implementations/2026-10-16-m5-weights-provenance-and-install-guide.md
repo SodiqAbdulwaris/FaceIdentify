@@ -60,9 +60,9 @@ asked for both.
 
 - The installed package in `local-models/state` still predates the DirectML variants (it runs on the
   CPU); moving the owner's library to the new manifest needs a decision.
-- Observed 2026-10-16 (not changed: this work may not write to `local-models/`): in
-  `local-models/state/policies/`, both `insightface-buffalo-l.json` and the backup
-  `insightface-buffalo-l.abstain-only-v1.json` hold the **matching** policy
-  (`buffalo-l-verified-match-v1`), so copying the backup over the live file would not return to
-  abstain-only. The abstain-only content is in the guide, section 4.
+- ~~Observed: both `insightface-buffalo-l.json` and the backup
+  `insightface-buffalo-l.abstain-only-v1.json` hold the matching policy.~~ **Corrected
+  2026-10-16:** that was read at 23:58 on 2026-10-15, while the owner was installing the policy; the
+  backup was rewritten at 23:59 and holds `buffalo-l-abstain-only-v1` (read again at 08:50), so the
+  way back to abstain-only works. The abstain-only content is also in the guide, section 4.
 - DirectML on AMD GPUs and on machines without DirectX 12 is unverified (2026-10-15 entry).
