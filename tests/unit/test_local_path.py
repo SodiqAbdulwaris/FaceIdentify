@@ -6,7 +6,6 @@ a refusal is shown to come before every probe or open).
 """
 
 import os
-import types
 from pathlib import Path
 from typing import Any
 
@@ -37,20 +36,21 @@ class Followed(Exception):
 
 @pytest.fixture
 def probes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Fail on every call that follows a path (stat, open, listing); record each `lstat`, which
-    reads only the entry itself, so a test can say which entries were looked at."""
+    """Fail on every call that follows a path (stat, lstat, open, listing); record each entry
+    looked at by name (`_entry`, which reads only the entry itself), so a test can say which."""
     looked: list[str] = []
-    real_lstat = os.lstat
+    real_entry = local_path._entry
 
-    def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+    def entry(path: Path) -> tuple[int, int] | None:
         looked.append(os.fspath(path))
-        return real_lstat(path, *args, **kwargs)
+        return real_entry(path)
 
     def forbidden(*args: object, **kwargs: object) -> None:
         raise Followed(args)
 
-    monkeypatch.setattr(os, "lstat", lstat)
+    monkeypatch.setattr(local_path, "_entry", entry)
     for owner, name in (
+        (os, "lstat"),
         (os, "stat"),
         (os, "open"),
         (os, "scandir"),
@@ -221,14 +221,14 @@ def test_reparse_points_are_classified_from_attributes_and_tag(
 
 
 def fake_entry(monkeypatch: pytest.MonkeyPatch, entry: Path, attributes: int, tag: int) -> None:
-    """Make `lstat(entry)` answer as a reparse point of the given kind (none can be made here)."""
-    real = os.lstat
-    fake = types.SimpleNamespace(st_file_attributes=attributes, st_reparse_tag=tag)
+    """Make the lookup of `entry` answer as a reparse point of the given kind (none can be made
+    here)."""
+    real = local_path._entry
 
-    def lstat(path: Any, *args: Any, **kwargs: Any) -> Any:
-        return fake if Path(path) == entry else real(path, *args, **kwargs)
+    def lookup(path: Path) -> tuple[int, int] | None:
+        return (attributes, tag) if path == entry else real(path)
 
-    monkeypatch.setattr(os, "lstat", lstat)
+    monkeypatch.setattr(local_path, "_entry", lookup)
 
 
 def test_an_app_execution_alias_is_refused_even_deep_in_the_path(
@@ -457,3 +457,54 @@ def test_a_path_on_no_local_volume_has_no_nt_name(monkeypatch: pytest.MonkeyPatc
     drives(monkeypatch, {"Z:": "\\Device\\Mup\\x"})
 
     assert local_path._expected_nt_path(Path("Z:\\a.png")) is None
+
+
+@pytest.mark.parametrize("part", ["*", "a?.png", "<a>", 'a"b', "a|b"])
+def test_wildcards_and_invalid_characters_are_refused_before_any_probe(
+    part: str, probes: list[str]
+) -> None:
+    assert is_device_component(part)
+    assert local_target(r"C:\dir" + "\\" + part + r"\a.png") is None
+    assert probes == []
+
+
+def test_an_entry_that_cannot_be_examined_is_not_walked_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = local_path._entry
+    asked: list[Path] = []
+
+    def lookup(path: Path) -> tuple[int, int] | None:
+        asked.append(path)
+        if path == tmp_path / "locked":
+            raise PermissionError(5, "Access is denied")
+        return real(path)
+
+    monkeypatch.setattr(local_path, "_entry", lookup)
+
+    assert local_target(tmp_path / "locked" / "deeper" / "a.png") is None
+    assert asked[-1] == tmp_path / "locked"  # nothing below it was looked at
+
+
+def test_an_entry_is_read_without_following_it(tmp_path: Path) -> None:
+    (tmp_path / "plain.png").write_bytes(b"x")
+    (tmp_path / "gone").symlink_to(tmp_path / "missing", target_is_directory=True)
+    link_directory(tmp_path / "junction", tmp_path)
+
+    plain = local_path._entry(tmp_path / "plain.png")
+    symlink = local_path._entry(tmp_path / "gone")  # dangling: following it would fail
+    junction = local_path._entry(tmp_path / "junction")
+
+    assert plain is not None
+    assert classify_reparse(*plain) is Reparse.PLAIN
+    assert symlink is not None
+    assert classify_reparse(*symlink) is Reparse.FOLLOW
+    assert junction is not None
+    assert classify_reparse(*junction) is Reparse.FOLLOW
+    assert local_path._entry(tmp_path / "nothing.png") is None
+    assert local_path._entry(tmp_path / "plain.png" / "below") is None  # a file is no folder
+
+
+def test_an_entry_the_lookup_rejects_raises(tmp_path: Path) -> None:
+    with pytest.raises(OSError, match="WinError"):
+        local_path._entry(tmp_path / ("a" * 300))  # a name no folder can hold
