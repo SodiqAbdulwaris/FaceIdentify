@@ -4,12 +4,13 @@ Owner decision 2026-10-14 (locked): one persistent worker, shared by interactive
 background processing through cooperative priority scheduling with starvation protection. An
 inference already running is never interrupted; the next one is chosen at that safe boundary:
 
-* an interactive request goes before a background one, so a face search waits for at most the
-  inference in progress (one detect or one represent), not for a whole source;
+* an interactive request goes before a waiting background one, so a face search waits for the
+  inference in progress and the interactive requests ahead of it (one detect or one represent
+  each), not for a whole source;
 * within a class, requests are served first come, first served;
 * after `burst` interactive grants in a row, a waiting background request goes first, so a stream
-  of face searches cannot stop processing (and a backlog of processing never blocks a search
-  beyond one inference).
+  of face searches cannot stop processing (and a backlog of processing delays a search by at most
+  the inference in progress, and one background inference after a burst).
 
 A request is interactive when it is made inside `interactive()` (face search wraps its perception
 in it); everything else is background. The lease is held only for the inference itself: nothing
