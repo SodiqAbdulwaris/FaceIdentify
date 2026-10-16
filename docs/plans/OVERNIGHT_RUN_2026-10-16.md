@@ -57,22 +57,22 @@ happened, and what waits for the owner.
   abstain-only restore copy rewritten at 23:59. (PR 207's entry, written at 23:58, says the backup
   held the matching policy; that was briefly true and is corrected by this report's PR.)
 
-## Decisions taken overnight (delegated; please confirm or overturn)
+## Decisions taken overnight (delegated; all four confirmed by the owner on 2026-10-16)
 
-> **Decision 2026-10-16:** (delegated by the owner overnight, pending confirmation) #174 is built as
+> **Decision 2026-10-16:** (delegated by the owner overnight; **confirmed by the owner on 2026-10-16**: "Okay, I confirm on all 4") #174 is built as
 > the locked policy's default (deny every network target, since no root can be approved yet) rather
 > than with the approved-roots opt-in, which needs its own configuration and screen.
 
-> **Decision 2026-10-16:** (delegated by the owner overnight, pending confirmation) #179: "opening" a
+> **Decision 2026-10-16:** (delegated by the owner overnight; **confirmed by the owner on 2026-10-16**: "Okay, I confirm on all 4") #179: "opening" a
 > source means its detail read, and "using" it means processing or retrying; the library listing
 > never verifies (no library-wide scan). An original without a recorded fingerprint is never brought
 > back by recheck.
 
-> **Decision 2026-10-16:** (delegated by the owner overnight, pending confirmation) #175's fairness
+> **Decision 2026-10-16:** (delegated by the owner overnight; **confirmed by the owner on 2026-10-16**: "Okay, I confirm on all 4") #175's fairness
 > parameter is a constant 3 (three searches in a row at most before waiting background work) until a
 > benchmark picks one.
 
-> **Decision 2026-10-16:** (delegated by the owner overnight, pending confirmation) tracker rows
+> **Decision 2026-10-16:** (delegated by the owner overnight; **confirmed by the owner on 2026-10-16**: "Okay, I confirm on all 4") tracker rows
 > TST-058, SEC-006 and TST-059 4a/4b marked `PASSING` from re-run suites; TST-054 left `IN_PROGRESS`
 > because its criterion is an end-to-end test (PR 214).
 
