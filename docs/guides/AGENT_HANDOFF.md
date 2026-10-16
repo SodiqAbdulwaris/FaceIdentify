@@ -47,8 +47,9 @@ Never trust a summary over the repository. In this order:
 - **Every PR gets an independent read-only review** (`.agents/rules/branches.md`). The author is
   never its only reviewer. When **Codex wrote the change**, the reviewer must be a fresh context that
   did not write it: a separate `codex exec -s read-only` run in a disposable worktree with only the
-  review prompt counts (it starts with no memory of the authoring conversation), and Claude Code is a
-  reviewer when it is available. Post the review as a PR comment and answer every finding.
+  review prompt counts (it starts with no memory of the authoring conversation); a Claude Code
+  subagent is a reviewer when Claude Code is available (a Claude Code CLI run only once its read-only
+  invocation is tested and added to the table in `.agents/rules/branches.md`). Post the review as a PR comment and answer every finding.
 - **CI must be green on the exact head** before a merge:
   `gh pr view <n> --json headRefOid` then
   `gh api repos/SodiqAbdulwaris/FaceIdentify/commits/<sha>/check-runs`. The Desktop shell (TST-047)
@@ -89,7 +90,7 @@ Never trust a summary over the repository. In this order:
 
 Full backend gate (about 6 to 13 minutes):
 `uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run mypy --platform linux && uv run pytest -q`.
-Frontend: `npm test && npm run typecheck && npm run lint && npm run build`. Desktop:
+Frontend: `npm run typecheck && npm run lint -- --deny-warnings && npm test && npm run build` (warnings fail the lint, as `.agents/rules/testing.md` requires). Desktop:
 `npx tauri build --debug --no-bundle`. Two test runs at once on one machine can collide over a
 shared-memory segment name (`FileExistsError: [WinError 183]`); re-run the failed tests alone.
 
