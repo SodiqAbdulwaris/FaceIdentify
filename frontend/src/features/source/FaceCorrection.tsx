@@ -9,6 +9,25 @@ import { errorMessage } from '../library/messages'
 import type { Face } from './faces'
 import { usePeopleChoices } from './usePeopleChoices'
 
+/** How the face got to this person, said plainly: an automatic match is not a confirmed one. */
+function Placement({ face }: { face: Face }) {
+  const { placement, match_similarity: similarity, match_margin: margin } = face.occurrence
+  if (placement === 'AUTOMATIC_MATCH') {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Matched automatically
+        {similarity === null
+          ? ''
+          : ` (similarity score ${similarity.toFixed(2)}${margin === null ? '' : `, lead ${margin.toFixed(2)}`})`}
+        . Check it, and move it if it is wrong.
+      </p>
+    )
+  }
+  return placement === 'USER' ? (
+    <p className="text-sm text-muted-foreground">Checked by you.</p>
+  ) : null
+}
+
 /**
  * Check one face: say it is right, or say it is someone else (a new person, or a person already
  * in the library). The backend keeps every correction as history and refuses one made from an out
@@ -45,16 +64,19 @@ export function FaceCorrection({ face }: { face: Face }) {
 
   if (!open) {
     return (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          change.reset()
-          setOpen(true)
-        }}
-      >
-        Check this face
-      </Button>
+      <div className="flex flex-col items-start gap-1">
+        <Placement face={face} />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            change.reset()
+            setOpen(true)
+          }}
+        >
+          Check this face
+        </Button>
+      </div>
     )
   }
 
@@ -62,7 +84,8 @@ export function FaceCorrection({ face }: { face: Face }) {
   return (
     <div role="group" aria-label={`Check ${label}`} className="flex flex-col gap-2 rounded-md border p-3">
       <p className="text-sm">
-        This face was recognised as <strong>{label}</strong>.
+        This face was {occurrence.placement === 'AUTOMATIC_MATCH' ? 'matched automatically to' : 'recognised as'}{' '}
+        <strong>{label}</strong>.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" disabled={change.isPending} onClick={() => change.mutate('confirm')}>

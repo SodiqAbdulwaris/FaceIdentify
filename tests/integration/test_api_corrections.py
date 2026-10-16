@@ -64,7 +64,7 @@ async def test_a_face_can_be_read_and_confirmed(api: Api, new_id: SeededUUIDs) -
     )
 
     assert confirmed.status_code == 200
-    assert confirmed.json() == seen
+    assert confirmed.json() == {**seen, "placement": "USER"}  # a person has now decided
     assert kinds(api) == ["CONFIRM"]
 
 
