@@ -71,7 +71,6 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-15 | [M5: enabling automatic acceptance at an owner-approved operating point](2026-10-15-enable-automatic-acceptance.md) | partial; option A (0.45 / 0.10) confirmed by the owner, verified with real weights; the owner installs the live policy |
 | 2026-10-15 | [M5: hard-negative strangers chosen inside the gate (issue 177)](2026-10-15-m5-gate-hard-negatives.md) | done; 15 look-alikes from all of LFW: 0 accepted by the real policy, best 0.320; acceptance stays off |
 | 2026-10-16 | [Test fix: `break_run` no longer races the index pass for the database lock](2026-10-16-break-run-index-race.md) | done; test-only |
-| 2026-10-16 | [Overnight run report](../plans/OVERNIGHT_RUN_2026-10-16.md) | report; documentation only |
 | 2026-10-16 | [The overnight run report of 2026-10-16](2026-10-16-overnight-run-report.md) ([report](../plans/OVERNIGHT_RUN_2026-10-16.md)) | done; documentation only |
 | 2026-10-16 | [M5 close-out: coverage measured and the definition of done audited](2026-10-16-m5-coverage-and-dod-audit.md) | done; documentation only; M5 not done yet |
 | 2026-10-16 | [The operating point and the hard-negative gate re-measured on DirectML](2026-10-16-directml-remeasure.md) | done; identical decisions and metrics; measurement only |
