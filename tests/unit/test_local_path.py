@@ -258,6 +258,9 @@ def test_a_cloud_placeholder_is_plain_only_when_it_is_on_disk(
         ("\\Device\\HarddiskVolume3", (DosDevice.LOCAL, "\\Device\\HarddiskVolume3")),
         ("\\device\\harddiskvolume12", (DosDevice.LOCAL, "\\device\\harddiskvolume12")),
         ("\\Device\\CdRom0", (DosDevice.LOCAL, "\\Device\\CdRom0")),
+        ("\\Device\\HarddiskVolume3\\hidden\\remote", (DosDevice.REFUSE, "")),  # hides folders
+        ("\\Device\\HarddiskVolume3\\", (DosDevice.REFUSE, "")),
+        ("\\Device\\HarddiskVolume", (DosDevice.REFUSE, "")),
         ("\\??\\C:\\base", (DosDevice.ALIAS, "C:\\base")),
         ("\\??\\D:\\", (DosDevice.ALIAS, "D:\\")),
         ("\\??\\UNC\\server\\share", (DosDevice.REFUSE, "")),
@@ -508,3 +511,12 @@ def test_an_entry_is_read_without_following_it(tmp_path: Path) -> None:
 def test_an_entry_the_lookup_rejects_raises(tmp_path: Path) -> None:
     with pytest.raises(OSError, match="WinError"):
         local_path._entry(tmp_path / ("a" * 300))  # a name no folder can hold
+
+
+def test_a_drive_mapped_to_a_folder_of_a_volume_is_refused_before_any_probe(
+    monkeypatch: pytest.MonkeyPatch, probes: list[str]
+) -> None:
+    drives(monkeypatch, {"Z:": r"\Device\HarddiskVolume3\hidden\remote"})
+
+    assert local_target("Z:\\query.png") is None
+    assert probes == []

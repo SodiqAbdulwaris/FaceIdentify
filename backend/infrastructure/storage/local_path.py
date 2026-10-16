@@ -14,8 +14,8 @@ when any step leaves the computer or cannot be shown to stay on it:
   alternate data stream, in any component;
 - a drive letter whose DOS device (`QueryDosDeviceW`, which reads the object manager and opens
   nothing) is not a local volume: a `\\??\\X:\\dir` alias is walked again from its target, so the
-  components it hides are checked, and only `\\Device\\HarddiskVolume*` and `\\Device\\CdRom*` are
-  accepted;
+  components it hides are checked, and only a bare `\\Device\\HarddiskVolumeN` or `\\Device\\CdRomN`
+  (no folder suffix, which would hide components) is accepted;
 - a reparse point other than a symbolic link or a mount point (junction), such as an app execution
   alias, or a cloud placeholder that is not on disk (opening it would download it).
 
@@ -32,6 +32,7 @@ refused, before any outbound access.
 
 import ntpath
 import os
+import re
 import stat
 import sys
 from enum import Enum
@@ -54,6 +55,7 @@ _RECALL = (
 )
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
+_VOLUME_DEVICE = re.compile(r"\\Device\\(HarddiskVolume|CdRom)\d+", re.IGNORECASE)
 _RESERVED = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
 _RESERVED |= {f"{name}{digit}" for name in ("COM", "LPT") for digit in "123456789¹²³"}
 
@@ -101,7 +103,7 @@ def classify_dos_device(target: str | None) -> tuple[DosDevice, str]:
         if len(drive) == 2 and drive[1] == ":":
             return DosDevice.ALIAS, rest
         return DosDevice.REFUSE, ""  # \??\UNC\..., \??\Volume{...}
-    if target.upper().startswith(("\\DEVICE\\HARDDISKVOLUME", "\\DEVICE\\CDROM")):
+    if _VOLUME_DEVICE.fullmatch(target):  # (a bare volume: a suffix would hide folders)
         return DosDevice.LOCAL, target
     return DosDevice.REFUSE, ""  # \Device\Mup, \Device\LanmanRedirector, ...
 
@@ -265,12 +267,7 @@ def open_local(path: str | Path) -> BinaryIO | None:
     handle = target.open("rb")
     final = _final_nt_path(handle.fileno())
     expected = _expected_nt_path(target)
-    if (
-        final is None
-        or expected is None
-        or classify_dos_device(final)[0] is not DosDevice.LOCAL
-        or final.upper() != expected.upper()
-    ):
+    if final is None or expected is None or final.upper() != expected.upper():
         handle.close()
         return None
     return handle
