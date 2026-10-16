@@ -42,7 +42,7 @@ from backend.infrastructure.media.image import (
     ImageTooLargeError,
     UnsupportedImageError,
 )
-from backend.infrastructure.storage.local_path import local_target
+from backend.infrastructure.storage.local_path import open_local
 from backend.ml.contracts.protocol import ContractError
 from backend.ml.supervisor.supervisor import MLUnavailableError, WorkerFailedError
 
@@ -99,8 +99,9 @@ def _read_query(raw: bytes, content_type: str, limits: MediaLimits) -> bytes:
     before anything is read: a UNC or device form, a mapped network drive, or a link or junction
     along the way that points at one (issue #174; `local_target`). It could make this computer
     reach out and authenticate to another one, and no network location is approved. The resolved
-    local file is what is opened, through one handle and never more than the limit, whatever it
-    grows into after a check.
+    local file is what is opened, checked once open to be that file on a local volume (a link
+    planted between the check and the open is still followed by the open, but nothing is read from
+    it), through one handle and never more than the limit, whatever it grows into after a check.
     """
     if "json" not in content_type:
         return raw
@@ -108,16 +109,14 @@ def _read_query(raw: bytes, content_type: str, limits: MediaLimits) -> bytes:
         path = json.loads(raw)["path"]
         if not isinstance(path, str):
             raise ValueError
-        target = local_target(path)
-        if target is None:
+        handle = open_local(path)
+        if handle is None:
             raise ApiError(
                 400, "QUERY_PATH_NOT_LOCAL",
                 "A picture on another computer or a network drive cannot be searched by its path. "
                 "Copy it to this computer, or choose it again so it is sent as bytes.",
             )  # fmt: skip
-        # ponytail: a link planted in `target` between this check and the open would still be
-        # followed; opening without following reparse points needs CreateFileW, add it if needed
-        with target.open("rb") as handle:
+        with handle:
             data = handle.read(limits.max_bytes + 1)
     except (ValueError, KeyError, TypeError, OSError):
         raise ApiError(400, "QUERY_IMAGE_UNREADABLE", "The image could not be read.") from None
