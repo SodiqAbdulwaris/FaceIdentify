@@ -7,8 +7,10 @@ real scheduler, executor and acceptance, so a requested run is really processed.
 import asyncio
 import uuid
 from dataclasses import replace
+from functools import partial
 from typing import Any
 
+import anyio
 import pytest
 from sqlalchemy import select, update
 
@@ -34,26 +36,30 @@ async def process(api: Api, source: dict[str, Any], *, tick: bool = True) -> dic
 
 
 async def finished(api: Api, run_id: str, state: str = "COMPLETED") -> dict[str, Any]:
-    """Poll the run over HTTP until it reaches `state` (the scheduler works in the background)."""
+    """Poll the run over HTTP until it reaches `state` (the scheduler works in the background).
+
+    A run reads COMPLETED as soon as acceptance commits, and acceptance then wakes an index pass
+    that writes on the scheduler thread. One pass here (passes are serialized) waits for it, so a
+    test's own write after this never waits behind it for the database lock."""
     async with asyncio.timeout(30):
         while True:
             run: dict[str, Any] = (await api.client.get(f"{RUNS}/{run_id}")).json()
             if run["state"] == state:
+                library = api.backend.library
+                assert library is not None
+                limit = api.backend.settings.index_batch
+                await anyio.to_thread.run_sync(
+                    partial(library.coordinator.apply_pending, limit=limit)
+                )
                 return run
             assert run["state"] not in ("FAILED", "NOT_RESUMABLE"), run
             await asyncio.sleep(0.02)
 
 
 def break_run(api: Api, run_id: str) -> None:
-    """Leave a run and its job as a crash or a failure would: FAILED.
-
-    A run reads COMPLETED as soon as acceptance commits, and acceptance then wakes an index pass
-    that writes on the scheduler thread; one pass here first (passes are serialized) so this write
-    never waits behind it for the database lock."""
-    library = api.backend.library
-    assert library is not None
-    library.coordinator.apply_pending(limit=api.backend.settings.index_batch)
-    with library.session_factory() as session:
+    """Leave a run and its job as a crash or a failure would: FAILED."""
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
         run_uuid = uuid.UUID(run_id)
         now = api.backend.settings.clock()
         session.execute(
