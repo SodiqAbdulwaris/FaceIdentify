@@ -56,8 +56,9 @@ threads arrived, so a face search could wait behind any number of processing req
   only interactive caller, and the client factories are shared with processing and with tests.
 - **Not built (listed for the M6 work):** batch yield boundaries for long jobs, cancelling a request
   while it waits, per-class wait and queue metrics beyond the debug log, and the latency targets the
-  decision says to set after measuring. A waiting request is cancelled when it reaches the worker (the
-  executor checks cancellation between inferences, as before).
+  decision says to set after measuring. A cancelled request that is already waiting still gets its turn
+  and runs its one inference; the executor checks cancellation after it, between inferences, as
+  before.
 
 ## Verification
 
