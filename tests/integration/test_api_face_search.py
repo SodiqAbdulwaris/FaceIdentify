@@ -5,6 +5,7 @@ job. Perception is planted (no weights); the library, the index and the recognit
 """
 
 import hashlib
+import os
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -28,6 +29,7 @@ from backend.app.runtime.perception_client import (
 )
 from backend.app.sources.models import Artifact, Source
 from backend.infrastructure.indexing.representation_index import IndexUnusableError
+from backend.infrastructure.storage import local_path
 from backend.ml.contracts.messages import Detection
 from backend.ml.contracts.protocol import ContractError, MLErrorCode
 from backend.ml.supervisor.supervisor import MLUnavailableError
@@ -389,6 +391,7 @@ async def test_limits_are_kept_while_the_picture_arrives(
         400,
         "QUERY_IMAGE_UNREADABLE",
     )
+    error(await api.client.post(FACE_SEARCH, json={"path": 5}), 400, "QUERY_IMAGE_UNREADABLE")
     for network in ("//server/share/a.png", r"/\server/share/a.png", r"\/server/share/a.png"):
         error(
             await api.client.post(FACE_SEARCH, json={"path": network}),
@@ -423,6 +426,48 @@ async def test_a_path_that_leads_to_a_network_share_through_a_link_is_refused(
         assert str(path) not in str(refused)  # the path is not echoed back
     local = await api.client.post(FACE_SEARCH, json={"path": str(tmp_path / "pictures" / "q.png")})
     assert local.status_code == 200, local.text
+
+
+async def test_device_names_and_unlisted_drives_are_refused_before_anything_is_opened(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #174: an extended path to NUL normalises to a device, and a drive that is not a
+    local volume is refused. Any open or stat of such a target fails the test, so the refusal
+    came first."""
+    api = processing_api
+    real_query = local_path._query_dos_device
+    monkeypatch.setattr(
+        local_path,
+        "_query_dos_device",
+        lambda drive: (
+            "\\Device\\Mup\\faceidentify-test.invalid\\share"
+            if drive == "Z:"
+            else real_query(drive)
+        ),
+    )
+    real_open = Path.open
+    real_stat = os.stat
+
+    def looks_remote(name: Any) -> bool:
+        text = str(os.fspath(name)).upper()
+        return text.startswith(("Z:", "\\\\")) or text.endswith(("NUL", "CON", "COM1", "COM1.TXT"))
+
+    def guarded_open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        assert not looks_remote(self), f"opened {self}"
+        return real_open(self, *args, **kwargs)
+
+    def guarded_stat(name: Any, *args: Any, **kwargs: Any) -> Any:
+        assert not looks_remote(name), f"looked at {name}"
+        return real_stat(name, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", guarded_open)
+    monkeypatch.setattr(os, "stat", guarded_stat)
+
+    for path in (r"\\?\C:\NUL", r"C:\CON", r"C:\COM1.txt", r"C:\a.png:stream", r"Z:\a.png"):
+        refused = error(
+            await api.client.post(FACE_SEARCH, json={"path": path}), 400, "QUERY_PATH_NOT_LOCAL"
+        )
+        assert path not in str(refused)
 
 
 async def test_the_search_index_or_worker_being_unavailable_is_said_plainly(
