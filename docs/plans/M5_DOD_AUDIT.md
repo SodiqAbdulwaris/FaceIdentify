@@ -9,8 +9,8 @@ supplies it.
 **Summary: M5 is not done.** Coverage, search, assisted recognition, the CI desktop end-to-end test
 and two of the three issues are met; #69 closes with PR 207. What is left is mostly bookkeeping the
 tracker never caught up with (TST-054, TST-058 and the TST-059 parts have no `PASSING` row although
-their work is built and tested) and two owner steps (TST-038/039's local-only evidence, the
-live automatic-acceptance policy and its backup); the smoke test was reported done but not itemised.
+their work is built and tested) and the owner's decision on TST-038/039's local-only evidence, plus a real-model check of automatic
+acceptance now that the live policy is installed; the smoke test was reported done but not itemised.
 
 | # | Criterion (M5 plan section 5) | Verdict | Evidence |
 |---|---|---|---|
@@ -20,7 +20,7 @@ live automatic-acceptance policy and its backup); the smoke test was reported do
 | 4 | SEC-006 (deletion privacy) `PASSING` | **Not met (tracker)** | Byte-level checks exist (`test_permanent_source_delete.py`, `test_forget_identity.py`, cited in TST-059 4c), but SEC-006 has no status row (definition only, line 357) |
 | 5 | TST-055 (historical and name search) `PASSING` | **Met** | Tracker row 5a `PASSING` (2026-10-09) |
 | 6 | TST-056 (face search) `PASSING` | **Met** | Tracker row 5b `PASSING` (2026-10-10, AVIF added 2026-10-15) |
-| 7 | TST-057 on real models | **Partly met; owner-blocked** | TST-057A (assisted) `PASSING` (owner, 2026-10-12). TST-057B (automatic) `IN_PROGRESS`: built and verified at the owner-confirmed point 0.45 / 0.10; remains open until the owner installs the live policy file ([entry](../implementations/2026-10-15-enable-automatic-acceptance.md)). Observed 2026-10-16: `local-models/state/policies/insightface-buffalo-l.json` already holds the matching policy (written 2026-10-15 23:58), but so does its backup `insightface-buffalo-l.abstain-only-v1.json`, so the way back to abstain-only is broken until the backup is rewritten. The owner should confirm the install and fix the backup before TST-057B is marked `PASSING` |
+| 7 | TST-057 on real models | **Partly met; owner-blocked** | TST-057A (assisted) `PASSING` (owner, 2026-10-12). TST-057B (automatic) `IN_PROGRESS`: built and verified at the owner-confirmed point 0.45 / 0.10; was open until the owner installed the live policy file ([entry](../implementations/2026-10-15-enable-automatic-acceptance.md)). The owner installed it on 2026-10-15 at 23:58: `local-models/state/policies/insightface-buffalo-l.json` is `buffalo-l-verified-match-v1` (0.45 / 0.10), and the restore copy `insightface-buffalo-l.abstain-only-v1.json` (rewritten 23:59) holds `buffalo-l-abstain-only-v1` (both read 2026-10-16 08:50). What is left is a small real-model check through the real host under the live policy, then the row |
 | 8 | TST-038 / TST-039 on the real path | **Owner-blocked** | Row 191 `IN_PROGRESS`: "Still open: the owner's decision whether local-only evidence closes these rows" (the weights are never in CI). Row 189 (`BLOCKED` on issue 69) is stale: the weights were selected 2026-10-07 and #69 closes with PR 207 |
 | 9 | TST-044 (initial calibrated policy) | **Not met (tracker)** | Row 192 `IN_PROGRESS`, "Remaining: a larger verified set (track R5)"; the 48-identity verified set (2026-10-15) and the verified operating point now exist, and a DirectML re-measure is pending its record (see the last column). Needs the row reviewed against that evidence. (The DirectML re-measure of 2026-10-16 matched the CPU operating point on all 686 photographs; it is recorded in its own overnight PR, **not yet merged**, so it is not evidence here until it is) |
 | 10 | Issue #69 closed | **Met once PR 207 merges** | PR 207 re-hashes the files in use against the record and adds the install guide; the licence stays a release blocker |
@@ -39,7 +39,7 @@ live automatic-acceptance policy and its backup); the smoke test was reported do
    the test files and counts from their implementation entries (re-running those suites to quote
    real results), and retires the stale TST-038/039 writer row.
 2. Merge PR 207 (#69).
-3. The owner: decide whether local-only evidence closes TST-038/039; confirm the live policy install
-   and rewrite the abstain-only backup, then mark TST-057B; optionally itemise the smoke test's
+3. The owner: decide whether local-only evidence closes TST-038/039; a real-model check of automatic
+   acceptance under the installed policy, then mark TST-057B; optionally itemise the smoke test's
    checklist outcomes (reported done 2026-10-14), and `M5_REMAINING_WORK.md` item 8 updated to match.
 4. Review TST-044 against the verified operating point, and the DirectML re-measure once its PR merges.
