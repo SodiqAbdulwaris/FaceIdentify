@@ -50,6 +50,7 @@ happened, and what waits for the owner.
 - **Backend coverage is 100%** on main (3,081 tests at the audit; 3,105 on PR 210's branch).
 - **M5 is not done yet** (PR 209's audit): with PR 214 the tracker catches up; what is left is
   TST-054's end-to-end correction test, the owner's decision on TST-038/039's local-only evidence,
+  a review of TST-044 against the verified operating point and the DirectML re-measure,
   and a real-model check of automatic acceptance under the installed policy (TST-057B).
 - **The live policy:** installed by the owner at 23:58 (`buffalo-l-verified-match-v1`), with the
   abstain-only restore copy rewritten at 23:59. (PR 207's entry, written at 23:58, says the backup
