@@ -17,16 +17,21 @@
   the worker at a time; the lease is released in `finally`. `interactive()` marks the requests made
   inside it as interactive (a context variable, so it follows the thread that made them);
   `is_interactive()` reads the mark. Each grant logs its wait at debug level.
-- `backend/ml/supervisor/supervisor.py`: `MLSupervisor.execute` takes its turn on the lease before
-  the existing request lock, so every inference, from any caller, goes through it. Starting,
-  stopping, pinging and releasing outputs do not (they are quick and are not inference).
+- `backend/api/real.py` and `backend/app/runtime/perception_client.py`: `ClientPool` owns the one
+  `WorkerLease` and gives it to every `PerceptionClient` it hands out; the client takes its turn
+  around each `supervisor.execute`. The pool keeps a supervisor per plan, so the lease sits above the
+  supervisors: a job on a frozen CPU-only plan and a search on a DirectML plan queue in the same
+  line, each still running its own plan's variants. Starting a plan's worker happens inside
+  `execute`, so it is serialized under the lease too. Stopping, pinging and releasing outputs do not
+  take a turn (quick, not inference). A lease whose wait is interrupted removes its own ticket and
+  wakes the others, and the post-grant logging is inside the release `finally`.
 - `backend/app/recognition/face_query.py`: face search runs its detect and represent inside
   `interactive()`. Processing is unchanged and so background.
-- Tests: `tests/concurrency/test_worker_lease.py` (8: interactive before waiting background work,
-  FIFO within a class, a stream of searches lets background work through after the burst, the streak
-  counts from the last background grant, never two holders at once under twelve mixed threads, a
-  failing request releases the worker, the mark stays inside `interactive()`, a burst below one is
-  refused, and the supervisor waits its turn on the lease before it runs a request);
+- Tests: `tests/concurrency/test_worker_lease.py` (ordering, FIFO, burst, mutual exclusion gated by
+  events and the lease's queue state, release after a failing body or a failure right after the
+  grant, an interrupted wait leaves no ticket, the mark on one thread through nested and
+  exceptional exits, a burst below one refused); `tests/integration/test_pool_lease.py`: requests
+  on two plans share one line and a search on one plan goes before background work on another;
   `tests/integration/test_api_face_search.py`: a face search's perception is marked interactive and
   processing's is not.
 
@@ -44,7 +49,7 @@ threads arrived, so a face search could wait behind any number of processing req
 - **The safe boundary is one inference** (one detect or one represent call). For images that is
   already short; a video's frames will be their own inferences, so the same lease serves M6 without a
   new boundary.
-- **The burst is a constant (3),** marked `ponytail:`: the decision asks for the fairness parameter
+- **The burst is a constant (3),** confirmed by the owner on 2026-10-16, marked `ponytail:`: the decision asks for the fairness parameter
   to be chosen from a benchmark, which needs real long runs (M6). Three means a stream of searches
   delays a processing step by at most three searches.
 - **Interactivity is a context variable,** not a new parameter on every client: face search is the
@@ -58,8 +63,8 @@ threads arrived, so a face search could wait behind any number of processing req
 
 - `uv run pytest -q tests/concurrency/test_worker_lease.py tests/integration/test_api_face_search.py
   tests/integration/test_ml_supervisor.py`: 64 passed. Full backend gate: see the PR.
-- The ordering tests hold the worker, line requests up until the lease reports them queued (a polled
-  condition with a deadline, not a fixed sleep), then read the order they were served in.
+- The tests hold the worker, line requests up until the lease reports them queued, and gate each
+  step on events; every wait is asserted to have succeeded and every thread to have ended.
 
 ## Open issues / follow-ups
 

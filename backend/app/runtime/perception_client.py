@@ -28,6 +28,7 @@ call; vectors come back in segments the worker made, which are copied out and th
 
 import uuid
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,6 +53,7 @@ from backend.ml.contracts.messages import (
     MLResponse,
 )
 from backend.ml.contracts.protocol import MLErrorCode, MLOperation, MLStatus
+from backend.ml.supervisor.lease import WorkerLease
 from backend.ml.supervisor.process import ProcessWorker
 from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy
 
@@ -124,8 +126,11 @@ class PerceptionClient:
         *,
         new_id: Callable[[], uuid.UUID],
         on_ran: Callable[[PlannedVariant], None] | None = None,
+        lease: WorkerLease | None = None,
     ) -> None:
         self._supervisor = supervisor
+        # The turn on the one worker, shared by every client of a pool (#175); None: no arbitration.
+        self._lease = lease
         self._plan = plan
         self._new_id = new_id
         self._on_ran = on_ran
@@ -214,7 +219,8 @@ class PerceptionClient:
             if _key(variant) in self._ruled_out:
                 continue
             request = build(variant)
-            response = self._supervisor.execute(request)
+            with self._lease.held() if self._lease else nullcontext():
+                response = self._supervisor.execute(request)
             if response.status is MLStatus.SUCCESS:
                 self._check_it_was_that_variant(request, response, variant)
                 return (

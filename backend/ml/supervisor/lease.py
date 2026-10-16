@@ -82,16 +82,21 @@ class WorkerLease:
         queued_at = self._clock()
         with self._condition:
             self._waiting[cls].append(ticket)
-            self._condition.wait_for(lambda: not self._held and self._next() is ticket)
+            try:
+                self._condition.wait_for(lambda: not self._held and self._next() is ticket)
+            except BaseException:  # (an interrupted wait must not leave its ticket at the head)
+                self._waiting[cls].remove(ticket)
+                self._condition.notify_all()
+                raise
             self._waiting[cls].popleft()
             self._held = True
             self._streak = self._streak + 1 if cls else 0
-        LOG.debug(
-            "worker granted to a %s request after %.3fs",
-            "interactive" if cls else "background",
-            self._clock() - queued_at,
-        )
         try:
+            LOG.debug(
+                "worker granted to a %s request after %.3fs",
+                "interactive" if cls else "background",
+                self._clock() - queued_at,
+            )
             yield
         finally:
             with self._condition:
