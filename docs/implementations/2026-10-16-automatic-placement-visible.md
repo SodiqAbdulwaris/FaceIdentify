@@ -1,7 +1,7 @@
 # M5: an automatic match is told apart from a confirmed face (TST-057B)
 
 - **Date:** 2026-10-16
-- **Milestone / tracker IDs:** M5 track R; TST-057B (stays `IN_PROGRESS`: the real-model check is a separate entry)
+- **Milestone / tracker IDs:** M5 track R; TST-057B (proposed `PASSING`, owner to confirm)
 - **Status:** done, with tests; review recorded on the pull request
 - **Commits:** PR to be recorded when merged (`feat(api): say how a face was placed`)
 
@@ -40,6 +40,10 @@ Resolving the old faces (or the owner confirming them) is what lets later pictur
 
 `uv run ruff format --check . && uv run ruff check . && uv run mypy`, `uv run pytest`,
 `npm run typecheck && npm run lint -- --deny-warnings && npm test && npm run build`: see the pull request.
+
+## Real-model check under the installed policy
+
+The live policy file equals `APPROVED_MATCHING` (compared as JSON); neither policy file was written (SHA-256 identical before and after; `local-models` was only read, through a junction in the worktree). `uv run pytest -m e2e tests/e2e/test_real_host.py -k approved_point`: 1 passed (real weights, CPU, private state with the same policy). The test now also asserts `placement == AUTOMATIC_MATCH` and a similarity at or above 0.45 on the matched photograph. The tracker row is proposed `PASSING`; confirming is the owner's.
 
 ## Open
 
