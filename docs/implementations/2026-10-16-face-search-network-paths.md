@@ -11,8 +11,11 @@
 ## What changed
 
 - `backend/infrastructure/storage/local_path.py` (new): `local_target(path)` follows a path the way
-  Windows would, one component at a time, reading each link's target from the link itself (`lstat`,
-  `readlink`: local volume only), and answers the fully resolved local file, or `None` when any step
+  Windows would, one component at a time, reading each entry's own attributes and reparse tag with
+  `FindFirstFileW` (not `os.lstat`: CPython reopens a reparse point it does not recognise with
+  traversal, which can start a cloud download) and each link's target with `readlink`: local volume
+  only. An entry that exists but cannot be examined (access denied, a bad name) refuses the path;
+  names with wildcard characters are refused too, because the lookup would expand them, and answers the fully resolved local file, or `None` when any step
   leaves the computer or cannot be shown to stay on it:
   - a UNC or device form (`\\server`, `//server`, `\\.\`, `\\?\UNC\`, `\\?\GLOBALROOT`, a volume
     mount point `\\?\Volume{...}`), **also one that normalisation creates**: `\\?\C:\NUL` becomes

@@ -4,9 +4,9 @@ A path that looks local can lead off this computer: a mapped network drive (`Z:\
 drive that hides a junction, or a symbolic link or junction anywhere along it whose target is a
 network share. Opening it would make this computer reach out, and possibly authenticate, to another
 one. `local_target` follows the path the way Windows would, one component at a time, but reads each
-link's target from the link itself (`lstat` and `readlink` touch only the local volume), so nothing
-remote is contacted while it decides. It answers the fully resolved local file, or None when any
-step leaves the computer or cannot be shown to stay on it:
+link's target from the link itself (`FindFirstFileW` and `readlink` touch only the local volume),
+so nothing remote is contacted while it decides. It answers the fully resolved local file, or None
+when any step leaves the computer or cannot be shown to stay on it:
 
 - a UNC (`\\\\server\\share`) or device (`\\\\.\\`, `\\\\?\\` other than a drive) form, also
   one that normalisation would create (`\\\\?\\C:\\NUL` becomes `\\\\.\\NUL`), a Windows reserved
@@ -76,9 +76,10 @@ def classify_reparse(attributes: int, tag: int) -> Reparse:
 
 
 def is_device_component(part: str) -> bool:
-    """A name Windows reads as a device or a stream, whatever follows it (`nul.txt`, `NUL .`)."""
-    if ":" in part:
-        return True  # an alternate data stream (and `NUL:`, `CONIN$:`)
+    """A name Windows reads as a device, a stream or a search pattern, whatever follows it
+    (`nul.txt`, `NUL .`, `a:b`, `*`)."""
+    if any(char in part for char in ':*?<>"|'):
+        return True  # an alternate data stream (and `NUL:`), or a wildcard the lookup would expand
     base = part.rstrip(" .").split(".")[0].rstrip(" ")
     return base.upper() in _RESERVED
 
@@ -121,6 +122,41 @@ if sys.platform == "win32":
     _kernel32.GetFinalPathNameByHandleW.restype = ctypes.c_uint32
     _VOLUME_NAME_NT = 0x2
 
+    class _FindData(ctypes.Structure):  # WIN32_FIND_DATAW
+        _fields_ = (
+            ("dwFileAttributes", ctypes.c_uint32),
+            ("ftCreationTime", ctypes.c_uint32 * 2),
+            ("ftLastAccessTime", ctypes.c_uint32 * 2),
+            ("ftLastWriteTime", ctypes.c_uint32 * 2),
+            ("nFileSizeHigh", ctypes.c_uint32),
+            ("nFileSizeLow", ctypes.c_uint32),
+            ("dwReserved0", ctypes.c_uint32),  # the reparse tag, when there is one
+            ("dwReserved1", ctypes.c_uint32),
+            ("cFileName", ctypes.c_wchar * 260),
+            ("cAlternateFileName", ctypes.c_wchar * 14),
+        )
+
+    _kernel32.FindFirstFileW.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(_FindData)]
+    _kernel32.FindFirstFileW.restype = ctypes.c_void_p
+    _kernel32.FindClose.argtypes = [ctypes.c_void_p]
+    _INVALID_HANDLE = ctypes.c_void_p(-1).value
+    _NOT_THERE = (2, 3, 267)  # file not found, path not found, a file where a folder was expected
+
+    def _entry(path: Path) -> tuple[int, int] | None:
+        """The entry's own (attributes, reparse tag), or None if nothing is there; any other
+        failure raises OSError. Unlike `os.lstat` this never reopens a reparse point it does not
+        recognise with traversal (CPython does, which can start a cloud download), and it opens no
+        file: it asks the parent folder about the name."""
+        data = _FindData()
+        handle = _kernel32.FindFirstFileW(_EXTENDED + os.fspath(path), ctypes.byref(data))
+        if handle is None or handle == _INVALID_HANDLE:
+            error = ctypes.get_last_error()
+            if error in _NOT_THERE:
+                return None
+            raise ctypes.WinError(error)
+        _kernel32.FindClose(handle)
+        return data.dwFileAttributes, data.dwReserved0
+
     def _query_dos_device(drive: str) -> str | None:
         """The current mapping of a drive such as `C:`, or None. Opens nothing."""
         if not drive:
@@ -145,6 +181,9 @@ else:  # pragma: no cover - the suite runs on Windows; this keeps the module imp
         return None  # ponytail: POSIX network mounts are not detected; add a statfs check if needed
 
     def _final_nt_path(descriptor: int) -> str | None:
+        return None
+
+    def _entry(path: Path) -> tuple[int, int] | None:
         return None
 
 
@@ -193,12 +232,12 @@ def local_target(path: str | Path) -> Path | None:
         for index, part in enumerate(parts):
             walked = walked / part
             try:
-                status = os.lstat(walked)  # (the entry itself, never what it points at)
+                entry = _entry(walked)  # (the entry itself, never what it points at)
             except OSError:
+                return None  # an entry that cannot be examined is not walked through
+            if entry is None:
                 continue  # nothing there (yet)
-            action = classify_reparse(
-                getattr(status, "st_file_attributes", 0), getattr(status, "st_reparse_tag", 0)
-            )
+            action = classify_reparse(*entry)
             if action is Reparse.REFUSE:
                 return None
             if action is Reparse.FOLLOW:
