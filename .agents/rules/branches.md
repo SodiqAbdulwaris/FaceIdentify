@@ -82,6 +82,13 @@ and `$dir`, save its report to `$result`, then continue from the two `git status
 and never report the PR as reviewed. For example, on 2026-09-23 Codex stopped with a usage-limit
 error, and the review was redone with a subagent.
 
+**When Codex is the author.** The reviewer must still be a context that did not write the change:
+a separate `codex exec -s read-only` run in a disposable worktree, given only the review prompt,
+counts (it has no memory of the authoring conversation); Claude Code (a CLI run or a subagent) is a
+reviewer when it is available.
+
+> **Decision 2026-10-16:** (delegated by the owner: "I'll leave all other decisions to your recommendations") Codex may author changes when Claude Code is out of usage; a fresh read-only Codex run counts as the independent review of a Codex-authored PR, as above. Source: [`docs/guides/AGENT_HANDOFF.md`](../../docs/guides/AGENT_HANDOFF.md).
+
 To approve a reviewer, run it in a disposable worktree, ask it to modify a file, confirm that
 `git -C "$dir" status --short` stays empty, then update this table. `codex review --base` does
 **not** accept custom instructions, so use `codex exec`.
