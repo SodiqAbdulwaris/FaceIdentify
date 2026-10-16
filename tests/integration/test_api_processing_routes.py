@@ -45,9 +45,15 @@ async def finished(api: Api, run_id: str, state: str = "COMPLETED") -> dict[str,
 
 
 def break_run(api: Api, run_id: str) -> None:
-    """Leave a run and its job as a crash or a failure would: FAILED."""
-    assert api.backend.library is not None
-    with api.backend.library.session_factory() as session:
+    """Leave a run and its job as a crash or a failure would: FAILED.
+
+    A run reads COMPLETED as soon as acceptance commits, and acceptance then wakes an index pass
+    that writes on the scheduler thread; one pass here first (passes are serialized) so this write
+    never waits behind it for the database lock."""
+    library = api.backend.library
+    assert library is not None
+    library.coordinator.apply_pending(limit=api.backend.settings.index_batch)
+    with library.session_factory() as session:
         run_uuid = uuid.UUID(run_id)
         now = api.backend.settings.clock()
         session.execute(
