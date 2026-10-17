@@ -39,6 +39,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 
 | Date | Entry | Status |
 |---|---|---|
+| 2026-10-17 | [M5 close-out plan](2026-10-17-m5-closeout-plan.md) | in progress; ordered PR, evidence, E2E and tracker work |
 | 2026-10-07 | [Test: the scheduler-degrade test no longer races its own retry](2026-10-07-scheduler-degrade-test-race.md) | done; flake diagnosed and hardened |
 | 2026-10-07 | [A licensing and commercialisation record](2026-10-07-licensing-record.md) | done; documentation |
 | 2026-10-09 | [M5 step 4c, part 2: forget an identity and a person](2026-10-09-m5-forget-identity.md) | done; TST-059, SEC-006 |
