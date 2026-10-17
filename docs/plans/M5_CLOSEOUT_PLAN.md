@@ -26,7 +26,7 @@ model, dependency, specification, or M6 scope.
 head, every review finding is answered, all required CI checks are green on that head, and the
 owner authorizes its rebase merge. The two PRs are handled one at a time.
 
-**Current blocker (2026-10-17):** the independent review of PR #213 head `02921ee` found that
+**Current blocker (2026-10-17):** the independent review of PR #213 found that
 `ClientPool.close()` can stop a worker after `execute()` but before `PerceptionClient` attaches and
 releases its shared-memory result. The PR needs active-operation draining and a deterministic
 shutdown-versus-`represent()` regression before it can be re-reviewed.
