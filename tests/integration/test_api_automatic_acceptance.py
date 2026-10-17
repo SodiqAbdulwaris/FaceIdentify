@@ -155,5 +155,73 @@ async def test_a_face_that_abstained_before_the_policy_changed_stays_abstained(
     assert "AMBIGUOUS_CANDIDATES" in reasons
 
 
+async def test_a_merge_or_a_split_by_the_owner_replaces_an_automatic_label(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approved_matching(monkeypatch)
+    folder = tmp_path / "pictures"
+    folder.mkdir()
+    async with host(tmp_path, development_profile=True) as client:
+        sources = []
+        for name in ("one", "two", "three"):
+            sources.append(await import_image(client, picture(folder, f"{name}.png", RED)))
+            await process_and_wait(client, sources[-1]["id"])
+        (identity,) = await identities(client)
+        (two,) = await occurrences(client, sources[1]["id"])
+        (three,) = await occurrences(client, sources[2]["id"])
+        assert (two["placement"], three["placement"]) == ("AUTOMATIC_MATCH",) * 2
+
+        # Splitting a matched face off is the owner's decision about it.
+        split = await client.post(
+            f"/api/v1/identities/{identity['id']}/split",
+            json={"occurrence_ids": [two["id"]], "expected_revision": identity["revision"]},
+        )
+        assert split.status_code == 201, split.text
+        (moved,) = await occurrences(client, sources[1]["id"])
+        assert moved["identity_id"] == split.json()["id"]
+        assert (moved["placement"], moved["match_similarity"]) == ("USER", None)
+
+        # So is merging: the other matched face, carried over by a merge, is no longer "automatic".
+        current = {i["id"]: i for i in await identities(client)}
+        merged = await client.post(
+            "/api/v1/identities/merge",
+            json={
+                "identities": [
+                    {"id": i, "revision": current[i]["revision"]}
+                    for i in (split.json()["id"], identity["id"])
+                ],
+                "preferred_identity_id": split.json()["id"],
+            },
+        )
+        assert merged.status_code == 200, merged.text
+        (carried,) = await occurrences(client, sources[2]["id"])
+        assert carried["identity_id"] == split.json()["id"]
+        assert (carried["placement"], carried["match_similarity"]) == ("USER", None)
+
+
+async def test_a_match_whose_evidence_has_no_scores_still_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shared writer accepts an IDENTITY_MATCHED row with no recognition payload: reading the
+    face must say it was matched automatically, without scores, not fail."""
+    approved_matching(monkeypatch)
+    folder = tmp_path / "pictures"
+    folder.mkdir()
+    async with host(tmp_path, development_profile=True) as client:
+        for name in ("one", "two"):
+            source = await import_image(client, picture(folder, f"{name}.png", RED))
+            await process_and_wait(client, source["id"])
+    database = sqlite3.connect(tmp_path / "library" / "database" / "library.db")
+    try:
+        database.execute("UPDATE evidence SET payload_json = '{}' WHERE kind = 'IDENTITY_MATCHED'")
+        database.commit()
+    finally:
+        database.close()
+    async with host(tmp_path, development_profile=True) as client:
+        (matched,) = await occurrences(client, source["id"])
+        assert matched["placement"] == "AUTOMATIC_MATCH"
+        assert (matched["match_similarity"], matched["match_margin"]) == (None, None)
+
+
 def test_the_abstain_only_policy_is_not_an_approved_matching_one() -> None:
     assert ABSTAIN_ONLY["version"] not in APPROVED_MATCHING
