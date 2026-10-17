@@ -237,6 +237,7 @@ class ClientPool:
     def close(self) -> None:
         """Stop every worker. One that will not stop does not keep the others running; it stays in
         the pool so a second `close` tries it again, and the first failure is raised."""
+        self.lease.close()  # queued requests are refused before any worker is stopped
         with self._lock:
             held = list(self._supervisors.items())
         failures: list[Exception] = []

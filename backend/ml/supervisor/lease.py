@@ -25,11 +25,18 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+from backend.ml.supervisor.supervisor import MLUnavailableError
+
 LOG = logging.getLogger(__name__)
 
 # Interactive grants in a row before a waiting background request goes first. ponytail: a fixed
 # value until a benchmark of real searches against long runs picks one (the decision's point 4).
 BURST = 3
+
+
+class WorkerClosedError(MLUnavailableError):
+    """The worker is shutting down: no request gets a turn any more."""
+
 
 _interactive: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "faceidentify_interactive", default=False
@@ -59,6 +66,7 @@ class WorkerLease:
         self._clock = clock
         self._condition = threading.Condition()
         self._held = False
+        self._closed = False
         self._waiting: dict[bool, deque[object]] = {True: deque(), False: deque()}
         self._streak = 0  # interactive grants since the last background one
 
@@ -66,6 +74,13 @@ class WorkerLease:
         """How many requests of a class are waiting (for readiness and tests)."""
         with self._condition:
             return len(self._waiting[interactive_class])
+
+    def close(self) -> None:
+        """Refuse every request that waits and every later one (shutdown), so a queued request is
+        never granted a worker that has been stopped. One already holding the worker finishes."""
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
 
     def _next(self) -> object | None:
         interactive_queue, background = self._waiting[True], self._waiting[False]
@@ -82,10 +97,16 @@ class WorkerLease:
         ticket = object()
         queued_at = self._clock()
         with self._condition:
+            if self._closed:
+                raise WorkerClosedError("the worker is shutting down")
             self._waiting[cls].append(ticket)
             try:
-                self._condition.wait_for(lambda: not self._held and self._next() is ticket)
-            except BaseException:  # (an interrupted wait must not leave its ticket at the head)
+                self._condition.wait_for(
+                    lambda: self._closed or (not self._held and self._next() is ticket)
+                )
+                if self._closed:
+                    raise WorkerClosedError("the worker is shutting down")
+            except BaseException:  # (a wait that ends without a turn must not leave its ticket)
                 self._waiting[cls].remove(ticket)
                 self._condition.notify_all()
                 raise

@@ -241,8 +241,7 @@ async def _search(
             recognition_k=max(settings.recognition_k, SEARCH_SHORTLIST),
         )
         try:
-            with backend.face_search_gate:
-                return query.search(image, _answer)
+            return query.search(image, _answer)
         except UnsupportedImageError:
             raise ApiError(
                 415,
