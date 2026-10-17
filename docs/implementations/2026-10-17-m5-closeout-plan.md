@@ -24,7 +24,7 @@ unchanged.
 
 - Documentation links and stated PR/issue dependencies inspected against the repository and GitHub
   state on 2026-10-17.
-- Independent review of PR #213 head `02921ee` found a shutdown race; it is recorded in the
+- Independent review of PR #213 on 2026-10-17 found a shutdown race; it is recorded in the
   close-out plan and on the PR. No source change was made.
 - No runtime, policy, model, user media or ignored local state was changed.
 
