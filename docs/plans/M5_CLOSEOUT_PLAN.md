@@ -26,6 +26,11 @@ model, dependency, specification, or M6 scope.
 head, every review finding is answered, all required CI checks are green on that head, and the
 owner authorizes its rebase merge. The two PRs are handled one at a time.
 
+**Current blocker (2026-10-17):** the independent review of PR #213 head `02921ee` found that
+`ClientPool.close()` can stop a worker after `execute()` but before `PerceptionClient` attaches and
+releases its shared-memory result. The PR needs active-operation draining and a deterministic
+shutdown-versus-`represent()` regression before it can be re-reviewed.
+
 ### 2. Record the live automatic-acceptance check (TST-057B)
 
 Run the real host with the owner-installed policy file in `local-models/state/policies/`, using an
