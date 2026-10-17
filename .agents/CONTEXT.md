@@ -449,6 +449,8 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 
 ## Next steps
 
+**M5 close-out plan (2026-10-17):** the owner approved [`docs/plans/M5_CLOSEOUT_PLAN.md`](../docs/plans/M5_CLOSEOUT_PLAN.md): resolve PRs #213 and #219 one at a time through exact-head review, CI and owner-authorized rebase merge; record the installed-policy real-host check and automatic-placement correction path (TST-057B); add Correction E2E (TST-054); resolve TST-044 and the owner decision on TST-038/039; then reconcile the active status documents. M6 follow-ups #180 and #221 remain out of scope.
+
 **Overnight decisions confirmed (2026-10-16):** the owner confirmed all four delegated decisions in `docs/plans/OVERNIGHT_RUN_2026-10-16.md` ("Okay, I confirm on all 4"): #174 refuses every network target by default (no approved roots yet); #179 rechecks a missing original only when a source is opened, processed or retried (never a library scan); #175 serves at most 3 face searches in a row before waiting background work; TST-058, SEC-006 and TST-059 4a/4b stay `PASSING` (TST-054 `IN_PROGRESS`).
 
 **Switching agents (2026-10-16):** when Claude Code is out of usage, continue with Codex from the repository root; `docs/guides/AGENT_HANDOFF.md` has the state pointers, the traps and the review rule for Codex-authored PRs (a fresh read-only Codex run is the independent reviewer). Keep that page current when you learn a new trap.
