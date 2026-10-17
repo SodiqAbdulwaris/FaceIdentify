@@ -44,6 +44,7 @@ from backend.app.memory.models import (
     Representation,
 )
 from backend.app.people.models import AssociationState, IdentityPersonAssociation, Person
+from backend.app.recognition.reasoner import EVIDENCE_SCHEMA_VERSION
 from backend.app.sources.models import Source, SourceState
 
 router = APIRouter(tags=["memory"])
@@ -139,11 +140,33 @@ def _brief(
 # --- occurrences ----------------------------------------------------------------------------
 
 
-_DECIDING = (
-    EvidenceKind.IDENTITY_CREATED,
-    EvidenceKind.IDENTITY_MATCHED,
+# What a person decided about a face (a correction, a merge, a split) outranks any automatic
+# decision, whatever their timestamps: a person's word is the later fact by definition.
+_BY_A_PERSON = (
     EvidenceKind.USER_CORRECTION,
+    EvidenceKind.IDENTITY_MERGED,
+    EvidenceKind.IDENTITY_SPLIT,
 )
+_DECIDING = (EvidenceKind.IDENTITY_CREATED, EvidenceKind.IDENTITY_MATCHED, *_BY_A_PERSON)
+
+
+def _match_score(evidence: Evidence) -> tuple[float | None, float | None]:
+    """The similarity and margin an automatic match was made on, when its Evidence says (version 1
+    of the recognition payload); an entry written otherwise gives nothing, never an error."""
+    payload = evidence.payload_json
+    if evidence.payload_schema_version != EVIDENCE_SCHEMA_VERSION or not isinstance(payload, dict):
+        return None, None
+    chosen = [
+        c
+        for c in payload.get("candidates") or []
+        if isinstance(c, dict) and c.get("identity_id") == payload.get("identity_id")
+    ]
+    similarity = chosen[0].get("similarity") if chosen else None
+    margin = payload.get("margin")
+    return (
+        similarity if isinstance(similarity, int | float) else None,
+        margin if isinstance(margin, int | float) else None,
+    )
 
 
 def _placements(
@@ -175,18 +198,12 @@ def _placements(
     placements: dict[uuid.UUID, tuple[Placement | None, float | None, float | None]] = {}
     for occurrence_id, observation_id in observation_of.items():
         decided = by_observation.get(observation_id, [])
-        if any(e.kind == EvidenceKind.USER_CORRECTION for e in decided):
+        if any(e.kind in _BY_A_PERSON for e in decided):
             placements[occurrence_id] = ("USER", None, None)
             continue
         for evidence in reversed(decided):
             if evidence.kind == EvidenceKind.IDENTITY_MATCHED:
-                payload = evidence.payload_json
-                chosen = [
-                    c for c in payload["candidates"] if c["identity_id"] == payload["identity_id"]
-                ]
-                placements[occurrence_id] = (
-                    "AUTOMATIC_MATCH", chosen[0]["similarity"], payload["margin"],
-                )  # fmt: skip
+                placements[occurrence_id] = ("AUTOMATIC_MATCH", *_match_score(evidence))
                 break
             if evidence.kind == EvidenceKind.IDENTITY_CREATED:
                 placements[occurrence_id] = ("AUTOMATIC_NEW", None, None)
