@@ -7,7 +7,10 @@ The application never writes it; you do. Background and evidence:
 
 ## The two files
 
-Both live in `local-models/state/policies/`:
+Both live in `<state root>/policies/`. `<state root>` is where the model package was installed
+([`INSTALLING_MODELS_WINDOWS.md`](INSTALLING_MODELS_WINDOWS.md#3-the-runtime-package)):
+`%LOCALAPPDATA%\io.github.sodiqabdulwaris.faceidentify\state` for the desktop app, or the
+`--local-state-root` you passed (in a development checkout, usually `local-models\state`).
 
 | File | Role |
 |---|---|
@@ -19,8 +22,8 @@ The full contents of each policy are in section 4 of
 the code accepts:
 
 - **On:** `buffalo-l-verified-match-v1`, match threshold 0.45, margin 0.10, no automatic new
-  identity. A face is placed only if its best similarity is at least 0.45 *and* leads the next
-  person by at least 0.10.
+  identity. A face is placed only if its best similarity is at least 0.45 *and*, when another person
+  is also a candidate, it leads that person by at least 0.10.
 - **Off:** `buffalo-l-abstain-only-v1`, `"match_threshold": 2.0`. Nothing is matched; every face
   after the first waits for you.
 
@@ -31,14 +34,16 @@ change (`APPROVED_MATCHING` in `backend/api/real.py`), not a file edit.
 ## Turn it off
 
 ```powershell
-Copy-Item local-models\state\policies\insightface-buffalo-l.abstain-only-v1.json `
-          local-models\state\policies\insightface-buffalo-l.json -Force
+$policies = "<state root>\policies"
+Copy-Item "$policies\insightface-buffalo-l.abstain-only-v1.json" "$policies\insightface-buffalo-l.json" -Force
 ```
 
 ## Turn it on
 
-Replace the live file with the `buffalo-l-verified-match-v1` JSON from section 4 of the install
-guide (the restore copy stays as it is).
+Only the abstain-only restore copy exists beside the live file. Save the `buffalo-l-verified-match-v1`
+JSON from section 4 of the install guide as `insightface-buffalo-l.verified-match-v1.json` in the
+same folder once, then switch by copying it over the live file as above (swap the source name). The
+restore copy stays as it is.
 
 ## What happens, and what does not
 
@@ -54,7 +59,7 @@ guide (the restore copy stays as it is).
 
 - The run record shows it: `policy.automatic_matching` is `true` under the on policy and `false`
   under the off one, with `policy.decision_policy_version`.
-- A matched face says "Matched automatically (similarity score …)" on the face check; a face you
-  confirmed or moved says "Checked by you." Undo a wrong match with "This is someone new" or "Move
-  this face"; the match stays on record as Evidence, the correction is added beside it.
+- A face placed automatically has `IDENTITY_MATCHED` Evidence with its similarity, the margin and
+  the policy it was made under; undo a wrong one with the face check's "This is someone new" or
+  "Move this face" (the match stays on record, the correction is added beside it).
 - Readiness (`/readiness`) shows `processing_policy: READY` for either accepted file.

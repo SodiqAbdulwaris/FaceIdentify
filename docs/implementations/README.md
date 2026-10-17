@@ -206,3 +206,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-03 | [M3: readers accept an identity-less ACTIVE candidate](2026-10-03-m3-identityless-candidates.md) | done; step 11, second part |
 | 2026-10-03 | [M3: the writer of a run's PENDING output](2026-10-03-m3-pending-output-writer.md) | done; step 7 complete; issue 88 |
 | 2026-10-03 | [M3: durable source-processing request](2026-10-03-m3-process-source-request.md) | partial; step 10 first slice; merged in PR #97 |
+| 2026-10-16 | [M5: how to turn automatic acceptance on and off](2026-10-16-automatic-acceptance-howto.md) | done; documentation only |
