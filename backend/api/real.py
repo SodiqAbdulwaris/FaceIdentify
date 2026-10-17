@@ -71,6 +71,7 @@ from backend.app.runtime.registration import (
 )
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.ml.contracts.protocol import WorkerState
+from backend.ml.supervisor.lease import WorkerLease
 from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy
 
 PACKAGE_KEY: Final = "insightface-buffalo-l"
@@ -176,6 +177,9 @@ class ClientPool:
         self._supervise = supervise
         self._lock = threading.Lock()
         self._supervisors: dict[object, MLSupervisor] = {}
+        # One turn-taking boundary for the single worker, whatever the plan (#175): a job on a
+        # frozen CPU-only plan and a search on a DirectML plan queue in the same line.
+        self.lease = WorkerLease()
         # stage -> (the provider that last ran it, whether that was a fallback)
         self._ran: dict[str, tuple[str, bool]] = {}
 
@@ -193,7 +197,11 @@ class ClientPool:
         # A client remembers which providers it has ruled out; a new one per job means each job
         # tries its preferred provider and records its own fallbacks.
         return PerceptionClient(
-            supervisor, plan, new_id=self._new_id, on_ran=lambda ran: self._record(plan, ran)
+            supervisor,
+            plan,
+            new_id=self._new_id,
+            on_ran=lambda ran: self._record(plan, ran),
+            lease=self.lease,
         )
 
     def _record(self, plan: PerceptionPlan, ran: PlannedVariant) -> None:
@@ -229,6 +237,7 @@ class ClientPool:
     def close(self) -> None:
         """Stop every worker. One that will not stop does not keep the others running; it stays in
         the pool so a second `close` tries it again, and the first failure is raised."""
+        self.lease.close()  # queued requests are refused before any worker is stopped
         with self._lock:
             held = list(self._supervisors.items())
         failures: list[Exception] = []

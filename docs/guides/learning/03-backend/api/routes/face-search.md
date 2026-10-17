@@ -16,7 +16,7 @@ returns. It is independent of matching thresholds in one respect: even when auto
 |---|---|
 | The route | `search_face` in `backend/api/routes/face_search.py` (the only `async def` route) |
 | The logic | `FaceQuery` in `backend/app/recognition/face_query.py` (same retrieval, assessment and reasoner as processing, in memory and read-only transactions) |
-| Limits | `Backend.face_search_slots` (3 at once) and `face_search_gate` (one decodes and perceives at a time) in `backend/api/startup.py` |
+| Limits | `Backend.face_search_slots` (3 at once; they take turns on the worker through the lease) in `backend/api/startup.py` |
 | The screen | `frontend/src/features/search/FaceSearch.tsx` |
 | Tests | `tests/integration/test_api_face_search.py`, `test_query_only_recognition.py` |
 

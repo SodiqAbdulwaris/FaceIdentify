@@ -175,8 +175,6 @@ class Backend:
     # Set once startup has finished, whether it opened the library or failed. Thread-safe, so a
     # test can wait for it instead of sleeping.
     settled: threading.Event = field(default_factory=threading.Event)
-    # One face search decodes and perceives at a time, so a burst cannot pile up decoded pictures.
-    face_search_gate: threading.Lock = field(default_factory=threading.Lock)
     # How many face searches may be in flight (reading, waiting or perceiving) at once: each can
     # hold a picture up to the size limit, so the memory they hold together is bounded too.
     face_search_slots: threading.BoundedSemaphore = field(
