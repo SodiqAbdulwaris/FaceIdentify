@@ -985,7 +985,13 @@ export interface components {
             identity_id: string;
             /** Kind */
             kind: string;
+            /** Match Margin */
+            match_margin: number | null;
+            /** Match Similarity */
+            match_similarity: number | null;
             person: components["schemas"]["PersonReference"] | null;
+            /** Placement */
+            placement: ("AUTOMATIC_MATCH" | "AUTOMATIC_NEW" | "USER") | null;
             representative_observation: components["schemas"]["ObservationBrief"] | null;
             /** Source Display Name */
             source_display_name: string;
