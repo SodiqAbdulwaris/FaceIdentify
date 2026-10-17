@@ -59,14 +59,17 @@ threads arrived, so a face search could wait behind any number of processing req
 - **The burst is a constant (3),** confirmed by the owner on 2026-10-16, marked `ponytail:`: the decision asks for the fairness parameter
   to be chosen from a benchmark, which needs real long runs (M6). Three means a stream of searches
   delays a processing step by at most three searches.
-- **One lease, not yet one process (a deferral that needs the owner's confirmation; the overnight
-  supervising session delegated the call to the author of this change, the owner has not seen it):** the pool still
-  keeps a supervisor, and so a worker process, per plan, because a worker is started with its plan's
-  configuration. The locked decision's contract (one inference at a time, one queue, interactive
-  first) is met by the pool-level lease. Merging the processes would mean one worker whose
-  configuration covers every plan, or restarting it on a plan change, which touches the worker
-  config, the supervisor and the pool's tests; that is its own change and is left to a follow-up on
-  #175, recorded here and on the PR. Cost until then: more than one model process may be resident.
+- **One lease, not yet one process:** the pool still keeps a supervisor, and so a worker process,
+  per plan, because a worker is started with its plan's configuration. The locked decision's
+  contract (one inference at a time, one queue, interactive first) is met by the pool-level lease.
+  Merging the processes would mean one worker whose configuration covers every plan, or restarting
+  it on a plan change, which touches the worker config, the supervisor and the pool's tests. Cost
+  until then: more than one model process may be resident.
+
+  > **Decision 2026-10-17:** the owner accepted the deferral: "Accept the deferral: merge #213 once
+  > green, and open a follow-up on #175 to make the pool own exactly one worker process across
+  > plans (restart on plan change), with tests proving only one worker is spawned." The follow-up
+  > is [#221](https://github.com/SodiqAbdulwaris/FaceIdentify/issues/221).
 - **Interactivity is a context variable,** not a new parameter on every client: face search is the
   only interactive caller, and the client factories are shared with processing and with tests.
 - **Not built (listed for the M6 work):** batch yield boundaries for long jobs, cancelling a request
@@ -85,4 +88,4 @@ threads arrived, so a face search could wait behind any number of processing req
 
 ## Open issues / follow-ups
 
-- #175 stays open for the parts listed under *Not built* and for the single worker process above.
+- #175 stays open for the parts listed under *Not built* and for the single worker process above (#221).
