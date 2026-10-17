@@ -29,8 +29,10 @@ Resolving the old faces (or the owner confirming them) is what lets later pictur
   occurrence's representative face as SUBJECT; any `USER_CORRECTION` wins over an automatic
   decision whatever the timestamps. The generated OpenAPI document and TypeScript types follow.
 - `FaceCorrection` (source screen and identity page) says "Matched automatically (similarity score
-  0.97, lead 0.31). Check it, and move it if it is wrong." for an automatic match and "Checked by
-  you." after a person's decision; the open panel says "matched automatically to".
+  0.97, lead 0.31). Check it, and move it if it is wrong." for an automatic match, "Created
+  automatically as a new person. Check it, and move it if it is wrong." for the first automatic
+  identity, and "Checked by you." after a person's decision; the open panel says "matched
+  automatically to".
 - Tests: `tests/integration/test_api_automatic_acceptance.py` (development host under the approved
   point: marking, score, Evidence, confirm and separate, a face abstained before the change),
   `FaceCorrection.test.tsx`; `test_a_face_can_be_read_and_confirmed` now expects `placement: USER`

@@ -23,6 +23,13 @@ function Placement({ face }: { face: Face }) {
       </p>
     )
   }
+  if (placement === 'AUTOMATIC_NEW') {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Created automatically as a new person. Check it, and move it if it is wrong.
+      </p>
+    )
+  }
   return placement === 'USER' ? (
     <p className="text-sm text-muted-foreground">Checked by you.</p>
   ) : null
