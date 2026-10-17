@@ -25,6 +25,13 @@
   `execute`, so it is serialized under the lease too. Stopping, pinging and releasing outputs do not
   take a turn (quick, not inference). A lease whose wait is interrupted removes its own ticket and
   wakes the others, and the post-grant logging is inside the release `finally`.
+- `WorkerLease.close()` (called first by `ClientPool.close()`): every waiting request and every later
+  one is refused with `WorkerClosedError` (an `MLUnavailableError`), so a queued request is never
+  granted a worker that shutdown has stopped and restarted. A request already running finishes.
+- `backend/api/routes/face_search.py`, `backend/api/startup.py`: the `face_search_gate` lock is
+  removed. It held searches outside the lease queue, so a queued background inference could be
+  chosen before a waiting search. Memory stays bounded by `face_search_slots` (3 in flight); the
+  lease serializes the inferences.
 - `backend/app/recognition/face_query.py`: face search runs its detect and represent inside
   `interactive()`. Processing is unchanged and so background.
 - Tests: `tests/concurrency/test_worker_lease.py` (ordering, FIFO, burst, mutual exclusion gated by
@@ -52,6 +59,13 @@ threads arrived, so a face search could wait behind any number of processing req
 - **The burst is a constant (3),** confirmed by the owner on 2026-10-16, marked `ponytail:`: the decision asks for the fairness parameter
   to be chosen from a benchmark, which needs real long runs (M6). Three means a stream of searches
   delays a processing step by at most three searches.
+- **One lease, not yet one process (delegated decision, owner-delegated 2026-10-16):** the pool still
+  keeps a supervisor, and so a worker process, per plan, because a worker is started with its plan's
+  configuration. The locked decision's contract (one inference at a time, one queue, interactive
+  first) is met by the pool-level lease. Merging the processes would mean one worker whose
+  configuration covers every plan, or restarting it on a plan change, which touches the worker
+  config, the supervisor and the pool's tests; that is its own change and is left to a follow-up on
+  #175, recorded here and on the PR. Cost until then: more than one model process may be resident.
 - **Interactivity is a context variable,** not a new parameter on every client: face search is the
   only interactive caller, and the client factories are shared with processing and with tests.
 - **Not built (listed for the M6 work):** batch yield boundaries for long jobs, cancelling a request
@@ -69,4 +83,4 @@ threads arrived, so a face search could wait behind any number of processing req
 
 ## Open issues / follow-ups
 
-- #175 stays open for the parts listed under *Not built*.
+- #175 stays open for the parts listed under *Not built* and for the single worker process above.

@@ -4,6 +4,7 @@ A picture goes in, the people it may show come out, and nothing is remembered: n
 job. Perception is planted (no weights); the library, the index and the recognition policy are real.
 """
 
+import asyncio
 import hashlib
 import os
 import threading
@@ -181,6 +182,34 @@ async def test_a_face_search_asks_the_worker_as_interactive_and_processing_does_
     assert searched.status_code == 200, searched.text
     assert processing == [("detect", False), ("represent", False)]
     assert marks == [("detect", True), ("represent", True)]
+
+
+async def test_two_searches_are_both_at_the_worker_boundary_together(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #175: searches are not held back outside the lease queue, where a waiting background
+    request could be chosen before them. Each holds at the barrier until the other has arrived, so
+    a gate that let only one search in at a time would break the barrier and fail both."""
+    api = processing_api
+    assert api.perception is not None
+    api.perception.vector = FACES[0]
+    await processed(api, "p.png")
+    both = threading.Barrier(2, timeout=10)
+    real = api.perception.detect
+
+    def meet(*args: Any, **kwargs: Any) -> Any:
+        both.wait()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(api.perception, "detect", meet)
+    path = str(api.image("q.png"))
+
+    first, second = await asyncio.gather(
+        api.client.post(FACE_SEARCH, json={"path": path}),
+        api.client.post(FACE_SEARCH, json={"path": path}),
+    )
+
+    assert (first.status_code, second.status_code) == (200, 200), (first.text, second.text)
 
 
 async def test_the_picture_can_be_sent_as_bytes_or_named_by_path(processing_api: Api) -> None:

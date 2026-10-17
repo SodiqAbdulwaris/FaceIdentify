@@ -13,9 +13,9 @@ from backend.api.real import ClientPool
 from backend.app.runtime.perception_client import PerceptionClient
 from backend.app.runtime.worker_config import PerceptionPlan
 from backend.ml.contracts.messages import MLRequest, MLResponse
-from backend.ml.supervisor.lease import interactive
+from backend.ml.supervisor.lease import WorkerClosedError, interactive
 from backend.ml.supervisor.supervisor import MLSupervisor
-from tests.concurrency.test_worker_lease import eventually, finish, reached
+from tests.concurrency.test_worker_lease import Watched, finish, reached, watched
 from tests.integration.test_real_profile import plan
 from tests.integration.test_runtime_perception_client import Scripted, detected
 from tests.integration.test_runtime_perception_client import picture as pixels
@@ -41,40 +41,63 @@ class Gate:
         return detected(request)
 
 
-def pool_of(gate: Gate) -> ClientPool:
-    def supervise(_plan: PerceptionPlan, _policy: Any) -> MLSupervisor:
-        return cast(MLSupervisor, Scripted(gate.answer))  # one supervisor per plan, as in life
+class Stoppable(Scripted):
+    stopped = 0
 
-    return ClientPool(uuid.uuid4, supervise=supervise)
+    def stop(self) -> None:
+        self.stopped += 1
+
+
+def pool_of(gate: Gate) -> tuple[ClientPool, Watched, list[Stoppable]]:
+    made: list[Stoppable] = []
+
+    def supervise(_plan: PerceptionPlan, _policy: Any) -> MLSupervisor:
+        made.append(Stoppable(gate.answer))  # one supervisor per plan, as in life
+        return cast(MLSupervisor, made[-1])
+
+    pool = ClientPool(uuid.uuid4, supervise=supervise)
+    condition = watched(pool.lease)
+    return pool, condition, made
 
 
 def start(
-    pool: ClientPool, which: PerceptionPlan, *, search: bool, threads: list[threading.Thread]
+    pool: ClientPool,
+    which: PerceptionPlan,
+    condition: Watched,
+    *,
+    search: bool,
+    threads: list[threading.Thread],
+    outcomes: list[BaseException] | None = None,
 ) -> None:
     client: PerceptionClient = pool.client_for(which)
 
     def run() -> None:
-        if search:
-            with interactive():
+        try:
+            if search:
+                with interactive():
+                    client.detect(pixels(64, 64))
+            else:
                 client.detect(pixels(64, 64))
-        else:
-            client.detect(pixels(64, 64))
+        except WorkerClosedError as error:
+            assert outcomes is not None
+            outcomes.append(error)
 
     thread = threading.Thread(target=run)
     thread.start()
     threads.append(thread)
+    condition.queued_one()  # its turn was asked for (granted at once if the worker was free)
 
 
 def test_requests_on_two_plans_never_run_on_the_worker_together() -> None:
     gate = Gate()
     threads: list[threading.Thread] = []
-    pool = pool_of(gate)
+    pool, condition, _ = pool_of(gate)
     cpu_only, directml = plan(1, 1), plan(2, 3)
 
-    start(pool, cpu_only, search=False, threads=threads)
+    start(pool, cpu_only, condition, search=False, threads=threads)
     reached(gate.arrived["first"])
-    start(pool, directml, search=False, threads=threads)
-    eventually(lambda: pool.lease.queued(False) == 1)
+    start(pool, directml, condition, search=False, threads=threads)
+    assert pool.lease.queued(False) == 1
     assert gate.entered == ["first"]  # the second plan's request waits for the first's
 
     gate.leave["first"].set()
@@ -87,21 +110,40 @@ def test_requests_on_two_plans_never_run_on_the_worker_together() -> None:
 def test_a_search_on_one_plan_goes_before_background_work_on_another() -> None:
     gate = Gate()
     threads: list[threading.Thread] = []
-    pool = pool_of(gate)
+    pool, condition, _ = pool_of(gate)
     cpu_only, directml = plan(1, 1), plan(2, 3)
 
-    start(pool, cpu_only, search=False, threads=threads)  # a job holds the worker
+    start(pool, cpu_only, condition, search=False, threads=threads)  # a job holds the worker
     reached(gate.arrived["first"])
-    start(pool, cpu_only, search=False, threads=threads)  # another job queues first
-    eventually(lambda: pool.lease.queued(False) == 1)
-    start(pool, directml, search=True, threads=threads)  # a search on the other plan, later
-    eventually(lambda: pool.lease.queued(True) == 1)
+    start(pool, cpu_only, condition, search=False, threads=threads)  # another job queues first
+    start(pool, directml, condition, search=True, threads=threads)  # a search, later, other plan
+    assert (pool.lease.queued(True), pool.lease.queued(False)) == (1, 1)
 
     gate.leave["first"].set()
     reached(gate.arrived["second"])
-    assert pool.lease.queued(True) == 0  # the search was served; the job is still waiting
-    assert pool.lease.queued(False) == 1
+    assert (pool.lease.queued(True), pool.lease.queued(False)) == (0, 1)  # the search went first
     gate.leave["second"].set()
     reached(gate.arrived["third"])
     gate.leave["third"].set()
     finish(threads)
+
+
+def test_closing_the_pool_refuses_a_queued_request_instead_of_restarting_a_worker() -> None:
+    gate = Gate()
+    threads: list[threading.Thread] = []
+    outcomes: list[BaseException] = []
+    pool, condition, made = pool_of(gate)
+    cpu_only, directml = plan(1, 1), plan(2, 3)
+
+    start(pool, cpu_only, condition, search=False, threads=threads)
+    reached(gate.arrived["first"])
+    start(pool, directml, condition, search=False, threads=threads, outcomes=outcomes)
+    assert pool.lease.queued(False) == 1
+
+    pool.close()  # the active inference is still running; the queued request is refused
+    finish(threads[1:])
+    assert len(outcomes) == 1
+    assert [s.stopped for s in made] == [1, 1]  # every worker was stopped, once
+    gate.leave["first"].set()
+    finish(threads)
+    assert gate.entered == ["first"]  # the refused request never reached a worker

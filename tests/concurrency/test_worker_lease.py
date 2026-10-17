@@ -8,12 +8,16 @@ every wait is asserted to have succeeded.
 """
 
 import threading
-import time
 from collections.abc import Callable
 
 import pytest
 
-from backend.ml.supervisor.lease import WorkerLease, interactive, is_interactive
+from backend.ml.supervisor.lease import (
+    WorkerClosedError,
+    WorkerLease,
+    interactive,
+    is_interactive,
+)
 
 DEADLINE = 10.0  # seconds; a correct lease answers in milliseconds, this only ends a hang
 
@@ -22,12 +26,38 @@ def reached(event: threading.Event) -> None:
     assert event.wait(DEADLINE), "the event never happened"
 
 
-def eventually(condition: Callable[[], bool]) -> None:
-    """Wait for something the lease reports (not for an assumed amount of time)."""
-    give_up = time.monotonic() + DEADLINE
-    while not condition():
-        assert time.monotonic() < give_up, "the lease never reached the expected state"
-        time.sleep(0)
+class Watched(threading.Condition):
+    """The lease's condition, reporting each request that starts to wait for its turn.
+
+    A request's ticket is queued before it waits, and the lease's lock is held until the wait
+    begins, so once `queued_one` returns the ticket is in the queue and the request is parked: the
+    tests wait for that transition itself, not for a delay and not by polling. `interrupt` makes
+    the next wait end in a `KeyboardInterrupt`, as a signal in the waiting thread would.
+    """
+
+    interrupt = False
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._arrivals = threading.Semaphore(0)
+
+    def wait_for(  # type: ignore[override]
+        self, predicate: Callable[[], bool], timeout: float | None = None
+    ) -> bool:
+        self._arrivals.release()
+        if self.interrupt:
+            self.interrupt = False
+            raise KeyboardInterrupt
+        return super().wait_for(predicate, timeout)
+
+    def queued_one(self) -> None:
+        assert self._arrivals.acquire(timeout=DEADLINE), "no request started to wait"
+
+
+def watched(lease: WorkerLease) -> Watched:
+    condition = Watched()
+    lease._condition = condition  # noqa: SLF001 - the seam that makes the queue observable
+    return condition
 
 
 def finish(threads: list[threading.Thread]) -> None:
@@ -41,6 +71,7 @@ class Line:
 
     def __init__(self, lease: WorkerLease) -> None:
         self.lease = lease
+        self.condition = watched(lease)
         self.served: list[str] = []
         self.threads: list[threading.Thread] = []
         self._release = threading.Event()
@@ -49,6 +80,7 @@ class Line:
         holder.start()
         self.threads.append(holder)
         reached(self._holding)
+        self.condition.queued_one()  # (the holder's own turn, granted at once)
 
     def _hold(self) -> None:
         with self.lease.held():
@@ -56,8 +88,6 @@ class Line:
             reached(self._release)
 
     def join(self, name: str, *, is_interactive: bool) -> None:
-        before = self.lease.queued(is_interactive)
-
         def request() -> None:
             if is_interactive:
                 with interactive(), self.lease.held():
@@ -69,7 +99,7 @@ class Line:
         thread = threading.Thread(target=request)
         thread.start()
         self.threads.append(thread)
-        eventually(lambda: self.lease.queued(is_interactive) == before + 1)
+        self.condition.queued_one()
 
     def let_go(self) -> list[str]:
         self._release.set()
@@ -110,6 +140,7 @@ def test_only_one_request_holds_the_worker_at_a_time() -> None:
     """Three requests queue behind a holder. Each, once inside, stays until the test lets it go,
     so a lease that admitted a second request would show it as an extra entry."""
     lease = WorkerLease()
+    condition = watched(lease)
     holder_in, holder_out = threading.Event(), threading.Event()
     inside = [threading.Event() for _ in range(3)]
     leave = [threading.Event() for _ in range(3)]
@@ -130,11 +161,13 @@ def test_only_one_request_holds_the_worker_at_a_time() -> None:
     holder.start()
     threads = [holder]
     reached(holder_in)
+    condition.queued_one()  # (the holder's own turn, granted at once)
     for n in range(3):
         thread = threading.Thread(target=request, args=(n,))
         thread.start()
         threads.append(thread)
-        eventually(lambda n=n: lease.queued(False) == n + 1)  # type: ignore[misc]
+        condition.queued_one()
+        assert lease.queued(False) == n + 1
     assert entered == []  # three are waiting and none got in beside the holder
 
     holder_out.set()
@@ -173,25 +206,10 @@ def test_a_failure_right_after_the_grant_still_releases_the_worker() -> None:
         pass
 
 
-class Interruptible(threading.Condition):
-    """A condition whose next wait is interrupted, as a KeyboardInterrupt in the waiting thread."""
-
-    interrupt = False
-
-    def wait_for(  # type: ignore[override]
-        self, predicate: Callable[[], bool], timeout: float | None = None
-    ) -> bool:
-        if self.interrupt:
-            self.interrupt = False
-            raise KeyboardInterrupt
-        return super().wait_for(predicate, timeout)
-
-
 def test_an_interrupted_wait_leaves_no_ticket_behind() -> None:
     lease = WorkerLease()
-    condition = Interruptible()
-    lease._condition = condition  # noqa: SLF001 - the only way to interrupt the wait itself
     line = Line(lease)
+    condition = line.condition
     outcome: list[BaseException] = []
 
     def interrupted() -> None:
@@ -204,6 +222,7 @@ def test_an_interrupted_wait_leaves_no_ticket_behind() -> None:
     condition.interrupt = True
     thread = threading.Thread(target=interrupted)
     thread.start()
+    condition.queued_one()
     finish([thread])
     assert len(outcome) == 1
     assert isinstance(outcome[0], KeyboardInterrupt)
@@ -235,3 +254,27 @@ def test_the_mark_follows_interactive_scopes_on_the_same_thread() -> None:
 def test_a_burst_below_one_is_refused() -> None:
     with pytest.raises(ValueError, match="at least one"):
         WorkerLease(burst=0)
+
+
+def test_closing_refuses_the_requests_that_wait_and_the_ones_that_come_later() -> None:
+    line = Line(WorkerLease())
+    outcome: list[BaseException] = []
+
+    def waiting() -> None:
+        try:
+            with line.lease.held():
+                raise AssertionError("a request that waited past the close must not get the worker")
+        except WorkerClosedError as error:
+            outcome.append(error)
+
+    thread = threading.Thread(target=waiting)
+    thread.start()
+    line.condition.queued_one()
+    line.lease.close()  # the holder is still inside: shutdown does not wait for the queue
+    finish([thread])
+
+    assert len(outcome) == 1
+    assert line.lease.queued(False) == 0  # the refused request left no ticket
+    with pytest.raises(WorkerClosedError), line.lease.held():
+        raise AssertionError("a request made after the close must not get the worker")
+    assert line.let_go() == []  # the holder finished normally
