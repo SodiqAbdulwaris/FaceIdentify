@@ -52,6 +52,18 @@ describe('how a face was placed', () => {
     ).toBeInTheDocument()
   })
 
+  it('explains when it created the first person automatically', async () => {
+    renderApp('/library/source/s1', [
+      { path: SOURCE, respond: detail({ processing_status: 'COMPLETED' }) },
+      { path: `${SOURCE}/media`, respond: 'bytes' },
+      { path: `${SOURCE}/occurrences`, respond: page([occurrence({ placement: 'AUTOMATIC_NEW' })]) },
+      { path: `${SOURCE}/processing-runs`, respond: page([]) },
+      { path: '/api/v1/identities', respond: page([identity({ id: 'i1' })]) },
+    ])
+
+    expect(await screen.findByText('Created automatically as a new person. Check it, and move it if it is wrong.')).toBeInTheDocument()
+  })
+
   it('says a face a person has checked was checked by them', async () => {
     renderApp('/library/source/s1', [
       { path: SOURCE, respond: detail({ processing_status: 'COMPLETED' }) },
