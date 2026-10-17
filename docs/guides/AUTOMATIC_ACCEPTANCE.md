@@ -57,9 +57,18 @@ restore copy stays as it is.
 
 ## Checking which one is live
 
-- The run record shows it: `policy.automatic_matching` is `true` under the on policy and `false`
-  under the off one, with `policy.decision_policy_version`.
+- **Reliable and read-only:** read the live file's `version` (`"buffalo-l-verified-match-v1"` is on,
+  `"buffalo-l-abstain-only-v1"` is off):
+
+  ```powershell
+  (Get-Content "<state root>\policies\insightface-buffalo-l.json" | ConvertFrom-Json).version
+  ```
+
+- A run shows only the policy it was started with (`policy.automatic_matching`,
+  `policy.decision_policy_version` on the processing-run record), so it tells you what a past run
+  used, not what the file says now.
+- `/readiness` reports `processing_policy: READY` for either accepted file, so it cannot tell them
+  apart.
 - A face placed automatically has `IDENTITY_MATCHED` Evidence with its similarity, the margin and
   the policy it was made under; undo a wrong one with the face check's "This is someone new" or
   "Move this face" (the match stays on record, the correction is added beside it).
-- Readiness (`/readiness`) shows `processing_policy: READY` for either accepted file.
