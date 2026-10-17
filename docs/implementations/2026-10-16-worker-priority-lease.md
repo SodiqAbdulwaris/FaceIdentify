@@ -59,7 +59,8 @@ threads arrived, so a face search could wait behind any number of processing req
 - **The burst is a constant (3),** confirmed by the owner on 2026-10-16, marked `ponytail:`: the decision asks for the fairness parameter
   to be chosen from a benchmark, which needs real long runs (M6). Three means a stream of searches
   delays a processing step by at most three searches.
-- **One lease, not yet one process (delegated decision, owner-delegated 2026-10-16):** the pool still
+- **One lease, not yet one process (a deferral that needs the owner's confirmation; the overnight
+  supervising session delegated the call to the author of this change, the owner has not seen it):** the pool still
   keeps a supervisor, and so a worker process, per plan, because a worker is started with its plan's
   configuration. The locked decision's contract (one inference at a time, one queue, interactive
   first) is met by the pool-level lease. Merging the processes would mean one worker whose
@@ -76,9 +77,10 @@ threads arrived, so a face search could wait behind any number of processing req
 
 ## Verification
 
-- `uv run pytest -q tests/concurrency/test_worker_lease.py tests/integration/test_api_face_search.py
-  tests/integration/test_ml_supervisor.py`: 64 passed. Full backend gate: see the PR.
-- The tests hold the worker, line requests up until the lease reports them queued, and gate each
+- `uv run pytest -q tests/concurrency/test_worker_lease.py tests/integration/test_pool_lease.py
+  tests/integration/test_api_face_search.py tests/integration/test_real_profile.py`: passed; full
+  backend suite: 3229 passed, ruff and mypy clean (2026-10-17).
+- The tests hold the worker, line requests up until an instrumented condition reports each parked, and gate each
   step on events; every wait is asserted to have succeeded and every thread to have ended.
 
 ## Open issues / follow-ups
