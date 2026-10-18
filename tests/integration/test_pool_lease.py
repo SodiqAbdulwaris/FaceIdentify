@@ -140,10 +140,13 @@ def test_closing_the_pool_refuses_a_queued_request_instead_of_restarting_a_worke
     start(pool, directml, condition, search=False, threads=threads, outcomes=outcomes)
     assert pool.lease.queued(False) == 1
 
-    pool.close()  # the active inference is still running; the queued request is refused
+    closing = threading.Thread(target=pool.close)
+    closing.start()
     finish(threads[1:])
     assert len(outcomes) == 1
-    assert [s.stopped for s in made] == [1, 1]  # every worker was stopped, once
+    assert closing.is_alive()  # shutdown drains the active worker protocol before stopping workers
+    assert [s.stopped for s in made] == [0, 0]
     gate.leave["first"].set()
-    finish(threads)
+    finish([*threads, closing])
+    assert [s.stopped for s in made] == [1, 1]  # every worker was stopped, once
     assert gate.entered == ["first"]  # the refused request never reached a worker
