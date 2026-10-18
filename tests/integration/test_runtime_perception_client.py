@@ -8,6 +8,7 @@ to say on demand (an initialisation failure, an answer for the wrong variant, a 
 
 import hashlib
 import logging
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -210,6 +211,80 @@ def test_directml_that_cannot_start_falls_back_to_the_cpu_visibly(
     }
     assert len(caplog.records) == 2  # one warning per stage
     assert f"preferred {DIRECTML} is not available" in caplog.records[0].getMessage()
+
+
+def test_pool_shutdown_waits_for_a_representation_output_to_be_released(
+    two_providers: PerceptionPlan, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A shutdown after EXECUTE cannot free the worker's output before the client attaches it."""
+    supervisors: list[MLSupervisor] = []
+
+    def supervise(plan: PerceptionPlan, policy: SupervisorPolicy) -> MLSupervisor:
+        supervisor = supervisor_for(plan, policy)
+        supervisors.append(supervisor)
+        return supervisor
+
+    pool = ClientPool(uuid.uuid4, policy=POLICY, supervise=supervise)
+    client = pool.client_for(two_providers)
+    supervisor = supervisors[0]
+    reading, release_read, shutdown_started, output_released = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    errors: list[BaseException] = []
+    read = client._read  # noqa: SLF001 - hold the precise output-attachment boundary
+    release_output = supervisor.release_output
+    stop = supervisor.stop
+    close_lease = pool.lease.close
+
+    def paused_read(response: MLResponse, asked: tuple[Any, ...]) -> tuple[Any, ...]:
+        reading.set()
+        assert release_read.wait(10), "the test never released the output reader"
+        return read(response, asked)
+
+    def observed_release(request_id: str) -> None:
+        release_output(request_id)
+        output_released.set()
+
+    def checked_stop() -> None:
+        assert output_released.is_set(), "the worker stopped before its output was released"
+        stop()
+
+    def observed_close() -> None:
+        close_lease()
+        shutdown_started.set()
+
+    monkeypatch.setattr(client, "_read", paused_read)
+    monkeypatch.setattr(supervisor, "release_output", observed_release)
+    monkeypatch.setattr(supervisor, "stop", checked_stop)
+    monkeypatch.setattr(pool.lease, "close", observed_close)
+
+    def run(call: Callable[[], None]) -> None:
+        try:
+            call()
+        except BaseException as error:  # keep thread failures in this test's assertions
+            errors.append(error)
+
+    def represent() -> None:
+        client.represent(picture(), three_faces())
+
+    representation = threading.Thread(target=lambda: run(represent))
+    representation.start()
+    assert reading.wait(10), "the representation never reached output attachment"
+
+    shutdown = threading.Thread(target=lambda: run(pool.close))
+    shutdown.start()
+    assert shutdown_started.wait(10), "the shutdown never closed the worker lease"
+    release_read.set()
+    representation.join(10)
+    shutdown.join(10)
+
+    assert not representation.is_alive(), "the representation did not finish"
+    assert not shutdown.is_alive(), "the shutdown did not finish"
+    assert not errors
+    assert output_released.is_set()
 
 
 def test_a_picture_with_no_face_is_a_result_and_nothing_is_embedded(
