@@ -13,8 +13,8 @@ inference already running is never interrupted; the next one is chosen at that s
   the inference in progress, and one background inference after a burst).
 
 A request is interactive when it is made inside `interactive()` (face search wraps its perception
-in it); everything else is background. The lease is held only for the inference itself: nothing
-here touches the database or the filesystem.
+in it); everything else is background. The lease is held through a worker request and its output
+attachment/release: nothing here touches the database or the filesystem.
 """
 
 import contextvars
@@ -81,6 +81,11 @@ class WorkerLease:
         with self._condition:
             self._closed = True
             self._condition.notify_all()
+
+    def wait_until_idle(self) -> None:
+        """Wait for the granted request to leave its worker protocol boundary."""
+        with self._condition:
+            self._condition.wait_for(lambda: not self._held)
 
     def _next(self) -> object | None:
         interactive_queue, background = self._waiting[True], self._waiting[False]

@@ -449,6 +449,12 @@ M1 is delivered as a series of small PRs, each reviewed and green before the nex
 
 ## Next steps
 
+**PR #213 shutdown race (2026-10-18):** after `EXECUTE` returned a representation's shared-memory
+descriptor, shutdown could stop the worker before the client attached and released that output. The
+lease now covers the full worker-output protocol and `ClientPool.close()` drains it before stopping
+supervisors; the deterministic regression holds precisely at that boundary. The update is awaiting
+independent review and exact-head CI before a user-authorized merge.
+
 **Overnight decisions confirmed (2026-10-16):** the owner confirmed all four delegated decisions in `docs/plans/OVERNIGHT_RUN_2026-10-16.md` ("Okay, I confirm on all 4"): #174 refuses every network target by default (no approved roots yet); #179 rechecks a missing original only when a source is opened, processed or retried (never a library scan); #175 serves at most 3 face searches in a row before waiting background work; TST-058, SEC-006 and TST-059 4a/4b stay `PASSING` (TST-054 `IN_PROGRESS`).
 
 **Switching agents (2026-10-16):** when Claude Code is out of usage, continue with Codex from the repository root; `docs/guides/AGENT_HANDOFF.md` has the state pointers, the traps and the review rule for Codex-authored PRs (a fresh read-only Codex run is the independent reviewer). Keep that page current when you learn a new trap.

@@ -142,13 +142,14 @@ class PerceptionClient:
     ) -> Detected:
         with SegmentLedger(new_id=self._new_id) as ledger:
             image = _put(ledger, pixels)
-            _, response, ran, fallbacks = self._attempt(
-                "the face detector",
-                self._plan.detector,
-                lambda variant: self._request(
-                    MLOperation.DETECT_FACES, variant, DetectFacesInput((image,)), context
-                ),
-            )
+            with self._lease.held() if self._lease else nullcontext():
+                _, response, ran, fallbacks = self._attempt(
+                    "the face detector",
+                    self._plan.detector,
+                    lambda variant: self._request(
+                        MLOperation.DETECT_FACES, variant, DetectFacesInput((image,)), context
+                    ),
+                )
         assert isinstance(response.output, DetectFacesOutput)  # (the operation's own output)
         # (a detection makes no worker segments, so there is nothing to release_output here)
         self._heard(ran)
@@ -168,20 +169,21 @@ class PerceptionClient:
         asked = tuple(FaceGeometry(0, d.detection_index, d.box, d.landmarks) for d in detections)
         with SegmentLedger(new_id=self._new_id) as ledger:
             image = _put(ledger, pixels)
-            request, response, ran, fallbacks = self._attempt(
-                "the face embedder",
-                self._plan.embedder,
-                lambda variant: self._request(
-                    MLOperation.GENERATE_REPRESENTATIONS,
-                    variant,
-                    GenerateRepresentationsInput((image,), asked),
-                    context,
-                ),
-            )
-            try:
-                represented = Represented(self._read(response, asked), ran, fallbacks)
-            finally:
-                self._supervisor.release_output(request.request_id)
+            with self._lease.held() if self._lease else nullcontext():
+                request, response, ran, fallbacks = self._attempt(
+                    "the face embedder",
+                    self._plan.embedder,
+                    lambda variant: self._request(
+                        MLOperation.GENERATE_REPRESENTATIONS,
+                        variant,
+                        GenerateRepresentationsInput((image,), asked),
+                        context,
+                    ),
+                )
+                try:
+                    represented = Represented(self._read(response, asked), ran, fallbacks)
+                finally:
+                    self._supervisor.release_output(request.request_id)
         self._heard(ran)  # (after the release: an observer that fails cannot leak the output)
         return represented
 
@@ -219,8 +221,7 @@ class PerceptionClient:
             if _key(variant) in self._ruled_out:
                 continue
             request = build(variant)
-            with self._lease.held() if self._lease else nullcontext():
-                response = self._supervisor.execute(request)
+            response = self._supervisor.execute(request)
             if response.status is MLStatus.SUCCESS:
                 self._check_it_was_that_variant(request, response, variant)
                 return (
