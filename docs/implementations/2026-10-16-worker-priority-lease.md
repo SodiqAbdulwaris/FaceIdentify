@@ -89,8 +89,9 @@ threads arrived, so a face search could wait behind any number of processing req
 - `uv run ruff format --check backend/api/real.py backend/app/runtime/perception_client.py
   backend/ml/supervisor/lease.py tests/integration/test_runtime_perception_client.py` and
   `uv run ruff check` on the same files: passed (2026-10-18).
-- `uv run pytest tests/integration/test_runtime_perception_client.py`: 38 passed (2026-10-18),
-  including the shutdown-versus-representation regression.
+- `uv run pytest tests/integration/test_pool_lease.py
+  tests/integration/test_runtime_perception_client.py`: 41 passed (2026-10-18), including the
+  shutdown-versus-representation regression and the active-inference drain.
 - The tests hold the worker, line requests up until an instrumented condition reports each parked, and gate each
   step on events; every wait is asserted to have succeeded and every thread to have ended.
 
