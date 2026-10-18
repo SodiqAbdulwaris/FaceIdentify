@@ -26,7 +26,7 @@ function Placement({ face }: { face: Face }) {
   if (placement === 'AUTOMATIC_NEW') {
     return (
       <p className="text-sm text-muted-foreground">
-        Created automatically as a new person. Check it, and move it if it is wrong.
+        Created automatically as a new identity. Check it, and move it if it is wrong.
       </p>
     )
   }
