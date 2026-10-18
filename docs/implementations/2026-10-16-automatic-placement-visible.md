@@ -26,8 +26,9 @@ Resolving the old faces (or the owner confirming them) is what lets later pictur
 - `OccurrenceSummary` gains `placement` (`AUTOMATIC_MATCH`, `AUTOMATIC_NEW` for the first face of an
   empty library, `USER`, or `null` when no decision is recorded), `match_similarity` and
   `match_margin` (the margin is `null` with one candidate). It is read from the Evidence citing the
-  occurrence's representative face as SUBJECT; any `USER_CORRECTION` wins over an automatic
-  decision whatever the timestamps. The generated OpenAPI document and TypeScript types follow.
+  occurrence's representative face as SUBJECT; `USER_CORRECTION`, `IDENTITY_MERGED`, and
+  `IDENTITY_SPLIT` are the owner's later placement decisions and clear an automatic label and
+  scores whatever the timestamps. The generated OpenAPI document and TypeScript types follow.
 - `FaceCorrection` (source screen and identity page) says "Matched automatically (similarity score
   0.97, lead 0.31). Check it, and move it if it is wrong." for an automatic match, "Created
   automatically as a new person. Check it, and move it if it is wrong." for the first automatic
