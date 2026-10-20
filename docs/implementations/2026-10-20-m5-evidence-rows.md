@@ -3,7 +3,7 @@
 - **Date:** 2026-10-20
 - **Milestone / tracker IDs:** M5 close-out step 4; TST-044, TST-038, TST-039
 - **Status:** done; documentation only (no code, threshold, policy, model or spec changed)
-- **Commits:** PR (number recorded when merged): `docs: close the M5 evidence rows`
+- **Commits:** PR #223: `docs: close the M5 evidence rows`
 
 ## What changed
 

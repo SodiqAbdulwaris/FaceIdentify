@@ -33,7 +33,28 @@ acceptance now that the live policy is installed; the smoke test was reported do
 | 17 | CI green on `main` | **Met up to `fa9ef67`; `210bcce` pending** | `push` runs on `main`: `16323bf` and `fa9ef67` succeeded (all six jobs); the run at `210bcce` (PR 206, docs only) had five jobs green and the backend tests still running when this was written |
 | 18 | CONTEXT, PROJECT_STATUS, the implementation log and the tracker agree | **Not met** | The tracker lags the implementation log: rows 1 to 4, the stale TST-038/039 writer row (row 8) and TST-044 (row 9) |
 
-## What would close M5, in order
+## Update 2026-10-20: current verdicts
+
+The table above is the 2026-10-16 snapshot and stays as it was. Since then close-out steps 1 to 5
+([plan](M5_CLOSEOUT_PLAN.md)) landed; against the repository on 2026-10-20 (main `dc93779`):
+
+| # | Now | Evidence |
+|---|---|---|
+| 1 to 4 | **Met** | TST-054 (with its end-to-end proof, PR 224), TST-058, TST-059 4a/4b/4c and SEC-006 rows are `PASSING` in the tracker |
+| 5, 6 | **Met** | TST-055 and TST-056 `PASSING` |
+| 7 | **Met** | TST-057A `PASSING`; TST-057B `PASSING`, confirmed by the owner on 2026-10-20 (PR 219) |
+| 8 | **Met** | TST-038 and TST-039 `PASSING` on local real-weight evidence by owner decision, 2026-10-20 (PR 223); the stale `BLOCKED` row is retired |
+| 9 | **Met** | TST-044 `PASSING`, reviewed against the 48-identity operating point and the DirectML re-measure (PR 223) |
+| 10 to 12 | **Met** | Issues #69, #80 and #137 are closed |
+| 13 | **Met, with the same gap** | the smoke test's checklist outcomes were never itemised; `M5_REMAINING_WORK.md` item 8 now says so |
+| 14 | **Met by tests** | the workflow suites behind rows 1 to 4 are `PASSING` |
+| 15, 17 | **To be re-run** | the full-gate and CI-on-`main` checks are done by the separate full-gate run, not claimed here |
+| 16 | **Met on 2026-10-16; the desktop job also runs the new correction test** | CI job "Desktop shell (TST-047)" |
+| 18 | **Met by the reconciliation PR** | CONTEXT, PROJECT_STATUS, the log, the tracker and these plans agree |
+
+**M5 is not declared complete here.** That waits for the full-gate run on `main` and the owner.
+
+## What would close M5, in order (2026-10-16; items 1 to 4 are done, see the update above)
 
 1. A tracker-only PR that adds or closes TST-054, TST-058, TST-059 (4a, 4b) and SEC-006 rows with
    the test files and counts from their implementation entries (re-running those suites to quote
