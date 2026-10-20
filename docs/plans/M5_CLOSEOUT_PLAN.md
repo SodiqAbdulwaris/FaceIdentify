@@ -71,6 +71,8 @@ TST-054 is `PASSING`.
 **Acceptance criteria:** each status change cites concrete tests or reports, and no superseded
 `BLOCKED` or pre-install wording remains in the active tracker row.
 
+**Done (2026-10-20):** TST-044 reviewed and `PASSING` (reproducible commands, report files and numbers recorded; not `COMPLETE`); TST-038 and TST-039 `PASSING` on local real-weight evidence by owner decision ([entry](../implementations/2026-10-20-m5-evidence-rows.md)).
+
 ### 5. Reconcile documentation and issues
 
 After the preceding evidence lands, make one docs-only reconciliation PR covering

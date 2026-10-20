@@ -211,3 +211,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-03 | [M3: durable source-processing request](2026-10-03-m3-process-source-request.md) | partial; step 10 first slice; merged in PR #97 |
 | 2026-10-16 | [M5: how to turn automatic acceptance on and off](2026-10-16-automatic-acceptance-howto.md) | done; documentation only |
 | 2026-10-20 | [TST-054: the correction end-to-end test](2026-10-20-correction-e2e.md) | done; PR to be recorded |
+| 2026-10-20 | [M5: tracker rows TST-044, TST-038 and TST-039](2026-10-20-m5-evidence-rows.md) | done; documentation only |
