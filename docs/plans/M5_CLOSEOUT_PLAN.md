@@ -41,9 +41,9 @@ the existing application flow.
 stranger abstention, and correction outcome are recorded in an implementation entry and the
 TST-057B tracker row. Tests and user data stay isolated from the live library.
 
-**Progress (2026-10-20):** PR #219 recorded an isolated real-host check under the installed
-policy ([entry](../implementations/2026-10-16-automatic-placement-visible.md)); TST-057B is proposed `PASSING` and awaits the
-owner's confirmation before this step is done.
+**Done (2026-10-20):** PR #219 recorded an isolated real-host check under the installed
+policy ([entry](../implementations/2026-10-16-automatic-placement-visible.md)); TST-057B is `PASSING`, confirmed by the
+owner on 2026-10-20.
 
 ### 3. Add the missing correction end-to-end proof (TST-054)
 
