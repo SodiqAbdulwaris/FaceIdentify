@@ -42,7 +42,7 @@ Related ideas:
   and it counts the *identity*, not how many photos it has, so a person with many photos is not favoured.
 - **Assisted versus automatic.** The owner decided on 2026-10-08 that the system first *assists* (ranked
   possible matches, you confirm), and that *automatic* recognition is a separate claim, blocked until a
-  verified evaluation exists (TST-057B).
+  verified evaluation exists; that evaluation was done and the owner enabled it (TST-057B `PASSING`, confirmed 2026-10-20).
 
 > **Decision 2026-10-15:** the owner decided to enable automatic acceptance (automatic cross-source recognition, TST-057B): "the we're enabling auto-acceptance, we can do that". The 2026-10-14 conditions 1 to 4 were met on 2026-10-15 (48-identity verified set, hard negatives, the conservative rule on a verified manifest with zero false accepts); this is the code change of condition 5: `require_abstain_first` became `require_approved_policy` in `backend/api/real.py`, which admits a matching policy only when it equals an operating point in `APPROVED_MATCHING` (a policy file alone still cannot enable matching; automatic new identities stay off). **The owner confirmed option A on 2026-10-15:** "A: threshold 0.45, margin 0.10, no automatic new identity." (`buffalo-l-verified-match-v1`; options and evidence in [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md)).
 
@@ -108,8 +108,8 @@ unplaced face can never be matched to, which prevents a face from silently attac
 1. Open-set identification.
 2. The best face is the strongest evidence of "same person" (a different angle or age may match well while
    the average is dragged down); counts would favour people with many photos.
-3. Assisted ranks possible matches and you confirm (TST-057A); automatic assigns without you and is not
-   claimed until its quality is measured on verified data (TST-057B, blocked).
+3. Assisted ranks possible matches and you confirm (TST-057A); automatic assigns without you and was not
+   claimed until its quality was measured on verified data (TST-057B, now `PASSING`).
 4. It assumes the person is always known; a library has many strangers.
 
 ## 8. Related files

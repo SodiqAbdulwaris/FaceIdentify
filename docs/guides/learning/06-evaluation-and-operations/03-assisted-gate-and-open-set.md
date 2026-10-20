@@ -35,7 +35,7 @@ The labels are still Commons categories unless you pass a **verified manifest** 
 second run on that subset scored 1.000 on 18 queries, which suggests much of the earlier gap was label noise and group photographs rather than the model. The entry
 is explicit that this **does not pass TST-057B** (automatic recognition): the verified set is far below the targets (9 of 40 identities with five or more photographs, 18 of 80
 queries), the owner verified only photographs they could confidently identify (a selection bias that leaves the hard cases out), and 18 queries support no claim beyond "no
-failures were seen". The open-set run added strangers: none of 25 was accepted as a known person. TST-057B stays `BLOCKED`.
+failures were seen". The open-set run added strangers: none of 25 was accepted as a known person. TST-057B stayed `BLOCKED` at that point; it is `PASSING` since the owner's 2026-10-20 confirmation.
 
 ## 4. Try it
 
