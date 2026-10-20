@@ -30,4 +30,8 @@ unchanged.
 
 ## Open issues / follow-ups
 
-PR #213 needs a shutdown-drain fix before re-review. M5 is not yet complete.
+PR #213 needed a shutdown-drain fix before re-review. M5 is not yet complete.
+
+**Update 2026-10-20:** PR #213 merged on 2026-10-19 with that drain and its regression; this
+branch was rebased onto `main` (shared-doc conflicts only, each long line merged into one) and
+the plan's blocker text, `.agents/CONTEXT.md` and `docs/plans/PROJECT_STATUS.md` now say so.
