@@ -12,7 +12,7 @@ Questions, and what the code did before this change:
 | Question | Finding |
 |---|---|
 | Is an automatically accepted face distinguishable from a confirmed one, in the API and the UI? | **No.** `OccurrenceSummary` carried no origin, so the screens showed an automatic match exactly like a person's decision. **Fixed here.** |
-| Can the owner see and undo it? | Yes. `POST /occurrences/{id}/confirm` and `/reassign` (to another identity, or `identity_id: null` to separate it) and the identity page's split and merge all work on a matched face; each writes `USER_CORRECTION` Evidence and rewrites nothing. Now covered by a test on a matched face. |
+| Can the owner see and undo it? | Yes. `POST /occurrences/{id}/confirm` and `/reassign` (to another identity, or `identity_id: null` to separate it) and the identity page's split and merge all work on a matched face; confirm and reassign write `USER_CORRECTION` Evidence, split and merge write `IDENTITY_SPLIT` and `IDENTITY_MERGED`, and none rewrites anything. Now covered by a test on a matched face. |
 | Does Evidence record the automatic decision with similarity and margin? | Yes. `IDENTITY_MATCHED` Evidence carries the outcome, reason, candidates with similarity, `margin` and the policy (version, threshold, margin). Now asserted end to end over HTTP. |
 | Do faces processed before the policy change stay abstained? | Yes. Nothing re-decides an abstention; a restart under the new policy leaves it, its Evidence and its missing occurrence untouched. Now asserted. |
 
