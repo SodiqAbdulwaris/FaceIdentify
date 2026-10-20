@@ -25,7 +25,7 @@ stops you from trusting a stale one.
   [`PROJECT_STATUS.md`](../../../plans/PROJECT_STATUS.md), the single page to trust for "where are we".
 - **Tracker statuses** (a legend at its top): `PLANNED`, `IN_PROGRESS`, `BLOCKED`, `PASSING` (the implemented test currently passes) and
   `COMPLETE` (test, docs, CI and review all finished). A row is marked only when verified; **this restructure marks none**. Example of honesty:
-  `TST-057A` is `PASSING` with "recognition quality explicitly unverified"; `TST-057B` (automatic recognition) is `BLOCKED` pending calibration.
+  `TST-057A` is `PASSING` with "recognition quality explicitly unverified"; `TST-057B` (automatic recognition) was `BLOCKED` pending calibration until the owner enabled it; it is `PASSING` since 2026-10-20.
 - **Decisions** are written where they live: a dated `Decision` note in the plan, a numbered item in `CONTEXT.md`, and the reasoning in the
   implementation entry. When documents disagree, the rule is: **ask the owner, with a recommendation, then update every affected document**
   ([documentation rules](../../../../.agents/rules/documentation.md)).
@@ -50,7 +50,7 @@ ls docs/implementations | tail -5                                               
 grep -n "New to the code" docs/plans/PROJECT_STATUS.md                           # the one link to this guide
 ```
 
-Observed: `TST-057A` shows `PASSING` and `TST-057B` shows `BLOCKED`; `PASSING` appears on 47 lines (rows plus legend and prose, so not a precise count of tests);
+Observed: `TST-057A` and `TST-057B` both show `PASSING` (the latter after being `BLOCKED` pending calibration); `PASSING` appears on 47 lines (rows plus legend and prose, so not a precise count of tests);
 `docs/implementations/` holds 136 files (its README plus the entries). Then open `PROJECT_STATUS.md` and find, in under two minutes: the current milestone, one thing that is
 **not** built, and the open blocker (the model licence).
 
