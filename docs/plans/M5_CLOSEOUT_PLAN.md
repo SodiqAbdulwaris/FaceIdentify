@@ -55,6 +55,10 @@ end-to-end layer.
 **Acceptance criteria:** the new test is deterministic, uses the existing harness and no wall-clock
 coordination, and the relevant desktop and frontend checks pass.
 
+**Done (2026-10-20):** the second test in `frontend/e2e/workflow.e2e.tsx` moves, marks "someone new" and confirms faces
+through the app and finds them placed the same after a restart ([entry](../implementations/2026-10-20-correction-e2e.md));
+TST-054 is `PASSING`.
+
 ### 4. Resolve evidence-only tracker rows
 
 1. Review TST-044 against the 48-identity verified operating point and DirectML re-measure. Mark
