@@ -37,3 +37,8 @@ branch was rebased onto `main` (shared-doc conflicts only, each long line merged
 the plan's blocker text, `.agents/CONTEXT.md` and `docs/plans/PROJECT_STATUS.md` now say so.
 PR #219 then merged on 2026-10-20; the branch was rebased again and step 1 marked done, with
 TST-057B left as proposed `PASSING` for the owner to confirm.
+
+**Update 2026-10-20:** the owner accepted all six close-out recommendations: TST-057B is `PASSING` (step 2 done);
+TST-038/039 close on local evidence (applied in step 4); #173 closed; #183 stays open for M8; #175 stays open
+for M6 step 2; M6 D1 to D10 are decided after M5 closes. `.agents/CONTEXT.md`, `PROJECT_STATUS.md`, this plan and the
+tracker row now say so.
