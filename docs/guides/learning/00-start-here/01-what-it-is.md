@@ -53,7 +53,7 @@ The vocabulary is taught properly in [03-backend/domain](../03-backend/domain/RE
 | Fake models (the *development profile*) so everything can be tried with no model files | [built] |
 | The desktop window that starts and stops the backend | [built] |
 | Measuring recognition quality (scripts in `evaluation/`) | [built]; needs local-only data |
-| Calibrated **automatic** matching | [designed]; blocked until a verified evaluation set exists (TST-057B) |
+| Calibrated **automatic** matching | built and enabled at the owner-approved operating point after a verified evaluation (TST-057B `PASSING`, confirmed 2026-10-20) |
 | Movies (M6), cameras (M7), installer and packaged runtime (M8) | [designed]; not started |
 
 > **Decision 2026-10-15:** the owner decided to enable automatic acceptance (automatic cross-source recognition, TST-057B): "the we're enabling auto-acceptance, we can do that". The 2026-10-14 conditions 1 to 4 were met on 2026-10-15 (48-identity verified set, hard negatives, the conservative rule on a verified manifest with zero false accepts); this is the code change of condition 5: `require_abstain_first` became `require_approved_policy` in `backend/api/real.py`, which admits a matching policy only when it equals an operating point in `APPROVED_MATCHING` (a policy file alone still cannot enable matching; automatic new identities stay off). **The owner confirmed option A on 2026-10-15:** "A: threshold 0.45, margin 0.10, no automatic new identity." (`buffalo-l-verified-match-v1`; options and evidence in [`docs/implementations/2026-10-15-enable-automatic-acceptance.md`](../../../../docs/implementations/2026-10-15-enable-automatic-acceptance.md)).
