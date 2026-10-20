@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { screen, waitFor, within } from '@testing-library/react'
 import { render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '@/app/App'
 import type { BackendStatus } from '@/native/backend'
 import { type RunningBackend, startBackend } from './backend'
@@ -41,8 +41,8 @@ function picture(name: string, colour: [number, number, number]): string {
   return path
 }
 
-async function launch() {
-  backend = await startBackend(join(root, 'library'), join(root, 'local'))
+async function launch(library = 'library') {
+  backend = await startBackend(join(root, library), join(root, `local-${library}`))
   shell.status = { state: 'ready', connection: backend.connection }
 }
 
@@ -54,12 +54,17 @@ async function quit(): Promise<number | null> {
 }
 
 beforeAll(() => {
-  vi.stubGlobal('WebSocket', TestSocket)
   root = mkdtempSync(join(tmpdir(), 'faceidentify-e2e-'))
   pictures = join(root, 'pictures')
   mkdirSync(join(root, 'library'))
+  mkdirSync(join(root, 'corrections'))
   mkdirSync(pictures)
   window.location.hash = '#/library'
+})
+
+// (restored after every test by the config, so set again before each one)
+beforeEach(() => {
+  vi.stubGlobal('WebSocket', TestSocket)
 })
 
 afterAll(async () => {
@@ -154,6 +159,112 @@ describe('the desktop image workflow', () => {
         '3 appearances in 3 images',
       ])
     }, LONG)
+    expect(await quit()).toBe(0)
+  }, 600_000)
+
+  it('keeps the corrections (confirm, move, someone new) after a restart', async () => {
+    const user = userEvent.setup()
+    const pick = [
+      picture('c-red.png', [200, 10, 10]),
+      picture('c-also-red.png', [200, 10, 10]),
+      picture('c-blue.png', [10, 10, 200]),
+    ]
+    const personName = /Person [0-9A-F]{6}/
+    // the emptied person stays in the library, with no appearances
+    const AFTER = [
+      '0 appearances in 0 images',
+      '1 appearance in 1 image',
+      '2 appearances in 2 images',
+    ]
+    const openImage = async (name: string) => {
+      await user.click(screen.getByRole('link', { name: 'Library' }))
+      await user.click((await screen.findAllByRole('link', { name }, LONG))[0])
+      expect(
+        await screen.findByRole('heading', { name: 'People in this image' }, LONG),
+      ).toBeInTheDocument()
+    }
+    const check = async (name: string, choose: () => Promise<void>) => {
+      await openImage(name)
+      await user.click(await screen.findByRole('button', { name: 'Check this face' }, LONG))
+      await choose()
+      expect(await screen.findByText('Checked by you.', {}, LONG)).toBeInTheDocument()
+    }
+    const faceOf = async () =>
+      (await screen.findByRole('link', { name: /: open$/ }, LONG))
+        .getAttribute('aria-label')!
+        .replace(': open', '')
+    const peopleNow = async (expected: string[]) => {
+      await user.click(screen.getByRole('link', { name: 'People' }))
+      await waitFor(() => {
+        const now = screen.getAllByRole('link', { name: personName })
+        expect(now.map((p) => within(p).getByText(/appearances? in/).textContent).sort()).toEqual(
+          expected,
+        )
+      }, LONG)
+    }
+
+    // --- first launch: three images, two people (red twice, blue once) -----------------------
+    window.location.hash = '#/library' // the earlier test left the address on People
+    await launch('corrections')
+    const first = render(<App />)
+    expect(await screen.findByText('No images yet', {}, LONG)).toBeInTheDocument()
+    shell.pick = pick
+    await user.click(screen.getByRole('button', { name: 'Import images' }))
+    for (const name of ['c-red', 'c-also-red', 'c-blue']) {
+      await user.click(await screen.findByRole('button', { name: `Process ${name}` }, LONG))
+    }
+    await waitFor(() => expect(screen.getAllByText('Done')).toHaveLength(3), LONG)
+    await peopleNow(['1 appearance in 1 image', '2 appearances in 2 images'])
+    const twice = screen
+      .getAllByRole('link', { name: personName })
+      .find((p) => /2 appearances/.test(p.textContent ?? ''))!
+    const redPerson = within(twice).getByText(personName).textContent!
+
+    // move the blue face to the person already seen twice (an existing identity)
+    await check('c-blue', async () => {
+      await user.selectOptions(
+        screen.getByLabelText('This is someone already in the library'),
+        redPerson,
+      )
+      await user.click(screen.getByRole('button', { name: 'Move this face' }))
+    })
+    expect(
+      await screen.findByRole('link', { name: `${redPerson}: open` }, LONG),
+    ).toBeInTheDocument()
+
+    // say the second red face is someone new (a new identity)
+    await check('c-also-red', async () => {
+      await user.click(screen.getByRole('button', { name: 'This is someone new' }))
+    })
+    const newPerson = await faceOf()
+    expect(newPerson).not.toBe(redPerson)
+
+    // confirm the first red face where it is
+    await check('c-red', async () => {
+      await user.click(screen.getByRole('button', { name: `Yes, this is ${redPerson}` }))
+    })
+    await peopleNow(AFTER)
+
+    // --- restart: the corrections are the authoritative placement ---------------------------
+    first.unmount()
+    window.location.hash = '#/library'
+    expect(await quit()).toBe(0)
+    await launch('corrections')
+    render(<App />)
+    expect(await screen.findByText('c-blue', {}, LONG)).toBeInTheDocument()
+    await peopleNow(AFTER)
+    const after = screen.getAllByRole('link', { name: personName }).map((p) => p.textContent ?? '')
+    expect(after.some((t) => t.includes(redPerson) && /2 appearances/.test(t))).toBe(true)
+    expect(after.some((t) => t.includes(newPerson) && /1 appearance /.test(t))).toBe(true)
+    for (const [image, person] of [
+      ['c-blue', redPerson],
+      ['c-also-red', newPerson],
+      ['c-red', redPerson],
+    ]) {
+      await openImage(image)
+      expect(await screen.findByRole('link', { name: `${person}: open` }, LONG)).toBeInTheDocument()
+      expect(await screen.findByText('Checked by you.', {}, LONG)).toBeInTheDocument()
+    }
     expect(await quit()).toBe(0)
   }, 600_000)
 })
