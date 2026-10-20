@@ -15,8 +15,8 @@ model, dependency, specification, or M6 scope.
 
 ### 1. Resolve the active PR queue
 
-1. **Done (2026-10-19):** PR #213 was re-reviewed at its exact head and merged. Close #175 only if
-   the PR's accepted scope is met; leave #221 open for M6's one-worker-process follow-up.
+1. **Done (2026-10-19):** PR #213 was re-reviewed at its exact head and merged. #175 stays open for M6
+   step 2's remaining tests (owner, 2026-10-20); leave #221 open for M6's one-worker-process follow-up.
 2. **Done (2026-10-20):** PR #219 was re-reviewed at its exact head (its findings answered), passed
    exact-head CI and merged on the owner's instruction.
 
@@ -75,8 +75,8 @@ plans, the implementation log and a dated implementation entry. It removes only 
 become demonstrably stale.
 
 Issue handling is individual: #174 remains open for its documented residual race; #180 and #221
-remain M6 work; #173, #176, #181 and #183 remain open unless their own criteria are independently
-met. Verify #66 against its actual UnitOfWork work before deciding whether it is stale.
+remain M6 work; #173 is closed and #175 stays open for M6 step 2 (owner decisions, 2026-10-20); #183 stays
+open as an M8 release blocker; #176 and #181 remain open unless their own criteria are independently met. Verify #66 against its actual UnitOfWork work before deciding whether it is stale.
 
 **Acceptance criteria:** the status documents agree, every retained issue has a current reason,
 and no deferred M6 work is presented as complete.
