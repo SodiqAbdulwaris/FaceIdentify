@@ -24,7 +24,7 @@ existed; the desktop workflow test named nobody and corrected nothing.
 ## Decisions
 
 An identity emptied by a move stays in the library with no appearances, so the test expects it
-(0, 1 and 2 appearances). No wall-clock waits, no new dependency; existing tests unchanged.
+(0, 1 and 2 appearances). The new test adds no wall-clock waits and no dependency; existing tests are unchanged. The existing `afterAll` cleanup retry (`rmSync` with `retryDelay`, for Windows file handles) is untouched: it is teardown, not test coordination, and was not added here.
 
 ## Verification
 
