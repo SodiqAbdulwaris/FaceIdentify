@@ -33,15 +33,15 @@ Criterion (tracker M3 table): "Reproducible component baselines exist". Verdict:
 - **Reports named:** `operating-point-celebs-commons-48-conservative.json`,
   `operating-point-celebs-commons-48-conservative-dml.json`, `gate-celebs-commons-hard-wide-dml.json`
   and the CPU gate report, in the Git-ignored `evaluation/datasets/reports/`. The operating-point script
-  records the manifest digest and `verified_labels` in its report, the gate records the pool manifest's SHA-256
-  and the provider that ran; the weights digest is recorded in the 2026-10-07 baseline
+  records the manifest digest and `verified_labels` in its report, the gate records the hard-negative pool manifest's SHA-256
+  ([entry](2026-10-15-m5-gate-hard-negatives.md)) and the provider that ran; the weights digest is recorded in the 2026-10-07 baseline
   ([research note](../research/measured-operating-point.md)).
 - **Numbers recorded:** 48 identities / 686 photographs; point 0.3314 / 0.02 chosen on the selection half;
   final half 156 of 156 correct, 0 false accepts, recall 0.994; the gate's Recall@1/5/MRR
   0.983 / 0.992 / 0.986 with 0 strangers accepted among 15 hard negatives; DirectML identical, embedding
   drift 1.25e-6. The first baseline (2026-10-07) records the weights digest and dataset manifest SHA-256.
-- **Why not `COMPLETE`:** the data and reports are licensed or local and cannot be in CI, so the baseline
-  is reproducible by the owner's machine rather than by a CI job. Gaps, for honesty: the verified
+- **Why not `COMPLETE`:** the data and reports are licensed or local (Git-ignored), and no CI integration or review of
+  the baseline is evidenced, so it is reproducible on the owner's machine rather than by a CI job. Gaps, for honesty: the verified
   export's manifest SHA-256 and the 48-identity weights digest are in the Git-ignored reports, not in
   these entries; the operating-point script records only the provider it was asked for.
 
