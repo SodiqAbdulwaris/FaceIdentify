@@ -407,7 +407,8 @@ describe('a source', () => {
     await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/library'))
-    expect(screen.queryByRole('img', { name: 'beach.png' })).toBeNull()
+    // The router state changes before React commits the new page: wait for the picture to go.
+    await waitFor(() => expect(screen.queryByRole('img', { name: 'beach.png' })).toBeNull())
     await waitFor(() =>
       expect(vi.mocked(URL.revokeObjectURL).mock.calls.map((c) => c[0])).toContain(made.at(-1)),
     )

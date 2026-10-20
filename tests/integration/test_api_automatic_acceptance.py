@@ -223,5 +223,44 @@ async def test_a_match_whose_evidence_has_no_scores_still_reads(
         assert (matched["match_similarity"], matched["match_margin"]) == (None, None)
 
 
+async def _after_rewriting_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rewrite: str
+) -> dict[str, Any]:
+    """Match a second face, rewrite its IDENTITY_MATCHED row with `rewrite` (SQL assignments) and
+    read the face again after a restart."""
+    approved_matching(monkeypatch)
+    folder = tmp_path / "pictures"
+    folder.mkdir()
+    async with host(tmp_path, development_profile=True) as client:
+        for name in ("one", "two"):
+            source = await import_image(client, picture(folder, f"{name}.png", RED))
+            await process_and_wait(client, source["id"])
+    database = sqlite3.connect(tmp_path / "library" / "database" / "library.db")
+    try:
+        database.execute(f"UPDATE evidence SET {rewrite} WHERE kind = 'IDENTITY_MATCHED'")
+        database.commit()
+    finally:
+        database.close()
+    async with host(tmp_path, development_profile=True) as client:
+        (read,) = await occurrences(client, source["id"])
+    return read
+
+
+async def test_a_match_recorded_in_another_payload_version_reads_without_scores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    read = await _after_rewriting_evidence(tmp_path, monkeypatch, "payload_schema_version = 2")
+    assert read["placement"] == "AUTOMATIC_MATCH"
+    assert (read["match_similarity"], read["match_margin"]) == (None, None)
+
+
+async def test_a_face_with_no_deciding_evidence_has_no_placement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    read = await _after_rewriting_evidence(tmp_path, monkeypatch, "kind = 'RECOGNITION_ABSTAINED'")
+    assert read["placement"] is None
+    assert (read["match_similarity"], read["match_margin"]) == (None, None)
+
+
 def test_the_abstain_only_policy_is_not_an_approved_matching_one() -> None:
     assert ABSTAIN_ONLY["version"] not in APPROVED_MATCHING

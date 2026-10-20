@@ -210,6 +210,7 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-03 | [M3: the writer of a run's PENDING output](2026-10-03-m3-pending-output-writer.md) | done; step 7 complete; issue 88 |
 | 2026-10-03 | [M3: durable source-processing request](2026-10-03-m3-process-source-request.md) | partial; step 10 first slice; merged in PR #97 |
 | 2026-10-16 | [M5: how to turn automatic acceptance on and off](2026-10-16-automatic-acceptance-howto.md) | done; documentation only |
+| 2026-10-20 | [M5: the two gaps the verification run found](2026-10-20-m5-gate-gaps.md) | done; tests and dead-code removal only |
 | 2026-10-20 | [TST-054: the correction end-to-end test](2026-10-20-correction-e2e.md) | done; merged in PR #224 |
 | 2026-10-20 | [M5: tracker rows TST-044, TST-038 and TST-039](2026-10-20-m5-evidence-rows.md) | done; documentation only; merged in PR #223 |
 | 2026-10-20 | [M5 close-out step 5: reconcile status documents and issues](2026-10-20-m5-reconcile-status.md) | done; documentation only |
