@@ -1,6 +1,6 @@
 # M5 close-out plan
 
-**Status:** approved by the owner on 2026-10-17; in progress. This plan orders the
+**Status:** approved by the owner on 2026-10-17; steps 1 to 5 done (2026-10-20); M5 is closed only after the full-gate run and the owner. This plan orders the
 remaining M5 work without changing the scope or decisions in
 [`M5_PLAN.md`](M5_PLAN.md).
 
@@ -86,6 +86,8 @@ open as an M8 release blocker; #176 and #181 remain open unless their own criter
 
 **Acceptance criteria:** the status documents agree, every retained issue has a current reason,
 and no deferred M6 work is presented as complete.
+
+**Done (2026-10-20):** one docs-only PR reconciled the status documents, tracker, M5 plans and the issue reasons ([entry](../implementations/2026-10-20-m5-reconcile-status.md)); TST-031 and TST-032 `PASSING` on cited tests; #66 verified done as scoped. M5 is not declared complete: that awaits the full-gate run and the owner.
 
 ## Verification checkpoints
 

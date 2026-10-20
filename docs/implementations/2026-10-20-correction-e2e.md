@@ -3,7 +3,7 @@
 - **Date:** 2026-10-20
 - **Milestone / tracker IDs:** M5 close-out step 3; TST-054
 - **Status:** done
-- **Commits:** PR to be recorded when merged (`test(e2e): keep corrections across a restart`)
+- **Commits:** PR #224 (`test(e2e): keep corrections across a restart`)
 
 ## Why
 
