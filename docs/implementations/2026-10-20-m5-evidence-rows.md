@@ -32,8 +32,10 @@ Criterion (tracker M3 table): "Reproducible component baselines exist". Verdict:
   flags, on DirectML ([entry](2026-10-16-directml-remeasure.md)).
 - **Reports named:** `operating-point-celebs-commons-48-conservative.json`,
   `operating-point-celebs-commons-48-conservative-dml.json`, `gate-celebs-commons-hard-wide-dml.json`
-  and the CPU gate report, in the Git-ignored `evaluation/datasets/reports/`. The scripts store the
-  manifest digest, weights digest and provider in each report.
+  and the CPU gate report, in the Git-ignored `evaluation/datasets/reports/`. The operating-point script
+  records the manifest digest and `verified_labels` in its report, the gate records the pool manifest's SHA-256
+  and the provider that ran; the weights digest is recorded in the 2026-10-07 baseline
+  ([research note](../research/measured-operating-point.md)).
 - **Numbers recorded:** 48 identities / 686 photographs; point 0.3314 / 0.02 chosen on the selection half;
   final half 156 of 156 correct, 0 false accepts, recall 0.994; the gate's Recall@1/5/MRR
   0.983 / 0.992 / 0.986 with 0 strangers accepted among 15 hard negatives; DirectML identical, embedding
