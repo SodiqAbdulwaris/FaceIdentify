@@ -494,8 +494,8 @@ needs an answer to start):
    owner-approved code change).
 4. **Issue 177** (medium): a hard-negatives selection mode (strangers chosen by similarity to enrolled people), then
    repeat the open-set evaluation with it.
-5. **Smaller, any time:** #173 (measured on `MyFaces/` 2026-10-15: 0 of 29 lost; open for a categorised close-up set
-   and the padded-fallback comparison, owner's call), #183 (LFW's own page; CelebA and the Kaggle mirror read 2026-10-15), #188 (AVIF), the remaining Commons
+5. **Smaller, any time:** #173 (closed by the owner on 2026-10-20; measured on `MyFaces/` 2026-10-15: 0 of 29 lost; the
+   categorised close-up set and padded-fallback comparison are not pursued), #183 (stays open for M8; LFW's own page; CelebA and the Kaggle mirror read 2026-10-15), #188 (AVIF), the remaining Commons
    public-domain review (14 people short, `label_review.py --people`).
 
 Working rules that cost time before: work from the repository root and do not `cd` elsewhere in a command (the shell
