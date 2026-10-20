@@ -15,9 +15,8 @@ model, dependency, specification, or M6 scope.
 
 ### 1. Resolve the active PR queue
 
-1. Re-review PR #213 at its exact current head, check its exact-head CI, and merge only with the
-   owner's explicit merge instruction. If it merges, close #175 only if the PR's accepted scope is
-   met; leave #221 open for M6's one-worker-process follow-up.
+1. **Done (2026-10-19):** PR #213 was re-reviewed at its exact head and merged. Close #175 only if
+   the PR's accepted scope is met; leave #221 open for M6's one-worker-process follow-up.
 2. Re-review PR #219 at its exact current head because the previous review findings were fixed
    afterwards. Check the API and desktop consumers show automatic placement and preserve the
    established correction paths. Merge only with the owner's explicit merge instruction.
