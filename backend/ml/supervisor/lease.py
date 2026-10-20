@@ -87,13 +87,12 @@ class WorkerLease:
         with self._condition:
             self._condition.wait_for(lambda: not self._held)
 
-    def _next(self) -> object | None:
+    def _next(self) -> object:
+        """The ticket to serve next. Only a waiter calls it, so one queue is never empty."""
         interactive_queue, background = self._waiting[True], self._waiting[False]
         if interactive_queue and (not background or self._streak < self._burst):
             return interactive_queue[0]
-        if background:
-            return background[0]
-        return None
+        return background[0]
 
     @contextmanager
     def held(self) -> Iterator[None]:

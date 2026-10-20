@@ -201,13 +201,13 @@ def _placements(
         if any(e.kind in _BY_A_PERSON for e in decided):
             placements[occurrence_id] = ("USER", None, None)
             continue
-        for evidence in reversed(decided):
-            if evidence.kind == EvidenceKind.IDENTITY_MATCHED:
-                placements[occurrence_id] = ("AUTOMATIC_MATCH", *_match_score(evidence))
-                break
-            if evidence.kind == EvidenceKind.IDENTITY_CREATED:
-                placements[occurrence_id] = ("AUTOMATIC_NEW", None, None)
-                break
+        if decided:  # (only matched or created rows are left here: the latest one decides)
+            latest = decided[-1]
+            placements[occurrence_id] = (
+                ("AUTOMATIC_MATCH", *_match_score(latest))
+                if latest.kind == EvidenceKind.IDENTITY_MATCHED
+                else ("AUTOMATIC_NEW", None, None)
+            )
     return placements
 
 
