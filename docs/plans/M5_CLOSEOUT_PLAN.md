@@ -17,9 +17,8 @@ model, dependency, specification, or M6 scope.
 
 1. **Done (2026-10-19):** PR #213 was re-reviewed at its exact head and merged. Close #175 only if
    the PR's accepted scope is met; leave #221 open for M6's one-worker-process follow-up.
-2. Re-review PR #219 at its exact current head because the previous review findings were fixed
-   afterwards. Check the API and desktop consumers show automatic placement and preserve the
-   established correction paths. Merge only with the owner's explicit merge instruction.
+2. **Done (2026-10-20):** PR #219 was re-reviewed at its exact head (its findings answered), passed
+   exact-head CI and merged on the owner's instruction.
 
 **Acceptance criteria:** each PR has an independent read-only review recorded against the exact
 head, every review finding is answered, all required CI checks are green on that head, and the
@@ -28,7 +27,7 @@ owner authorizes its rebase merge. The two PRs are handled one at a time.
 **Progress (2026-10-20):** PR #213 merged on 2026-10-19. Its 2026-10-17 review had found that
 `ClientPool.close()` could stop a worker after `execute()` but before `PerceptionClient` attached
 and released its shared-memory result; the PR added active-operation draining and a deterministic
-shutdown-versus-`represent()` regression before it was re-reviewed and merged. PR #219 is next.
+shutdown-versus-`represent()` regression before it was re-reviewed and merged. PR #219 merged on 2026-10-20.
 
 ### 2. Record the live automatic-acceptance check (TST-057B)
 
@@ -41,6 +40,10 @@ the existing application flow.
 **Acceptance criteria:** the provider and fallback, policy version, automatic placement,
 stranger abstention, and correction outcome are recorded in an implementation entry and the
 TST-057B tracker row. Tests and user data stay isolated from the live library.
+
+**Progress (2026-10-20):** PR #219 recorded an isolated real-host check under the installed
+policy ([entry](../implementations/2026-10-16-automatic-placement-visible.md)); TST-057B is proposed `PASSING` and awaits the
+owner's confirmation before this step is done.
 
 ### 3. Add the missing correction end-to-end proof (TST-054)
 
