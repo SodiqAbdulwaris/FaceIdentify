@@ -1,17 +1,22 @@
-# M6 plan: movies and scheduling (draft)
+# M6 plan: movies and scheduling (approved)
 
-**Status:** **draft, 2026-10-16**, written during the unattended overnight run; **not approved**. Nothing
-here is built or decided until the owner approves it; the open decisions are batched in section 7, each
-with a recommendation. **Scope:** tracker milestone M6 (TST-060 to TST-070) in
+**Status:** **approved by the owner on 2026-10-21** (drafted 2026-10-16 during the unattended overnight
+run). The owner decided D1 to D10 as recommended and added D11 and D12; the outcomes are recorded in
+section 7. Nothing here is built yet. **Scope:** tracker milestone M6 (TST-060 to TST-070) in
 [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md), the Roadmap's Phase G
 (source reprocessing, issue #180) and video phase ([`Roadmap-Plan.md`](Roadmap-Plan.md) sections 66
 to 70), and the worker arbitration that long runs need (issue #175). **Milestone gate (tracker):**
 "Movie processing can be interrupted and recovered without corrupting identity memory."
 
 This plan sequences work; it changes no spec. Where a step needs a spec change (a new table, route or
-contract), the step says so and that change is the owner's.
+contract), the step says so, and that step's PR proposes the exact text for the owner to approve there
+(D1).
 
 ## 1. Where things stand (2026-10-16)
+
+> **Update 2026-10-21:** M5 is complete: the owner declared it on 2026-10-21 as of main `a778d81`
+> ([entry](../implementations/2026-10-21-m5-complete.md)), and approved this plan the same day. The first
+> bullet below is the 2026-10-16 state, kept as written.
 
 - M5 is close to its definition of done (`M5_PLAN.md` section 5): real `buffalo_l` models on DirectML
   or the CPU, assisted and automatic recognition (0.45 / margin 0.10), naming, corrections, merge,
@@ -72,14 +77,20 @@ Build the locked design for images first, where every other part of the pipeline
   activation, and forget or erasure surviving reprocessing.
 - Tracker: TST-061, TST-064, TST-067 (their image halves).
 
-### Step 2. Worker arbitration (#175)
+### Step 2. Worker arbitration (#175) and one worker process (#221)
 
 A lease at the perception client boundary: interactive requests first at the next safe boundary, FIFO
 within a class, bounded consecutive interactive grants so background work progresses, cancellation and
 shutdown at boundaries, release in `finally`, no database transaction or file lock held across an
 inference. Measured, not invented: per-class wait and execution times and queue depth are logged, and
-the fairness parameter is chosen from a benchmark (D5). Needed before long videos, useful for images
-now (a face search during a large import).
+the fairness parameter starts at 3 consecutive interactive grants and changes only on benchmark
+evidence (D5). Needed before long videos, useful for images now (a face search during a large import).
+- The pool owns exactly one worker process for all plans (#221, an owner-accepted deferral from #213,
+  moved into this step by D11). Today the pool keeps one worker per plan; the lease then arbitrates
+  across plans instead of per plan.
+- Acceptance: #175's remaining acceptance tests (batch yields for long runs, queued cancellation, the
+  measured fairness parameter) and, for #221, a test that the pool never holds more than one live worker
+  process across plans, shutdown and crash recovery included.
 - Tracker: TST-069 (first half). (TST-068, one heavy movie pipeline at a time, is a job-admission rule, not
   this lease: step 7 owns it.)
 
@@ -145,15 +156,19 @@ appearance list compared by hand for a few people, and a crash-and-resume run.
 
 ## 4. Dependencies and blockers
 
-- Step 1 has no dependency beyond M5. Steps 3 to 7 depend on step 1 (Roadmap order) and step 2.
-- Step 3 needs the owner's decision on FFmpeg and PyAV (D2): a new dependency and a runtime binary.
-- Spec changes (D1) gate steps 1, 3, 6 and 7.
-- Test videos (D8) gate the real-world check; fixture videos for CI can be generated (frames built from the existing image
+- Step 1 has no dependency beyond M5. Steps 3 to 7 depend on step 1 (Roadmap order) and step 2 (which
+  includes #221, the single worker process, D11).
+- Step 3 adds a new dependency and a runtime binary (decided by D2: the locked stack, a pinned LGPL
+  FFmpeg and PyAV). The exact builds' licences, PyAV's bundled FFmpeg included, are inspected and
+  recorded in `docs/research/licensing-and-commercialization.md` before step 3 merges.
+- Spec changes gate steps 1, 3, 6 and 7; each step's PR proposes its exact spec text for the owner to
+  approve there (D1).
+- Test videos (the owner's own, D8) gate the real-world check; fixture videos for CI can be generated (frames built from the existing image
   fixtures, or FFmpeg's test sources), never from biometric data.
 
 ## 5. Tracker IDs and definition of done
 
-M6 is done when TST-060 to TST-070 are `PASSING` with the evidence their rows ask for, #180 and #175
+M6 is done when TST-060 to TST-070 are `PASSING` with the evidence their rows ask for, #180, #175 and #221
 are closed with their acceptance tests, the real-world check is recorded, and the milestone gate
 holds: a movie interrupted at any stage and recovered leaves identity memory uncorrupted (no duplicate
 occurrence, no lost or resurrected evidence, human decisions intact), shown by tests that kill the
@@ -173,20 +188,27 @@ process at each stage.
 - **Checkpoint volume:** per-chunk checkpoints in SQLite must stay small (positions and ids, not
   pixels).
 
-## 7. Open decisions for the owner (batched, with recommendations)
+## 7. Decisions (recorded 2026-10-21)
 
-| # | Decision | Recommendation |
+> **Decision 2026-10-21 (owner):** "I accept all twelve M6 recommendations (D1 to D12 as you laid them
+> out) and approve the M6 plan." D1 to D10 are the ten decisions drafted on 2026-10-16, decided as
+> recommended (D5 reworded below); D11 and D12 were added on 2026-10-21. Recorded in
+> [the implementation entry](../implementations/2026-10-21-m6-plan-approved.md).
+
+| # | Decision | Outcome (owner, 2026-10-21) |
 |---|---|---|
-| D1 | Approve the spec changes M6 needs: a generation pointer and supersession link (identity model, ERD, persistence spec), `REPROCESS_SOURCE` and pause/resume routes (API spec), video source metadata | Approve per step, as each step's PR proposes the exact text |
-| D2 | How FFmpeg and ffprobe are obtained (both are locked in `tech-stack.md` section 6 and Roadmap section 68): a pinned FFmpeg build with its ffprobe shipped as a runtime package, plus PyAV for frame access; or PyAV's own wheels only, which would replace ffprobe and need a tech-stack change | Keep the locked stack: a pinned LGPL FFmpeg build (ffmpeg + ffprobe) as a runtime package, PyAV for frames. The licence of the exact builds (PyAV's bundled FFmpeg included) is **unverified** until inspected and recorded in the licensing record |
-| D3 | Reprocessing: what counts as a trustworthy face correspondence between V1 and V2 for carrying human decisions over | Only when V1 and V2 are in the same compatible `RepresentationSpace` (processing invariant 36.9: vectors of different spaces are never compared): same source, box IoU >= 0.7 and embedding cosine >= 0.9, one-to-one. Across spaces (a new model or preprocessing), or with a vector missing, box geometry alone is not proof: every carried-over decision goes to review |
-| D4 | Default video sampling rate | 2 frames per second for detection, configurable; adaptive sampling later, if measured to help |
-| D5 | Worker fairness parameter | Benchmark first; start with at most 3 consecutive interactive grants before one background unit |
-| D6 | Tracker: NumPy-only association, or OpenCV for tracking | NumPy-only first (IoU plus landmarks plus embedding when available); OpenCV only for a measured need |
-| D7 | Track-level automatic acceptance: reuse the per-face 0.45 / 0.10 point, or measure a track-level rule | Reuse the per-face point on each selected observation and require agreement; measure a track rule later on owner-verified video |
-| D8 | Test videos: which videos may be used for the real-world check | The owner's own videos, kept local and Git-ignored like the photographs |
-| D9 | Whether reprocessing (step 1) ships in M6 or as a separate milestone before it | In M6, as step 1 (the Roadmap order and #180's decision both put it before video) |
-| D10 | Retry of a failed video run: resume from its last valid checkpoint, or start a new run | Resume from the last valid checkpoint when the run's frozen snapshot is still runnable (same models and settings); otherwise a new run, with the old run's committed output left as it is |
+| D1 | Spec changes M6 needs: a generation pointer and supersession link (identity model, ERD, persistence spec), `REPROCESS_SOURCE` and pause/resume routes (API spec), video source metadata | Approved per step: each step's PR proposes the exact spec text for the owner to approve there. No spec text is added by the plan itself |
+| D2 | How FFmpeg and ffprobe are obtained (both locked in `tech-stack.md` section 6 and Roadmap section 68) | Keep the locked stack: a pinned LGPL FFmpeg build (ffmpeg + ffprobe) as a runtime package, plus PyAV for frames, with no GPL components (x264 and similar). The exact builds' licences, PyAV's bundled FFmpeg included, are inspected and recorded in `docs/research/licensing-and-commercialization.md` before step 3 merges |
+| D3 | Reprocessing: what counts as a trustworthy face correspondence between V1 and V2 for carrying human decisions over | A human decision carries over only within the same compatible `RepresentationSpace` (processing invariant 36.9), the same source, box IoU >= 0.7 and embedding cosine >= 0.9, one-to-one. Anything else goes to review: a model or preprocessing change, or a missing vector. Reasoning: the DirectML re-measure showed same-model embeddings within 1.25e-6, so true correspondences sit near 1.0, and no stranger scored above 0.402 |
+| D4 | Default video sampling rate | 2 frames per second for detection, configurable; adaptive sampling only if measured to help |
+| D5 | Worker fairness parameter | Keep 3 consecutive interactive grants (built in #213, confirmed in the 2026-10-16 overnight decisions) as the starting value. Step 2 benchmarks it, and it changes only on measured evidence |
+| D6 | Tracker: NumPy-only association, or OpenCV | NumPy-only first (IoU, landmarks, embedding when available); OpenCV only for a measured need |
+| D7 | Track-level automatic acceptance | Reuse the per-face 0.45 / margin 0.10 point on each selected observation and require them to agree. A track-level rule is measured later, on owner-verified video |
+| D8 | Test videos for the real-world check | The owner's own videos, kept local and Git-ignored like the photographs. CI fixtures are generated, never biometric |
+| D9 | Whether reprocessing (step 1) ships in M6 | Yes, in M6 as step 1 (Roadmap order and #180's decision both put it before video) |
+| D10 | Retry of a failed video run | Resume from the last valid checkpoint when the run's frozen snapshot is still runnable (same models and settings); otherwise start a new run, leaving the old run's committed output untouched. Both paths are tested for no duplicates |
+| D11 | #221 (the pool owns exactly one worker process, an owner-accepted deferral from #213) | Goes into M6 step 2, alongside #175's remaining acceptance tests |
+| D12 | The M6 plan | Approved |
 
 ## 8. Not in this plan
 
