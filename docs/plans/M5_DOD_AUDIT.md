@@ -64,3 +64,42 @@ The table above is the 2026-10-16 snapshot and stays as it was. Since then close
    acceptance under the installed policy, then mark TST-057B; optionally itemise the smoke test's
    checklist outcomes (reported done 2026-10-14), and `M5_REMAINING_WORK.md` item 8 updated to match.
 4. Review TST-044 against the verified operating point, and the DirectML re-measure once its PR merges.
+
+## Update 2026-10-21: final verdicts and the declaration
+
+The 2026-10-16 table and the 2026-10-20 update above stay as dated history. The 2026-10-20 update
+listed the full-gate run (items 15 and 17) as **still to do**; it is **now done**. A verification-only
+run on main `a778d81` (no code changed) passed:
+
+- **Backend gate:** ruff format and check; mypy and `mypy --platform linux` (306 files each);
+  `pytest -q --cov` 3,237 passed, 3 deselected; coverage exactly 100% (10,821 statements, 2,228
+  branches, 0 missed or partial).
+- **Frontend:** typecheck; `oxlint --deny-warnings`; `npm test` 206 passed in 26 files; `npm run build`.
+- **Repeat run:** `SourcePage.test.tsx` alone, 5 runs of 23 of 23.
+- **Desktop:** `npm run test:e2e` 2 tests, including the correction test; `npx tauri build --debug --no-bundle`.
+- **CI:** all 6 checks green on that sha.
+- **Not re-run:** the real-model gate (TST-057A/B), which needs the local weights; those rows rest on
+  the recorded local evidence.
+
+| # | Criterion (M5 plan section 5) | Verdict | Evidence |
+|---|---|---|---|
+| 1 | TST-054 (naming, corrections) | **Met** | Tracker `PASSING`; correction end-to-end test in the `npm run test:e2e` run on `a778d81` (PR 224) |
+| 2 | TST-058 (merge and split) | **Met** | Tracker `PASSING`; suites inside the 3,237 backend tests |
+| 3 | TST-059 (recycle, delete, forget) | **Met** | 4a, 4b and 4c `PASSING`; backend gate on `a778d81` |
+| 4 | SEC-006 (deletion privacy) | **Met** | Tracker `PASSING`; byte-level deletion suites in the backend gate |
+| 5 | TST-055 (historical and name search) | **Met** | Tracker `PASSING`; backend and frontend gates on `a778d81` |
+| 6 | TST-056 (face search) | **Met** | Tracker `PASSING`; backend and frontend gates on `a778d81` |
+| 7 | TST-057 on real models | **Met (local evidence)** | TST-057A `PASSING` (owner, 2026-10-12); TST-057B `PASSING` (owner, 2026-10-20, PR 219). Not re-run in the verification run: it needs the local weights |
+| 8 | TST-038 / TST-039 on the real path | **Met (local evidence)** | `PASSING` on local real-weight evidence by owner decision, 2026-10-20 (PR 223) |
+| 9 | TST-044 (initial calibrated policy) | **Met** | `PASSING` against the 48-identity operating point and the DirectML re-measure (PR 223) |
+| 10 | Issue #69 closed | **Met** | Closed |
+| 11 | Issue #80 closed | **Met** | Closed |
+| 12 | Issue #137 closed | **Met** | Closed |
+| 13 | Real-world gate run and recorded | **Met, with the same gap** | Local runs recorded; the smoke test's checklist outcomes were never itemised (reported done 2026-10-14) |
+| 14 | Identity-management workflows preserve current state and historical evidence | **Met** | Workflow suites behind rows 1 to 4 pass in the backend gate and the desktop end-to-end test |
+| 15 | Full backend gate with 100% coverage | **Met** | The backend gate above on `a778d81`: 3,237 passed, 3 deselected, 100% (10,821 statements, 2,228 branches) |
+| 16 | Desktop end-to-end test passes on the development profile in CI | **Met** | `npm run test:e2e` 2 tests on `a778d81`; CI job "Desktop shell (TST-047)" green; `tauri build --debug --no-bundle` built |
+| 17 | CI green on `main` | **Met** | All 6 checks green on `a778d81` |
+| 18 | CONTEXT, PROJECT_STATUS, the implementation log and the tracker agree | **Met** | Reconciled by PR 225 and the declaration PR ([entry](../implementations/2026-10-21-m5-complete.md)) |
+
+**M5 is declared complete.** The owner, on 2026-10-21: "I declare M5 complete as of main a778d81."
