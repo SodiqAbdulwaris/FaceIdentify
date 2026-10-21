@@ -215,3 +215,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-20 | [M5: tracker rows TST-044, TST-038 and TST-039](2026-10-20-m5-evidence-rows.md) | done; documentation only; merged in PR #223 |
 | 2026-10-20 | [M5 close-out step 5: reconcile status documents and issues](2026-10-20-m5-reconcile-status.md) | done; documentation only |
 | 2026-10-21 | [M5 declared complete](2026-10-21-m5-complete.md) | done; documentation only; owner declaration as of main `a778d81` |
+| 2026-10-21 | [M6 plan approved](2026-10-21-m6-plan-approved.md) | done; documentation only; owner approval and decisions D1 to D12 |
