@@ -72,7 +72,8 @@ Build the locked design for images first, where every other part of the pipeline
 - Human-authored associations carried over only through a trustworthy face correspondence; ambiguous
   ones go to review (decision D3).
 - Needs: a schema revision (generation pointer, supersession link, `SUPERSEDED` where the tables do not
-  allow it) and a route (`POST /sources/{id}/reprocess`), both spec changes (D1).
+  allow it). The route `POST /api/v1/sources/{source_id}/reprocess` is already in the API spec; the
+  spec changes are the generation and supersession semantics and the schema (D1).
 - Tests: the seven acceptance tests in #180's decision, including crashes before, during and after
   activation, and forget or erasure surviving reprocessing.
 - Tracker: TST-061, TST-064, TST-067 (their image halves).
@@ -144,9 +145,10 @@ evidence (D5). Needed before long videos, useful for images now (a face search d
   worker lease: a second movie stays `QUEUED` while the first runs, tested with two queued movies
   (and with an image job and a face search running alongside, which may).
 - Retry of a failed video run (the video half of TST-064): today `RetryProcessingUseCase` refuses video
-  and starts a fresh run. Decide (D10) whether a video retry resumes from the last valid checkpoint or
-  starts over, and test that neither path duplicates committed observations, occurrences or index
-  operations.
+  and starts a fresh run. By D10 a video retry resumes from the last valid checkpoint when the run's
+  frozen snapshot is still runnable (same models and settings), and otherwise starts a new run, leaving
+  the old run's committed output untouched. Test that neither path duplicates committed observations,
+  occurrences or index operations.
 - Tracker: TST-060, TST-062, TST-064 (video half), TST-065, TST-066, TST-067, TST-068, TST-070.
 
 ### M6 real-world check
