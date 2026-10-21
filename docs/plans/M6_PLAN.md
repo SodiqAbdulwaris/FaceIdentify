@@ -72,7 +72,7 @@ Build the locked design for images first, where every other part of the pipeline
 - Human-authored associations carried over only through a trustworthy face correspondence; ambiguous
   ones go to review (decision D3).
 - Needs: a schema revision (generation pointer, supersession link, `SUPERSEDED` where the tables do not
-  allow it). The route `POST /api/v1/sources/{source_id}/reprocess` is already in the API spec; the
+  allow it). The route `POST /api/v1/sources/{source_id}/reprocess` is already in the API spec; the
   spec changes are the generation and supersession semantics and the schema (D1).
 - Tests: the seven acceptance tests in #180's decision, including crashes before, during and after
   activation, and forget or erasure surviving reprocessing.
