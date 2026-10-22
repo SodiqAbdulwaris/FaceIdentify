@@ -27,7 +27,9 @@ owner's approval before any code (decision D1). Tracker: TST-061, TST-064, TST-0
 5. `correspondence.py` (pure): human-decided test, IoU/cosine/mutual-unique pairing with the D3 constants.
 6. Candidate revalidation (`recognition`/coordinator) also requires `processing_run_id == source.current_processing_run_id`.
 7. Forget/erasure interaction: suppression of V2 faces over erased V1 faces (item 9a).
-8. Retry copies `supersedes_run_id`; recovery routes a `FINALIZING` reprocess run through the same acceptance.
+8. Job-type-aware acceptance and retry: acceptance today selects only the `PROCESS_SOURCE` job and retry always creates one, so both accept `REPROCESS_SOURCE` for a run with `supersedes_run_id`; retry preserves the job type and copies `supersedes_run_id`; recovery routes a `FINALIZING` reprocess run through the same acceptance. Tests: a reprocess run is accepted; its retry keeps `REPROCESS_SOURCE` and `supersedes_run_id`.
+9. Permanent deletion clears `supersedes_run_id` as it clears `parent_run_id` (test: delete a reprocessed source).
+10. Carry-over disposes of the pending identity a carried face's `CREATE_NEW` created (kept if another uncarried face uses it, else `DELETED`); test: no extra identity survives. Validation of a completed run accepts the suppressed-face shape of persistence 12.1 item 9a.
 
 ## Acceptance tests (issue 180) mapped to tracker rows
 
