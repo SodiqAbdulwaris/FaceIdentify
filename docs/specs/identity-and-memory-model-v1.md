@@ -1898,6 +1898,18 @@ Deleting the final visual source does not automatically erase user-authored Pers
 
 ## 61. Query vs Ingest Invariant
 
+## 60.1 Reprocessing Does Not Overwrite Human Decisions
+
+> **Proposed decision 2026-10-22 (M6 step 1, issue 180; awaiting the owner's approval, D1):** reprocessing a Source creates a new generation of derived output (persistence 12.1); it never edits a Person, a name, an association, a correction, a merge or a split, and it never lets a model prediction replace one. Model output is evidence; human decisions win.
+
+A V1 face is *human-decided* when its `ACTIVE` representation has an identity and either that representation is the subject of `USER_CORRECTION`, `IDENTITY_MERGED` or `IDENTITY_SPLIT` evidence, or its identity has an `ACTIVE` Person association (a name). (Human Validation `CONFIRMED` joins this list when it is built.) For a merged identity the decision is applied to the canonical identity the merge chain ends at.
+
+A V1 face and a V2 face *correspond*, with a trustworthy correspondence, only when all of these hold: both belong to the same Source; both representations are in the same `RepresentationSpace` (processing invariant 36.9: vectors of different spaces are never compared, so a model or preprocessing change that creates a new space yields no correspondence); the normalized boxes have IoU >= 0.7; the stored vectors have cosine >= 0.9 (so a missing or erased vector yields no correspondence); and the pairing is one-to-one and unambiguous: each face has the other as its only candidate. A face with two or more candidates is ambiguous. The numbers are the owner's (decision D3) and are constants of the rule, versioned with it; changing them is a policy decision, not a setting.
+
+For each human-decided V1 face: with a trustworthy correspondent, the V2 face takes V1's identity instead of its own recognition result (it creates no new identity), its occurrence is created under that identity, and `REPROCESS_DECISION_CARRIED_OVER` evidence is written; without one, `REPROCESS_REVIEW_REQUIRED` evidence is written with its reason (`NO_CORRESPONDENCE`, `AMBIGUOUS`, `SPACE_CHANGED`, `MISSING_VECTOR`). In that case V1's occurrence is superseded with the rest of V1 but the identity, its name and its other evidence are untouched, and no V2 face is assigned on the strength of that decision. Every other V2 face is accepted by its own automatic decision, including `ABSTAIN` (which is not a new identity). Forget and erasure persist across reprocessing (persistence 12.1 item 9): the rule above never revives an erased face.
+
+> **Note:** this deliberately differs from section 47 for one case: a later *image* of a forgotten person is a new unknown identity, but reprocessing the *same* image must not bring the forgotten face back.
+
 Temporary Search analysis must not silently become persistent memory.
 
 ```text
