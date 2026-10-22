@@ -947,6 +947,8 @@ justified.
     once, while internal parallelism and higher-priority concurrent
     workloads remain allowed.
 
+> **Proposed decision 2026-10-22 (M6 step 1, issue 180; awaiting the owner's approval, D1):** reprocessing a processed Source is a new ProcessingRun under a new frozen manifest (invariant 10) whose output stays private until one acceptance transaction repoints the Source; failure, cancellation and a crash before that commit leave the previous generation authoritative (invariants 6, 11, 12, 13), a human-decided face is carried over only within one compatible representation space (invariant 9), and Forget and Delete still take effect first (invariant 14). Details: persistence 12.1 and identity model 60.1.
+
 ## 37. Explicitly Open Decisions
 
 This architecture does not yet select:
