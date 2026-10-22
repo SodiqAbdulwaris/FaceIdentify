@@ -293,6 +293,8 @@ Invariant:
 
 **There is no `observation.identity_id`.**
 
+> **Proposed decision 2026-10-22 (M6 step 1, issue 180; awaiting the owner's approval, D1):** the ERD's Track/Observation hierarchy is unchanged by reprocessing. Generations are carried by the processing run each derived row already names; a Source has one authoritative generation (`current_processing_run_id`), a run has an optional `supersedes_run_id` to the run it replaced, and the derived Observation, Representation and Occurrence rows gain `superseded_at` and the state `SUPERSEDED`. Video reprocessing applies the same rules later (M6 step 7).
+
 ## 4.3 Ownership
 
 Authorized permanent Source deletion owns:
