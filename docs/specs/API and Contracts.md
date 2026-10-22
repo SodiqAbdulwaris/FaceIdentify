@@ -271,6 +271,14 @@ Reprocessing creates:
 
 Historical processing provenance is preserved.
 
+> **Proposed decision 2026-10-22 (M6 step 1, issue 180; awaiting the owner's approval, D1):** the route's semantics, on image Sources.
+
+Request: a `ProcessingRequestV1`, exactly as for `process` (5.3). Preconditions, checked in one transaction: the Source is visible (`404 SOURCE_NOT_FOUND` otherwise), `ACTIVE` with an `AVAILABLE` original, and has a current completed run (otherwise `409 SOURCE_STATE_CONFLICT`; a never-processed Source is processed, not reprocessed); no run of the Source is in flight (`409 SOURCE_BUSY`, which also makes a retried request safe). Response `202 Accepted`, the Job and the new ProcessingRun (its `supersedes_run_id` names the generation it will replace), `source.updated` is not emitted until activation.
+
+Until activation the previous result stays current: Source detail, search, people views and counts show it, and the new run's output is invisible. On success one transaction makes the new run current and moves the previous run's observations, representations and occurrences to `SUPERSEDED`; the Source then emits `source.updated`. On failure or cancellation nothing changes for the user except the run's own state. Human decisions are carried over only through a trustworthy face correspondence; everything else is left for review (identity-and-memory-model 60.1). Persistence: PERSISTENCE_IMPLEMENTATION 12.1.
+
+`POST /api/v1/sources/{source_id}/process` on a Source that already has a current run answers `409 SOURCE_ALREADY_PROCESSED`.
+
 ---
 
 ## 5.5 Recycle
