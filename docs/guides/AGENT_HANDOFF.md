@@ -86,6 +86,14 @@ Never trust a summary over the repository. In this order:
 - **Frontend formatting** is no-semicolon, single-quote:
   `npx prettier --no-semi --single-quote --print-width 100 --trailing-comma all`, never bare prettier.
 
+- **Worktrees can hold junctions to real data.** A worktree folder may contain a junction
+  (`local-models` linked to the main checkout's real `local-models`, or an npm workspace link in
+  `node_modules`). Such a folder looks empty to `find -type f` and refuses `rmdir`. A recursive
+  delete (`rm -rf`, `rmdir /s`, `Remove-Item -Recurse`) can follow the link and **destroy the real
+  weights, policy and index**. Remove each junction alone first (`cmd /c rmdir <link>`, no `/s`),
+  count the real `local-models` before and after, then remove the empty folders. Found on
+  2026-10-28.
+
 ## The checks
 
 Full backend gate (about 6 to 13 minutes):

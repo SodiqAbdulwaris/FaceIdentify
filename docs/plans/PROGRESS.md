@@ -98,10 +98,8 @@ description.
 ## 5. Open owner decisions
 
 1. Approve PR #229's spec text and answer its eleven questions (section 2).
-2. Two remote branches belong to closed, unmerged PRs and were left in place: `feat/177-hard-negative-selection`
-   (PR #196) and `fix/178-verified-operating-point` (PR #187). Their work was superseded by later merged
-   PRs (hard negatives and the verified operating point are on `main`). Recommendation: delete both;
-   GitHub keeps each closed PR's commits.
+2. Settled on 2026-10-28: the two remote branches of closed PRs were deleted at the owner's
+   request (section 6).
 
 ## 6. Housekeeping done on 2026-10-28
 
@@ -112,10 +110,22 @@ description.
   branches.
 - The remote branch `fix/pr213` deleted (every patch on `main`, through PR #213).
 - Eight finished Claude Code side sessions archived. The PR #229 session is kept.
-- Three empty folders under `.claude/worktrees/` (`m5-gate-gaps-52956a`, `m5-gates-de2d88`,
-  `mystifying-robinson-309f1a`) and `../FI-179` could not be removed: Windows reports them busy
-  because another process still holds them, even after their sessions were archived. They hold no
-  files and are not git worktrees; delete them after restarting the Claude app.
+- The remote branches `feat/177-hard-negative-selection` (PR #196) and
+  `fix/178-verified-operating-point` (PR #187) deleted at the owner's request. Both PRs were closed
+  as superseded, and their replacements (#197 and #195) are merged.
+- Four leftover folders removed: three under `.claude/worktrees/` (`m5-gate-gaps-52956a`,
+  `m5-gates-de2d88`, `mystifying-robinson-309f1a`) and `../FI-179`. They looked empty and refused
+  deletion because each still held a **junction**. Three held an npm workspace link to their own
+  deleted `frontend/`. One held `local-models`, linked to the **real** `local-models` (the weights,
+  the live policy and the index). Only the links were removed (`rmdir` without `/s`), and the real
+  folder was counted before and after (671 items, unchanged). See the trap in
+  `docs/guides/AGENT_HANDOFF.md`.
+- In the parent folder, `../copilot-worktrees` held a leftover GitHub Copilot worktree of a
+  different project (`device-checkin-system`, branch `sodiqabdulwaris-super-garbanzo`). It was clean,
+  fully merged into that project's `main` (its PR #28) and absent from GitHub, so it was removed
+  through `git worktree remove`, its branch deleted, and the empty folder removed. No other
+  repository in `Projects/` or `S.A Stuffs/` was touched.
+- The main checkout is on `main`, fast-forwarded to `origin/main`.
 
 ## 7. How to resume
 
@@ -128,3 +138,18 @@ description.
 4. Only after the owner approves the spec: build M6 step 1 (phase 2 in the PR's plan), one small PR at
    a time, each with an independent read-only review and green CI on its exact head before the
    owner's merge.
+
+## 8. Prompt to resume
+
+Paste this into a new Claude Code (or Codex) session at the repository root:
+
+```text
+Resume FaceIdentify after the pause. Read AGENTS.md, docs/guides/AGENT_HANDOFF.md,
+.agents/CONTEXT.md, every file in .agents/rules/, docs/plans/PROGRESS.md and
+docs/plans/M6_PLAN.md. Then run git fetch, git status, git log --oneline -5 origin/main,
+gh pr list --state open and gh issue list, and tell me in a few lines where things stand
+and anything that differs from PROGRESS.md. Then follow PROGRESS.md section 7: rebase
+draft PR #229 if main has moved, re-review its exact head, and bring me its spec text and
+its eleven open questions with your recommendations. Do not write any M6 code until I
+approve the spec. Merges need my own message. Start any side sessions on Sonnet.
+```
