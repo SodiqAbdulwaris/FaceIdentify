@@ -49,3 +49,14 @@ content was checked against `origin/main` before deletion.
 
 Three empty folders under `.claude/worktrees/` and `../FI-179` stay until the process holding them
 releases them (Windows reports them busy). Resume from `docs/plans/PROGRESS.md` section 7.
+
+## Update 2026-10-28 (later the same day)
+
+At the owner's request: the remote branches `feat/177-hard-negative-selection` (PR #196) and
+`fix/178-verified-operating-point` (PR #187) were deleted after confirming both PRs were closed as
+superseded by merged PRs #197 and #195. The four leftover folders were removed. Each still held a
+junction, one of them `local-models` linked to the real `local-models`, so only the links were
+removed first and the real folder was counted before and after (671 items, unchanged); the trap is
+now in `docs/guides/AGENT_HANDOFF.md`. In the parent folder, a clean, fully merged GitHub Copilot
+worktree of another project (`device-checkin-system`) was removed through `git worktree remove`.
+The main checkout is on `main`. `docs/plans/PROGRESS.md` gained section 8, a prompt to resume.
