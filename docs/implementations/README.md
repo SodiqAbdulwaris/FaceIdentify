@@ -216,4 +216,5 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-20 | [M5 close-out step 5: reconcile status documents and issues](2026-10-20-m5-reconcile-status.md) | done; documentation only |
 | 2026-10-21 | [M5 declared complete](2026-10-21-m5-complete.md) | done; documentation only; owner declaration as of main `a778d81` |
 | 2026-10-21 | [M6 plan approved](2026-10-21-m6-plan-approved.md) | done; documentation only; owner approval and decisions D1 to D12 |
+| 2026-10-22 | [M6 step 1: reprocessing images, spec proposal](2026-10-22-m6-step1-reprocess-spec-proposal.md) | proposal; documentation only; PR #229 awaits the owner's approval of the spec text (D1) |
 | 2026-10-28 | [Implementation paused; progress snapshot](2026-10-28-pause-and-progress.md) | done; documentation and housekeeping only |
