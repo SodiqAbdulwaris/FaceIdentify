@@ -12,6 +12,8 @@ The owner resumed the work paused on 2026-10-28 and made four decisions, recorde
 - `.agents/CONTEXT.md`: a dated decision note, "Last updated" and "Next steps".
 - `docs/plans/PROGRESS.md`: the status line says resumed; the 2026-10-28 snapshot stays as history.
 - `docs/plans/PROJECT_STATUS.md`: "Last updated", "What is next" and the M6 row.
+- `docs/plans/M6_PLAN.md`: a dated note that D1's per-step approval is delegated, and the
+  dependency line that repeated it.
 - PR #231 (the resume prompt and cleanup record; reviewed with no findings, six checks green) was
   rebase-merged by the agent under decision 3.
 
@@ -22,8 +24,12 @@ step's spec text, and every merge. The owner removed those gates for this run.
 
 ## Decisions
 
-1. **PR #229 approved.** The spec text is approved and the eleven questions are decided as recommended
-   (`docs/plans/PROGRESS.md` section 2, questions 1 to 11).
+1. **PR #229 approved.** The agent asked: "Do you approve the spec text and accept all 11
+   recommendations?" The owner answered: "accept all 11 and i'll leave the rest of the decisions
+   entirely to you". The eleven questions are therefore decided by the owner as recommended
+   (`docs/plans/PROGRESS.md` section 2, questions 1 to 11). The approval of the spec text itself
+   rests on that answer to that question together with the delegation of "the rest of the
+   decisions": the owner did not separately write "I approve the text", and may still reverse it.
 2. **Delegation.** D1's per-step spec approval, and the remaining product and design decisions, are
    delegated to the agent for M6, M7 and M8. A spec change is still proposed in its PR, independently
    reviewed, and written as a dated note marked as a delegated decision. The owner may reverse any.

@@ -12,6 +12,13 @@ This plan sequences work; it changes no spec. Where a step needs a spec change (
 contract), the step says so, and that step's PR proposes the exact text for the owner to approve there
 (D1).
 
+> **Decision 2026-11-09 (owner):** D1's per-step approval is delegated to the agent ("i'll leave the
+> rest of the decisions entirely to you"; later spec text: "Delegate to me"). Each step's PR still
+> proposes its exact spec text, which is independently reviewed and recorded as a dated delegated
+> decision; the owner may reverse any of them. Where this plan says the owner approves a step's spec
+> text, read it with this note.
+> [Entry](../implementations/2026-11-09-resume-and-delegation.md).
+
 ## 1. Where things stand (2026-10-16)
 
 > **Update 2026-10-21:** M5 is complete: the owner declared it on 2026-10-21 as of main `a778d81`
@@ -163,8 +170,8 @@ appearance list compared by hand for a few people, and a crash-and-resume run.
 - Step 3 adds a new dependency and a runtime binary (decided by D2: the locked stack, a pinned LGPL
   FFmpeg and PyAV). The exact builds' licences, PyAV's bundled FFmpeg included, are inspected and
   recorded in `docs/research/licensing-and-commercialization.md` before step 3 merges.
-- Spec changes gate steps 1, 3, 6 and 7; each step's PR proposes its exact spec text for the owner to
-  approve there (D1).
+- Spec changes gate steps 1, 3, 6 and 7; each step's PR proposes its exact spec text (D1; since
+  2026-11-09 approved by the agent as a delegated decision after an independent review).
 - Test videos (the owner's own, D8) gate the real-world check; fixture videos for CI can be generated (frames built from the existing image
   fixtures, or FFmpeg's test sources), never from biometric data.
 
