@@ -1,6 +1,11 @@
 # Progress: where FaceIdentify stands, and what is left
 
-**Status:** implementation **paused by the owner on 2026-10-28**. This page is the snapshot to resume
+**Status:** **resumed on 2026-11-09** (it was paused by the owner on 2026-10-28). The owner approved
+PR #229's spec text and all eleven recommendations of section 2, delegated the later per-step spec
+text and remaining decisions to the agent, authorised the agent to merge after an independent review
+and green CI on the exact head, and set the scope to everything through M8
+([entry](../implementations/2026-11-09-resume-and-delegation.md)). Sections 2, 5, 7 and 8 below are the
+2026-10-28 snapshot, kept as history. This page was the snapshot to resume
 from. It does not replace [`PROJECT_STATUS.md`](PROJECT_STATUS.md) (the one-page map) or
 [`.agents/CONTEXT.md`](../../.agents/CONTEXT.md) (the agent's state and decisions): it says what was
 in flight when work stopped and how to pick it up.
