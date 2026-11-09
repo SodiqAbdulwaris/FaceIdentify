@@ -28,9 +28,9 @@ call; vectors come back in segments the worker made, which are copied out and th
 
 import uuid
 from collections.abc import Callable, Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -53,7 +53,6 @@ from backend.ml.contracts.messages import (
     MLResponse,
 )
 from backend.ml.contracts.protocol import MLErrorCode, MLOperation, MLStatus
-from backend.ml.supervisor.lease import WorkerLease
 from backend.ml.supervisor.process import ProcessWorker
 from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy
 
@@ -63,6 +62,13 @@ WORKER_FACTORY = "backend.ml.worker.perception_handlers:build_handlers"
 PROVIDER_UNAVAILABLE = frozenset(
     {MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE, MLErrorCode.RUNTIME_INITIALIZATION_FAILED}
 )
+
+
+class Turn(Protocol):
+    """A turn on the one worker (a `WorkerLease`, or the pool's turn for one plan, #221): every
+    worker call of a detection or a representation is made inside `held()`."""
+
+    def held(self) -> AbstractContextManager[None]: ...
 
 
 class PerceptionError(Exception):
@@ -126,7 +132,7 @@ class PerceptionClient:
         *,
         new_id: Callable[[], uuid.UUID],
         on_ran: Callable[[PlannedVariant], None] | None = None,
-        lease: WorkerLease | None = None,
+        lease: Turn | None = None,
     ) -> None:
         self._supervisor = supervisor
         # The turn on the one worker, shared by every client of a pool (#175); None: no arbitration.

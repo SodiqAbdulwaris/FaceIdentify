@@ -1,4 +1,4 @@
-"""The real profile: installed runtime packages, a supervised worker per plan, and a measured
+"""The real profile: installed runtime packages, one supervised worker process, and a measured
 decision policy (M5 track R; the development profile is `backend.api.development`).
 
 * `prepare` registers the installed packages in the library's catalog (find-or-create, so it is safe
@@ -9,7 +9,10 @@ decision policy (M5 track R; the development profile is `backend.api.development
 * `client_for` gives the executor a fresh `PerceptionClient` over a supervisor kept for the life of
   the process: loading the models costs seconds, so a worker is not started per job, while the
   client's per-job state (which providers it has ruled out) is never carried between jobs, so every
-  job records its own fallbacks. `close` stops every worker at shutdown and keeps trying the rest
+  job records its own fallbacks. A worker is started with its plan's configuration, so the pool
+  keeps a supervisor per plan, but **at most one of them has a live worker process** (#221, the
+  locked "one persistent ML worker"): a request on another plan stops the running worker, under the
+  lease, before its own starts. `close` stops every worker at shutdown and keeps trying the rest
   when one will not stop.
 * `request_for` builds the processing request from the registered catalog and the measured policy
   file `<local state root>/policies/<package key>.json`, read on every request so a newly measured
@@ -26,11 +29,12 @@ decision policy (M5 track R; the development profile is `backend.api.development
   17.2). Any other file is refused, however plausible its numbers, because nothing binds it to a
   measurement.
 * Readiness: `runtime_package` (the package this profile runs is installed and registered),
-  `processing_policy` (a usable policy file exists) and `ml_worker` (the supervisors' own state:
-  `NOT_STARTED` until a job starts one, then `READY`, `FAILED`...), `execution_provider` (the
-  provider that last ran, `NOT_STARTED` before any) and `provider_fallback` (`ACTIVE` when that was
-  not the preferred provider, else `NONE`). A change of provider is logged, a fallback as a warning:
-  asking for DirectML or CUDA on a machine where it cannot start is never a silent CPU run.
+  `processing_policy` (a usable policy file exists) and `ml_worker` (the state of the supervisor
+  that last had the worker: `NOT_STARTED` until a request starts one, then `READY`, `FAILED`...),
+  `execution_provider` (the provider that last ran, `NOT_STARTED` before any) and
+  `provider_fallback` (`ACTIVE` when that was not the preferred provider, else `NONE`). A change of
+  provider is logged, a fallback as a warning: asking for DirectML or CUDA on a machine where it
+  cannot start is never a silent CPU run.
 """
 
 import json
@@ -40,7 +44,8 @@ import re
 import sys
 import threading
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Final
@@ -72,7 +77,7 @@ from backend.app.runtime.registration import (
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.ml.contracts.protocol import WorkerState
 from backend.ml.supervisor.lease import WorkerLease
-from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy
+from backend.ml.supervisor.supervisor import MLSupervisor, MLUnavailableError, SupervisorPolicy
 
 PACKAGE_KEY: Final = "insightface-buffalo-l"
 POLICY_DIRECTORY: Final = "policies"
@@ -162,8 +167,15 @@ def require_approved_policy(request: Mapping[str, Any]) -> None:
 
 
 class ClientPool:
-    """One supervised worker per plan, kept for the life of the process, and a fresh client for
-    every job; all workers are stopped together."""
+    """One worker process for every plan (#221), a fresh client for every job.
+
+    A worker is started with its plan's configuration, so a supervisor is kept per plan (it also
+    keeps that plan's crash-loop record), but only the *active* one may have a worker: each worker
+    request takes its turn on the one lease, and at the start of the turn a request on another plan
+    stops the running worker before its own supervisor starts one. Supervisors start a worker only
+    inside a turn, so two worker processes are never alive at once. ponytail: a stream of requests
+    alternating between two plans restarts the worker at every change (seconds each); in practice
+    every job and search runs the one installed package's plan."""
 
     def __init__(
         self,
@@ -177,6 +189,7 @@ class ClientPool:
         self._supervise = supervise
         self._lock = threading.Lock()
         self._supervisors: dict[object, MLSupervisor] = {}
+        self._active: MLSupervisor | None = None  # the supervisor that may have a live worker
         # One turn-taking boundary for the single worker, whatever the plan (#175): a job on a
         # frozen CPU-only plan and a search on a DirectML plan queue in the same line.
         self.lease = WorkerLease()
@@ -201,8 +214,24 @@ class ClientPool:
             plan,
             new_id=self._new_id,
             on_ran=lambda ran: self._record(plan, ran),
-            lease=self.lease,
+            lease=_PlanTurn(self, supervisor),
         )
+
+    def activate(self, supervisor: MLSupervisor) -> None:
+        """Make `supervisor` the one that may run a worker, stopping every other plan's worker
+        first. Called at the start of a turn, so no worker request is in flight. A worker that
+        cannot be stopped refuses the request rather than start a second process beside it."""
+        with self._lock:
+            if self._active is supervisor:
+                return
+            others = [s for s in self._supervisors.values() if s is not supervisor]
+        try:
+            for other in others:
+                other.stop()  # (idempotent: a supervisor without a worker only notes STOPPED)
+        except Exception as error:
+            raise MLUnavailableError("the running ML worker could not be stopped") from error
+        with self._lock:
+            self._active = supervisor
 
     def _record(self, plan: PerceptionPlan, ran: PlannedVariant) -> None:
         """Remember the provider a stage ran on; log when it changes, a fallback as a warning."""
@@ -254,19 +283,31 @@ class ClientPool:
             raise failures[0]
 
     def worker_state(self) -> str:
-        """The workers' own state for readiness: nothing until a job has started one."""
+        """The worker's own state for readiness, from the supervisor that last had it: nothing
+        until a request has started one."""
         with self._lock:
-            states = [supervisor.state for supervisor in self._supervisors.values()]
-        if not states:
-            return NOT_STARTED
-        for bad in (WorkerState.FAILED, WorkerState.UNAVAILABLE):
-            if bad in states:
-                return str(bad)
-        if all(state in (WorkerState.READY, WorkerState.BUSY) for state in states):
+            active = self._active
+        state = active.state if active is not None else WorkerState.STOPPED
+        if state in (WorkerState.FAILED, WorkerState.UNAVAILABLE, WorkerState.STARTING):
+            return str(state)
+        if state in (WorkerState.READY, WorkerState.BUSY):
             return READY
-        if WorkerState.STARTING in states:
-            return str(WorkerState.STARTING)
         return NOT_STARTED
+
+
+class _PlanTurn:
+    """A plan's turn on the pool's one worker: the shared lease, then this plan's supervisor made
+    the only one that may run a worker."""
+
+    def __init__(self, pool: ClientPool, supervisor: MLSupervisor) -> None:
+        self._pool = pool
+        self._supervisor = supervisor
+
+    @contextmanager
+    def held(self) -> Iterator[None]:
+        with self._pool.lease.held():
+            self._pool.activate(self._supervisor)
+            yield
 
 
 def real_processing(

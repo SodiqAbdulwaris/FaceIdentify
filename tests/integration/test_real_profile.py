@@ -193,7 +193,10 @@ def supervised() -> tuple[list[FakeSupervisor], Any]:
     return made, supervise
 
 
-def test_one_worker_per_plan_is_kept_and_all_are_stopped_at_the_end() -> None:
+def test_a_supervisor_per_plan_is_kept_and_all_are_stopped_at_the_end() -> None:
+    """A supervisor holds its plan's worker configuration and crash-loop record; that only one of
+    them ever has a live worker is shown in test_pool_lease and, with real processes, in
+    test_runtime_perception_client (#221)."""
     made, supervise = supervised()
     pool = ClientPool(uuid.uuid4, supervise=supervise)
 
@@ -202,7 +205,7 @@ def test_one_worker_per_plan_is_kept_and_all_are_stopped_at_the_end() -> None:
     pool.client_for(plan(1, 5))  # other variants
     pool.client_for(plan(2, 1))  # another space
 
-    assert len(made) == 3  # the same plan reused its worker; the others started their own
+    assert len(made) == 3  # the same plan reused its supervisor; the others have their own
     assert first is not again  # but a client is never shared between jobs
     assert first._supervisor is again._supervisor
 
@@ -246,23 +249,36 @@ def test_a_worker_that_will_not_stop_does_not_keep_the_others_running_and_is_ret
     [
         ([], "NOT_STARTED"),
         (["STOPPED"], "NOT_STARTED"),
+        (["STOPPING"], "NOT_STARTED"),
         (["READY"], "READY"),
-        (["READY", "BUSY"], "READY"),
-        (["READY", "STARTING"], "STARTING"),
-        (["READY", "FAILED"], "FAILED"),
-        (["UNAVAILABLE", "READY"], "UNAVAILABLE"),
+        (["BUSY"], "READY"),
+        (["STARTING"], "STARTING"),
+        (["FAILED"], "FAILED"),
+        (["UNAVAILABLE"], "UNAVAILABLE"),
+        (["FAILED", "READY"], "READY"),  # another plan's past failure is not the worker's state
+        (["READY", "STOPPED"], "NOT_STARTED"),
     ],
 )
-def test_the_worker_state_reported_to_readiness_is_the_supervisors_own(
+def test_the_worker_state_reported_to_readiness_is_the_active_supervisors_own(
     states: list[str], expected: str
 ) -> None:
     made, supervise = supervised()
     pool = ClientPool(uuid.uuid4, supervise=supervise)
     for space, state in enumerate(states, start=1):
         pool.client_for(plan(space, 1))
+        pool.activate(cast(MLSupervisor, made[-1]))  # (what a request's turn does)
         made[-1].state = state
 
     assert pool.worker_state() == expected
+
+
+def test_no_worker_is_reported_before_a_request_has_had_a_turn() -> None:
+    made, supervise = supervised()
+    pool = ClientPool(uuid.uuid4, supervise=supervise)
+    pool.client_for(plan(1, 1))
+    made[0].state = "READY"  # (a supervisor nobody has used cannot be READY; the pool asks none)
+
+    assert pool.worker_state() == "NOT_STARTED"
 
 
 class Machine:

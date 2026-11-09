@@ -12,6 +12,8 @@ from typing import Any, Protocol
 
 from backend.ml.worker.main import worker_entry
 
+KILL_WAIT = 30.0  # seconds; a killed process ends at once, this only stops a hang
+
 
 class WorkerConnection(Protocol):
     """The parent's end of the pipe (a `multiprocessing` Connection is one; its class differs
@@ -76,5 +78,8 @@ class ProcessWorker:
     def kill(self) -> None:
         pid = self._process.pid
         assert pid is not None  # (the process is started in __init__)
-        kill_process_tree(pid)  # (taskkill returns when the process is gone: nothing to wait for)
+        kill_process_tree(pid)
+        # taskkill can return before the process has been reaped; wait for it, so that once `kill`
+        # returns no second worker can be started beside this one (#221).
+        self._process.join(KILL_WAIT)
         self.connection.close()
