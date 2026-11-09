@@ -1,6 +1,6 @@
 # M6 step 1: reprocessing images (implementation outline)
 
-Status: **approved by the owner on 2026-11-09; phase 2 (code) in progress.** Serves issue 180 and
+Status: **approved by the owner on 2026-11-09; phase 2 (code) follows in separate PRs.** Serves issue 180 and
 `docs/plans/M6_PLAN.md` step 1. The spec text this outline implements (persistence 12.1, identity model 60.1, API
 5.4) was approved under decision D1 in PR #229. Tracker: TST-061, TST-064, TST-067 (their image halves).
 
@@ -40,7 +40,7 @@ Status: **approved by the owner on 2026-11-09; phase 2 (code) in progress.** Ser
 5. `correspondence.py` (pure): human-decided test, IoU/cosine/mutual-unique pairing with the D3 constants.
 6. Candidate revalidation (`recognition`/coordinator) also requires `processing_run_id == source.current_processing_run_id`.
 7. Forget/erasure interaction: suppression of V2 faces over erased V1 faces (item 9a).
-8. Job-type-aware acceptance and retry: acceptance today selects only the `PROCESS_SOURCE` job and retry always creates one, so both accept `REPROCESS_SOURCE` for a run with `supersedes_run_id`; retry preserves the job type and copies `supersedes_run_id`; recovery routes a `FINALIZING` reprocess run through the same acceptance. Tests: a reprocess run is accepted; its retry keeps `REPROCESS_SOURCE` and `supersedes_run_id`.
+8. Job-type-aware scheduling, acceptance, retry and run views: the scheduler claims only `PROCESS_SOURCE` jobs (`processing/scheduler.py`), acceptance selects only the `PROCESS_SOURCE` job, retry always creates one, and the run detail and retry route select only `PROCESS_SOURCE` (`api/routes/processing.py`), so all of them accept `REPROCESS_SOURCE` for a run with `supersedes_run_id` (end-to-end test: a reprocess job is claimed, runs, is accepted, and a failed one can be retried); retry preserves the job type and copies `supersedes_run_id`; recovery routes a `FINALIZING` reprocess run through the same acceptance. Tests: a reprocess run is accepted; its retry keeps `REPROCESS_SOURCE` and `supersedes_run_id`.
 9. Permanent deletion clears `supersedes_run_id` as it clears `parent_run_id` (test: delete a reprocessed source).
 10. Carry-over disposes of the pending identity a carried face's `CREATE_NEW` created (kept if another uncarried face uses it, else `DELETED`); test: no extra identity survives. Validation of a completed run accepts the suppressed-face shape of persistence 12.1 item 9a.
 

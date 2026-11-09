@@ -285,9 +285,9 @@ An `Occurrence` is a meaningful appearance of an Identity within a Source. For a
 
 `processing_runs` contains `id`; `source_id`; `configuration_snapshot_id`; nullable `parent_run_id` for reprocessing lineage; `state` (`PENDING`, `RUNNING`, `PAUSING`, `PAUSED`, `CANCELLING`, `CANCELLED`, `FINALIZING`, `COMPLETED`, `FAILED`, `INTERRUPTED`, `NOT_RESUMABLE`); `requested_at`, `started_at`, `completed_at`, `failed_at`; nullable `failure_code` and `failure_detail`; `current_checkpoint_id`; `revision`; and `created_at`, `updated_at`.
 
-There may be many historical runs per source but only one source pointer, `current_processing_run_id`, designates the accepted current result. A new run begins private. Cancellation/failure does not mutate the previous accepted run. `COMPLETED` means the acceptance transaction committed; it does not require all derived IndexOperations to already be applied.
+> **Decision 2026-11-09 (owner, D1; M6 step 1, issue 180; proposed 2026-10-22, approved with all eleven recommendations of PR 229):** the paragraph above is superseded for lineage: `parent_run_id` means *retry* lineage, as built (`RetryProcessingUseCase`, decision of 2026-10-06), not reprocessing lineage, and `processing_runs` also contains a nullable `supersedes_run_id` (revision `0011`), the reprocessing (supersession) lineage of section 12.1 below.
 
-> **Decision 2026-11-09 (owner, D1; M6 step 1, issue 180; proposed 2026-10-22, approved with all eleven recommendations of PR 229):** section 12.1 below is new, and `parent_run_id` in this section means *retry* lineage, as built (`RetryProcessingUseCase`, decision of 2026-10-06), not reprocessing lineage; reprocessing lineage is `supersedes_run_id`.
+There may be many historical runs per source but only one source pointer, `current_processing_run_id`, designates the accepted current result. A new run begins private. Cancellation/failure does not mutate the previous accepted run. `COMPLETED` means the acceptance transaction committed; it does not require all derived IndexOperations to already be applied.
 
 ## 12.1 Reprocessing: generations and atomic supersession
 
