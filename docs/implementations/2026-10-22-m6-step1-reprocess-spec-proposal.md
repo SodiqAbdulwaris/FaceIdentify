@@ -18,7 +18,7 @@ Issue #180 locked the design (2026-10-14) and decision D1 requires the exact spe
 
 ## Verification
 
-Documentation only: CRLF preserved, `git diff --check`. Independent read-only Codex review of the spec text (five findings, all addressed in this PR); a fresh read-only review of the final head is posted on PR #229.
+Documentation only: CRLF preserved, `git diff --check`. Independent read-only Codex review of the spec text (five findings, all addressed in this PR); a fresh read-only Codex review of the approved head (five findings: three fixed, `parent_run_id` lineage note moved beside the text it supersedes, scheduler and run-view job types added to plan item 8, status lines aligned; two answered on the PR) is posted on PR #229.
 
 ## Open issues / follow-ups
 
