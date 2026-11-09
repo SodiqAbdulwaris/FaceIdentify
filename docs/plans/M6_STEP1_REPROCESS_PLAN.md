@@ -1,8 +1,21 @@
 # M6 step 1: reprocessing images (implementation outline)
 
-Status: **proposal, 2026-10-22.** Serves issue 180 and `docs/plans/M6_PLAN.md` step 1. The spec text this
-outline implements is proposed in the same PR (persistence 12.1, identity model 60.1, API 5.4) and needs the
-owner's approval before any code (decision D1). Tracker: TST-061, TST-064, TST-067 (their image halves).
+Status: **approved by the owner on 2026-11-09; phase 2 (code) in progress.** Serves issue 180 and
+`docs/plans/M6_PLAN.md` step 1. The spec text this outline implements (persistence 12.1, identity model 60.1, API
+5.4) was approved under decision D1 in PR #229. Tracker: TST-061, TST-064, TST-067 (their image halves).
+
+> **Decision 2026-11-09 (owner, on PR #229):** "accept all 11 and i'll leave the rest of the decisions entirely to you". The eleven open questions are answered as recommended:
+> (1) "one-to-one" means mutual and unique pairs only, a face with two or more candidates goes to review; (2) a
+> human-decided face is one with a correction, merge or split on it or a named identity (later also human
+> validation), automatic-only decisions are not carried; (3) review items are append-only
+> `REPROCESS_REVIEW_REQUIRED` evidence rows, ids only, no new table; (4) V2 is activated while review items are
+> pending; (5) the same image is the same evidence, so reprocessing never brings a forgotten face back (identity
+> model 60.1 note against section 47); (6) `parent_run_id` stays retry lineage and `supersedes_run_id` is added;
+> (7) `process` on a processed Source is `409 SOURCE_ALREADY_PROCESSED`; (8) a second reprocess request while one
+> is in flight is `409 SOURCE_BUSY`; (9) no new cleanup of a cancelled or failed V2's output in this step; (10)
+> superseded vectors are kept until forget, erasure or permanent deletion; (11) V1's own representations are
+> excluded from V2's recognition pool. Every other design choice in phase 2 is delegated to the agent and recorded
+> below as a dated "delegated decision".
 
 ## Schema: Alembic `0011_reprocessing_generations`
 
@@ -46,7 +59,7 @@ owner's approval before any code (decision D1). Tracker: TST-061, TST-064, TST-0
 Plus unit tests for the correspondence rule (boundaries 0.7/0.9, ties, mutual uniqueness) and migration tests as above.
 Coverage stays at 100%.
 
-## Order of work (phase 2, after approval)
+## Order of work (phase 2)
 
 migration and tests; domain and `ReprocessSourceUseCase`; pool exclusion and revalidation filter; activation
 branch; correspondence and carry-over; forget interaction; route; crash tests; docs (implementation entry, README
