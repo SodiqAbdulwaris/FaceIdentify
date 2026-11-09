@@ -271,7 +271,7 @@ Reprocessing creates:
 
 Historical processing provenance is preserved.
 
-> **Proposed decision 2026-10-22 (M6 step 1, issue 180; awaiting the owner's approval, D1):** the route's semantics, on image Sources.
+> **Decision 2026-11-09 (owner, D1; M6 step 1, issue 180; proposed 2026-10-22, approved with all eleven recommendations of PR 229):** the route's semantics, on image Sources.
 
 Request: a `ProcessingRequestV1`, exactly as for `process` (5.3). Preconditions, checked in one transaction: the Source is visible (`404 SOURCE_NOT_FOUND` otherwise), `ACTIVE` with an `AVAILABLE` original, and has a current completed run (otherwise `409 SOURCE_STATE_CONFLICT`; a never-processed Source is processed, not reprocessed); no run of the Source is in flight (`409 SOURCE_BUSY`, which also makes a retried request safe). Response `202 Accepted`, the Job and the new ProcessingRun (its `supersedes_run_id` names the generation it will replace), `source.updated` is not emitted until activation.
 
