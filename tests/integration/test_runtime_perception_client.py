@@ -20,6 +20,7 @@ import pytest
 from backend.api.real import ClientPool
 from backend.app.runtime.perception_client import (
     PROVIDER_UNAVAILABLE,
+    WORKER_FACTORY,
     PerceptionClient,
     PerceptionError,
     ProviderFallback,
@@ -285,6 +286,74 @@ def test_pool_shutdown_waits_for_a_representation_output_to_be_released(
     assert not shutdown.is_alive(), "the shutdown did not finish"
     assert not errors
     assert output_released.is_set()
+
+
+def test_the_pool_never_has_more_than_one_live_worker_process_across_plans(
+    models: dict[str, tuple[Path, bytes]],
+) -> None:
+    """#221 with real worker processes: two plans (each worker is started with its own plan's
+    configuration) share one process at a time, through plan changes, a crash and its restart,
+    concurrent jobs on both plans, and shutdown. Every start checks that no other worker is
+    alive."""
+    (dpath, ddata), (epath, edata) = models["detector"], models["embedder"]
+
+    def cpu_plan() -> PerceptionPlan:
+        return plan_of(
+            (planned(dpath, ddata, DETECTOR, CPU, component=uuid.uuid4()),),
+            (planned(epath, edata, EMBEDDER, CPU, component=uuid.uuid4()),),
+        )
+
+    first, second = cpu_plan(), cpu_plan()
+    spawned: list[ProcessWorker] = []
+
+    def live() -> int:
+        return sum(worker.is_alive() for worker in spawned)
+
+    def supervise(plan: PerceptionPlan, policy: SupervisorPolicy) -> MLSupervisor:
+        def spawn() -> ProcessWorker:
+            assert live() == 0, "a worker was started while another was alive"
+            spawned.append(ProcessWorker(WORKER_FACTORY, plan.worker_config()))
+            return spawned[-1]
+
+        return MLSupervisor(spawn, policy)
+
+    pool = ClientPool(uuid.uuid4, policy=POLICY, supervise=supervise)
+    errors: list[BaseException] = []
+    try:
+        on_first, on_second = pool.client_for(first), pool.client_for(second)
+        assert on_first.detect(picture()).ran is first.detector[0]
+        assert (len(spawned), live()) == (1, 1)
+        assert on_second.detect(picture()).ran is second.detector[0]  # the plan changed
+        assert (len(spawned), live()) == (2, 1)
+        on_second.detect(picture())  # the same plan again reuses its worker
+        assert (len(spawned), live()) == (2, 1)
+
+        spawned[-1].kill()  # the worker crashes between requests
+        assert live() == 0
+        assert on_second.detect(picture()).ran is second.detector[0]  # restarted, alone
+        assert (len(spawned), live()) == (3, 1)
+
+        def job(plan: PerceptionPlan) -> None:
+            try:
+                client = pool.client_for(plan)  # (a client belongs to one thread, one job)
+                for _ in range(2):
+                    found = client.detect(picture())
+                    client.represent(picture(), found.detections)
+            except BaseException as error:  # keep thread failures in this test's assertions
+                errors.append(error)
+
+        threads = [threading.Thread(target=job, args=(p,)) for p in (first, second, first)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(120)
+            assert not thread.is_alive(), "a job never finished"
+        assert not errors
+        assert live() == 1
+        assert pool.worker_state() == "READY"
+    finally:
+        pool.close()
+    assert live() == 0  # shutdown leaves no worker behind
 
 
 def test_a_picture_with_no_face_is_a_result_and_nothing_is_embedded(
