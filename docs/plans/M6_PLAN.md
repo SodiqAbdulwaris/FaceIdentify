@@ -69,6 +69,8 @@ review, as in M5.
 ### Step 1. Reprocessing images: versioned runs with atomic supersession (#180, Roadmap Phase G)
 
 Build the locked design for images first, where every other part of the pipeline is already proven.
+
+Progress: done for images on 2026-11-10 (spec PR #229, then revision 0011, the activation and the source-screen control; [step plan](M6_STEP1_REPROCESS_PLAN.md)).
 - `REPROCESS_SOURCE` creates a new run (V2) while V1 stays authoritative; V2 output is PENDING and
   invisible to search, counts and identity decisions.
 - On success, one transaction switches the source's authoritative generation and marks V1's derived

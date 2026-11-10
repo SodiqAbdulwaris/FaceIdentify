@@ -225,3 +225,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-10 | [M6 step 1: reprocessing schema (revision 0011)](2026-11-10-m6-step1-reprocessing-schema.md) | done; schema only, use cases follow |
 | 2026-11-09 | [One ML worker process across plans (#221)](2026-11-09-one-worker-process-across-plans.md) | done; M6 step 2, first part |
 | 2026-11-10 | [M6 step 1: reprocessing request, activation and API](2026-11-10-m6-step1-reprocess-activation.md) | done for the backend; UI next |
+| 2026-11-10 | [M6 step 1: the Reprocess control and review items](2026-11-10-m6-step1-reprocess-source-control.md) | done; step 1 complete for images |
