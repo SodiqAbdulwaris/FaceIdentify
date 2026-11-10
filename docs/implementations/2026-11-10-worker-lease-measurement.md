@@ -24,7 +24,8 @@
   flight (the route's `face_search_slots`). It is run once per fairness value and reports, per class,
   the wait for the worker (nearest-rank p50, p95, and the max), the mean inference time, the queue
   depth and the outcomes (ran, failed, cancelled, printed per class), plus the fairness grants (background grants made
-  while searches waited), the background throughput and the searches' end-to-end time. `--real` runs the installed models through
+  while searches waited), the background throughput (images completed per second; every recorded
+  run completed all 200) and the searches' end-to-end time. `--real` runs the installed models through
   the real `ClientPool` and worker process (and reports the provider that actually ran); the default
   holds the real lease for simulated inference times.
 - Tests in `tests/concurrency/test_worker_lease.py`: a measured turn's wait, hold and outcome for a
@@ -32,8 +33,8 @@
   each grant; the default debug line; a clock failing at the release or at the grant still records
   the turn with the time unknown; a failing cancellation check is recorded `FAILED`.
   `tests/unit/test_worker_lease_stress.py`: the benchmark's nearest-rank percentile, and its
-  per-class outcomes, kept and reported when the workload raises (the benchmark then exits with an
-  error after printing what it measured).
+  per-class outcomes and the completed-image throughput, kept and reported when the workload raises;
+  the command prints its table and writes its JSON before exiting with the error.
 
 ## Why
 
