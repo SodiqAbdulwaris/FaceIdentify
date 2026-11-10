@@ -222,3 +222,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-10 | [D2: the FFmpeg and PyAV licence record](2026-11-10-d2-ffmpeg-pyav-licence-record.md) | done; documentation only; PyAV wheel bundles GPL x264/x265, LGPL ffmpeg over pipes recommended |
 | 2026-11-10 | [M7 plan: live cameras](2026-11-10-m7-plan.md) | done; documentation only; delegated decisions C1 to C12 |
 | 2026-11-10 | [M8 plan: packaging and release for personal use](2026-11-10-m8-plan.md) | done; documentation only; delegated decisions R1 to R12 |
+| 2026-11-10 | [M6 step 1: reprocessing schema (revision 0011)](2026-11-10-m6-step1-reprocessing-schema.md) | done; schema only, use cases follow |
