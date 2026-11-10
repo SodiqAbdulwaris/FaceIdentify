@@ -23,11 +23,14 @@ from backend.app.processing.models import (
     ProcessingRunState,
 )
 from backend.app.processing.process_source import ProcessSourceError
+from backend.app.processing.repository import SegmentRepository
 from backend.app.processing.retry import RetryProcessingUseCase
 from backend.app.processing.scheduler import StartedProcessingJob
+from backend.app.runtime.perception_client import Detected, ProviderFallback, ProviderUnavailable
 from backend.app.sources.models import Source
 from backend.infrastructure.media.video import CorruptVideoError
 from backend.infrastructure.storage.files import BytesMissingError
+from backend.ml.contracts.protocol import MLErrorCode
 from backend.ml.supervisor.lease import interactive
 from tests.fixtures.pipeline import Pipeline
 from tests.fixtures.video_pipeline import (
@@ -304,3 +307,40 @@ def test_a_failed_video_run_is_not_retried_yet(
             clock=pipeline.clock,
             wake_scheduler=lambda: None,
         ).retry(started.job.id)
+
+
+def test_a_provider_fallback_inside_a_chunk_redoes_it_under_the_new_segment(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    started = claim(pipeline, video)
+    run_id = started.job.processing_run_id
+    assert run_id is not None
+    real_detect = perception.detect
+
+    def falls_back_once(pixels: Any) -> Detected:
+        found = real_detect(pixels)
+        if perception.log.count("detect") == 3:  # the first chunk's second batch
+            failed = ProviderUnavailable(
+                found.ran, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE, "no GPU"
+            )
+            return Detected(found.detections, found.ran, (ProviderFallback((failed,), found.ran),))
+        return found
+
+    perception.detect = falls_back_once  # type: ignore[method-assign]
+
+    video_executor(pipeline).execute(started)
+
+    with pipeline.lib.session_factory() as session:
+        first, second = SegmentRepository(session).list_for_run(run_id)
+    assert first.ended_reason == "FALLBACK"
+    with pipeline.lib.session_factory() as session:
+        rows = session.scalars(
+            select(Observation.execution_segment_id).where(Observation.processing_run_id == run_id)
+        ).all()
+        produced = session.scalars(
+            select(Representation.execution_segment_id).where(
+                Representation.processing_run_id == run_id
+            )
+        ).all()
+    assert set(rows) == set(produced) == {second.id}  # nothing settled under the closed segment
+    assert perception.log.count("detect") == 6 + 4  # chunk one's four frames were done again
