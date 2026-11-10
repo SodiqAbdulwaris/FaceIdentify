@@ -92,8 +92,9 @@ Run on 2026-11-10 on Windows, on this branch rebased over PR #235 and revision 0
 - `uv run pytest -q --cov`: **3,270 passed**, 3 deselected, coverage **100%** (10,954 statements,
   2,242 branches). After the review fixes (the streak fix and the new tests), again: **3,274
   passed**, 3 deselected, coverage **100%** (10,955 statements, 2,242 branches); the last commit
-  (`test: settle a failing cancellation check through the runner`) changes one test only and was run
-  on its own file twice (7 passed each time). (An earlier full run on the branch, before the rebase, had one
+  (`test: settle a failing cancellation check through the runner`) changes that one test and this
+  verification record, not the backend code; the test file was run on its own twice (7 passed each
+  time). (An earlier full run on the branch, before the rebase, had one
   `WinError 183` shared-memory collision with another session's run and was not counted.)
 - The new tests were run five times in a row before the gate (5 passed each time). One first draft
   of the "next boundary" test expected the search's representation before the job's; it failed,
