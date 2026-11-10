@@ -22,7 +22,12 @@ from tests.fixtures.video_pipeline import (
     video_perception,
 )
 
-SETTINGS: dict[str, Any] = {"chunk_frames": 2, "frames_per_turn": 1, "keep_per_track": 2, "max_per_track": 3}
+SETTINGS: dict[str, Any] = {
+    "chunk_frames": 2,
+    "frames_per_turn": 1,
+    "keep_per_track": 2,
+    "max_per_track": 3,
+}
 
 
 class Crash(BaseException):
