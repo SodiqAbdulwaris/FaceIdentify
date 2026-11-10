@@ -1,9 +1,11 @@
-# Worker arbitration: queued cancellation and #175's remaining acceptance tests (M6 step 2)
+# Worker arbitration: queued cancellation and #175's image-path acceptance tests (M6 step 2)
 
 - **Date:** 2026-11-10
 - **Milestone / tracker IDs:** M6 step 2; issue #175; TST-069 (first half, recorded with the
   measurement PR)
-- **Status:** done (the measurement and the stress benchmark, D5, follow in their own PR)
+- **Status:** done for what it covers. Still open in #175: the measured fairness parameter and the
+  stress benchmark (D5, the next PR), and batch yields for long runs, which can only be built and
+  tested with the video path (M6 steps 4 and 5)
 - **Commits:** PR (number recorded when merged): `feat(ml): cancel a queued worker request before it
   runs`, `test: cover worker arbitration through the pipeline and the pool`, `docs: record the worker
   arbitration acceptance tests`
@@ -14,7 +16,8 @@
   as cancellable. When such a request's turn comes, `cancelled()` is asked first (holding the turn,
   never the lease's own lock); if it answers true, the request gives its turn up and raises
   `RequestCancelledError` (an `MLUnavailableError`) without reaching the worker. An inference already
-  running is never interrupted.
+  running is never interrupted. A turn given up does not count towards the burst of interactive
+  grants (the streak is updated only once the check has passed: found by the Codex review).
 - `backend/app/processing/execute_job.py`, inside `execute()` only (agreed with the step 1 session
   on 2026-11-10): the job's detection and representation are made inside `cancellable`, asking the
   same question as the existing boundary check (the job or its run is `CANCELLING`). A
@@ -34,11 +37,19 @@
   - **the next safe boundary**: a search that arrives during a job's detection runs as soon as that
     one inference ends, before the job's representation, which was already waiting (through the real
     client pool);
-  - **worker failure during a request**: the job's request fails with `WorkerFailedError` (its own
-    job policy applies, the executor settles it `FAILED` as before) and the waiting search still runs
-    both its requests; nothing is left queued;
+  - **worker failure during a request**, through the real pipeline: the worker dies under a job's
+    representation while a search waits; the search runs, the job and its run end `FAILED` with the
+    detection kept private (one `PENDING` observation, no representation), and a retry (a new job
+    and run) ends with one active observation, one private one from the failed attempt and one
+    identity, so nothing is duplicated; through the client pool, the job's `WorkerFailedError`
+    reaches the job and the waiting search still runs both its requests;
+  - **a cancellation check that cannot read the database**: the error is raised (as from the
+    boundary check, the runner then settles an unexpected error), the request never reaches the
+    worker and the turn is free;
   - lease units: a cancelled waiting request is asked once, at its turn, and the next request runs;
-    a request that is not cancelled runs, and the scope ends with its block.
+    a request that is not cancelled runs, and the scope ends with its block; a turn given up does
+    not count towards the burst (this test fails without the streak fix); a check that raises frees
+    the turn.
 
 What the earlier work already covered (cited, not repeated): interactive first, FIFO within a class,
 the bounded burst, one request at a time and release in `finally` (PR #213,
