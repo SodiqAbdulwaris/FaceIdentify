@@ -56,6 +56,8 @@ export const endpoints = (api: ApiClient) => ({
   getRun: (id: string) => api.get<ProcessingRun>(`${V1}/processing-runs/${id}`),
   cancelRun: (id: string) => api.post<ProcessingRun>(`${V1}/processing-runs/${id}/cancel`),
   retryRun: (id: string) => api.post<ProcessingRun>(`${V1}/processing-runs/${id}/retry`),
+  pauseJob: (id: string) => api.post<ProcessingRun>(`${V1}/jobs/${id}/pause`),
+  resumeJob: (id: string) => api.post<ProcessingRun>(`${V1}/jobs/${id}/resume`),
 
   listIdentities: (cursor?: string) =>
     api.get<Page<IdentitySummary>>(`${V1}/identities`, { cursor, limit: 50 }),

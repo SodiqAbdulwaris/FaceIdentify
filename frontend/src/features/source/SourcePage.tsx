@@ -6,7 +6,15 @@ import { keys } from '@/api/keys'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '../StatusBadge'
-import { ACTIVE_REFETCH_MS, canCancel, canProcess, canRetry, isActive } from '../status'
+import {
+  ACTIVE_REFETCH_MS,
+  canCancel,
+  canPause,
+  canProcess,
+  canResume,
+  canRetry,
+  isActive,
+} from '../status'
 import { useSourceImage } from '../useSourceImage'
 import { errorMessage } from '../library/messages'
 import { useRunActions } from '../processing/useRunActions'
@@ -18,6 +26,7 @@ import { RecycleControl } from './RecycleControl'
 import { ReprocessReviews } from './ReprocessReviews'
 import { UnresolvedFaces } from './UnresolvedFaces'
 import { labelFaces } from './faces'
+import { clock, VideoProgress, VideoTimeline } from './VideoPanel'
 
 const kilobytes = (bytes: number | null) => (bytes === null ? '' : `${Math.ceil(bytes / 1024)} KB`)
 
@@ -33,7 +42,9 @@ export function SourcePage() {
     retry: false,
   })
   const missing = source.data?.availability !== 'AVAILABLE'
-  const image = useSourceImage(sourceId, source.isSuccess && !missing)
+  // A video is not downloaded to be shown (it can be gigabytes): its page shows who appears when.
+  const video = source.data?.type === 'VIDEO'
+  const image = useSourceImage(sourceId, source.isSuccess && !missing && !video)
   const occurrences = useQuery({
     queryKey: keys.sourceOccurrences(sourceId),
     queryFn: () => endpoints.sourceOccurrences(sourceId),
@@ -69,6 +80,7 @@ export function SourcePage() {
   const faces = labelFaces(occurrences.data?.items ?? [])
   const latest = runs.data?.items[0]
   const people = [...new Map(faces.map((f) => [f.occurrence.identity_id, f.label])).entries()]
+  const what = video ? 'video' : 'image'
 
   return (
     <section className="flex flex-col gap-4">
@@ -91,8 +103,19 @@ export function SourcePage() {
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
-        <div>
-          {image.url ? (
+        <div className="flex flex-col gap-4">
+          {video ? (
+            <>
+              <p className="rounded-lg border p-4 text-sm text-muted-foreground">
+                Video{detail.duration_ms !== null ? `, ${clock(detail.duration_ms)} long` : ''}
+                {detail.width && detail.height ? `, ${detail.width} × ${detail.height}` : ''}
+              </p>
+              {latest && isActive(latest.state) ? (
+                <VideoProgress run={latest} now={Date.now()} />
+              ) : null}
+              <VideoTimeline durationMs={detail.duration_ms ?? 0} faces={faces} />
+            </>
+          ) : image.url ? (
             <FaceOverlay url={image.url} alt={detail.display_name} faces={faces} />
           ) : (
             <p className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
@@ -136,6 +159,20 @@ export function SourcePage() {
                 Cancel processing
               </Button>
             ) : null}
+            {video && latest && canPause(latest.state) ? (
+              <Button
+                variant="outline"
+                disabled={actions.busy}
+                onClick={() => actions.pause.mutate(latest)}
+              >
+                Pause
+              </Button>
+            ) : null}
+            {video && latest && canResume(latest.state) ? (
+              <Button disabled={actions.busy} onClick={() => actions.resume.mutate(latest)}>
+                Resume
+              </Button>
+            ) : null}
             {latest && canRetry(latest.state) && !missing && detail.state === 'ACTIVE' ? (
               <Button disabled={actions.busy} onClick={() => actions.retry.mutate(latest)}>
                 Try again
@@ -154,14 +191,14 @@ export function SourcePage() {
           ) : null}
 
           <div>
-            <h2 className="mb-1 font-medium">People in this image</h2>
+            <h2 className="mb-1 font-medium">People in this {what}</h2>
             {occurrences.isPending ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : people.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {detail.processing_status === 'COMPLETED'
-                  ? 'No faces were found in this image.'
-                  : 'Nobody yet. Faces appear here once the image has been processed.'}
+                  ? `No faces were found in this ${what}.`
+                  : `Nobody yet. Faces appear here once the ${what} has been processed.`}
               </p>
             ) : (
               <ul className="flex flex-col gap-1">
@@ -180,7 +217,7 @@ export function SourcePage() {
 
           <ReprocessReviews sourceId={sourceId} />
 
-          {faces.length > 0 ? (
+          {faces.length > 0 && !video ? (
             <div>
               <h2 className="mb-1 font-medium">Faces</h2>
               <ul className="flex flex-col gap-2">
@@ -203,7 +240,7 @@ export function SourcePage() {
                 The processing history could not be loaded: {errorMessage(runs.error)}
               </p>
             ) : runs.data.items.length === 0 ? (
-              <p className="text-sm text-muted-foreground">This image has not been processed.</p>
+              <p className="text-sm text-muted-foreground">This {what} has not been processed.</p>
             ) : (
               <ul className="flex flex-col gap-1">
                 {runs.data.items.map((run) => (

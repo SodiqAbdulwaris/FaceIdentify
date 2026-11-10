@@ -87,14 +87,17 @@ async fn choose_picture(app: AppHandle) -> Result<Option<String>, String> {
         .map(|path| path.display().to_string()))
 }
 
-/// Let the user pick images to import. The backend reads the files itself (it is on the same
-/// machine), so only their paths cross to the web view.
+/// Let the user pick images and videos to import. The backend reads the files itself (it is on the
+/// same machine), so only their paths cross to the web view.
 #[tauri::command]
 async fn choose_images(app: AppHandle) -> Result<Vec<String>, String> {
+    let both: Vec<&str> = [config::IMAGE_EXTENSIONS, config::VIDEO_EXTENSIONS].concat();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()
             .file()
+            .add_filter("Images and videos", &both)
             .add_filter("Images", config::IMAGE_EXTENSIONS)
+            .add_filter("Videos", config::VIDEO_EXTENSIONS)
             .blocking_pick_files()
     })
     .await

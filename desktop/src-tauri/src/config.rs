@@ -16,6 +16,8 @@ const SETTINGS_FILE: &str = "shell.json";
 
 /// The image formats the backend can import (JPEG, PNG, BMP, WebP, AVIF): what the picker offers.
 pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp", "webp", "avif"];
+/// The video files the backend imports by name (M6 step 3; `VIDEO_SUFFIXES` in the backend).
+pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "m4v", "mov", "mkv", "webm", "avi"];
 
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct Saved {
@@ -124,6 +126,10 @@ mod tests {
         assert_eq!(
             IMAGE_EXTENSIONS,
             ["jpg", "jpeg", "png", "bmp", "webp", "avif"]
+        );
+        assert_eq!(
+            VIDEO_EXTENSIONS,
+            ["mp4", "m4v", "mov", "mkv", "webm", "avi"]
         );
     }
 

@@ -53,7 +53,12 @@ export const isActive = (state: string): boolean => ACTIVE.has(state)
 export const canProcess = (state: string): boolean => !isActive(state) && state !== 'COMPLETED'
 
 /** A run can be asked to stop while it has not yet been made authoritative. */
-export const canCancel = (state: string): boolean => state === 'PENDING' || state === 'RUNNING'
+export const canCancel = (state: string): boolean =>
+  state === 'PENDING' || state === 'RUNNING' || state === 'PAUSED'
+
+/** A video run can be paused while it runs, and resumed once paused (M6 step 7). */
+export const canPause = (state: string): boolean => state === 'RUNNING'
+export const canResume = (state: string): boolean => state === 'PAUSED'
 
 /** A finished-without-result run can be tried again as a new run. */
 export const canRetry = (state: string): boolean =>
