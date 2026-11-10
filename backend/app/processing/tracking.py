@@ -16,11 +16,13 @@ Selection keeps, per track and per chunk, the `keep` best detections by detectio
 square root of the face's area times how frontal the face is (from its landmarks: the nose between
 the eyes), preferring ones at or above the quality gate and spreading them over the chunk (a face
 less than `min_gap` slots from one already kept is taken only if nothing else is left); only those
-are embedded and recorded, never every frame's face.
+are embedded and recorded, never every frame's face. A track's kept faces are also bounded over
+its whole life (`room`, from the tracker's count of what it kept): an hour on screen gives
+a few observations, not a few every chunk.
 """
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,19 +71,35 @@ class Tracker:
     ) -> None:
         self._min_iou = min_iou
         self._max_gap = max_gap
-        state = state or {"next_id": 0, "live": []}
+        state = state or {"next_id": 0, "live": [], "kept": {}}
         self._next_id: int = state["next_id"]
+        # faces kept so far per live track (a track's budget spans chunks and restarts)
+        self._kept: dict[str, int] = dict(state.get("kept", {}))
         # each live track: [id, last slot, box (4), velocity per slot (4), landmark shape or None]
         self._live: list[list[Any]] = [list(track) for track in state["live"]]
 
     def state(self) -> dict[str, Any]:
-        return {"next_id": self._next_id, "live": [list(track) for track in self._live]}
+        return {
+            "next_id": self._next_id,
+            "live": [list(track) for track in self._live],
+            "kept": dict(self._kept),
+        }
+
+    def room(self, track: int, cap: int) -> int:
+        """How many more faces `track` may keep under a lifetime `cap`."""
+        return max(0, cap - self._kept.get(str(track), 0))
+
+    def kept(self, track: int) -> None:
+        """Count one more face kept for `track`."""
+        self._kept[str(track)] = self._kept.get(str(track), 0) + 1
 
     def update(
         self, slot: int, boxes: Sequence[Box], landmarks: Sequence[Points] | None = None
     ) -> list[int]:
         """The track of each box seen at `slot`, in order (`landmarks`: each box's, if known)."""
         self._live = [t for t in self._live if slot - t[1] <= self._max_gap]
+        live = {str(t[0]) for t in self._live}
+        self._kept = {track: n for track, n in self._kept.items() if track in live}
         given = landmarks if landmarks is not None else [None] * len(boxes)
         shapes = [shape(box, points) for box, points in zip(boxes, given, strict=True)]
         assigned: list[int | None] = [None] * len(boxes)
@@ -141,27 +159,33 @@ class Candidate:
 
 
 def select_kept(
-    candidates: Sequence[Candidate], *, keep: int, min_score: float, min_gap: int = 2
+    candidates: Sequence[Candidate],
+    *,
+    keep: int,
+    min_score: float,
+    min_gap: int = 2,
+    room: Callable[[int], int] = lambda _track: 1 << 30,
 ) -> list[Candidate]:
-    """Up to `keep` per track: the best at or above `min_score` (else the single best below it),
-    spread out: one less than `min_gap` slots from a face already kept comes only if nothing else
-    is left."""
+    """Up to `keep` per track (and no more than its `room` left): the best at or above
+    `min_score` (else the single best below it), spread out: one less than `min_gap` slots from a
+    face already kept comes only if nothing else is left."""
     by_track: dict[int, list[Candidate]] = {}
     for candidate in candidates:
         by_track.setdefault(candidate.track, []).append(candidate)
     chosen: list[Candidate] = []
-    for group in by_track.values():
+    for track, group in by_track.items():
+        limit = min(keep, room(track))
         ranked = sorted(group, key=lambda c: -c.merit)
         good = [c for c in ranked if c.score >= min_score]
         if not good:
-            chosen.extend(ranked[:1])
+            chosen.extend(ranked[: min(1, limit)])
             continue
         kept: list[Candidate] = []
         for candidate in good:  # first: spread out
-            if len(kept) < keep and all(abs(candidate.slot - k.slot) >= min_gap for k in kept):
+            if len(kept) < limit and all(abs(candidate.slot - k.slot) >= min_gap for k in kept):
                 kept.append(candidate)
         for candidate in good:  # then fill, if spreading left room
-            if len(kept) < keep and candidate not in kept:
+            if len(kept) < limit and candidate not in kept:
                 kept.append(candidate)
         chosen.extend(kept)
     return chosen

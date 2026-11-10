@@ -22,8 +22,8 @@
   end time and frame). A frame larger than `max_pixels` fails the run before decoding.
 - `backend/app/processing/tracking.py` (new, NumPy only, D6): greedy IoU association against each live track's
   box predicted by its last per-slot velocity (`min_iou` 0.2, a track ends after 2 empty slots), state as JSON
-  so a track crosses a chunk boundary or a restart; `select_kept` keeps per track and chunk the best 3 by
-  detection score times the square root of the face area, preferring faces at or above the quality gate.
+  so a track crosses a chunk boundary or a restart; `select_kept` keeps per track and chunk the best 3 (and
+  at most 12 per track in all) by score, size and frontal pose, spread over the chunk (decision 4).
 - `ProcessSourceUseCase` accepts a video (`require_processable_source`); `RetryProcessingUseCase` still refuses a
   video run ("cannot be retried yet") until step 7 (D10).
 - `benchmarks/worker_lease_stress.py --background-batch N`: the background detects video frames N to a turn.
@@ -62,8 +62,11 @@ Delegated (owner, 2026-11-09; reversible):
    one chunk in memory (about 120 MB at 1080p; larger frames are scaled down, decision 7).
 3. **Tracker (D6):** IoU 0.2 against a constant-velocity prediction, 2 slots of grace; no embedding in
    association (embeddings exist only for kept faces). To be checked on owner video in step 8 (D8).
-4. **Selection:** 3 per track and chunk, score times square-root area, at or above the decision policy's
-   quality gate when any is; only those are embedded and recorded.
+4. **Selection:** 3 per track and chunk and at most 12 per track over its whole life (the tracker counts
+   what it kept, across chunks and restarts), by detection score x sqrt(face area) x frontalness (from the
+   landmarks), at or above the decision policy's quality gate when any is, spread at least 2 slots apart
+   within a chunk unless nothing else is left; only those are embedded and recorded. (Second review of
+   PR #247: a face on screen for an hour would otherwise keep three faces every ten seconds.)
 5. **Checkpoint and FINAL payloads** (spec text, D1): recorded in `PERSISTENCE_IMPLEMENTATION.md` section 16.
 6. **A video run is not retried until step 7** (D10 builds resume from the checkpoint).
 7. **Frames are scaled to a longest side of 1920** (`VideoProcessing.max_side`) before detection: the owner's
