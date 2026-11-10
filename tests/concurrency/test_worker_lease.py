@@ -421,3 +421,48 @@ def test_by_default_each_turn_is_logged_at_debug_level(caplog: pytest.LogCapture
     assert record.getMessage().endswith(
         "(RAN); 0 interactive and 0 background waiting at its grant"
     )
+
+
+def test_a_turn_whose_clock_fails_is_still_recorded_with_its_time_unknown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The measurement never loses a turn and never fails one: a clock that fails at the release
+    leaves the hold unknown; one that fails at the grant (the request then fails, as before) leaves
+    both times unknown."""
+    readings: list[float | Exception] = [0.0, 1.0, RuntimeError("the clock failed")]
+
+    def clock() -> float:
+        reading = readings.pop(0)
+        if isinstance(reading, Exception):
+            raise reading
+        return reading
+
+    records: list[TurnRecord] = []
+    lease = WorkerLease(clock=clock, observe=records.append)
+    with lease.held():  # asked at 0, granted at 1, the release reading fails
+        pass
+    readings[:] = [2.0, RuntimeError("the clock failed at the grant"), 3.0]
+    with pytest.raises(RuntimeError, match="at the grant"), lease.held():
+        raise AssertionError("the body must not run")
+
+    assert records == [
+        TurnRecord(False, 1.0, None, 0, 0, "RAN"),
+        TurnRecord(False, None, None, 0, 0, "FAILED"),
+    ]
+    with caplog.at_level(logging.DEBUG, logger="backend.ml.supervisor.lease"):
+        WorkerLease(clock=lambda: 0.0)._observe(records[1])  # noqa: SLF001 - the default observer
+    assert "waited an unknown time and held it an unknown time (FAILED)" in caplog.text
+
+
+def test_a_cancellation_check_that_fails_is_recorded_as_a_failed_turn() -> None:
+    records: list[TurnRecord] = []
+    lease = WorkerLease(observe=records.append)
+
+    def broken() -> bool:
+        raise RuntimeError("database is locked")
+
+    with pytest.raises(RuntimeError, match="locked"), cancellable(broken), lease.held():
+        raise AssertionError("the body must not run")
+
+    (record,) = records
+    assert record.outcome == "FAILED"
