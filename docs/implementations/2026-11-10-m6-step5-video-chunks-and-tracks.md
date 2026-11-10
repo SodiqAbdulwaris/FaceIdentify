@@ -59,13 +59,15 @@ Delegated (owner, 2026-11-09; reversible):
 1. **`frames_per_turn` = 2** (measured above): the throughput of larger batches with a search waiting at most
    about 50 ms at p95.
 2. **Chunks of 20 sampled frames** (ten seconds at 2 fps): a checkpoint every ten seconds of video, pixels of
-   one chunk in memory (about 120 MB at 1080p; 4K is the known ceiling, noted in the code).
+   one chunk in memory (about 120 MB at 1080p; larger frames are scaled down, decision 7).
 3. **Tracker (D6):** IoU 0.2 against a constant-velocity prediction, 2 slots of grace; no embedding in
    association (embeddings exist only for kept faces). To be checked on owner video in step 8 (D8).
 4. **Selection:** 3 per track and chunk, score times square-root area, at or above the decision policy's
    quality gate when any is; only those are embedded and recorded.
 5. **Checkpoint and FINAL payloads** (spec text, D1): recorded in `PERSISTENCE_IMPLEMENTATION.md` section 15.
 6. **A video run is not retried until step 7** (D10 builds resume from the checkpoint).
+7. **Frames are scaled to a longest side of 1920** (`VideoProcessing.max_side`) before detection: the owner's
+   library has 3840x1920 HEVC (step 4 entry), and a 20-frame chunk of 4K would otherwise hold about 440 MB.
 
 ## Verification
 
