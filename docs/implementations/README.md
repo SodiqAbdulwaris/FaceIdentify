@@ -219,3 +219,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-10-22 | [M6 step 1: reprocessing images, spec proposal](2026-10-22-m6-step1-reprocess-spec-proposal.md) | done; documentation only; spec text approved by the owner on 2026-11-09 (D1), PR #229 |
 | 2026-10-28 | [Implementation paused; progress snapshot](2026-10-28-pause-and-progress.md) | done; documentation and housekeeping only |
 | 2026-11-09 | [Work resumed; delegation recorded](2026-11-09-resume-and-delegation.md) | done; documentation only; owner decisions |
+| 2026-11-10 | [D2: the FFmpeg and PyAV licence record](2026-11-10-d2-ffmpeg-pyav-licence-record.md) | done; documentation only; PyAV wheel bundles GPL x264/x265, LGPL ffmpeg over pipes recommended |
