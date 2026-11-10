@@ -5,7 +5,9 @@
 The zip is downloaded by hand (or by CI) from `URL` and refused unless its SHA-256 is `SHA256`. Its
 `bin` folder (ffmpeg, ffprobe and their DLLs) and `LICENSE.txt` are unpacked into
 `<local state>/runtime/ffmpeg`, staged next to it and renamed into place, so the folder is either
-absent or complete. An existing install is replaced only with `--replace`. The binaries are never
+absent or complete. An existing install is replaced only with `--replace`: it is moved aside first
+and removed only once the new one is in place (a backup left by an interrupted replace is put back
+by the next run). The binaries are never
 committed: they are third-party bytes with their own licence (docs/research/licensing-and-
 commercialization.md section 4.1).
 """
@@ -37,6 +39,9 @@ def main() -> None:
         raise SystemExit(f"refused: the zip's SHA-256 is {digest}, not the pinned {SHA256}")
     runtime = arguments.local_state_root / "runtime"
     target = runtime / "ffmpeg"
+    backup = runtime / "ffmpeg.previous"
+    if backup.exists() and not target.exists():
+        backup.rename(target)  # an interrupted replace: the old install comes back
     if target.exists() and not arguments.replace:
         raise SystemExit(f"{target} exists; pass --replace to install again")
     runtime.mkdir(parents=True, exist_ok=True)
@@ -50,9 +55,13 @@ def main() -> None:
     if missing:
         shutil.rmtree(staging)
         raise SystemExit(f"refused: the zip has no {', '.join(missing)}")
+    if backup.exists():
+        shutil.rmtree(backup)
     if target.exists():
-        shutil.rmtree(target)
+        target.rename(backup)
     staging.rename(target)
+    if backup.exists():
+        shutil.rmtree(backup)
     print(f"installed FFmpeg into {target}")
 
 

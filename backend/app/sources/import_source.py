@@ -21,18 +21,21 @@ is the user's own entry, not a unique file.
 A video (M6 step 3, chosen by its file name, `is_video_name`) is never read into memory: ffprobe
 reads its facts from the file first, so a file that is not a usable video leaves nothing behind,
 and then the bytes are streamed into managed storage (or, referenced, hashed where they are). The
-probe and the copy read the file separately; a file changed in between is found when it is decoded.
+facts must describe the bytes recorded, so the file's size and modification time are taken before
+the probe and must be the same after it and at the end of the copy (which also stops at that size):
+a file that changes or grows meanwhile is refused and leaves nothing behind.
 """
 
 import contextlib
 import hashlib
 import io
+import os
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 from sqlalchemy.orm import Session
 
@@ -84,6 +87,36 @@ class _Facts:
     frame_rate: tuple[int, int] | None = None
 
 
+class _Unchanged:
+    """The file's bytes for the copy, refused (`ImportFileError`) if there are more of them than
+    when it was probed or if, at their end, the file is no longer the one probed."""
+
+    def __init__(self, stream: BinaryIO, path: Path, before: os.stat_result) -> None:
+        self._stream, self._path, self._before, self._read = stream, path, before, 0
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._stream.read(size)
+        self._read += len(data)
+        if self._read > self._before.st_size or (not data and self._read != self._before.st_size):
+            raise ImportFileError(f"{self._path.name} changed while it was being read")
+        if not data:
+            _require_unchanged(self._path, self._before)
+        return data
+
+
+def _stat(path: Path) -> os.stat_result:
+    try:
+        return path.stat()
+    except OSError as error:
+        raise ImportFileError(f"cannot read {path.name} ({type(error).__name__})") from error
+
+
+def _require_unchanged(path: Path, before: os.stat_result) -> None:
+    after = _stat(path)
+    if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+        raise ImportFileError(f"{path.name} changed while it was being read")
+
+
 @dataclass(frozen=True, slots=True)
 class ImportedSource:
     source_id: uuid.UUID
@@ -128,8 +161,8 @@ class ImportSourceUseCase:
         name = self._name(path, display_name)
         if is_video_name(path):
             video = self._video_import()
-            self._check_size(path, video.max_bytes)
-            facts = self._video_facts(video, path)
+            before = self._check_size(path, video.max_bytes)
+            facts = self._video_facts(video, path, before)
             try:
                 stream = path.open("rb")
             except OSError as error:
@@ -137,7 +170,9 @@ class ImportSourceUseCase:
                     f"cannot read {path.name} ({type(error).__name__})"
                 ) from error
             with stream:
-                return self._store_managed(stream, path.name, name, facts)
+                return self._store_managed(
+                    cast(BinaryIO, _Unchanged(stream, path, before)), path.name, name, facts
+                )
         data = self._read(path)
         return self._store_managed(io.BytesIO(data), path.name, name, self._image_facts(data))
 
@@ -198,9 +233,11 @@ class ImportSourceUseCase:
         name = self._name(path, display_name)
         if is_video_name(path):
             video = self._video_import()
-            self._check_size(path, video.max_bytes)  # first: inspecting a file hashes all of it
+            before = self._check_size(path, video.max_bytes)  # first: inspecting hashes all of it
             referenced = inspect_referenced_file(path, self._store.roots)
-            facts = self._video_facts(video, referenced.path)
+            if referenced.stored.size_bytes != before.st_size:
+                raise ReferencedFileError(f"{path} changed while it was being read")
+            facts = self._video_facts(video, referenced.path, before)
         else:
             self._check_size(path, self._max_bytes)
             referenced = inspect_referenced_file(path, self._store.roots)
@@ -236,21 +273,20 @@ class ImportSourceUseCase:
         return self._video()
 
     @staticmethod
-    def _check_size(path: Path, max_bytes: int) -> None:
-        try:
-            size = path.stat().st_size
-        except OSError as error:
-            raise ImportFileError(f"cannot read {path.name} ({type(error).__name__})") from error
-        if size > max_bytes:
+    def _check_size(path: Path, max_bytes: int) -> os.stat_result:
+        found = _stat(path)
+        if found.st_size > max_bytes:
             raise ImportFileTooLargeError(f"{path.name} is larger than the {max_bytes} allowed")
+        return found
 
     def _image_facts(self, data: bytes) -> _Facts:
         decoded = decode_image(data, max_pixels=self._max_pixels)
         return _Facts(SourceKind.IMAGE, decoded.header.mime_type, decoded.width, decoded.height)
 
     @staticmethod
-    def _video_facts(video: VideoImport, path: Path) -> _Facts:
+    def _video_facts(video: VideoImport, path: Path, before: os.stat_result) -> _Facts:
         facts = video.probe(path)
+        _require_unchanged(path, before)
         rate = facts.frame_rate
         return _Facts(
             SourceKind.VIDEO,

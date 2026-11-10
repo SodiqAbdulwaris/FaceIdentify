@@ -7,8 +7,10 @@ already exists, never into a half-made Source.
 
 import hashlib
 import io
+import os
 import sqlite3
 import threading
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -54,7 +56,7 @@ from backend.infrastructure.media.video import (
 )
 from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.layout import StorageRoots
-from backend.infrastructure.storage.referenced import ReferencedFileError
+from backend.infrastructure.storage.referenced import ReferencedFileError, inspect_referenced_file
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 from tests.fixtures.media import installed_tools, make_clip, rotate
 
@@ -762,17 +764,99 @@ def test_without_video_support_a_video_cannot_be_imported(world: World) -> None:
         world.importer(video=False).import_managed(clip(world))
 
 
-def test_a_video_that_disappears_after_its_probe_leaves_nothing(world: World) -> None:
+def test_a_video_that_cannot_be_opened_for_the_copy_leaves_nothing(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = clip(world)
+    real_open = Path.open
 
-    def probe_then_lose(path: Path) -> Any:
-        facts = probe_video(installed_tools(), path)
-        path.unlink()
-        return facts
+    def refused(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == path:
+            raise PermissionError("locked by another program")
+        return real_open(self, *args, **kwargs)
 
-    importer = world.importer()
-    importer._video = lambda: VideoImport(probe_then_lose, 10_000_000)  # noqa: SLF001
+    monkeypatch.setattr(Path, "open", refused)
 
     with pytest.raises(ImportFileError, match="cannot read"):
+        world.importer().import_managed(path)
+    assert world.nothing_was_written()
+
+
+def test_a_video_that_disappears_after_its_probe_leaves_nothing(world: World) -> None:
+    importer = world.importer()
+    importer._video = lambda: VideoImport(probing_then(Path.unlink), 10_000_000)  # noqa: SLF001
+
+    with pytest.raises(ImportFileError, match="cannot read"):
+        importer.import_managed(clip(world))
+    assert world.nothing_was_written()
+
+
+def grow(path: Path) -> None:
+    with path.open("ab") as stream:
+        stream.write(b"\0" * 10)
+
+
+def probing_then(change: Callable[[Path], None]) -> Callable[[Path], Any]:
+    def probe(path: Path) -> Any:
+        facts = probe_video(installed_tools(), path)
+        change(path)
+        return facts
+
+    return probe
+
+
+@pytest.mark.parametrize("referenced", [False, True])
+def test_a_video_that_changes_while_it_is_probed_is_refused(world: World, referenced: bool) -> None:
+    path = clip(world)
+    importer = world.importer()
+    importer._video = lambda: VideoImport(probing_then(grow), 10_000_000)  # noqa: SLF001
+    importing = importer.import_referenced if referenced else importer.import_managed
+
+    with pytest.raises(ImportFileError, match="changed"):
+        importing(path)
+    assert world.nothing_was_written()
+
+
+def rewrite_same_size(path: Path) -> None:
+    data = bytearray(path.read_bytes())
+    data[-1] ^= 0xFF
+    stat = path.stat()
+    path.write_bytes(bytes(data))
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [grow, rewrite_same_size, lambda path: path.write_bytes(path.read_bytes()[:-10])],
+    ids=["grows", "rewritten", "shrinks"],
+)
+def test_a_video_that_changes_while_it_is_copied_is_not_stored(
+    world: World, change: Callable[[Path], None]
+) -> None:
+    path = clip(world)
+    importer = world.importer()
+    importer._checkpoint = lambda step: change(path) if step == "reserved" else None  # noqa: SLF001
+
+    with pytest.raises(ImportFileError, match="changed"):
         importer.import_managed(path)
+    assert world.count(Source) == 0
+    with world.factory() as session:
+        (artifact,) = session.scalars(select(Artifact)).all()
+    assert artifact.state == ArtifactState.MISSING  # the failed write is recorded, no bytes kept
+    assert list(world.store.managed_files()) == []
+
+
+def test_a_referenced_video_that_grows_before_it_is_hashed_is_refused(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = clip(world)
+
+    def grown(path: Path, roots: Any) -> Any:
+        grow(path)
+        return inspect_referenced_file(path, roots)
+
+    monkeypatch.setattr(import_source, "inspect_referenced_file", grown)
+
+    with pytest.raises(ReferencedFileError, match="changed"):
+        world.importer().import_referenced(path)
     assert world.nothing_was_written()
