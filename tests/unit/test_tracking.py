@@ -145,3 +145,35 @@ def test_kept_faces_are_spread_over_the_chunk() -> None:
 
     assert [c.key for c in kept] == [0, 2, "far"]  # 1 is next to 0; then the gap is filled
     assert [c.key for c in select_kept(near, keep=3, min_score=0.5)] == [0, 2, 1]
+
+
+def test_a_track_keeps_a_few_faces_over_its_whole_life() -> None:
+    tracker = Tracker()
+    box = (0.1, 0.1, 0.3, 0.4)
+    kept_per_chunk = []
+    for chunk in range(4):  # one face on screen for four chunks, kept over a restart
+        tracker = Tracker(state=tracker.state())
+        faces = []
+        for slot in range(chunk * 5, chunk * 5 + 5):
+            (track,) = tracker.update(slot, [box])
+            faces.append(Candidate(track, 0.9, box, slot, None, slot))
+        kept = select_kept(
+            faces, keep=3, min_score=0.5, room=lambda track, now=tracker: now.room(track, 7)
+        )
+        for face in kept:
+            tracker.kept(face.track)
+        kept_per_chunk.append(len(kept))
+
+    assert kept_per_chunk == [3, 3, 1, 0]  # seven in all, however long it lasts
+    assert (
+        select_kept([Candidate(0, 0.1, box, "poor")], keep=1, min_score=0.5, room=lambda t: 0) == []
+    )
+
+
+def test_a_track_that_ends_drops_its_count() -> None:
+    tracker = Tracker(max_gap=1)
+    (track,) = tracker.update(0, [(0.1, 0.1, 0.3, 0.4)])
+    tracker.kept(track)
+    tracker.update(5, [])
+
+    assert tracker.state()["kept"] == {}

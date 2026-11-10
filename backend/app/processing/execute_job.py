@@ -815,7 +815,10 @@ class ExecuteProcessingJob:
             candidates,
             keep=self._video.keep_per_track,
             min_score=frozen.decision_policy.min_detection_score,
+            room=lambda track: tracker.room(track, self._video.max_per_track),
         )
+        for candidate in kept:
+            tracker.kept(candidate.track)
         faces: dict[int, list[tuple[int, Any]]] = {}
         for candidate in sorted(kept, key=lambda c: (c.key[0], c.key[1].detection_index)):
             faces.setdefault(candidate.key[0], []).append((candidate.track, candidate.key[1]))
