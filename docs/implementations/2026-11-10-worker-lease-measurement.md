@@ -13,6 +13,7 @@
   inference and its output protocol), how many requests of each class were still waiting when it was
   granted (the queue depth), and its outcome (`RAN`, `FAILED`, `CANCELLED`). It goes to the lease's
   `observe` callback, which by default logs one debug line per turn; the benchmark collects them.
+  Every turn gets its record: a clock reading that fails leaves that time `None`.
   The lease's default clock is now `time.perf_counter` (monotonic, and fine-grained on Windows,
   where `time.monotonic` ticks every 15.6 ms and the first benchmark run showed every short wait as
   0, 15.6 or 31.2 ms).
@@ -20,13 +21,16 @@
   as the scheduler does (a fresh client per job, a detection then a representation, each its own
   turn), while face searches arrive at random (exponential gaps, seeded) with at most three in
   flight (the route's `face_search_slots`). It is run once per fairness value and reports, per class,
-  the wait for the worker (p50, p95, max), the mean inference time and the queue depth, plus the
-  background throughput and the searches' end-to-end time. `--real` runs the installed models through
+  the wait for the worker (nearest-rank p50, p95, and the max), the mean inference time, the queue
+  depth and the outcomes (ran, failed, cancelled), plus the fairness grants (background grants made
+  while searches waited), the background throughput and the searches' end-to-end time. `--real` runs the installed models through
   the real `ClientPool` and worker process (and reports the provider that actually ran); the default
   holds the real lease for simulated inference times.
 - Tests in `tests/concurrency/test_worker_lease.py`: a measured turn's wait, hold and outcome for a
   request that ran, failed and was cancelled (a deterministic clock); the queue depth recorded at
-  each grant; the default debug line.
+  each grant; the default debug line; a clock failing at the release or at the grant still records
+  the turn with the time unknown; a failing cancellation check is recorded `FAILED`.
+  `tests/unit/test_worker_lease_stress_percentile.py`: the benchmark's nearest-rank percentile.
 
 ## Why
 
@@ -39,53 +43,56 @@ at 3 consecutive interactive grants and changes only on measured evidence).
 
 Windows 11, 2026-11-10, 200 background images per run, a search every 400 ms on average (seed 7),
 burst = the consecutive interactive grants allowed before a waiting background request goes first.
-One run per value: the differences between neighbouring values are of the order of the run-to-run
-noise, so read trends, not single digits. Other sessions were using the machine at the same time.
+Percentiles are nearest-rank. A *fairness grant* is a background grant made while searches were
+waiting (the burst had run out). Other sessions were using the machine at the same time, so read
+trends across runs, not single digits.
 
-**Real models** (`buffalo_l` through the real pool and worker, DirectML preferred with the CPU as
-fallback; one LFW photograph with one face as every request's picture, read locally, nothing about
-it printed or kept; two runs):
+**Real models, final run** (`buffalo_l` through the real pool and worker; the report records
+`execution_provider` `DmlExecutionProvider`, `provider_fallback` `NONE`; one LFW photograph with
+one face as every request's picture, read locally, nothing about it printed or kept; mean inference
+about 45 ms; no request was cancelled or failed):
 
-| burst | search wait p50 / p95 / max (ms) | job wait p50 / p95 / max (ms) | images/s | search end-to-end p50 / p95 (ms) |
-|---|---|---|---|---|
-| 1 | 49.4 / 190.3 / 289.9 · 27.1 / 134.4 / 186.0 | 0.0 / 62.2 / 78.7 · 0.0 / 44.1 / 57.4 | 8.33 · 12.16 | 178.7 / 414.4 · 133.5 / 319.0 |
-| 2 | 43.8 / 145.6 / 200.0 · 29.7 / 106.1 / 158.4 | 0.0 / 90.6 / 134.0 · 0.0 / 64.4 / 108.4 | 8.13 · 10.72 | 183.9 / 336.9 · 138.8 / 267.8 |
-| **3** | **34.5 / 116.3 / 160.7 · 32.5 / 80.0 / 115.3** | 0.0 / 82.9 / 165.9 · 0.0 / 59.3 / 147.8 | **8.32 · 11.60** | 171.1 / 276.1 · 134.3 / 211.4 |
-| 5 | 35.0 / 106.5 / 152.4 · 28.1 / 69.5 / 95.8 | 0.0 / 72.3 / 271.3 · 0.0 / 61.1 / 224.3 | 7.43 · 10.73 | 174.4 / 273.3 · 135.4 / 194.2 |
+| burst | search wait p50 / p95 / max (ms) | job wait p50 / p95 / max (ms) | images/s | search end-to-end p50 / p95 (ms) | fairness grants |
+|---|---|---|---|---|---|
+| 1 | 27.9 / 134.2 / 167.0 | 0.0 / 41.7 / 55.6 | 12.17 | 131.0 / 284.3 | 40 |
+| 2 | 29.4 / 114.6 / 166.4 | 0.0 / 71.1 / 124.6 | 10.07 | 141.3 / 284.8 | 17 |
+| **3** | **30.3 / 93.2 / 150.2** | 0.0 / 80.3 / 176.9 | 9.75 | 145.0 / 234.9 | 11 |
+| 5 | 28.4 / 88.1 / 130.0 | 0.0 / 80.6 / 249.2 | 10.04 | 142.9 / 251.8 | 4 |
 
-Each cell gives the first run, then the second (`first · second`). The first run's report predates
-the provider field; the second records `execution_provider` `DmlExecutionProvider`,
-`provider_fallback` `NONE`. Mean inference was about 45 ms in both (detection and representation
-together average out over 400 background and 130 to 145 search requests per run); the second run
-had less competition from other sessions' test runs, hence the higher throughput.
+Two earlier real runs (before the review fixes: a rounded rather than nearest-rank percentile, no
+provider, grant or outcome fields; the second recorded DirectML with no fallback afterwards) showed
+the same shape: search wait p95 190 / 146 / 116 / 107 ms and 134 / 106 / 80 / 70 ms for bursts
+1 / 2 / 3 / 5, with the worst background wait 79 / 134 / 166 / 271 ms and 57 / 108 / 148 / 224 ms.
+Throughput moved between 7.4 and 12.2 images/s across runs without a consistent order by burst: at
+this search rate it is dominated by the machine's other load, not by the fairness parameter.
 
-**Simulated** (the real lease held for 40 ms per detection and 25 ms per representation, jitter
-±10%):
+**Simulated, final run** (the real lease held for 40 ms per detection and 25 ms per representation,
+jitter ±10%):
 
-| burst | search wait p50 / p95 / max (ms) | job wait p50 / p95 / max (ms) | images/s | search end-to-end p50 / p95 (ms) |
-|---|---|---|---|---|
-| 1 | 37.7 / 159.3 / 186.2 | 0.0 / 42.4 / 46.5 | 11.58 | 133.5 / 309.3 |
-| 2 | 19.8 / 84.0 / 137.6 | 0.0 / 71.5 / 87.2 | 11.57 | 105.7 / 207.1 |
-| 3 | 22.9 / 97.8 / 108.4 | 0.0 / 70.8 / 133.6 | 11.54 | 106.6 / 202.8 |
-| 5 | 20.5 / 62.8 / 90.8 | 0.0 / 69.3 / 177.9 | 11.55 | 97.4 / 180.5 |
+| burst | search wait p50 / p95 / max (ms) | job wait p50 / p95 / max (ms) | images/s | search end-to-end p50 / p95 (ms) | fairness grants |
+|---|---|---|---|---|---|
+| 1 | 37.1 / 160.7 / 185.4 | 0.0 / 42.9 / 53.2 | 11.56 | 143.0 / 338.4 | 70 |
+| 2 | 18.2 / 92.9 / 162.0 | 0.0 / 71.7 / 95.8 | 11.32 | 106.6 / 235.5 | 17 |
+| 3 | 21.0 / 75.6 / 118.8 | 0.0 / 80.6 / 132.2 | 11.00 | 115.3 / 201.6 | 13 |
+| 5 | 17.6 / 67.1 / 91.8 | 0.0 / 72.5 / 194.7 | 11.01 | 95.9 / 193.8 | 3 |
 
 ## Decisions
 
 > **Decision 2026-11-10 (delegated decision, D5; the owner: "accept all 11 and i'll leave the rest
 > of the decisions entirely to you"):** the fairness parameter stays at **3** consecutive interactive
-> grants. On the real models in both runs, 1 and 2 make a search wait longer at p95 (134 to 190 ms)
-> than 3 (80 to 116 ms); 5 shortens the search p95 by only 10 ms or so while the worst wait of
-> background work grows (224 to 271 ms against 148 to 166 ms at 3) and throughput was lower in both
-> runs (7.43 and 10.73 images/s against 8.32 and 11.60). 3 keeps throughput within about 5% of the
-> setting most favourable to background work (1) while cutting the search p95 by about 40%. The
-> measurements
-> confirm the starting value; nothing argues for a change. No latency target is set: the owner's
-> decision says to choose thresholds only after measuring representative workloads, and video work
-> (steps 4 and 5) is the representative long-run load still to come.
+> grants. In all three real runs and the simulated one, 1 and 2 make a search wait longer at p95
+> than 3, while 5 shortens the search p95 by only 5 to 10 ms and lengthens the worst wait of
+> background work by about 50% (249 against 177 ms in the final run). Throughput does not separate
+> the values at this load. The measurements confirm the starting value; nothing argues for a change.
+> No latency target is set: the owner's decision says to choose thresholds only after measuring
+> representative workloads, and video work (steps 4 and 5) is the representative long-run load
+> still to come.
 
 > **Decision 2026-11-10 (delegated decision):** the per-turn measurement is logged at debug level
 > and kept nowhere else (no metrics store, no readiness field): it is diagnosis and benchmark input,
-> and two lines per image at info level would flood the log during an import.
+> and two lines per image at info level would flood the log during an import. A clock that fails
+> while a turn is measured leaves that time unknown (`None`) and never fails the turn or loses its
+> record (found by the Codex review).
 
 ## Verification
 
