@@ -300,13 +300,14 @@ labelled uncalibrated):
 | TST-069 | P1 | Resource-policy tests | Bounded queues and backpressure |
 | TST-070 | P1 | Movie-processing E2E | Complete movie workflow succeeds |
 
-**Current evidence** (2026-11-10; M6 step 1, reprocessing images, issue #180; the video halves follow with M6 steps 3 to 7):
+**Current evidence** (2026-11-10; M6 step 1, reprocessing images, issue #180, and step 2, worker arbitration, issues #175 and #221; the video halves follow with M6 steps 3 to 7):
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
 | TST-061 | `IN_PROGRESS` | Image half passing: `tests/integration/test_reprocess_images.py` (the current generation stays until one transaction replaces it; superseded rows keep their history; no view, stale index entry or old index file shows the replaced generation; human decisions carry over only through the correspondence rule, otherwise review evidence), `tests/unit/test_correspondence.py`, `tests/integration/test_migration_0011.py`. Remaining: video runs |
 | TST-064 | `IN_PROGRESS` | Image half passing: `test_reprocess_images.py` (a cancelled, failed or refused reprocess leaves the current generation; a retry keeps what it replaces; repeated requests and activations make no second generation; a second first run is never accepted over a result). Remaining: video retries |
 | TST-067 | `IN_PROGRESS` | Image half passing: `tests/recovery/test_reprocess_process_kill.py` (a real child process killed before FINAL, after FINAL, inside the open activation transaction and after its commit converges to one generation, without perception) and `test_reprocess_images.py` (forget and erasure survive reprocessing and a restart). Remaining: video recovery |
+| TST-069 | `IN_PROGRESS` | First half (the one worker's arbitration) passing. **2026-11-10, M6 step 2 (PRs #235, #239 and the measurement PR):** one worker process across plans, never two alive (`test_runtime_perception_client.py::test_the_pool_never_has_more_than_one_live_worker_process_across_plans`, real processes; `test_pool_lease.py`; `test_ml_supervisor.py`); interactive first, FIFO within a class, a bounded burst, one request at a time, release in `finally`, shutdown refusing the queue (`tests/concurrency/test_worker_lease.py`, PR #213); queued cancellation never reaching the worker, no SQLite write lock or index lock across an inference, a search served at the next boundary, a worker failure handing the turn on with the job `FAILED` and a retry without duplicates (`tests/integration/test_worker_arbitration.py`); every turn measured (class, wait, hold, queue depth, outcome) and the fairness parameter measured on the real models with `benchmarks/worker_lease_stress.py`: it stays 3 (D5; numbers in [the entry](../implementations/2026-11-10-worker-lease-measurement.md)). **Second half not built:** bounded queues and backpressure for long video runs (batch yields per frame batch) come with M6 steps 4 and 5. |
 
 **Dependencies:** M5 and the processing implementation.
 
