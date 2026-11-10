@@ -58,21 +58,25 @@ class TurnRecord:
     """One request's turn on the worker."""
 
     interactive: bool
-    waited: float  # seconds from asking for the turn to getting it
-    held: float  # seconds holding the worker: the inference and its output protocol
+    waited: float | None  # seconds from asking for the turn to getting it (None: the clock failed)
+    held: float | None  # seconds holding the worker: inference and output protocol (None: idem)
     queued_interactive: int  # requests of each class still waiting when this one was granted
     queued_background: int
     outcome: str  # RAN, FAILED (the body raised) or CANCELLED (given up at its turn)
 
 
+def _seconds(value: float | None) -> str:
+    return "an unknown time" if value is None else f"{value:.3f}s"
+
+
 def log_turn(record: TurnRecord) -> None:
     """The default observer: one debug line per turn."""
     LOG.debug(
-        "worker: a %s request waited %.3fs and held it %.3fs (%s); %d interactive and %d "
+        "worker: a %s request waited %s and held it %s (%s); %d interactive and %d "
         "background waiting at its grant",
         "interactive" if record.interactive else "background",
-        record.waited,
-        record.held,
+        _seconds(record.waited),
+        _seconds(record.held),
         record.outcome,
         record.queued_interactive,
         record.queued_background,
@@ -181,7 +185,8 @@ class WorkerLease:
             self._waiting[cls].popleft()
             self._held = True
             behind = (len(self._waiting[True]), len(self._waiting[False]))
-        granted_at, outcome = queued_at, "FAILED"
+        granted_at: float | None = None
+        outcome = "FAILED"
         try:
             granted_at = self._clock()
             cancelled = _cancelled.get()
@@ -198,8 +203,24 @@ class WorkerLease:
             with self._condition:
                 self._held = False
                 self._condition.notify_all()
+            released_at = self._reading()  # (a failing clock must not lose the turn's record)
             self._observe(
                 TurnRecord(
-                    cls, granted_at - queued_at, self._clock() - granted_at, *behind, outcome
+                    cls,
+                    _span(queued_at, granted_at),
+                    _span(granted_at, released_at),
+                    *behind,
+                    outcome,
                 )
             )
+
+    def _reading(self) -> float | None:
+        """The clock, or None if it fails: timing is diagnosis, never a reason to fail a turn."""
+        try:
+            return self._clock()
+        except Exception:  # noqa: BLE001 - recorded as an unknown time, see `TurnRecord`
+            return None
+
+
+def _span(start: float | None, end: float | None) -> float | None:
+    return None if start is None or end is None else end - start
