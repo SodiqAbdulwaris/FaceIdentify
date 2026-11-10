@@ -1,6 +1,7 @@
 """Tracks across sampled frames, and which detections are kept (M6 step 5; D6; TST-063)."""
 
 import json
+from functools import partial
 
 import numpy as np
 import pytest
@@ -147,6 +148,10 @@ def test_kept_faces_are_spread_over_the_chunk() -> None:
     assert [c.key for c in select_kept(near, keep=3, min_score=0.5)] == [0, 2, 1]
 
 
+def room_of(tracker: Tracker, track: int) -> int:
+    return tracker.room(track, 7)
+
+
 def test_a_track_keeps_a_few_faces_over_its_whole_life() -> None:
     tracker = Tracker()
     box = (0.1, 0.1, 0.3, 0.4)
@@ -157,9 +162,7 @@ def test_a_track_keeps_a_few_faces_over_its_whole_life() -> None:
         for slot in range(chunk * 5, chunk * 5 + 5):
             (track,) = tracker.update(slot, [box])
             faces.append(Candidate(track, 0.9, box, slot, None, slot))
-        kept = select_kept(
-            faces, keep=3, min_score=0.5, room=lambda track, now=tracker: now.room(track, 7)
-        )
+        kept = select_kept(faces, keep=3, min_score=0.5, room=partial(room_of, tracker))
         for face in kept:
             tracker.kept(face.track)
         kept_per_chunk.append(len(kept))
