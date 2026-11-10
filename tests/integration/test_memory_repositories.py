@@ -373,6 +373,7 @@ def test_a_representation_changes_state_only_from_a_state_the_caller_expects(
         refreshed = RepresentationRepository(session).get(rep.id)
         assert refreshed is not None
         assert refreshed.state == "SUPERSEDED"
+        assert refreshed.superseded_at == stamp  # revision 0011: stamped on becoming SUPERSEDED
         assert refreshed.activated_at == stamp  # kept, not cleared
 
 

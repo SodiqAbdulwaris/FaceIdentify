@@ -423,6 +423,7 @@ def test_an_occurrence_changes_state_only_from_a_state_the_caller_expects(
         kept = OccurrenceRepository(session).get(occurrence.id)
         assert kept is not None
         assert (kept.state, kept.activated_at) == ("SUPERSEDED", stamp)
+        assert kept.superseded_at == stamp  # revision 0011: stamped on becoming SUPERSEDED
 
 
 # --- evidence -----------------------------------------------------------------------------------
