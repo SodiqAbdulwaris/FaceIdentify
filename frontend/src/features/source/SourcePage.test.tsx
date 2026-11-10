@@ -185,6 +185,21 @@ describe('a source', () => {
     expect(screen.queryByRole('button', { name: 'Process' })).toBeNull() // it has a result
   })
 
+  it('offers no reprocessing while a run is under way, even before the history has loaded', async () => {
+    open([
+      {
+        path: SOURCE,
+        respond: detail({ processing_status: 'PENDING', current_processing_run_id: 'r1' }),
+      },
+      media,
+      noFaces,
+      noRuns, // (the source itself says a run is under way; the history is not needed)
+    ])
+
+    expect(await screen.findByRole('heading', { name: 'beach.png' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reprocess' })).toBeNull()
+  })
+
   it('offers no reprocessing while a run is under way or before a first result', async () => {
     open([
       {
