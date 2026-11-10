@@ -9,7 +9,11 @@ This use case writes it, in one transaction that takes the run's write lock firs
 * a **running** job asks to stop: job and run `CANCELLING`; the executor settles `CANCELLED` at its
   next safe boundary, and its private output stays private;
 * a run already `CANCELLING` or `CANCELLED` is a repeat: nothing changes, so a double click is safe;
-* a **paused** video run (M6 step 7) is cancelled outright, job and run `CANCELLED`;
+* a **paused** video run (M6 step 7) is cancelled outright, job and run `CANCELLED`; one still
+  **pausing** (its chunk in hand) asks to stop instead, job and run `CANCELLING`, settled at the
+  next boundary like any running one;
+* a request naming a job (`job_id`) acts only if it is the run's current attempt (a resumed video
+  run has an older, finished job: commands to it must not reach the newer one);
 * anything else (`FINALIZING`, whose FINAL result is being made authoritative, or a run that is
   over or interrupted) cannot be cancelled here.
 """
@@ -55,21 +59,35 @@ class CancelProcessingUseCase:
         self._uow = unit_of_work
         self._clock = clock
 
-    def cancel(self, run_id: uuid.UUID) -> CancelResult:
-        return self._uow.write(lambda session: self._cancel(session, run_id))
+    def cancel(self, run_id: uuid.UUID, *, job_id: uuid.UUID | None = None) -> CancelResult:
+        return self._uow.write(lambda session: self._cancel(session, run_id, job_id))
 
-    def _cancel(self, session: Session, run_id: uuid.UUID) -> CancelResult:
+    def _cancel(
+        self, session: Session, run_id: uuid.UUID, job_id: uuid.UUID | None = None
+    ) -> CancelResult:
         run = ProcessingRunRepository(session).lock(run_id)
         if run is None:
             raise RunNotFoundError(f"run {run_id} does not exist")
         if run.state in (ProcessingRunState.CANCELLING, ProcessingRunState.CANCELLED):
             return CancelResult(run_id, CancelOutcome.ALREADY)
         job = JobRepository(session).current_for_run(run_id)
+        if job_id is not None and (job is None or job.id != job_id):
+            raise CancelError(f"job {job_id} is not the current attempt of run {run_id}")
         if job and job.state == JobState.QUEUED:  # its run is PENDING: nothing has started
             self._settle(
                 session, run, job, JobState.QUEUED, JobState.CANCELLED, ProcessingRunState.CANCELLED
             )
             return CancelResult(run_id, CancelOutcome.CANCELLED)
+        if run.state == ProcessingRunState.PAUSING and job and job.state == JobState.PAUSING:
+            self._settle(
+                session,
+                run,
+                job,
+                JobState.PAUSING,
+                JobState.CANCELLING,
+                ProcessingRunState.CANCELLING,
+            )
+            return CancelResult(run_id, CancelOutcome.REQUESTED)
         if run.state == ProcessingRunState.PAUSED and job and job.state == JobState.PAUSED:
             self._settle(
                 session, run, job, JobState.PAUSED, JobState.CANCELLED, ProcessingRunState.CANCELLED

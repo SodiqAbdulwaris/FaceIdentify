@@ -63,6 +63,19 @@ Delegated (owner, 2026-11-09; reversible). Spec text recorded as dated notes in 
    memory; appearances are shown as times. Playback is a follow-up.
 5. **Corrections on video faces** stay on the identity screens; the source screen lists people and times.
 
+## Review (Codex, read-only) and what changed
+
+1. **P1, commands to an older attempt:** cancel, pause and resume through a job act only if that job is its
+   run's current attempt (checked in the command's own transaction), so a command to a resumed run's old,
+   failed job cannot reach the new one. Test: `test_commands_to_an_older_attempt_do_not_reach_the_current_one`.
+2. **P2, a recovered pause without a chunk:** kept as designed and now stated (API 13 note): a crash while
+   pausing before the first chunk was settled leaves nothing committed, so the run is `PAUSED` with no chunk
+   checkpoint and a resume starts at the beginning; the kill test asserts there is no checkpoint and that the
+   resume detects every frame.
+3. **P2, cancel while pausing:** a `PAUSING` run asked to cancel becomes `CANCELLING` and stops at the next
+   batch (`CANCELLED`); recovery already settles `CANCELLING`. Test:
+   `test_a_cancel_while_pausing_stops_the_run_at_the_next_batch`.
+
 ## Verification
 
 - Targeted runs of every file above: all pass. Frontend: `npm run typecheck`, `SourcePage.test.tsx` 32 passed.
