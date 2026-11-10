@@ -150,13 +150,14 @@ def _check_context(
     processing_run_id: uuid.UUID,
     execution_segment_id: uuid.UUID,
 ) -> None:
-    """The output belongs to one source, running run and running segment before it is written."""
+    """The output belongs to one source, running run and running segment before it is written. A
+    video run asked to pause (`PAUSING`) still finishes the chunk in hand (M6 step 7)."""
     run = session.get(ProcessingRun, processing_run_id)
     if run is None:
         raise PendingOutputError(f"no processing run {processing_run_id}")
     if run.source_id != source_id:
         raise PendingOutputError("the source does not belong to the processing run")
-    if run.state != ProcessingRunState.RUNNING:
+    if run.state not in (ProcessingRunState.RUNNING, ProcessingRunState.PAUSING):
         raise PendingOutputError(f"the processing run is {run.state}, not writable")
     segment = session.get(ExecutionSegment, execution_segment_id)
     if segment is None:

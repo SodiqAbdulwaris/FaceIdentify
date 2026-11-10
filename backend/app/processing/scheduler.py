@@ -9,14 +9,17 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.jobs.models import SOURCE_JOB_TYPES, JobState
+from backend.app.jobs.models import SOURCE_JOB_TYPES, Job, JobState
 from backend.app.jobs.repository import ClaimedJob, JobRepository
 from backend.app.processing.models import ProcessingRun, ProcessingRunState
 from backend.app.processing.repository import SegmentRepository
 from backend.app.processing.run_repository import ProcessingRunRepository
+from backend.app.sources.models import Source, SourceKind
 from backend.infrastructure.db.optimistic import optimistic_locked_update
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 
@@ -29,9 +32,20 @@ class StartedProcessingJob:
     execution_segment_id: uuid.UUID
 
 
+# A video run in these states holds the movie slot (a paused one does not: it waits for a person).
+_HEAVY = (
+    ProcessingRunState.RUNNING,
+    ProcessingRunState.PAUSING,
+    ProcessingRunState.CANCELLING,
+    ProcessingRunState.FINALIZING,
+)
+
+
 class ProcessingScheduler:
     """Claims only source-processing work (a first run or a reprocess run) and starts its run in
-    one short write transaction."""
+    one short write transaction. `videos` True claims only video work and False everything else
+    (M6 step 7): the backend runs one loop of each, so one heavy movie runs at a time while images
+    keep being processed beside it, both sharing the one worker (`WorkerLease`)."""
 
     def __init__(
         self,
@@ -40,7 +54,9 @@ class ProcessingScheduler:
         new_id: Callable[[], uuid.UUID],
         clock: Callable[[], datetime],
         lease_for: timedelta,
+        videos: bool | None = None,
     ) -> None:
+        self._videos = videos
         self._uow = uow
         self._new_id = new_id
         self._clock = clock
@@ -60,11 +76,21 @@ class ProcessingScheduler:
     def _claim(self, session: Session, owner: str, now: datetime) -> StartedProcessingJob | None:
         # Session is intentionally not stored: this transaction ends before the executor computes.
         repository = JobRepository(session)
+        if self._videos and session.scalar(
+            select(ProcessingRun.id)
+            .where(
+                ProcessingRun.id.in_(self._kind_runs()),
+                ProcessingRun.state.in_(_HEAVY),
+            )
+            .limit(1)
+        ):
+            return None  # one heavy movie at a time (processing spec section 8)
         job = repository.claim_next(
             owner=owner,
             now=now,
             lease_for=self._lease_for,
             types=SOURCE_JOB_TYPES,
+            where=() if self._videos is None else (Job.processing_run_id.in_(self._kind_runs()),),
         )
         if job is None:
             return None
@@ -80,7 +106,12 @@ class ProcessingScheduler:
             ProcessingRun,
             run.id,
             expected_revision=run.revision,
-            values={"state": ProcessingRunState.RUNNING, "started_at": now, "updated_at": now},
+            # (a resumed video run keeps when it first started)
+            values={
+                "state": ProcessingRunState.RUNNING,
+                "started_at": run.started_at or now,
+                "updated_at": now,
+            },
             extra_where=(ProcessingRun.state == ProcessingRunState.PENDING,),
         )
         assert changed == 1  # the write lock taken by ProcessingRunRepository.lock prevents a race
@@ -92,6 +123,12 @@ class ProcessingScheduler:
             now=now,
         )
         return StartedProcessingJob(job, segment.id)
+
+    def _kind_runs(self) -> Any:
+        kind = Source.kind == SourceKind.VIDEO if self._videos else Source.kind != SourceKind.VIDEO
+        return (
+            select(ProcessingRun.id).join(Source, Source.id == ProcessingRun.source_id).where(kind)
+        )
 
     @staticmethod
     def _fail(repository: JobRepository, job: ClaimedJob, now: datetime, code: str) -> None:

@@ -44,6 +44,7 @@ from backend.api.routes.sources import gone_sources, recheck_if_missing, require
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
 from backend.app.identities.models import Evidence, EvidenceKind, Identity, IdentityState
 from backend.app.jobs.models import SOURCE_JOB_TYPES, Job, JobPriority
+from backend.app.jobs.repository import JobRepository
 from backend.app.processing.cancel import (
     CancelError,
     CancelOutcome,
@@ -51,6 +52,7 @@ from backend.app.processing.cancel import (
     RunNotFoundError,
 )
 from backend.app.processing.configuration import UNCALIBRATED
+from backend.app.processing.execute_job import snapshot_runnable
 from backend.app.processing.models import (
     ProcessingConfigurationSnapshot,
     ProcessingRun,
@@ -220,7 +222,7 @@ def visible_run(session: Session, run_id: uuid.UUID) -> ProcessingRun:
     return run
 
 
-def _run_detail(session: Session, run_id: uuid.UUID) -> ProcessingRunDetail:
+def run_detail(session: Session, run_id: uuid.UUID) -> ProcessingRunDetail:
     return _details(session, [visible_run(session, run_id)])[0]
 
 
@@ -288,7 +290,7 @@ def _schedule(
         ) from None
     backend.announce_run(scheduled.processing_run_id, "processing_run.created")
     return library.unit_of_work.read(
-        lambda session: _run_detail(session, scheduled.processing_run_id)
+        lambda session: run_detail(session, scheduled.processing_run_id)
     )
 
 
@@ -413,7 +415,7 @@ def list_source_runs(
 
 @router.get("/processing-runs/{run_id}")
 def get_run(run_id: uuid.UUID, library: Library) -> ProcessingRunDetail:
-    return library.unit_of_work.read(lambda session: _run_detail(session, run_id))
+    return library.unit_of_work.read(lambda session: run_detail(session, run_id))
 
 
 def cancel_command(library: Library, backend: Backend, run_id: uuid.UUID) -> ProcessingRunDetail:
@@ -433,7 +435,7 @@ def cancel_command(library: Library, backend: Backend, run_id: uuid.UUID) -> Pro
         ) from None  # fmt: skip
     if result.outcome != CancelOutcome.ALREADY:  # a repeat changed nothing: nothing to announce
         backend.announce_run(result.run_id)
-    return library.unit_of_work.read(lambda session: _run_detail(session, result.run_id))
+    return library.unit_of_work.read(lambda session: run_detail(session, result.run_id))
 
 
 @router.post("/processing-runs/{run_id}/cancel", status_code=202)
@@ -449,9 +451,8 @@ def retry_run(
 ) -> ProcessingRunDetail:
     def find_job(session: Session) -> tuple[uuid.UUID, uuid.UUID | None]:
         run = visible_run(session, run_id)
-        return run.source_id, session.scalar(
-            select(Job.id).where(Job.processing_run_id == run_id, Job.type.in_(SOURCE_JOB_TYPES))
-        )
+        job = JobRepository(session).current_for_run(run_id)  # (a resumed video run has two)
+        return run.source_id, None if job is None or job.type not in SOURCE_JOB_TYPES else job.id
 
     source_id, job_id = library.unit_of_work.read(find_job)
     recheck_if_missing(library, backend, source_id)  # a missing original is verified on use (#179)
@@ -463,6 +464,9 @@ def retry_run(
             new_id=backend.settings.new_id,
             clock=backend.settings.clock,
             wake_scheduler=backend.wake_scheduler,
+            runnable=(lambda _session, _run: True)
+            if backend.processing is None
+            else snapshot_runnable(library.packages, backend.processing.planner),
         ).retry(job_id)
     except ProcessSourceError as error:
         _still_there(library, lambda session: visible_run(session, run_id))
@@ -472,5 +476,5 @@ def retry_run(
         ) from None  # fmt: skip
     backend.announce_run(scheduled.processing_run_id, "processing_run.created")
     return library.unit_of_work.read(
-        lambda session: _run_detail(session, scheduled.processing_run_id)
+        lambda session: run_detail(session, scheduled.processing_run_id)
     )

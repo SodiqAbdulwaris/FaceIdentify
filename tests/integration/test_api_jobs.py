@@ -11,7 +11,9 @@ from sqlalchemy import update
 
 from backend.api.pagination import encode_cursor
 from backend.app.jobs.models import Job
+from backend.app.processing.models import ProcessingRun
 from tests.fixtures.api import Api, error, imported
+from tests.fixtures.media import make_clip
 from tests.integration.test_api_processing_routes import finished, process
 
 RUNS = "/api/v1/processing-runs"
@@ -153,3 +155,101 @@ async def test_job_filters_and_cursors_are_validated(processing_api: Api) -> Non
     forged = encode_cursor("jobs:None:None", ["not-a-date", "not-an-id"])
     error(await api.client.get(JOBS, params={"cursor": forged}), 400, "INVALID_CURSOR")
     error(await api.client.get(f"{JOBS}/{uuid.uuid4()}"), 404, "JOB_NOT_FOUND")
+
+
+# --- pause and resume (M6 step 7) -----------------------------------------------------------------
+
+
+def set_states(api: Api, run_id: str, job_state: str, run_state: str) -> None:
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        session.execute(
+            update(Job)
+            .where(Job.processing_run_id == uuid.UUID(run_id))
+            .values(
+                state=job_state,
+                lease_owner="worker" if job_state in ("RUNNING", "PAUSING") else None,
+                lease_expires_at=api.backend.settings.clock()
+                if job_state in ("RUNNING", "PAUSING")
+                else None,
+            )
+        )
+        session.execute(
+            update(ProcessingRun)
+            .where(ProcessingRun.id == uuid.UUID(run_id))
+            .values(state=run_state)
+        )
+        session.commit()
+
+
+async def test_a_running_video_job_is_paused_then_resumed(processing_api: Api) -> None:
+    api = processing_api
+    wakes: list[None] = []
+    api.backend.wake_scheduler = lambda: None  # type: ignore[method-assign]
+    clip = make_clip(api.folder / "film.mp4", seconds=1)
+    source = await imported(api, path=str(clip))
+    run = await process(api, source)
+    job = f"{JOBS}/{run['job']['id']}"
+    set_states(api, run["id"], "RUNNING", "RUNNING")
+
+    paused = await api.client.post(f"{job}/pause")
+    again = await api.client.post(f"{job}/pause")
+
+    assert paused.status_code == again.status_code == 202
+    assert (paused.json()["state"], paused.json()["job"]["state"]) == ("PAUSING", "PAUSING")
+    error(await api.client.post(f"{job}/resume"), 409, "JOB_INVALID_TRANSITION")  # not yet paused
+    set_states(api, run["id"], "PAUSED", "PAUSED")  # (the executor settles it at the chunk's end)
+    api.backend.wake_scheduler = lambda: wakes.append(None)  # type: ignore[method-assign]
+
+    resumed = await api.client.post(f"{job}/resume")
+
+    assert resumed.status_code == 202
+    assert (resumed.json()["state"], resumed.json()["job"]["state"]) == ("PENDING", "QUEUED")
+    assert wakes == [None]  # the scheduler looks at the queue again
+    assert (await api.client.post(f"{job}/resume")).status_code == 202  # a repeat is harmless
+    assert wakes == [None]
+
+
+async def test_only_a_running_video_job_can_be_paused(processing_api: Api) -> None:
+    api = processing_api
+    image_run = await queued(api)
+    set_states(api, image_run["id"], "RUNNING", "RUNNING")
+
+    body = error(
+        await api.client.post(f"{JOBS}/{image_run['job']['id']}/pause"),
+        409,
+        "JOB_INVALID_TRANSITION",
+    )
+    assert "video" in body["details"]["reason"]
+    video = await imported(api, path=str(make_clip(api.folder / "queued.mp4", seconds=1)))
+    queued_video = await process(api, video)
+    error(
+        await api.client.post(f"{JOBS}/{queued_video['job']['id']}/pause"),
+        409,
+        "JOB_INVALID_TRANSITION",
+    )
+    error(await api.client.post(f"{JOBS}/{uuid.uuid4()}/pause"), 404, "JOB_NOT_FOUND")
+
+
+async def test_a_job_with_no_run_cannot_be_paused(processing_api: Api) -> None:
+    api = processing_api
+    run = await queued(api)
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        session.execute(update(Job).values(processing_run_id=None, type="CLEAN_STORAGE"))
+        session.commit()
+
+    error(await api.client.post(f"{JOBS}/{run['job']['id']}/resume"), 409, "JOB_INVALID_TRANSITION")
+
+
+async def test_a_paused_video_job_can_be_cancelled(processing_api: Api) -> None:
+    api = processing_api
+    api.backend.wake_scheduler = lambda: None  # type: ignore[method-assign]
+    video = await imported(api, path=str(make_clip(api.folder / "p.mp4", seconds=1)))
+    run = await process(api, video)
+    set_states(api, run["id"], "PAUSED", "PAUSED")
+
+    response = await api.client.post(f"{JOBS}/{run['job']['id']}/cancel")
+
+    assert response.status_code == 202
+    assert (response.json()["state"], response.json()["job"]["state"]) == ("CANCELLED", "CANCELLED")

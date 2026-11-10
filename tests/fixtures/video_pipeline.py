@@ -79,6 +79,8 @@ class PaintedPerception:
 
     def represent(self, pixels: Any, detections: tuple[Detection, ...]) -> Represented:
         self.log.append("represent")
+        if not detections:  # (an image without a painted square: nothing to embed)
+            return Represented((), None)
         vectors = tuple(
             FaceVector(d.detection_index, COLOURS[d.detection_index][1], "L2_NORMALIZED")
             for d in detections

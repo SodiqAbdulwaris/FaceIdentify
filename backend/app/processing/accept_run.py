@@ -473,14 +473,10 @@ class AcceptProcessingRunUseCase:
         job_type = (
             JobType.PROCESS_SOURCE if run.supersedes_run_id is None else JobType.REPROCESS_SOURCE
         )
-        jobs = list(
-            session.scalars(
-                select(Job).where(Job.processing_run_id == run.id, Job.type == job_type)
-            )
-        )
-        if source is None or len(jobs) != 1:
+        job = JobRepository(session).current_for_run(run.id)  # (a retried video run has two)
+        if source is None or job is None or job.type != job_type:
             raise AcceptanceError("processing source or job is no longer valid")
-        return source, jobs[0]
+        return source, job
 
     @staticmethod
     def _require_source_is_acceptable(session: Session, source: Source) -> None:

@@ -19,12 +19,12 @@ transaction and the job is still `QUEUED`.
 """
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.jobs.models import Job, JobState
@@ -65,6 +65,17 @@ class JobRepository:
         """The row as the database has it now, not as this session last saw it."""
         return self._session.get(Job, job_id, populate_existing=True)
 
+    def current_for_run(self, run_id: uuid.UUID) -> Job | None:
+        """A run's current job: its latest attempt. A run has one job, or more when a video run
+        is retried from its checkpoint (M6 D10: a new job on the same run, API 15)."""
+        return self._session.scalars(
+            select(Job)
+            .where(Job.processing_run_id == run_id)
+            .order_by(Job.attempt_number.desc())
+            .limit(1)
+            .execution_options(populate_existing=True)
+        ).first()
+
     def claim_next(
         self,
         *,
@@ -72,14 +83,16 @@ class JobRepository:
         now: datetime,
         lease_for: timedelta,
         types: Collection[str] | None = None,
+        where: Sequence[ColumnElement[bool]] = (),
     ) -> ClaimedJob | None:
         """Claim the most urgent, oldest `QUEUED` job for `owner`, or None if there is none.
 
         Ties on priority and creation time break by id, so the order is total. The job becomes
         `RUNNING` with a lease until `now + lease_for`, a first heartbeat and `started_at`.
+        `where` narrows the eligible jobs further (the scheduler's video or other queue).
         """
         expires = now + lease_for
-        eligible = [Job.state == JobState.QUEUED]
+        eligible = [Job.state == JobState.QUEUED, *where]
         if types is not None:
             if not types:
                 return None
