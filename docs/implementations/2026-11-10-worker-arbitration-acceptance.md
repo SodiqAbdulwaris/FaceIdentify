@@ -43,9 +43,9 @@
     and run) ends with one active observation, one private one from the failed attempt and one
     identity, so nothing is duplicated; through the client pool, the job's `WorkerFailedError`
     reaches the job and the waiting search still runs both its requests;
-  - **a cancellation check that cannot read the database**: the error is raised (as from the
-    boundary check, the runner then settles an unexpected error), the request never reaches the
-    worker and the turn is free;
+  - **a cancellation check that cannot read the database**, through the runner: the error is an
+    unexpected one, as from the boundary check (the runner raises it after settling the job and run
+    `FAILED` with `UNEXPECTED_ERROR`), the request never reaches the worker and the turn is free;
   - lease units: a cancelled waiting request is asked once, at its turn, and the next request runs;
     a request that is not cancelled runs, and the scope ends with its block; a turn given up does
     not count towards the burst (this test fails without the streak fix); a check that raises frees
@@ -90,7 +90,10 @@ Run on 2026-11-10 on Windows, on this branch rebased over PR #235 and revision 0
 - `uv run ruff format --check .` (318 files formatted), `uv run ruff check .` (all checks passed),
   `uv run mypy` and `uv run mypy --platform linux` (no issues, 309 files).
 - `uv run pytest -q --cov`: **3,270 passed**, 3 deselected, coverage **100%** (10,954 statements,
-  2,242 branches). (An earlier full run on the branch, before the rebase, had one
+  2,242 branches). After the review fixes (the streak fix and the new tests), again: **3,274
+  passed**, 3 deselected, coverage **100%** (10,955 statements, 2,242 branches); the last commit
+  (`test: settle a failing cancellation check through the runner`) changes one test only and was run
+  on its own file twice (7 passed each time). (An earlier full run on the branch, before the rebase, had one
   `WinError 183` shared-memory collision with another session's run and was not counted.)
 - The new tests were run five times in a row before the gate (5 passed each time). One first draft
   of the "next boundary" test expected the search's representation before the job's; it failed,

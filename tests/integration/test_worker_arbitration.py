@@ -33,6 +33,7 @@ from backend.app.processing.cancel import CancelOutcome, CancelProcessingUseCase
 from backend.app.processing.execute_job import ProcessingCancelledError
 from backend.app.processing.models import ProcessingRun
 from backend.app.processing.retry import RetryProcessingUseCase
+from backend.app.processing.runner import UNEXPECTED_CODE
 from backend.app.runtime.perception_client import Detected, Represented
 from backend.app.runtime.worker_config import PerceptionPlan
 from backend.ml.contracts.messages import Detection, ExecutionContext, MLRequest, MLResponse
@@ -268,21 +269,20 @@ def test_a_worker_failing_during_a_jobs_inference_fails_the_job_hands_the_turn_o
     assert pipeline.count(Identity) == 1
 
 
-def test_a_cancellation_check_that_cannot_read_the_database_frees_the_turn_and_raises(
+def test_a_cancellation_check_that_cannot_read_the_database_is_settled_as_unexpected(
     pipeline: Pipeline, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Like the boundary check, a failing read is not a cancellation: the error is raised (the
-    runner settles it as an unexpected error), the request never reaches the worker, and the turn
-    is free."""
+    """Like the boundary check, a failing read is not a cancellation: through the runner, the error
+    is an unexpected one, the job and run are settled FAILED with `UNEXPECTED_ERROR`, the request
+    never reached the worker, and the turn is free."""
     lease = WorkerLease()
     planted = pipeline.perception
     pipeline.perception = Leased(planted, lease)  # type: ignore[assignment]
     pipeline.enqueue(pipeline.import_image())
-    started = pipeline.scheduler().claim_source_job("worker")
-    assert started is not None
-    executor = pipeline.executor()
+    runner = pipeline.runner()
+    executor = runner._executor  # noqa: SLF001 - the check the turn asks
+    read = executor._cancellation_requested  # noqa: SLF001
     reads = 0
-    read = executor._cancellation_requested  # noqa: SLF001 - the check the turn asks
 
     def failing_at_the_turn(session: Any, claimed: Any) -> bool:
         nonlocal reads
@@ -292,11 +292,16 @@ def test_a_cancellation_check_that_cannot_read_the_database_frees_the_turn_and_r
         return read(session, claimed)
 
     monkeypatch.setattr(executor, "_cancellation_requested", failing_at_the_turn)
-    with pytest.raises(RuntimeError, match="locked"):
-        executor.execute(started)
+    with pytest.raises(RuntimeError, match="unexpected RuntimeError while processing"):
+        runner.run_once()
 
     assert reads == 3
     assert planted.calls == 0  # the detection never reached the worker
+    with pipeline.lib.session_factory() as session:
+        run = session.scalars(select(ProcessingRun)).one()
+        job = session.scalars(select(Job)).one()
+        assert (run.state, run.failure_code) == ("FAILED", UNEXPECTED_CODE)
+        assert (job.state, job.failure_code) == ("FAILED", UNEXPECTED_CODE)
     with lease.held():  # and the worker is free
         pass
 
