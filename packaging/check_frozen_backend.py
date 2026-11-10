@@ -2,10 +2,11 @@
 
     uv run python packaging/check_frozen_backend.py build/dist/faceidentify-backend
 
-Starts the executable on the development profile in a scratch library, reads the handshake,
-calls `/health` and `/readiness`, checks the library was migrated, closes its standard input (the
-shell's stop signal) and expects a clean exit; then asks it which ONNX Runtime providers it and a
-spawned child see. Prints one JSON line with the measurements and exits 1 on any failure.
+Starts the executable on the development profile in a scratch library, reads the handshake, calls
+`/health` and `/readiness`, checks the library was migrated, closes its standard input (the shell's
+stop signal) and expects a clean exit. Then it runs one request through the real worker process
+with model-free handlers, and asks which ONNX Runtime providers the executable and a spawned child
+see. Prints one JSON report and exits 1 on any failure.
 """
 
 import base64
@@ -68,6 +69,12 @@ def main(folder: Path) -> int:
     report["providers"] = (
         json.loads(probe.stdout) if probe.returncode == 0 else probe.stderr[-2000:]
     )
+    worker = subprocess.run(
+        [str(exe), "--probe-worker"], capture_output=True, text=True, timeout=300, check=False
+    )
+    report["worker"] = (
+        json.loads(worker.stdout) if worker.returncode == 0 else worker.stderr[-2000:]
+    )
     report["folder_megabytes"] = round(
         sum(p.stat().st_size for p in folder.rglob("*") if p.is_file()) / 1e6
     )
@@ -76,6 +83,7 @@ def main(folder: Path) -> int:
         report["readiness"]["state"] == "READY"  # type: ignore[index]
         and report["exit_code"] == 0
         and report["database_created"]
+        and worker.returncode == 0
         and probe.returncode == 0
         and report["providers"]["usearch_size"] == 1  # type: ignore[index]
         and report["providers"]["avif"]  # type: ignore[index]
