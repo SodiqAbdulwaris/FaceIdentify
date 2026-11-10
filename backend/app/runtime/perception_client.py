@@ -27,8 +27,8 @@ call; vectors come back in segments the worker made, which are copied out and th
 """
 
 import uuid
-from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -142,13 +142,32 @@ class PerceptionClient:
         self._on_ran = on_ran
         # (stage, variant) -> why this provider cannot run; a stage never inherits another's
         self._ruled_out: dict[tuple[str, uuid.UUID], str] = {}
+        self._in_turn = False  # inside `turn()`: the requests take no turn of their own
+
+    @contextmanager
+    def turn(self) -> Iterator[None]:
+        """Hold the worker for several requests: one turn for a batch of video frames (#242).
+        The turn is asked for once, so a cancellation (`cancellable`) is seen before the batch and
+        an interactive request waits for at most the batch. A client is used by one thread."""
+        if self._lease is None or self._in_turn:
+            yield
+            return
+        with self._lease.held():
+            self._in_turn = True
+            try:
+                yield
+            finally:
+                self._in_turn = False
+
+    def _held(self) -> AbstractContextManager[None]:
+        return nullcontext() if self._lease is None or self._in_turn else self._lease.held()
 
     def detect(
         self, pixels: NDArray[np.uint8], *, context: ExecutionContext | None = None
     ) -> Detected:
         with SegmentLedger(new_id=self._new_id) as ledger:
             image = _put(ledger, pixels)
-            with self._lease.held() if self._lease else nullcontext():
+            with self._held():
                 _, response, ran, fallbacks = self._attempt(
                     "the face detector",
                     self._plan.detector,
@@ -175,7 +194,7 @@ class PerceptionClient:
         asked = tuple(FaceGeometry(0, d.detection_index, d.box, d.landmarks) for d in detections)
         with SegmentLedger(new_id=self._new_id) as ledger:
             image = _put(ledger, pixels)
-            with self._lease.held() if self._lease else nullcontext():
+            with self._held():
                 request, response, ran, fallbacks = self._attempt(
                     "the face embedder",
                     self._plan.embedder,

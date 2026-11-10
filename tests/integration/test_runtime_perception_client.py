@@ -11,6 +11,7 @@ import logging
 import threading
 import uuid
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -848,3 +849,39 @@ def test_a_variant_ruled_out_for_one_stage_is_still_asked_in_the_other(
     with side.ledger:
         out = client.represent(picture(64, 64), three_faces())
     assert out.ran is embedder
+
+
+class CountingTurn:
+    def __init__(self) -> None:
+        self.turns = 0
+
+    @contextmanager
+    def held(self) -> Iterator[None]:
+        self.turns += 1
+        yield
+
+
+def test_requests_inside_a_turn_share_it_and_outside_take_their_own(new_id: SeededUUIDs) -> None:
+    script = Scripted(detected)
+    lease = CountingTurn()
+    client = PerceptionClient(
+        cast(MLSupervisor, script), plan_of((variant(CPU),), ()), new_id=new_id, lease=lease
+    )
+
+    with client.turn():
+        client.detect(picture(64, 64))
+        with client.turn():  # (a turn inside a turn is the same turn)
+            client.detect(picture(64, 64))
+    client.detect(picture(64, 64))
+
+    assert lease.turns == 2  # one for the batch of two (#242), one for the request alone
+    assert len(script.requests) == 3
+
+
+def test_a_client_without_a_lease_has_turns_that_hold_nothing(new_id: SeededUUIDs) -> None:
+    client = PerceptionClient(
+        cast(MLSupervisor, Scripted(detected)), plan_of((variant(CPU),), ()), new_id=new_id
+    )
+
+    with client.turn():
+        client.detect(picture(64, 64))

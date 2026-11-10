@@ -106,3 +106,16 @@ def test_the_command_prints_and_writes_the_report_then_fails_on_a_workload_error
     assert json.loads(report.read_text(encoding="utf-8"))["runs"][0]["errors"] == [
         "RequestCancelledError"
     ]
+
+
+def test_video_frames_are_detected_a_batch_to_a_turn() -> None:
+    records: list[Any] = []
+    lease = WorkerLease(observe=records.append)
+    client = Simulated(lease, 0.0, 0.0, random.Random(1))
+
+    with client.turn():
+        client.detect(None)
+        client.detect(None)
+    client.detect(None)
+
+    assert len(records) == 2  # the batch held one turn, the lone request its own

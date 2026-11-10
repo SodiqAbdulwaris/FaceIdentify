@@ -26,7 +26,8 @@ import statistics
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -50,11 +51,22 @@ class Simulated:
     def __init__(self, lease: WorkerLease, detect_s: float, represent_s: float, rng: random.Random):
         self._lease, self._detect, self._represent = lease, detect_s, represent_s
         self._rng, self._rng_lock = rng, threading.Lock()
+        self._in_turn = False
+
+    @contextmanager
+    def turn(self) -> Iterator[None]:
+        """One turn for several requests, as `PerceptionClient.turn` (a video batch, #242)."""
+        with self._lease.held():
+            self._in_turn = True
+            try:
+                yield
+            finally:
+                self._in_turn = False
 
     def _hold(self, seconds: float) -> None:
         with self._rng_lock:
             jitter = self._rng.uniform(0.9, 1.1)
-        with self._lease.held():
+        with nullcontext() if self._in_turn else self._lease.held():
             time.sleep(seconds * jitter)
 
     def detect(self, _pixels: Any) -> tuple[int]:
@@ -73,7 +85,10 @@ def run_once(
     images: int,
     search_gap_s: float,
     seed: int,
+    batch: int = 0,
 ) -> dict[str, Any]:
+    """`batch` 0: the background processes images (a detection and a representation, each its own
+    turn). `batch` N: it processes video frames, detecting N frames in ONE turn (#242)."""
     records: list[TurnRecord] = []
     lease = WorkerLease(burst=burst, observe=records.append)
     rng = random.Random(seed)
@@ -85,6 +100,15 @@ def run_once(
     def process() -> None:
         nonlocal completed
         try:
+            if batch:
+                client = client_for(lease)  # one client for the video job
+                for start in range(0, images, batch):
+                    frames = min(batch, images - start)
+                    with client.turn():
+                        for _ in range(frames):
+                            client.detect(pixels)
+                    completed += frames
+                return
             for _ in range(images):
                 client = client_for(lease)  # a fresh client per job, as the executor gets
                 found = client.detect(pixels)
@@ -195,6 +219,12 @@ def main() -> None:
     parser.add_argument("--detect-ms", type=float, default=40.0, help="simulated detection")
     parser.add_argument("--represent-ms", type=float, default=25.0, help="simulated embedding")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--background-batch",
+        type=int,
+        default=0,
+        help="0: images; N: video frames detected N to a worker turn (#242)",
+    )
     parser.add_argument("--real", action="store_true", help="run the installed models")
     parser.add_argument("--local-state-root", type=Path)
     parser.add_argument("--key", default="insightface-buffalo-l")
@@ -223,6 +253,7 @@ def main() -> None:
             "providers": arguments.providers if arguments.real else None,
             "images": arguments.images,
             "search_gap_ms": arguments.search_gap_ms,
+            "background_batch": arguments.background_batch,
             "runs": [
                 run_once(
                     int(burst),
@@ -231,6 +262,7 @@ def main() -> None:
                     images=arguments.images,
                     search_gap_s=arguments.search_gap_ms / 1000,
                     seed=arguments.seed,
+                    batch=arguments.background_batch,
                 )
                 for burst in arguments.bursts.split(",")
             ],
