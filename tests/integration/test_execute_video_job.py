@@ -17,7 +17,12 @@ from sqlalchemy import select, update
 from backend.app.jobs.models import Job, JobState
 from backend.app.memory.models import Observation, Representation
 from backend.app.processing.accept_run import AcceptProcessingRunUseCase
-from backend.app.processing.cancel import RunNotFoundError
+from backend.app.processing.cancel import (
+    CancelError,
+    CancelOutcome,
+    CancelProcessingUseCase,
+    RunNotFoundError,
+)
 from backend.app.processing.execute_job import (
     ProcessingCancelledError,
     ProcessingExecutionError,
@@ -627,3 +632,47 @@ def test_a_provider_fallback_inside_a_chunk_redoes_it_under_the_new_segment(
         ).all()
     assert set(rows) == set(produced) == {second.id}  # nothing settled under the closed segment
     assert perception.log.count("detect") == 6 + 4  # chunk one's four frames were done again
+
+
+def test_a_cancel_while_pausing_stops_the_run_at_the_next_batch(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    started = claim(pipeline, video)
+    run_id = started.job.processing_run_id
+    assert run_id is not None
+    canceller = CancelProcessingUseCase(pipeline.lib.unit_of_work, clock=pipeline.clock)
+
+    def pause_then_cancel(number: int) -> None:
+        if number == 1:
+            pauser(pipeline).pause(run_id)
+        if number == 2:
+            assert canceller.cancel(run_id).outcome == CancelOutcome.REQUESTED  # not refused
+
+    perception.on_detect = pause_then_cancel
+
+    with pytest.raises(ProcessingCancelledError):
+        video_executor(pipeline, frames_per_turn=2).execute(started)
+
+    assert run_state(pipeline, run_id) == ProcessingRunState.CANCELLED
+    assert job_state(pipeline, started.job.id) == JobState.CANCELLED
+    assert observations(pipeline, run_id) == []  # the chunk in hand was never settled
+
+
+def test_commands_to_an_older_attempt_do_not_reach_the_current_one(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    started = claim(pipeline, video)
+    run_id = started.job.processing_run_id
+    assert run_id is not None
+    fail_at(perception, 5)
+    with pytest.raises(OSError, match="disk went away"):
+        video_executor(pipeline).execute(started)
+    retrier(pipeline).retry(started.job.id)  # a new job on the same run (D10)
+
+    with pytest.raises(CancelError, match="not the current attempt"):
+        CancelProcessingUseCase(pipeline.lib.unit_of_work, clock=pipeline.clock).cancel(
+            run_id, job_id=started.job.id
+        )
+    with pytest.raises(PauseError, match="not the current attempt"):
+        pauser(pipeline).resume(run_id, job_id=started.job.id)
+    assert run_state(pipeline, run_id) == ProcessingRunState.PENDING  # the retry is untouched

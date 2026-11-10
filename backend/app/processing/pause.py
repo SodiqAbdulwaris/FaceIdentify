@@ -44,14 +44,17 @@ class PauseProcessingUseCase:
         self._uow = unit_of_work
         self._clock = clock
 
-    def pause(self, run_id: uuid.UUID) -> PauseOutcome:
-        return self._uow.write(lambda session: self._pause(session, run_id))
+    def pause(self, run_id: uuid.UUID, *, job_id: uuid.UUID | None = None) -> PauseOutcome:
+        """`job_id`: act only if it is the run's current attempt (see `cancel.py`)."""
+        return self._uow.write(lambda session: self._pause(session, run_id, job_id))
 
-    def resume(self, run_id: uuid.UUID) -> PauseOutcome:
-        return self._uow.write(lambda session: self._resume(session, run_id))
+    def resume(self, run_id: uuid.UUID, *, job_id: uuid.UUID | None = None) -> PauseOutcome:
+        return self._uow.write(lambda session: self._resume(session, run_id, job_id))
 
-    def _pause(self, session: Session, run_id: uuid.UUID) -> PauseOutcome:
-        run, job = self._load(session, run_id)
+    def _pause(
+        self, session: Session, run_id: uuid.UUID, job_id: uuid.UUID | None = None
+    ) -> PauseOutcome:
+        run, job = self._load(session, run_id, job_id)
         if run.state in (ProcessingRunState.PAUSING, ProcessingRunState.PAUSED):
             return PauseOutcome.ALREADY
         if session.get(Source, run.source_id).kind != SourceKind.VIDEO:  # type: ignore[union-attr]
@@ -63,8 +66,10 @@ class PauseProcessingUseCase:
         )
         return PauseOutcome.REQUESTED
 
-    def _resume(self, session: Session, run_id: uuid.UUID) -> PauseOutcome:
-        run, job = self._load(session, run_id)
+    def _resume(
+        self, session: Session, run_id: uuid.UUID, job_id: uuid.UUID | None = None
+    ) -> PauseOutcome:
+        run, job = self._load(session, run_id, job_id)
         if run.state in (ProcessingRunState.PENDING, ProcessingRunState.RUNNING) and job.state in (
             JobState.QUEUED,
             JobState.RUNNING,
@@ -76,12 +81,16 @@ class PauseProcessingUseCase:
         return PauseOutcome.RESUMED
 
     @staticmethod
-    def _load(session: Session, run_id: uuid.UUID) -> tuple[ProcessingRun, Job]:
+    def _load(
+        session: Session, run_id: uuid.UUID, job_id: uuid.UUID | None
+    ) -> tuple[ProcessingRun, Job]:
         run = ProcessingRunRepository(session).lock(run_id)
         if run is None:
             raise RunNotFoundError(f"run {run_id} does not exist")
         job = JobRepository(session).current_for_run(run_id)
         assert job is not None  # (every source run is created with its job)
+        if job_id is not None and job.id != job_id:
+            raise PauseError(f"job {job_id} is not the current attempt of run {run_id}")
         return run, job
 
     def _move(

@@ -419,12 +419,15 @@ def get_run(run_id: uuid.UUID, library: Library) -> ProcessingRunDetail:
     return library.unit_of_work.read(lambda session: run_detail(session, run_id))
 
 
-def cancel_command(library: Library, backend: Backend, run_id: uuid.UUID) -> ProcessingRunDetail:
-    """Shared by the run and job cancel routes: write the request, then show the run."""
+def cancel_command(
+    library: Library, backend: Backend, run_id: uuid.UUID, *, job_id: uuid.UUID | None = None
+) -> ProcessingRunDetail:
+    """Shared by the run and job cancel routes: write the request, then show the run. Through a
+    job, only the run's current attempt is cancelled."""
     library.unit_of_work.read(lambda session: visible_run(session, run_id))
     try:
         result = CancelProcessingUseCase(library.unit_of_work, clock=backend.settings.clock).cancel(
-            run_id
+            run_id, job_id=job_id
         )
     except RunNotFoundError:
         raise run_not_found(run_id) from None

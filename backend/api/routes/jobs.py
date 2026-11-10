@@ -135,7 +135,7 @@ def cancel_job(
             409, "JOB_NOT_CANCELLABLE", "The job has no processing run to cancel.",
             details={"job_id": str(job_id)},
         )  # fmt: skip
-    return cancel_command(library, backend, run_id)
+    return cancel_command(library, backend, run_id, job_id=job_id)
 
 
 def _pause_command(
@@ -152,7 +152,11 @@ def _pause_command(
     library.unit_of_work.read(lambda session: visible_run(session, run_id))
     use_case = PauseProcessingUseCase(library.unit_of_work, clock=backend.settings.clock)
     try:
-        outcome = use_case.resume(run_id) if resume else use_case.pause(run_id)
+        outcome = (
+            use_case.resume(run_id, job_id=job_id)
+            if resume
+            else use_case.pause(run_id, job_id=job_id)
+        )
     except PauseError as error:
         raise ApiError(
             409, "JOB_INVALID_TRANSITION", "The job cannot be paused or resumed now.",

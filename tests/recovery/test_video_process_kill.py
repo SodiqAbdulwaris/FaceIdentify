@@ -25,7 +25,7 @@ from backend.app.jobs.models import Job
 from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.memory.models import Observation, Occurrence, OccurrenceKind
-from backend.app.processing.models import ProcessingRun
+from backend.app.processing.models import ProcessingCheckpoint, ProcessingRun
 from backend.app.processing.pause import PauseProcessingUseCase
 from backend.app.processing.retry import RetryProcessingUseCase
 from backend.infrastructure.db.unit_of_work import TransactionRetry
@@ -155,6 +155,16 @@ def test_a_video_killed_while_pausing_is_paused_and_resumes(library: Library) ->
         pipeline = library.pipeline(reopened)
         run = video_run(pipeline, library)
         assert run.state == "PAUSED"  # recovery settles the request a crash left behind
+        with reopened.session_factory() as session:  # (the kill came before the first chunk was
+            # settled: a recovered pause has no chunk yet, so the resume starts at the beginning)
+            assert (
+                session.scalars(
+                    select(ProcessingCheckpoint).where(
+                        ProcessingCheckpoint.processing_run_id == run.id
+                    )
+                ).all()
+                == []
+            )
         with reopened.session_factory() as session:
             assert (
                 session.scalars(select(Job.state).where(Job.processing_run_id == run.id)).one()
