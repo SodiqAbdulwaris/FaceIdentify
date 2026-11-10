@@ -79,7 +79,9 @@ class ProcessWorker:
         pid = self._process.pid
         assert pid is not None  # (the process is started in __init__)
         kill_process_tree(pid)
-        # taskkill can return before the process has been reaped; wait for it, so that once `kill`
-        # returns no second worker can be started beside this one (#221).
+        # taskkill can return before the process has been reaped: wait for it, and never report a
+        # worker that is still alive as gone, so no second worker is started beside it (#221).
         self._process.join(KILL_WAIT)
+        if self._process.is_alive():
+            raise OSError(f"the worker process {pid} did not end")
         self.connection.close()
