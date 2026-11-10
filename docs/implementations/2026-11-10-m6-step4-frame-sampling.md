@@ -3,7 +3,9 @@
 - **Date:** 2026-11-10
 - **Milestone / tracker IDs:** M6 step 4; TST-063 (timestamps); D4
 - **Status:** done (the chunk checkpoints come with the video executor, step 5)
-- **Commits:** PR (number recorded when merged): `feat(media): sample video frames by presentation time`
+- **Commits:** PR #246: `feat(media): sample video frames by presentation time`,
+  `fix(media): test variable frame rates and refuse a non-finite rate`,
+  `feat(media): scale chosen frames down to a longest side`
 
 ## What changed
 
@@ -38,7 +40,8 @@ Delegated (owner, 2026-11-09; reversible):
 
 ## Verification
 
-`uv run pytest -q tests/integration/test_video_frames.py` with the pinned build installed: 12 passed;
+`uv run pytest -q tests/integration/test_video_frames.py` with the pinned build installed: 19 passed (after the
+review fixes: a variable-frame-rate clip, a resume across a slot boundary, non-finite rates, scaling);
 `frames.py` 100% covered. ruff, mypy (Windows and Linux): clean. Full gate: in the PR.
 
 ## Real containers (the owner's videos, read in place, 2026-11-10)
@@ -55,7 +58,7 @@ nothing from it (names, frames, faces) is in Git, a fixture or CI. Results, aggr
   10.5x**. Detection on the real models runs at about 20x real time (41.7 frames a second, step 5), so decoding
   is never the slower stage.
 - Because 4K frames exist, `sampled_frames(max_side=...)` scales a chosen frame down so its longer side is at
-  most `max_side` (the executor uses 1920): a 4K chunk then holds a quarter of the memory, and the detector
+  most `max_side` (the step 5 executor passes 1920, `VideoProcessing.max_side`, in its own PR): a 4K chunk then holds a quarter of the memory, and the detector
   works at 640 pixels anyway. Boxes are normalised, so nothing downstream changes.
 
 ## Open issues / follow-ups

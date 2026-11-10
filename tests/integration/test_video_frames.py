@@ -174,3 +174,15 @@ def test_a_large_frame_is_scaled_down_to_the_longest_side_allowed(tmp_path: Path
 
     assert frames[0].pixels.shape == (50, 100, 3)
     assert frame_size(80, 40, 100) == (80, 40)  # a frame already small enough is left alone
+    odd = list(sampled_frames(installed_tools(), clip, width=320, height=160, max_side=101))
+    assert odd[0].pixels.shape == (50, 101, 3)  # (raw RGB takes an odd width)
+
+
+@pytest.mark.parametrize("max_side", [0, -5])
+def test_max_side_must_be_positive(tmp_path: Path, max_side: int) -> None:
+    with pytest.raises(ValueError, match="max_side"):
+        next(
+            sampled_frames(
+                installed_tools(), tmp_path / "x.mp4", width=4, height=4, max_side=max_side
+            )
+        )
