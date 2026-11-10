@@ -231,3 +231,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-10 | [M6 step 3: video import and probe](2026-11-10-m6-step3-video-import.md) | done; M6 step 3 |
 | 2026-11-10 | [M8 step 1: licence inventory and notices generator](2026-11-10-m8-step1-notices-inventory.md) | done |
 | 2026-11-10 | [M6 step 4: sampled frames over an ffmpeg pipe](2026-11-10-m6-step4-frame-sampling.md) | done; first part of step 4 |
+| 2026-11-10 | [M6 steps 4 and 5: chunked video runs, tracks and batched turns (#242)](2026-11-10-m6-step5-video-chunks-and-tracks.md) | done; occurrences next (step 6) |
