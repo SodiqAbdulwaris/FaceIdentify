@@ -22,6 +22,7 @@ database and file work in a worker thread and the event loop stays free.
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, BinaryIO, Literal
 
@@ -49,6 +50,7 @@ from backend.app.sources.import_source import (
     ImportFileError,
     ImportFileTooLargeError,
     ImportSourceUseCase,
+    VideoImport,
 )
 from backend.app.sources.lifecycle import (
     SourceBusyError,
@@ -73,6 +75,13 @@ from backend.infrastructure.media.image import (
     CorruptImageError,
     ImageTooLargeError,
     UnsupportedImageError,
+)
+from backend.infrastructure.media.video import (
+    CorruptVideoError,
+    MediaToolsMissingError,
+    UnsupportedVideoError,
+    media_tools,
+    probe_video,
 )
 from backend.infrastructure.storage.files import BytesMissingError
 from backend.infrastructure.storage.referenced import ReferencedFileError
@@ -118,6 +127,7 @@ class SourceDetail(SourceSummary):
     original: MediaReference | None
     width: int | None
     height: int | None
+    duration_ms: int | None  # a video's length; None for an image
     mime_type: str | None
     size_bytes: int | None
     original_filename: str | None
@@ -209,6 +219,7 @@ def _detail(source: Source, artifact: Artifact, run: ProcessingRun | None) -> So
         original=_original_reference(source, artifact),
         width=source.width,
         height=source.height,
+        duration_ms=source.media_duration_ms,
         mime_type=artifact.mime_type,
         size_bytes=artifact.size_bytes,
         original_filename=artifact.original_filename,
@@ -306,6 +317,10 @@ def import_source(
         clock=backend.settings.clock,
         max_pixels=limits.max_pixels,
         max_bytes=limits.max_bytes,
+        video=lambda: VideoImport(
+            partial(probe_video, media_tools(library.roots.local_state_root)),
+            limits.max_video_bytes,
+        ),
     )
     path = Path(body.path)
     try:
@@ -330,6 +345,18 @@ def import_source(
         ) from None
     except CorruptImageError:
         raise ApiError(422, "MEDIA_CORRUPT", "The image could not be read.") from None
+    except UnsupportedVideoError:
+        raise ApiError(
+            415,
+            "MEDIA_FORMAT_UNSUPPORTED",
+            "Only MP4, MOV, MKV, WebM and AVI videos with a video stream are supported.",
+        ) from None
+    except CorruptVideoError:
+        raise ApiError(422, "MEDIA_CORRUPT", "The video could not be read.") from None
+    except MediaToolsMissingError:
+        raise ApiError(
+            503, "MEDIA_TOOLS_UNAVAILABLE", "Video support (FFmpeg) is not installed."
+        ) from None
     except ImageTooLargeError:
         raise ApiError(
             413, "MEDIA_TOO_LARGE", "The image has more pixels than is allowed."

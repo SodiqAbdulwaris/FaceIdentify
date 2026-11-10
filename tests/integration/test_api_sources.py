@@ -13,14 +13,17 @@ from typing import Any
 
 import anyio.to_thread
 import httpx
+import pytest
 from sqlalchemy import select
 
 from backend.api.pagination import encode_cursor
 from backend.api.startup import Backend, create_backend_app
 from backend.app.sources.models import Artifact, ArtifactState
+from backend.infrastructure.media.video import FFMPEG_DIR_ENV
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import MAX_BYTES, MAX_PIXELS, Api, error, imported, library_settings
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+from tests.fixtures.media import make_clip
 
 # --- import ---------------------------------------------------------------------------------
 
@@ -362,3 +365,34 @@ async def test_import_is_unavailable_until_the_host_configures_its_limits(
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "IMPORT_UNAVAILABLE"
+
+
+# --- videos (M6 step 3) ---------------------------------------------------------------------
+
+
+async def test_a_video_is_imported_with_its_length(api: Api) -> None:
+    path = make_clip(api.folder / "Party.mkv", seconds=1.5, encode=("-c:v", "mpeg4"))
+
+    source = await imported(api, path=str(path))
+
+    assert (source["type"], source["display_name"]) == ("VIDEO", "Party")
+    assert (source["width"], source["height"]) == (160, 120)
+    assert abs(source["duration_ms"] - 1500) <= 40  # Matroska rounds to its last frame
+    assert source["mime_type"] == source["original"]["content_type"] == "video/x-matroska"
+    assert source["processing_status"] == "NOT_PROCESSED"
+
+
+async def test_video_import_failures_are_mapped_to_stable_codes(
+    api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    url = "/api/v1/sources/import"
+    picture = api.folder / "photo.avi"
+    picture.write_bytes(api.image("p.png").read_bytes())
+    damaged = api.folder / "cut.mp4"
+    damaged.write_bytes(make_clip(api.folder / "whole.mp4").read_bytes()[:3000])
+
+    error(await api.client.post(url, json={"path": str(picture)}), 415, "MEDIA_FORMAT_UNSUPPORTED")
+    error(await api.client.post(url, json={"path": str(damaged)}), 422, "MEDIA_CORRUPT")
+    monkeypatch.setenv(FFMPEG_DIR_ENV, str(api.folder / "no-ffmpeg-here"))
+    error(await api.client.post(url, json={"path": str(damaged)}), 503, "MEDIA_TOOLS_UNAVAILABLE")
+    assert (await api.client.get("/api/v1/sources")).json()["items"] == []

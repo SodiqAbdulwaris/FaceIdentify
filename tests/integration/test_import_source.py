@@ -9,6 +9,7 @@ import hashlib
 import io
 import sqlite3
 import threading
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from backend.app.sources.import_source import (
     ImportFileError,
     ImportFileTooLargeError,
     ImportSourceUseCase,
+    VideoImport,
 )
 from backend.app.sources.models import (
     Artifact,
@@ -45,10 +47,16 @@ from backend.infrastructure.media.image import (
     ImageTooLargeError,
     UnsupportedImageError,
 )
+from backend.infrastructure.media.video import (
+    CorruptVideoError,
+    UnsupportedVideoError,
+    probe_video,
+)
 from backend.infrastructure.storage.files import ManagedFileStore
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.referenced import ReferencedFileError
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+from tests.fixtures.media import installed_tools, make_clip, rotate
 
 MAX_PIXELS = 10_000
 MAX_BYTES = 100_000
@@ -103,6 +111,8 @@ class World:
         max_pixels: int = MAX_PIXELS,
         max_bytes: int = MAX_BYTES,
         crash_at: str | None = None,
+        max_video_bytes: int = 10_000_000,
+        video: bool = True,
     ) -> ImportSourceUseCase:
         def checkpoint(step: str) -> None:
             if step == crash_at:
@@ -116,6 +126,9 @@ class World:
             max_pixels=max_pixels,
             max_bytes=max_bytes,
             checkpoint=checkpoint,
+            video=(lambda: VideoImport(partial(probe_video, installed_tools()), max_video_bytes))
+            if video
+            else None,
         )
 
     def file(self, name: str, data: bytes) -> Path:
@@ -662,3 +675,104 @@ def test_the_bytes_that_are_decoded_are_the_bytes_that_are_stored(
     assert artifact.storage_key is not None
     with world.store.open(artifact.storage_key) as stored:
         assert stored.read() == good
+
+
+# --- videos (M6 step 3; TST-063, the metadata half) ----------------------------------------------
+
+
+def clip(world: World, name: str = "Film.mp4", **options: Any) -> Path:
+    world.photos.mkdir(exist_ok=True)
+    return make_clip(world.photos / name, **options)
+
+
+def test_a_managed_video_is_copied_with_its_facts(world: World) -> None:
+    path = clip(world, rate=30)
+    data = path.read_bytes()
+
+    imported = world.importer().import_managed(path)
+
+    source = world.source(imported.source_id)
+    artifact = world.artifact(imported.artifact_id)
+    assert (source.kind, source.state, source.display_name) == (
+        SourceKind.VIDEO,
+        SourceState.ACTIVE,
+        "Film",
+    )
+    assert (source.width, source.height) == (160, 120)
+    assert source.media_duration_ms == 2000
+    assert (source.frame_rate_num, source.frame_rate_den) == (30, 1)
+    assert (artifact.state, artifact.mime_type) == (ArtifactState.AVAILABLE, "video/mp4")
+    assert artifact.sha256 == hashlib.sha256(data).digest()
+    assert artifact.storage_key is not None
+    with world.store.open(artifact.storage_key) as stored:
+        assert stored.read() == data
+
+
+def test_a_rotated_video_records_the_size_it_is_shown_at(world: World) -> None:
+    rotated = rotate(clip(world, "flat.mp4"), world.photos / "Side.mov", 90)
+
+    source = world.source(world.importer().import_managed(rotated).source_id)
+
+    assert (source.width, source.height) == (120, 160)
+    assert world.artifact(source.original_artifact_id).mime_type == "video/quicktime"
+
+
+def test_a_referenced_video_is_recorded_where_it_is(world: World) -> None:
+    path = clip(world, "Trip.webm", encode=("-c:v", "libvpx"))
+
+    imported = world.importer().import_referenced(path)
+
+    artifact = world.artifact(imported.artifact_id)
+    assert (artifact.storage_mode, artifact.mime_type) == (StorageMode.REFERENCED, "video/webm")
+    assert world.source(imported.source_id).kind == SourceKind.VIDEO
+    assert list(world.store.managed_files()) == []
+
+
+def test_a_damaged_video_leaves_nothing_behind(world: World) -> None:
+    whole = clip(world, "whole.mp4").read_bytes()
+    damaged = world.file("cut.mp4", whole[:3000])  # the index (moov) is at the end
+
+    for importing in (world.importer().import_managed, world.importer().import_referenced):
+        with pytest.raises(CorruptVideoError):
+            importing(damaged)
+
+    assert world.count(Source) == world.count(Artifact) == 0
+
+
+def test_a_picture_named_as_a_video_is_unsupported(world: World) -> None:
+    path = world.file("photo.mp4", png_bytes())
+
+    with pytest.raises(UnsupportedVideoError):
+        world.importer().import_managed(path)
+    assert world.nothing_was_written()
+
+
+def test_a_video_larger_than_allowed_is_refused_before_it_is_read(world: World) -> None:
+    path = clip(world)
+    importer = world.importer(max_video_bytes=path.stat().st_size - 1)
+
+    for importing in (importer.import_managed, importer.import_referenced):
+        with pytest.raises(ImportFileTooLargeError):
+            importing(path)
+    assert world.nothing_was_written()
+
+
+def test_without_video_support_a_video_cannot_be_imported(world: World) -> None:
+    with pytest.raises(ImportFileError, match="videos"):
+        world.importer(video=False).import_managed(clip(world))
+
+
+def test_a_video_that_disappears_after_its_probe_leaves_nothing(world: World) -> None:
+    path = clip(world)
+
+    def probe_then_lose(path: Path) -> Any:
+        facts = probe_video(installed_tools(), path)
+        path.unlink()
+        return facts
+
+    importer = world.importer()
+    importer._video = lambda: VideoImport(probe_then_lose, 10_000_000)  # noqa: SLF001
+
+    with pytest.raises(ImportFileError, match="cannot read"):
+        importer.import_managed(path)
+    assert world.nothing_was_written()
