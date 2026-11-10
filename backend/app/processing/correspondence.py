@@ -55,6 +55,14 @@ class Face:
     box: Box
     space_id: uuid.UUID | None = None
     vector: npt.NDArray[np.float32] | None = None
+    # A video face's presentation time (M6 step 7): it corresponds only to a face of the same
+    # sampled frame. None for an image.
+    time_ms: int | None = None
+
+
+def overlap(old: Face, new: Face) -> float:
+    """Box IoU of two faces of the same frame; 0 for faces of different frames."""
+    return iou(old.box, new.box) if old.time_ms == new.time_ms else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +130,7 @@ def correspond(
         return face.space_id == space_id and face.vector is not None
 
     def related(old: Face, new: Face) -> bool:
-        if not (comparable(old) and comparable(new)) or iou(old.box, new.box) < MIN_IOU:
+        if not (comparable(old) and comparable(new)) or overlap(old, new) < MIN_IOU:
             return False
         assert old.vector is not None  # (comparable)
         assert new.vector is not None
@@ -146,7 +154,7 @@ def correspond(
             assert face.vector is not None  # (related)
             assert new.vector is not None
             result[face_id] = Pair(
-                face_id, new.id, iou(face.box, new.box), cosine(face.vector, new.vector)
+                face_id, new.id, overlap(face, new), cosine(face.vector, new.vector)
             )
     return result
 
@@ -157,7 +165,7 @@ def geometric_pairs(
     """Each current face whose box corresponds (IoU >= `MIN_IOU`, mutual and unique) to one of
     `previous`, mapped to it: vectors and spaces play no part."""
     forward, backward = _candidates(
-        previous, current, lambda old, new: iou(old.box, new.box) >= MIN_IOU
+        previous, current, lambda old, new: overlap(old, new) >= MIN_IOU
     )
     return {
         found[0]: old_id

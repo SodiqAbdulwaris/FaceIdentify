@@ -24,6 +24,7 @@ from backend.app.memory.models import (
 )
 from backend.app.processing.accept_run import AcceptanceError
 from backend.app.processing.models import ProcessingCheckpoint, ProcessingRun
+from tests.factories.models import ModelFactory
 from tests.fixtures.pipeline import Pipeline
 from tests.fixtures.video_pipeline import (
     import_video,
@@ -277,3 +278,54 @@ def test_accepting_again_finds_a_changed_track_result(
 
     with pytest.raises(AcceptanceError):
         pipeline.accept(run_id, apply_index=False)
+
+
+# --- reprocessing a video (M6 step 7; step 1's rules on video; TST-061 video half) -------------
+
+
+def test_a_reprocessed_video_carries_a_named_track_over_and_replaces_its_generation(
+    pipeline: Pipeline, red: uuid.UUID, tmp_path: Path
+) -> None:
+    first = process_video(pipeline, tmp_path)
+    pipeline.accept(first, apply_index=True)
+    with pipeline.lib.session_factory() as session:  # the person names the red identity
+        source_id = session.get(ProcessingRun, first).source_id  # type: ignore[union-attr]
+        ModelFactory(session, pipeline.clock, pipeline.new_id).association(identity_id=red)  # type: ignore[arg-type]
+        session.commit()
+
+    pipeline.enqueue_reprocess(source_id)
+    started = pipeline.scheduler().claim_source_job("worker")
+    assert started is not None
+    second = video_executor(pipeline).execute(started).processing_run_id
+    pipeline.accept(second, apply_index=True)
+    pipeline.accept(second, apply_index=True)  # idempotent: the carried faces validate again
+
+    with pipeline.lib.session_factory() as session:
+        old = session.scalars(select(Occurrence).where(Occurrence.processing_run_id == first)).all()
+        assert [o.state for o in old] == ["SUPERSEDED"]
+        (occurrence,) = session.scalars(
+            select(Occurrence).where(Occurrence.processing_run_id == second)
+        ).all()
+        assert (occurrence.identity_id, occurrence.kind) == (red, OccurrenceKind.TRACK)
+        assert (occurrence.start_timestamp_ms, occurrence.end_timestamp_ms) == (0, 2520)
+        carried = session.scalars(
+            select(Evidence).where(
+                Evidence.processing_run_id == second,
+                Evidence.kind == EvidenceKind.REPROCESS_DECISION_CARRIED_OVER,
+            )
+        ).all()
+        assert carried  # each red face corresponds to the same face of the same frame
+        members = set(
+            session.scalars(
+                select(OccurrenceObservation.observation_id).where(
+                    OccurrenceObservation.occurrence_id == occurrence.id
+                )
+            )
+        )
+        carried_faces = {
+            session.get(
+                Representation, uuid.UUID(e.payload_json["representation_id"])
+            ).observation_id  # type: ignore[union-attr]
+            for e in carried
+        }
+        assert carried_faces <= members  # carried faces join their track's one occurrence

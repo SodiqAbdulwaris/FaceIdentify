@@ -152,7 +152,10 @@ def erased_faces(session: Session, previous_run_id: uuid.UUID) -> list[Face]:
     seen: dict[uuid.UUID, Face] = {}
     for observation, representation in _faces(session, previous_run_id):
         if representation.state in _ERASED_STATES:
-            seen.setdefault(observation.id, Face(observation.id, box_of(observation)))
+            seen.setdefault(
+                observation.id,
+                Face(observation.id, box_of(observation), time_ms=observation.timestamp_ms),
+            )
     return list(seen.values())
 
 
@@ -177,6 +180,7 @@ def plan_supersession(
             box_of(observation),
             representation.representation_space_id,
             _vector(representation),
+            observation.timestamp_ms,
         )
         for observation, representation in new_faces
     ]
@@ -196,6 +200,7 @@ def plan_supersession(
             box_of(observation),
             representation.representation_space_id,
             _vector(representation),
+            observation.timestamp_ms,
         )
         previous.setdefault(observation.id, face)  # (an image run has one space)
         if human_decided(session, representation):

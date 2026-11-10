@@ -18,7 +18,7 @@ occurrence over the time it spans, its matched faces its members; an unsettled o
 """
 
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from math import isclose, isfinite
@@ -233,12 +233,17 @@ class AcceptProcessingRunUseCase:
                 suppressed_observations.add(decision.observation_id)
             elif decision.representation_id in plan.carried:
                 carried = plan.carried[decision.representation_id]
-                self._carry(session, run, source, decision, carried, now)
+                self._carry(session, run, source, decision, carried, now, occurrence=tracks is None)
             else:
                 self._accept_decision(
                     session, run, source, decision, now, occurrence=tracks is None
                 )
-        for track, identity_id, members in _settled_tracks(decisions, tracks, plan):
+        placed = {
+            d.observation_id: plan.carried[d.representation_id].identity_id
+            for d in decisions
+            if d.representation_id in plan.carried
+        } | _matched(decisions, exclude=plan.suppressed | set(plan.carried))
+        for track, identity_id, members in _settled_tracks(tracks, placed):
             self._track_occurrence(session, run, source, identity_id, track, members, now)
         self._dispose_pending_identities(session, decisions, plan, now)
         record_reviews(session, run, plan.reviews, now=now, new_id=self._new_id)
@@ -339,6 +344,8 @@ class AcceptProcessingRunUseCase:
         decision: _Decision,
         carried: CarriedDecision,
         now: datetime,
+        *,
+        occurrence: bool = True,
     ) -> None:
         """The new face takes the previous face's human decision instead of its own recognition
         result (identity model 60.1): it joins that identity, with its own occurrence, index entry
@@ -378,7 +385,8 @@ class AcceptProcessingRunUseCase:
             now=now,
             new_id=self._new_id,
         )
-        self._occurrence(session, run, source, identity.id, decision.observation_id, now)
+        if occurrence:  # (a video face joins its track's occurrence instead)
+            self._occurrence(session, run, source, identity.id, decision.observation_id, now)
 
     @staticmethod
     def _dispose_pending_identities(
@@ -803,6 +811,10 @@ class AcceptProcessingRunUseCase:
         observation_id: uuid.UUID,
         now: datetime,
     ) -> None:
+        observation = session.get(Observation, observation_id)
+        moment = None if observation is None else observation.timestamp_ms
+        # (a video face on its own, as a carried-over human decision is: the moment it is seen)
+        frame = None if observation is None else observation.frame_index
         OccurrenceRepository(session).add(
             Occurrence(
                 id=self._new_id(),
@@ -810,8 +822,12 @@ class AcceptProcessingRunUseCase:
                 identity_id=identity_id,
                 processing_run_id=run.id,
                 representative_observation_id=observation_id,
-                kind=OccurrenceKind.IMAGE,
+                kind=OccurrenceKind.IMAGE if moment is None else OccurrenceKind.TRACK,
                 state=OccurrenceState.ACTIVE,
+                start_frame=frame,
+                end_frame=frame,
+                start_timestamp_ms=moment,
+                end_timestamp_ms=moment,
                 created_at=now,
                 activated_at=now,
             ),
@@ -865,9 +881,19 @@ class AcceptProcessingRunUseCase:
         # The track rule again, on what was recorded (each face's decision, or its recorded proposal
         # when it was left unsettled), so a changed FINAL cannot pass as the result accepted.
         _validate_track_rule(decisions, _recorded_proposals(decisions), tracks)
+        carried_to = {
+            uuid.UUID(named): rows[0].subject_identity_id
+            for named, rows in carried.items()
+            if rows and rows[0].subject_identity_id is not None
+        }
+        placed = {
+            d.observation_id: carried_to[d.representation_id]
+            for d in decisions
+            if d.representation_id in carried_to
+        } | _matched(decisions, exclude=set(carried_to))
         settled = {
             observation: (track, members)
-            for track, _identity, members in _settled_tracks(decisions, tracks, None)
+            for track, _identity, members in _settled_tracks(tracks, placed)
             for observation in members
         }
         for decision in decisions:
@@ -921,7 +947,14 @@ class AcceptProcessingRunUseCase:
         }
         found = [d for d in decisions if d.observation_id in observations]  # (a missing one is
         # refused by the caller's loop)
-        current = [Face(d.representation_id, box_of(observations[d.observation_id])) for d in found]
+        current = [
+            Face(
+                d.representation_id,
+                box_of(observations[d.observation_id]),
+                time_ms=observations[d.observation_id].timestamp_ms,
+            )
+            for d in found
+        ]
         return set(geometric_pairs(erased_faces(session, run.supersedes_run_id), current))
 
     @staticmethod
@@ -1379,29 +1412,32 @@ def _validate_track_rule(
             raise AcceptanceError("FINAL checkpoint track does not follow the track rule")
 
 
-def _settled_tracks(
-    decisions: Sequence[_Decision], tracks: tuple[_Track, ...] | None, plan: Any
-) -> list[tuple[_Track, uuid.UUID, tuple[uuid.UUID, ...]]]:
-    """Each settled track with its identity and its faces accepted as matches (`plan`: leave out
-    faces a reprocess carries over or suppresses)."""
-    if tracks is None:
-        return []
-    matched = {
+def _matched(
+    decisions: Sequence[_Decision], *, exclude: Collection[uuid.UUID]
+) -> dict[uuid.UUID, uuid.UUID]:
+    """Each face accepted as a match, by observation, with its identity (`exclude`: faces a
+    reprocess suppresses or carries over, by representation)."""
+    return {
         d.observation_id: d.identity_id
         for d in decisions
         if d.outcome is RecognitionOutcome.MATCH_EXISTING
         and d.identity_id is not None
-        and (
-            plan is None
-            or d.representation_id not in plan.suppressed
-            and d.representation_id not in plan.carried
-        )
+        and d.representation_id not in exclude
     }
-    settled = []
-    for track in tracks:
-        members = tuple(o for o in track.observations if o in matched)
-        if members:
-            settled.append((track, matched[members[0]], members))
+
+
+def _settled_tracks(
+    tracks: tuple[_Track, ...] | None, placed: Mapping[uuid.UUID, uuid.UUID]
+) -> list[tuple[_Track, uuid.UUID, tuple[uuid.UUID, ...]]]:
+    """One occurrence per track and identity: the track's faces that were placed (matched, or a
+    reprocess's carried-over human decision), grouped by identity, spanning the track's time."""
+    settled: list[tuple[_Track, uuid.UUID, tuple[uuid.UUID, ...]]] = []
+    for track in tracks or ():
+        by_identity: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for observation in track.observations:
+            if observation in placed:
+                by_identity.setdefault(placed[observation], []).append(observation)
+        settled.extend((track, identity, tuple(m)) for identity, m in by_identity.items())
     return settled
 
 
