@@ -158,3 +158,18 @@ jobs:
       # restart in the middle.
       - name: End-to-end workflow
         run: npm run test:e2e
+
+  frozen-backend:
+    name: Frozen backend (TST-078, TST-079)
+    # M8 step 2: the PyInstaller build of the backend starts headless, migrates a scratch library,
+    # answers /readiness, stops when its standard input closes, and its spawned worker sees ONNX
+    # Runtime. DirectML needs a DirectX 12 device, so a runner without one lists the CPU only.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --group build
+      - name: Build
+        run: uv run pyinstaller packaging/faceidentify-backend.spec --noconfirm --distpath build/dist --workpath build/work
+      - name: Check the frozen backend
+        run: uv run python packaging/check_frozen_backend.py build/dist/faceidentify-backend

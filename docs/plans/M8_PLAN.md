@@ -79,6 +79,8 @@ Each step is one or more small PRs with an implementation entry and an independe
 
 ### Step 2. Freeze the backend
 
+**Built 2026-11-10** ([entry](../implementations/2026-11-10-m8-step2-freeze-backend.md)): (a), (b) and (c) in one PR: spec, entry and headless check, CI job. The worker needs no flag: `freeze_support()` makes the spawned child run the worker. Real-model run in the frozen build: not yet (step 8).
+
 Sized as three PRs: (a) the PyInstaller spec and the frozen host that starts and stops headless; (b) the native-library
 collection hooks and the worker started from the same executable; (c) the headless CI job and the size and start-time record.
 
