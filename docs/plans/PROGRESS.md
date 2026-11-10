@@ -76,7 +76,7 @@ description.
    retry (D10).
 8. The real-world check on the owner's own videos (D8).
 
-**M7 and M8:** neither has a plan.
+**M7 and M8:** plans drafted 2026-11-10 ([M7](M7_PLAN.md), [M8](M8_PLAN.md)); nothing built.
 
 **Open issues and where each belongs:**
 
