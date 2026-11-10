@@ -21,7 +21,7 @@ approval").
 | **M5** recognition and memory | **Done** | Declared complete by the owner on 2026-10-21 as of `main` `a778d81`, after a full-gate run (3,237 backend tests at 100% coverage, 206 frontend tests, both desktop end-to-end tests, the Tauri build and green CI). [Declaration entry](../implementations/2026-10-21-m5-complete.md), [audit](M5_DOD_AUDIT.md) |
 | **M6** movies and scheduling | **In progress** (resumed 2026-11-09) | [Plan](M6_PLAN.md) approved 2026-10-21 with decisions D1 to D12. No M6 code exists. Step 1's spec proposal (PR #229, section 2) was approved by the owner on 2026-11-09 and is not merged yet |
 | M7 cameras | Plan drafted 2026-11-10, nothing built | [Plan](M7_PLAN.md) |
-| M8 packaging and release | Not started | No plan yet; carries the release blockers in section 4 |
+| M8 packaging and release | Plan drafted 2026-11-10, nothing built | [Plan](M8_PLAN.md); carries the release blockers in section 4 |
 
 Automatic acceptance is live at the owner-approved operating point (0.45 / margin 0.10,
 `buffalo-l-verified-match-v1`, installed 2026-10-15).
