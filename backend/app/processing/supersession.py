@@ -343,5 +343,7 @@ def carried_evidence(session: Session, run_id: uuid.UUID) -> Mapping[str, list[E
             Evidence.kind == EvidenceKind.REPROCESS_DECISION_CARRIED_OVER,
         )
     ):
-        found.setdefault(str(row.payload_json.get("representation_id")), []).append(row)
+        payload = row.payload_json
+        named = payload.get("representation_id") if isinstance(payload, dict) else None
+        found.setdefault(str(named), []).append(row)
     return found

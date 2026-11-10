@@ -540,7 +540,17 @@ def test_a_carried_decision_whose_identity_was_retired_refuses_activation(
     assert current_run(lib, source_id) == v1
 
 
-CARRIED_TAMPERING = ["occurrence", "duplicate", "no_support", "extra_link", "payload", "rule"]
+CARRIED_TAMPERING = [
+    "occurrence",
+    "duplicate",
+    "no_support",
+    "extra_link",
+    "payload",
+    "rule",
+    "not_an_object",
+    "orphan",
+    "unnamed",
+]
 
 
 def tamper_with_carried(lib: Pipeline, v2: uuid.UUID, how: str) -> None:
@@ -552,7 +562,12 @@ def tamper_with_carried(lib: Pipeline, v2: uuid.UUID, how: str) -> None:
             session.execute(
                 update(Occurrence).where(Occurrence.processing_run_id == v2).values(state="DELETED")
             )
-        elif how == "duplicate":  # a second carry-over row for the same face
+        elif how in ("duplicate", "orphan", "unnamed"):  # a second carry-over row
+            payload: Any = dict(carried.payload_json)
+            if how == "orphan":  # ... for a face that is not this run's
+                payload["representation_id"] = str(uuid.UUID(int=7))
+            elif how == "unnamed":  # ... that names no face at all
+                del payload["representation_id"]
             copy = Evidence(
                 id=lib.new_id(),
                 kind=carried.kind,
@@ -560,7 +575,7 @@ def tamper_with_carried(lib: Pipeline, v2: uuid.UUID, how: str) -> None:
                 source_id=carried.source_id,
                 subject_identity_id=carried.subject_identity_id,
                 payload_schema_version=carried.payload_schema_version,
-                payload_json=dict(carried.payload_json),
+                payload_json=payload,
                 created_at=carried.created_at,
             )
             session.add(copy)
@@ -576,14 +591,16 @@ def tamper_with_carried(lib: Pipeline, v2: uuid.UUID, how: str) -> None:
                     evidence_id=carried.id, representation_id=other, role="CANDIDATE"
                 )
             )
-        else:  # the payload no longer says what was measured, or under which rule
-            payload = dict(carried.payload_json)
+        else:  # the payload no longer says what was measured, or under which rule, or is no object
+            changed: Any = dict(carried.payload_json)
             if how == "payload":
-                payload["cosine"] = 0.5
+                changed["cosine"] = 0.5
+            elif how == "rule":
+                changed["rule"] = {**changed["rule"], "min_iou": 0.1}
             else:
-                payload["rule"] = {**payload["rule"], "min_iou": 0.1}
+                changed = ["not", "an", "object"]
             session.execute(
-                update(Evidence).where(Evidence.id == carried.id).values(payload_json=payload)
+                update(Evidence).where(Evidence.id == carried.id).values(payload_json=changed)
             )
 
     write(lib, change)
@@ -606,7 +623,11 @@ def test_a_completed_reprocess_run_whose_faces_were_changed_is_refused_on_repeat
         expected = "unexplained rejected face"
     else:
         tamper_with_carried(lib, v2, tamper)
-        expected = "inconsistent carried face"
+        expected = (
+            "carry-over evidence for no face"
+            if tamper in ("orphan", "unnamed", "not_an_object")  # (names no face of the run)
+            else "inconsistent carried face"
+        )
 
     with pytest.raises(AcceptanceError, match=expected):
         accepted(lib, v2)
