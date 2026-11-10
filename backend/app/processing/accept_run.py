@@ -753,6 +753,8 @@ class AcceptProcessingRunUseCase:
         if source.current_processing_run_id != run.id or job.state != JobState.COMPLETED:
             raise AcceptanceError("completed processing run is missing its accepted owners")
         carried = {} if run.supersedes_run_id is None else carried_evidence(session, run.id)
+        if set(carried) - {str(decision.representation_id) for decision in decisions}:
+            raise AcceptanceError("completed processing run has carry-over evidence for no face")
         suppressible = self._suppressible(session, run, decisions)
         for decision in decisions:
             representation = session.get(Representation, decision.representation_id)
