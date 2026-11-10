@@ -20,6 +20,7 @@ picture is printed or kept, only timings. A local measurement, not part of CI.
 
 import argparse
 import json
+import math
 import random
 import statistics
 import threading
@@ -35,10 +36,12 @@ SEARCH_SLOTS = 3  # the face search route's limit (backend/api/startup.py, face_
 
 
 def percentile(values: list[float], p: float) -> float:
+    """The nearest-rank percentile: the smallest value with at least p% of the values at or below
+    it (so the p50 of 1, 2, 3, 4 is 2, and the p95 of 20 values is the 19th)."""
     if not values:
         return float("nan")
     ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, round(p / 100 * (len(ordered) - 1)))]
+    return ordered[max(1, math.ceil(p / 100 * len(ordered))) - 1]
 
 
 class Simulated:
@@ -118,10 +121,14 @@ def run_once(
 
     def of(cls: bool) -> dict[str, Any]:
         mine = [r for r in records if r.interactive is cls]
-        waits = [r.waited * 1000 for r in mine]
-        held = [r.held * 1000 for r in mine]
+        waits = [r.waited * 1000 for r in mine if r.waited is not None]
+        held = [r.held * 1000 for r in mine if r.held is not None]
         return {
             "requests": len(mine),
+            "outcomes": {
+                o: sum(r.outcome == o for r in mine) for o in ("RAN", "FAILED", "CANCELLED")
+            },
+            "unknown_times": sum(r.waited is None or r.held is None for r in mine),
             "wait_ms_p50": round(percentile(waits, 50), 1),
             "wait_ms_p95": round(percentile(waits, 95), 1),
             "wait_ms_max": round(max(waits, default=float("nan")), 1),
@@ -135,6 +142,8 @@ def run_once(
         "burst": burst,
         "interactive": of(True),
         "background": of(False),
+        # a background grant made while searches waited: the burst ran out (a fairness grant)
+        "fairness_grants": sum(not r.interactive and r.queued_interactive > 0 for r in records),
         "background_images_per_s": round(images / elapsed, 2),
         "searches": len(searches),
         "search_ms_p50": round(percentile([s * 1000 for s in searches], 50), 1),
@@ -225,13 +234,18 @@ def main() -> None:
         }
     finally:
         close()
-    print("burst | search wait p50/p95/max ms | job wait p50/p95/max ms | images/s | search ms")
+    print(
+        "burst | search wait p50/p95/max ms | job wait p50/p95/max ms | images/s | search ms"
+        " | fairness grants | cancelled"
+    )
     for run in report["runs"]:
         i, b = run["interactive"], run["background"]
         print(
             f"{run['burst']:>5} | {i['wait_ms_p50']}/{i['wait_ms_p95']}/{i['wait_ms_max']}"
             f" | {b['wait_ms_p50']}/{b['wait_ms_p95']}/{b['wait_ms_max']}"
             f" | {run['background_images_per_s']} | {run['search_ms_p50']}/{run['search_ms_p95']}"
+            f" | {run['fairness_grants']}"
+            f" | {i['outcomes']['CANCELLED'] + b['outcomes']['CANCELLED']}"
         )
     if arguments.json:
         arguments.json.write_text(json.dumps(report, indent=2), encoding="utf-8")
