@@ -116,7 +116,7 @@ export function SourcePage() {
               </Button>
             ) : null}
             {detail.current_processing_run_id !== null &&
-            !(latest && isActive(latest.state)) &&
+            !isActive(detail.processing_status) &&
             !missing &&
             detail.state === 'ACTIVE' ? (
               <Button
