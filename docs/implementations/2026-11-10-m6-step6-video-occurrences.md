@@ -53,6 +53,13 @@ Delegated (owner, 2026-11-09; reversible):
    `TRACK_UNSETTLED` reason and the `proposal` evidence key are recorded in `PERSISTENCE_IMPLEMENTATION.md`
    section 11 (evidence).
 
+## Review (Codex, read-only) and what changed
+
+Two medium findings, both fixed: a second acceptance now applies the track rule again on what was recorded
+(each face's decision, or its recorded proposal when unsettled), and checks each track occurrence's span
+(start and end time and frame) and representative face, not only its kind and members. Tests:
+`test_accepting_again_finds_a_changed_track_result[span|representative|merged tracks]`.
+
 ## Verification
 
 - `uv run pytest -q tests/integration/test_video_occurrences.py tests/integration/test_accept_processing_run.py

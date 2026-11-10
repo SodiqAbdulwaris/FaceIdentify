@@ -246,3 +246,34 @@ def test_a_track_whose_faces_all_match_cannot_be_left_unsettled(
 
     with pytest.raises(AcceptanceError, match="does not follow the track rule"):
         pipeline.accept(run_id, apply_index=False)
+
+
+@pytest.mark.parametrize("corrupt", ["span", "representative", "merged tracks"])
+def test_accepting_again_finds_a_changed_track_result(
+    pipeline: Pipeline, red: uuid.UUID, tmp_path: Path, corrupt: str
+) -> None:
+    run_id = process_video(pipeline, tmp_path)
+    pipeline.accept(run_id, apply_index=True)
+    with pipeline.lib.session_factory() as session:
+        occurrence = session.scalars(
+            select(Occurrence).where(Occurrence.processing_run_id == run_id)
+        ).one()
+        if corrupt == "span":
+            occurrence.end_timestamp_ms = 99
+        elif corrupt == "representative":
+            members = session.scalars(
+                select(OccurrenceObservation.observation_id).where(
+                    OccurrenceObservation.occurrence_id == occurrence.id
+                )
+            ).all()
+            occurrence.representative_observation_id = members[-1]
+        session.commit()
+    if corrupt == "merged tracks":  # the red and green tracks claimed as one
+        payload = final_of(pipeline, run_id)
+        red_track, green_track = payload["tracks"]
+        red_track["observations"] += green_track["observations"]
+        payload["tracks"] = [red_track]
+        rewrite_final(pipeline, run_id, payload)
+
+    with pytest.raises(AcceptanceError):
+        pipeline.accept(run_id, apply_index=False)
