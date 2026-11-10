@@ -3,6 +3,7 @@
 exists, and `source.updated` when the new generation is accepted."""
 
 from tests.fixtures.api import Api, error, imported
+from tests.fixtures.pipeline import unit
 from tests.fixtures.ws import WsClient
 from tests.integration.test_api_processing_routes import finished, process
 
@@ -67,3 +68,62 @@ async def test_a_second_reprocess_while_one_is_in_flight_is_busy(processing_api:
     assert first.status_code == 202, first.text
 
     error(await api.client.post(f"{V1}/{source['id']}/reprocess"), 409, "SOURCE_BUSY")
+
+
+async def test_a_source_shows_its_current_run(processing_api: Api) -> None:
+    api = processing_api
+    source = await imported(api, path=str(api.image()))
+    assert (await api.client.get(f"{V1}/{source['id']}")).json()[
+        "current_processing_run_id"
+    ] is None
+
+    first = await process(api, source)
+    await finished(api, first["id"])
+
+    shown = (await api.client.get(f"{V1}/{source['id']}")).json()
+    assert shown["current_processing_run_id"] == first["id"]
+
+
+async def test_a_named_face_that_was_not_found_again_is_listed_for_review(
+    processing_api: Api,
+) -> None:
+    api = processing_api
+    assert api.perception is not None
+    source = await imported(api, path=str(api.image()))
+    first = await process(api, source)
+    await finished(api, first["id"])
+    reviews = f"{V1}/{source['id']}/reprocess-reviews"
+    assert (await api.client.get(reviews)).json() == {"items": []}
+    (face,) = (await api.client.get(f"{V1}/{source['id']}/occurrences")).json()["items"]
+    named = await api.client.post(
+        "/api/v1/people", json={"display_name": "Ada", "identity_id": face["identity_id"]}
+    )
+    assert named.status_code == 201, named.text
+    api.perception.vector = unit(0, 1, 0, 0)  # the same place, a different face
+
+    again = await process(api, source, again=True)
+    await finished(api, again["id"])
+
+    (item,) = (await api.client.get(reviews)).json()["items"]
+    assert item["identity_id"] == face["identity_id"]
+    assert (item["person"], item["reason"]) == ("Ada", "NO_CORRESPONDENCE")
+    assert item["processing_run_id"] == again["id"]
+
+    # the person puts the new face where it belongs: the review is answered and leaves the list
+    api.clock.advance(seconds=1)
+    (new_face,) = (await api.client.get(f"{V1}/{source['id']}/occurrences")).json()["items"]
+    moved = await api.client.post(
+        f"/api/v1/occurrences/{new_face['id']}/reassign",
+        json={"expected_identity_id": new_face["identity_id"], "identity_id": face["identity_id"]},
+    )
+    assert moved.status_code == 200, moved.text
+    assert (await api.client.get(reviews)).json() == {"items": []}
+
+
+async def test_review_items_of_an_unknown_source_are_not_found(processing_api: Api) -> None:
+    api = processing_api
+    error(
+        await api.client.get(f"{V1}/00000000-0000-0000-0000-000000000000/reprocess-reviews"),
+        404,
+        "SOURCE_NOT_FOUND",
+    )

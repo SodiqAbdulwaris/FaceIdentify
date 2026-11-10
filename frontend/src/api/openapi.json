@@ -1487,6 +1487,69 @@
         "title": "RenamePerson",
         "type": "object"
       },
+      "ReprocessReview": {
+        "description": "A human decision that reprocessing could not carry over (identity model 60.1): the identity\nit was about, who that is if named, and why (`NO_CORRESPONDENCE`, `AMBIGUOUS`,\n`SPACE_CHANGED`, `MISSING_VECTOR`).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "identity_id": {
+            "title": "Identity Id",
+            "type": "string"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person"
+          },
+          "processing_run_id": {
+            "title": "Processing Run Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "identity_id",
+          "person",
+          "reason",
+          "processing_run_id",
+          "created_at"
+        ],
+        "title": "ReprocessReview",
+        "type": "object"
+      },
+      "ReprocessReviews": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReprocessReview"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ReprocessReviews",
+        "type": "object"
+      },
       "Resolve": {
         "properties": {
           "identity_id": {
@@ -1594,6 +1657,17 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "current_processing_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Processing Run Id"
           },
           "display_name": {
             "title": "Display Name",
@@ -1741,6 +1815,7 @@
           "size_bytes",
           "original_filename",
           "latest_processing_run",
+          "current_processing_run_id",
           "recycled_at"
         ],
         "title": "SourceDetail",
@@ -3970,6 +4045,50 @@
           }
         },
         "summary": "Reprocess Source",
+        "tags": [
+          "processing"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}/reprocess-reviews": {
+      "get": {
+        "description": "The source's open review items: `REPROCESS_REVIEW_REQUIRED` evidence (persistence 10)\nwhose identity is still `ACTIVE` and has had no correction since, newest first.",
+        "operationId": "reprocess_reviews",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReprocessReviews"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Reprocess Reviews",
         "tags": [
           "processing"
         ]

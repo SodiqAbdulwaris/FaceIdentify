@@ -26,8 +26,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import Select, select
-from sqlalchemy.orm import Session
+from sqlalchemy import Select, exists, select
+from sqlalchemy.orm import Session, aliased
 
 from backend.api.dependencies import Library, get_backend
 from backend.api.errors import ApiError
@@ -39,8 +39,10 @@ from backend.api.pagination import (
     older_than,
     paginate,
 )
+from backend.api.routes.memory import person_references
 from backend.api.routes.sources import gone_sources, recheck_if_missing, require_visible_source
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
+from backend.app.identities.models import Evidence, EvidenceKind, Identity, IdentityState
 from backend.app.jobs.models import SOURCE_JOB_TYPES, Job, JobPriority
 from backend.app.processing.cancel import (
     CancelError,
@@ -89,6 +91,23 @@ class PolicyProvenance(BaseModel):
     calibrated: bool
     # False when the frozen policy cannot match a face to an existing identity (threshold above 1).
     automatic_matching: bool
+
+
+class ReprocessReview(BaseModel):
+    """A human decision that reprocessing could not carry over (identity model 60.1): the identity
+    it was about, who that is if named, and why (`NO_CORRESPONDENCE`, `AMBIGUOUS`,
+    `SPACE_CHANGED`, `MISSING_VECTOR`)."""
+
+    id: str
+    identity_id: str
+    person: str | None
+    reason: str
+    processing_run_id: str
+    created_at: datetime
+
+
+class ReprocessReviews(BaseModel):
+    items: list[ReprocessReview]
 
 
 class ProcessingRunDetail(BaseModel):
@@ -280,6 +299,48 @@ def process_source(
     backend: Annotated[Backend, Depends(get_backend)],
 ) -> ProcessingRunDetail:
     return _schedule(library, backend, source_id, reprocess=False)
+
+
+@router.get("/sources/{source_id}/reprocess-reviews")
+def reprocess_reviews(source_id: uuid.UUID, library: Library) -> ReprocessReviews:
+    """The source's open review items: `REPROCESS_REVIEW_REQUIRED` evidence (persistence 10)
+    whose identity is still `ACTIVE` and has had no correction since, newest first."""
+
+    def read(session: Session) -> ReprocessReviews:
+        _require_source(session, source_id)
+        later = aliased(Evidence)
+        resolved = exists().where(
+            later.kind == EvidenceKind.USER_CORRECTION,
+            later.subject_identity_id == Evidence.subject_identity_id,
+            later.created_at > Evidence.created_at,
+        )
+        rows = session.execute(
+            select(Evidence, Identity)
+            .join(Identity, Identity.id == Evidence.subject_identity_id)
+            .where(
+                Evidence.source_id == source_id,
+                Evidence.kind == EvidenceKind.REPROCESS_REVIEW_REQUIRED,
+                Identity.state == IdentityState.ACTIVE,
+                ~resolved,
+            )
+            .order_by(Evidence.created_at.desc(), Evidence.id.desc())
+        ).tuples().all()  # fmt: skip
+        names = person_references(session, [identity.id for _evidence, identity in rows])
+        return ReprocessReviews(
+            items=[
+                ReprocessReview(
+                    id=str(evidence.id),
+                    identity_id=str(identity.id),
+                    person=None if identity.id not in names else names[identity.id].display_name,
+                    reason=str(evidence.payload_json["reason"]),
+                    processing_run_id=str(evidence.processing_run_id),
+                    created_at=evidence.created_at,
+                )
+                for evidence, identity in rows
+            ]
+        )
+
+    return library.unit_of_work.read(read)
 
 
 @router.post("/sources/{source_id}/reprocess", status_code=202)
