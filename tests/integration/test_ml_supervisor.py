@@ -493,6 +493,7 @@ class Scripted:
         self.connection, self._worker_end = Pipe()
         self.killed = False
         self.alive = True
+        self.refuse_kills = 0  # kills that fail, the process staying alive (taskkill refused)
         self.seen: list[ControlType] = []
         self.nonces: list[str] = []
         self._thread = threading.Thread(
@@ -504,6 +505,9 @@ class Scripted:
         return self.alive
 
     def kill(self) -> None:
+        if self.refuse_kills:
+            self.refuse_kills -= 1
+            raise OSError("the worker process did not end")
         self.killed = True
         self.alive = False
         self._worker_end.close()
@@ -695,6 +699,69 @@ def test_killing_a_worker_ends_its_process_and_closes_the_pipe_to_it() -> None:
     assert wait_until_gone(pid)
     assert not worker.is_alive()
     assert worker.connection.closed
+
+
+def test_a_worker_that_will_not_end_is_never_joined_by_a_second_one() -> None:
+    """#221: a kill that leaves the process alive is an error, the handle is kept, and no new
+    worker starts until the old one has been ended."""
+    handles: list[Scripted] = []
+
+    def spawn() -> Scripted:
+        assert not any(h.is_alive() for h in handles), "a worker started beside a live one"
+        handles.append(Scripted(polite))
+        return handles[-1]
+
+    supervisor = MLSupervisor(spawn, POLICY, clock=Ticks())
+    supervisor.start()
+    handles[0].refuse_kills = 2
+
+    with pytest.raises(OSError, match="did not end"):
+        supervisor.stop()  # (the worker acknowledged SHUTDOWN, but its process will not end)
+    assert handles[0].is_alive()
+    with pytest.raises(OSError, match="did not end"):
+        supervisor.start()  # the old one is tried again first, and still will not end
+    assert len(handles) == 1  # so nothing new was started
+
+    supervisor.start()  # it ends at last; only then does a new worker start
+    assert handles[0].killed
+    assert len(handles) == 2
+    assert state_of(supervisor) is WorkerState.READY
+    supervisor.stop()
+
+
+def test_a_failure_whose_kill_fails_keeps_the_worker_for_the_next_start() -> None:
+    """A worker found broken is killed; if that fails, the failure is still reported as it was, and
+    the next start ends the old process before starting another."""
+    supervisor, handles = scripted_supervisor(well_behaved_until("PING", lambda end: None))
+    supervisor.start()
+    handles[0].refuse_kills = 1
+
+    assert supervisor.ping() is False  # (unanswered: a failure, and the kill fails quietly)
+    assert state_of(supervisor) is WorkerState.UNAVAILABLE
+    assert handles[0].is_alive()  # (its kill failed: it is kept)
+    supervisor.start()
+    assert handles[0].killed
+    assert len(handles) == 2
+    supervisor.stop()
+
+
+def test_a_killed_process_that_does_not_end_is_reported_and_its_pipe_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.ml.supervisor import process
+
+    worker = ProcessWorker(HANDLERS)
+    monkeypatch.setattr(process, "kill_process_tree", lambda pid: None)  # taskkill does nothing
+    monkeypatch.setattr(process, "KILL_WAIT", 0.1)
+    try:
+        with pytest.raises(OSError, match="did not end"):
+            worker.kill()
+        assert worker.is_alive()
+        assert not worker.connection.closed  # the handle is still usable
+    finally:
+        monkeypatch.undo()
+        worker.kill()
+    assert not worker.is_alive()
 
 
 def test_a_release_that_cannot_be_written_marks_the_worker_gone() -> None:

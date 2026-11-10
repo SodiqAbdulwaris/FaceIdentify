@@ -22,9 +22,14 @@
   worker), not a combination of every plan's supervisor: a stopped supervisor of another plan is not
   the worker's state. `NOT_STARTED` until a request has had a turn.
 - `backend/ml/supervisor/process.py`: `ProcessWorker.kill` now waits (up to 30 s) for the killed
-  process to be reaped after `taskkill`. The real-process test found that `taskkill /F /T` can
-  return while the process still reads as alive, so without the wait a plan change could start the
-  next worker for a moment beside the dying one.
+  process to be reaped after `taskkill`, and raises `OSError` (keeping its pipe) if it is still
+  alive. The real-process test found that `taskkill /F /T` can return while the process still reads
+  as alive, so without the wait a plan change could start the next worker beside the dying one.
+- `backend/ml/supervisor/supervisor.py`: a worker whose kill fails is **kept**, not forgotten. `stop`
+  raises (so the pool's plan change refuses the request), a failure found by a request, ping or
+  release is still reported as before (the kill error is suppressed there, the handle kept), and
+  the next start kills the kept worker first, raising `OSError` without starting another if it
+  still will not end. Found by the Codex review of PR #235.
 - `backend/app/runtime/perception_client.py`: the client's `lease` parameter is typed by a small
   `Turn` protocol (anything with `held()`), so it accepts the `WorkerLease` or the pool's per-plan
   turn. Behaviour unchanged.
@@ -54,7 +59,22 @@ request's frozen variant selection, with tests that only one worker process is e
 
 ## Verification
 
-Filled in from the actual runs before the PR is reported ready (see below).
+Run on 2026-11-10 on Windows, on the PR head after the review fix:
+
+- `uv run ruff format --check .` (315 files formatted), `uv run ruff check .` (all checks passed),
+  `uv run mypy` and `uv run mypy --platform linux` (no issues, 306 files).
+- `uv run pytest -q --cov`: 3,215 passed, 3 deselected; 29 failed and 3 errored, every one with
+  `FileExistsError: [WinError 183]` on the same shared-memory name, because another session's full
+  run started at the same time (the known collision in `docs/guides/AGENT_HANDOFF.md`). All 32 were
+  in `test_runtime_perception_client.py` and `test_ml_supervisor.py`; those two files re-run alone
+  with `--cov --cov-append`: 75 passed, and the combined coverage is **100%** (10,848 statements,
+  2,228 branches, nothing missing). An earlier run hit the same collision only in
+  `test_shared_memory.py`, which then passed alone (35 passed).
+- Focused: `test_pool_lease.py`, `test_real_profile.py`, `test_runtime_perception_client.py`,
+  `test_ml_supervisor.py`: 140 passed. The real-process test
+  (`test_the_pool_never_has_more_than_one_live_worker_process_across_plans`) first **failed** on
+  `live() == 0` right after a kill, which is how the reap wait in `ProcessWorker.kill` was found.
+- Not verified here: CI on the PR head (checked before merging).
 
 ## Open issues / follow-ups
 

@@ -24,6 +24,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -93,12 +94,14 @@ class MLSupervisor:
 
     def start(self) -> None:
         """Make the worker READY, starting it if it is not running. Raises `WorkerFailedError` if
-        it cannot be started, `MLUnavailableError` if the capability has FAILED."""
+        it cannot be started, `MLUnavailableError` if the capability has FAILED, and `OSError` if
+        an earlier worker that could not be ended still cannot (no second one is started)."""
         with self._lock:
             self._ensure_ready()
 
     def stop(self) -> None:
-        """Ask the worker to shut down; kill it if it does not acknowledge in time. Idempotent."""
+        """Ask the worker to shut down; kill it if it does not acknowledge in time. Idempotent.
+        Raises `OSError` if the worker cannot be ended; it is kept, and a later call tries again."""
         with self._lock:
             worker = self._worker
             if worker is None:
@@ -185,6 +188,7 @@ class MLSupervisor:
             self._record_failure("the worker had died between requests")
             if self.state is WorkerState.FAILED:  # (read through the property: the call changed it)
                 raise MLUnavailableError(f"the ML capability has failed: {self.last_failure}")
+        self._discard_worker()  # a worker that could not be ended earlier must end before a new one
         return self._launch()
 
     def _launch(self) -> WorkerHandle:
@@ -230,18 +234,22 @@ class MLSupervisor:
 
     def _record_failure(self, reason: str) -> None:
         self.last_failure = reason
-        self._discard_worker()
         now = self._clock()
         self._failures.append(now)
         while self._failures and now - self._failures[0] > self._policy.restart_window:
             self._failures.popleft()
         crash_loop = len(self._failures) > self._policy.max_restarts
         self._state = WorkerState.FAILED if crash_loop else WorkerState.UNAVAILABLE
+        with suppress(OSError):  # (kept, and killed again before any new worker is started)
+            self._discard_worker()
 
     def _discard_worker(self) -> None:
-        worker, self._worker = self._worker, None
+        """Kill the worker. One that cannot be ended (`kill` raises `OSError`) is kept, and killed
+        again before any new worker is started, so two are never alive at once (#221)."""
+        worker = self._worker
         if worker is not None:
             worker.kill()
+            self._worker = None
 
     def _shut_down(self, worker: WorkerHandle) -> None:
         try:
