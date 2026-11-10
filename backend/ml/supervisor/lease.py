@@ -20,6 +20,11 @@ A request made inside `cancellable(cancelled)` is asked `cancelled()` when its t
 reaches the worker: one that answers true gives its turn up and raises `RequestCancelledError`, so
 a request cancelled while it waited never enters inference (decision point 5). An inference already
 running is never interrupted; its cancellation is the caller's to observe after it, at the boundary.
+
+Every turn is measured (decision point 8, M6 D5): its class, how long it waited, how long it held
+the worker, how many of each class were still waiting when it was granted, and whether it ran,
+failed or was cancelled. A `TurnRecord` goes to `observe`, which logs it at debug level unless told
+otherwise (the stress benchmark collects them).
 """
 
 import contextvars
@@ -29,6 +34,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from backend.ml.supervisor.supervisor import MLUnavailableError
 
@@ -45,6 +51,32 @@ class WorkerClosedError(MLUnavailableError):
 
 class RequestCancelledError(MLUnavailableError):
     """The request was cancelled while it waited: it gave its turn up and never ran."""
+
+
+@dataclass(frozen=True, slots=True)
+class TurnRecord:
+    """One request's turn on the worker."""
+
+    interactive: bool
+    waited: float  # seconds from asking for the turn to getting it
+    held: float  # seconds holding the worker: the inference and its output protocol
+    queued_interactive: int  # requests of each class still waiting when this one was granted
+    queued_background: int
+    outcome: str  # RAN, FAILED (the body raised) or CANCELLED (given up at its turn)
+
+
+def log_turn(record: TurnRecord) -> None:
+    """The default observer: one debug line per turn."""
+    LOG.debug(
+        "worker: a %s request waited %.3fs and held it %.3fs (%s); %d interactive and %d "
+        "background waiting at its grant",
+        "interactive" if record.interactive else "background",
+        record.waited,
+        record.held,
+        record.outcome,
+        record.queued_interactive,
+        record.queued_background,
+    )
 
 
 _interactive: contextvars.ContextVar[bool] = contextvars.ContextVar(
@@ -83,11 +115,19 @@ def cancellable(cancelled: Callable[[], bool]) -> Iterator[None]:
 
 
 class WorkerLease:
-    def __init__(self, *, burst: int = BURST, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        *,
+        burst: int = BURST,
+        clock: Callable[[], float] = time.perf_counter,  # (monotonic, and finer than
+        # time.monotonic on Windows, whose 15.6 ms tick hid short waits)
+        observe: Callable[[TurnRecord], None] = log_turn,
+    ) -> None:
         if burst < 1:
             raise ValueError("the burst must be at least one")
         self._burst = burst
         self._clock = clock
+        self._observe = observe  # (must not raise: it runs as the turn is released)
         self._condition = threading.Condition()
         self._held = False
         self._closed = False
@@ -140,21 +180,26 @@ class WorkerLease:
                 raise
             self._waiting[cls].popleft()
             self._held = True
+            behind = (len(self._waiting[True]), len(self._waiting[False]))
+        granted_at, outcome = queued_at, "FAILED"
         try:
+            granted_at = self._clock()
             cancelled = _cancelled.get()
             if cancelled is not None and cancelled():  # (asked holding the turn, never the lock)
+                outcome = "CANCELLED"
                 raise RequestCancelledError(
                     "the request was cancelled before it reached the worker"
                 )
             with self._condition:  # (a turn given up does not count towards the burst)
                 self._streak = self._streak + 1 if cls else 0
-            LOG.debug(
-                "worker granted to a %s request after %.3fs",
-                "interactive" if cls else "background",
-                self._clock() - queued_at,
-            )
             yield
+            outcome = "RAN"
         finally:
             with self._condition:
                 self._held = False
                 self._condition.notify_all()
+            self._observe(
+                TurnRecord(
+                    cls, granted_at - queued_at, self._clock() - granted_at, *behind, outcome
+                )
+            )
