@@ -32,7 +32,8 @@ def make_clip(
     """A clip of FFmpeg's own test pattern (`source` is any lavfi video source)."""
     subprocess.run(
         [str(installed_tools().ffmpeg), "-v", "error", "-y", *before, "-f", "lavfi"]
-        + ["-i", f"{source}=size={size}:rate={rate}", "-t", str(seconds), *encode, str(path)],
+        + ["-i", f"{source}{':' if '=' in source else '='}size={size}:rate={rate}"]
+        + ["-t", str(seconds), *encode, str(path)],
         check=True,
         capture_output=True,
     )

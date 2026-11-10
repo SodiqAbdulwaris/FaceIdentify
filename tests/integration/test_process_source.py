@@ -252,14 +252,10 @@ def test_unprocessable_source_leaves_no_snapshot_run_or_job(
     assert wakes == []
 
 
-@pytest.mark.parametrize(
-    ("source_kind", "expected"), [(None, "does not exist"), ("VIDEO", "not an image")]
-)
-def test_missing_or_non_image_source_leaves_no_processing_rows(
-    sqlite_engine: Engine, build: ModelFactory, source_kind: str | None, expected: str
+def test_a_missing_source_leaves_no_processing_rows(
+    sqlite_engine: Engine, build: ModelFactory
 ) -> None:
-    source_id = uuid.uuid4() if source_kind is None else build.source(kind=source_kind).id
-    build.session.commit()
+    source_id, expected = uuid.uuid4(), "does not exist"  # (a video is processed since M6 step 5)
     wakes: list[None] = []
 
     with pytest.raises(ProcessSourceError, match=expected):

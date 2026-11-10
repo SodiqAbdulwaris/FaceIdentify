@@ -30,10 +30,10 @@ from backend.app.processing.process_source import (
     ScheduledProcessing,
     SourceAlreadyProcessedError,
     require_no_run_in_flight,
-    require_processable_image,
+    require_processable_source,
 )
 from backend.app.processing.run_repository import ProcessingRunRepository, SnapshotRepository
-from backend.app.sources.models import Source
+from backend.app.sources.models import Source, SourceKind
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 
 _RETRYABLE_JOB_STATES = (JobState.INTERRUPTED, JobState.FAILED)
@@ -81,7 +81,9 @@ class RetryProcessingUseCase:
             )
         if session.scalar(select(Job.id).where(Job.previous_job_id == old_job.id).limit(1)):
             raise ProcessSourceError(f"job {job_id} has already been retried")
-        require_processable_image(session, old_run.source_id)
+        if require_processable_source(session, old_run.source_id) == SourceKind.VIDEO:
+            # ponytail: until a video retry resumes from its checkpoint (M6 step 7, D10)
+            raise ProcessSourceError("a video run cannot be retried yet")
         current = session.scalar(
             select(Source.current_processing_run_id).where(Source.id == old_run.source_id)
         )
