@@ -72,6 +72,7 @@ from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
 from backend.infrastructure.media.image import ImageError, decode_image
 from backend.infrastructure.storage.files import BytesMissingError, ManagedFileStore
+from backend.ml.supervisor.lease import RequestCancelledError, cancellable
 from backend.ml.supervisor.supervisor import WorkerFailedError
 
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -210,14 +211,22 @@ class ExecuteProcessingJob:
             plan = self._uow.read(lambda session: self._plan(session, frozen))
             pixels = decode_image(self._read_original(source), max_pixels=self._max_pixels).pixels
             client = self._client_for(plan)
-            detected = client.detect(pixels)
+
+            # A cancellation requested while a request waits for the worker is seen at its turn,
+            # so it never enters inference (#175); the cancellation is then settled as below.
+            def cancelled() -> bool:
+                return self._uow.read(lambda s: self._cancellation_requested(s, started))
+
+            with cancellable(cancelled):
+                detected = client.detect(pixels)
             started = self._advance_after_fallbacks(source, started, detected.fallbacks)
             self._cancel_if_requested(started)
             observations = self._uow.write(
                 lambda session: self._settle_detections(session, source, started, detected)
             )
             self._cancel_if_requested(started)
-            represented = client.represent(pixels, detected.detections)
+            with cancellable(cancelled):
+                represented = client.represent(pixels, detected.detections)
             started = self._advance_after_fallbacks(source, started, represented.fallbacks)
             self._cancel_if_requested(started)
             representations = self._uow.write(
@@ -241,6 +250,9 @@ class ExecuteProcessingJob:
                 tuple(observations),
                 tuple(decision.representation_id for decision in decisions),
             )
+        except RequestCancelledError:
+            self._uow.write(lambda session: self._cancel(session, started))
+            raise ProcessingCancelledError("source processing was cancelled") from None
         except SETTLED_FAILURES as error:
             self._fail(started, type(error).__name__)
             raise

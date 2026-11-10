@@ -15,6 +15,11 @@ inference already running is never interrupted; the next one is chosen at that s
 A request is interactive when it is made inside `interactive()` (face search wraps its perception
 in it); everything else is background. The lease is held through a worker request and its output
 attachment/release: nothing here touches the database or the filesystem.
+
+A request made inside `cancellable(cancelled)` is asked `cancelled()` when its turn comes, before it
+reaches the worker: one that answers true gives its turn up and raises `RequestCancelledError`, so
+a request cancelled while it waited never enters inference (decision point 5). An inference already
+running is never interrupted; its cancellation is the caller's to observe after it, at the boundary.
 """
 
 import contextvars
@@ -38,6 +43,10 @@ class WorkerClosedError(MLUnavailableError):
     """The worker is shutting down: no request gets a turn any more."""
 
 
+class RequestCancelledError(MLUnavailableError):
+    """The request was cancelled while it waited: it gave its turn up and never ran."""
+
+
 _interactive: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "faceidentify_interactive", default=False
 )
@@ -56,6 +65,21 @@ def interactive() -> Iterator[None]:
 def is_interactive() -> bool:
     """Whether the current request is made inside `interactive()`."""
     return _interactive.get()
+
+
+_cancelled: contextvars.ContextVar[Callable[[], bool] | None] = contextvars.ContextVar(
+    "faceidentify_cancelled", default=None
+)
+
+
+@contextmanager
+def cancellable(cancelled: Callable[[], bool]) -> Iterator[None]:
+    """Ask `cancelled()` at the turn of each worker request made inside, before it runs."""
+    token = _cancelled.set(cancelled)
+    try:
+        yield
+    finally:
+        _cancelled.reset(token)
 
 
 class WorkerLease:
@@ -118,6 +142,11 @@ class WorkerLease:
             self._held = True
             self._streak = self._streak + 1 if cls else 0
         try:
+            cancelled = _cancelled.get()
+            if cancelled is not None and cancelled():  # (asked holding the turn, never the lock)
+                raise RequestCancelledError(
+                    "the request was cancelled before it reached the worker"
+                )
             LOG.debug(
                 "worker granted to a %s request after %.3fs",
                 "interactive" if cls else "background",
