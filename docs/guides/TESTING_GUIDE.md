@@ -23,6 +23,16 @@ JavaScript dependencies use npm workspaces from the root `package.json` (Node ve
 npm install
 ```
 
+Video tests (M6) run the pinned LGPL FFmpeg to make small synthetic clips (FFmpeg's own test patterns,
+never a face). Download the zip named in `scripts/install_ffmpeg.py` (`URL`) and install it once:
+
+```bash
+uv run python scripts/install_ffmpeg.py --zip <downloaded zip> --local-state-root <your local state>
+```
+
+The tests find it in the local state root (`FACEIDENTIFY_LOCAL_STATE_ROOT`, else
+`%LOCALAPPDATA%/FaceIdentify`), or wherever `FACEIDENTIFY_FFMPEG_DIR` points. Without it they fail, by design.
+
 ## Running tests
 
 | Goal | Command |

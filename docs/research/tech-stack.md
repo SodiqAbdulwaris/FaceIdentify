@@ -206,6 +206,8 @@ Do not maintain multiple ANN engines in parallel without a demonstrated reason.
 
 If PyAV becomes problematic for a particular flow, that flow may use direct FFmpeg subprocess/pipe processing.
 
+> **Decision 2026-11-10:** (orchestrating session, under the owner's delegation of 2026-11-09; the owner may reverse it) M6 video decodes and probes through the pinned LGPL `ffmpeg` and `ffprobe` over pipes; the PyAV wheel is not added (its bundled FFmpeg links GPL x264 and x265, against D2). The flows that this section gives to PyAV use the direct subprocess/pipe route above. Record: `docs/research/licensing-and-commercialization.md` section 4.1; [entry](../implementations/2026-11-10-m6-step3-video-import.md).
+
 ## 7. ML Development and Production
 
 ### Development / training

@@ -228,3 +228,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-10 | [M6 step 1: the Reprocess control and review items](2026-11-10-m6-step1-reprocess-source-control.md) | done; step 1 complete for images |
 | 2026-11-10 | [Worker arbitration: queued cancellation and acceptance tests (#175)](2026-11-10-worker-arbitration-acceptance.md) | done; M6 step 2, second part |
 | 2026-11-10 | [Worker lease measurement and the fairness benchmark (D5)](2026-11-10-worker-lease-measurement.md) | done; M6 step 2, third part; burst stays 3 |
+| 2026-11-10 | [M6 step 3: video import and probe](2026-11-10-m6-step3-video-import.md) | done; M6 step 3 |

@@ -112,6 +112,8 @@ Managed creation is a three-step protocol: commit a `PENDING` row; write to a te
 
 Import creates an available original artifact and then an `ACTIVE` source in one short semantic transaction. Logical recycle changes only source state; it does not move bytes. Permanent deletion is a dedicated use case which first creates durable derived-index and byte-deletion intent, then performs the physical/database finalization. The initial UI supports only managed `IMAGE` imports, but the schema retains `VIDEO` and `REFERENCED` support.
 
+> **Decision 2026-11-10 (agent, delegated by the owner, D1; M6 step 3):** `VIDEO` Sources are imported (API 5.1, managed or referenced) with no schema change: `width` and `height` are the size as shown, `media_duration_ms` the probed duration, `frame_rate_num`/`frame_rate_den` the average frame rate (null when the file gives none). [Entry](../implementations/2026-11-10-m6-step3-video-import.md).
+
 > **Decision 2026-11-09 (owner, D1; M6 step 1, issue 180; proposed 2026-10-22, approved with all eleven recommendations of PR 229):** the authoritative generation of a Source is `sources.current_processing_run_id`, and no column is added for it. A *generation* is one `ProcessingRun` together with the derived rows (observations, representations, occurrences) that carry its `processing_run_id`; there is no generation counter, because the run id is the immutable identity of a generation and `processing_runs.requested_at` orders them. The pointer is changed only by an acceptance transaction (section 12.1), so at any instant a Source has at most one authoritative generation. Reprocessing never edits the Source's original, thumbnail or state.
 
 ## 5. Observation persistence
