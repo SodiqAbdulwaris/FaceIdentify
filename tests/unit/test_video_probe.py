@@ -143,3 +143,29 @@ def test_a_probe_that_takes_too_long_is_a_corrupt_video(
 
     with pytest.raises(CorruptVideoError, match="too long"):
         probe_video(MediaTools(tmp_path / "ffmpeg", tmp_path / "ffprobe"), tmp_path / "a.mp4")
+
+
+def test_an_ffprobe_that_cannot_start_means_the_tools_are_missing(tmp_path: Path) -> None:
+    tools = MediaTools(tmp_path / "ffmpeg.exe", tmp_path / "absent-ffprobe.exe")
+
+    with pytest.raises(MediaToolsMissingError, match="cannot run"):
+        probe_video(tools, tmp_path / "a.mp4")
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        b"not json",
+        b"[]",
+        b'{"format": {"format_name": "avi"}, "streams": [{"codec_type": "video", "width": "x"}]}',
+    ],
+)
+def test_output_that_cannot_be_read_is_a_corrupt_video(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, output: bytes
+) -> None:
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, output, b"")
+    )
+
+    with pytest.raises(CorruptVideoError, match="cannot be read"):
+        probe_video(MediaTools(tmp_path / "ffmpeg", tmp_path / "ffprobe"), tmp_path / "a.avi")

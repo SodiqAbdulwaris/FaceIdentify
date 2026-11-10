@@ -97,9 +97,14 @@ def probe_video(tools: MediaTools, path: Path) -> VideoFacts:
         )
     except subprocess.TimeoutExpired as error:
         raise CorruptVideoError(f"{path.name} took too long to read") from error
+    except OSError as error:  # the configured ffprobe cannot be started
+        raise MediaToolsMissingError(f"ffprobe cannot run: {error}") from error
     if completed.returncode != 0:
         raise CorruptVideoError(f"{path.name} could not be read")
-    return video_facts(json.loads(completed.stdout), path.suffix.lower())
+    try:
+        return video_facts(json.loads(completed.stdout), path.suffix.lower())
+    except (ValueError, TypeError, KeyError, AttributeError) as error:  # (output we cannot use)
+        raise CorruptVideoError(f"{path.name} gave facts that cannot be read") from error
 
 
 def video_facts(probe: Mapping[str, Any], suffix: str) -> VideoFacts:

@@ -52,8 +52,14 @@ All delegated (owner, 2026-11-09; the owner may reverse any of them):
    exists, and caches it.
 3. **A video is chosen by its file name** (`.mp4 .m4v .mov .mkv .webm .avi`), then its content must be one of
    those containers. Images keep content sniffing. A picture renamed `.mp4` is refused as unsupported.
-4. **Probe before writing, stream the copy.** The probe and the copy read the file separately; a file changed
-   in between is found when it is decoded (step 4). Same residual window as a referenced image after its check.
+4. **Probe before writing, stream the copy, and bind the facts to the bytes** (review of PR #243): the
+   file's size and modification time are taken before the probe and must be unchanged after it; the
+   managed copy stops at that size and checks them again at its end; a referenced import compares the
+   hashed size with them. A file that grows, shrinks or is rewritten meanwhile is refused and leaves no
+   Source (a managed copy leaves its reservation `MISSING`, as any failed write does). A probe whose
+   executable cannot start is `MEDIA_TOOLS_UNAVAILABLE`; output that cannot be read is `MEDIA_CORRUPT`.
+   `scripts/install_ffmpeg.py --replace` moves the old install aside and removes it only after the new one
+   is in place.
 5. **No thumbnails in step 3** (images have none either); the step 7 video screen shows the original.
 6. **`MEDIA_TOOLS_UNAVAILABLE` (503)** is a new error code.
 7. **No schema change:** the `sources` columns for duration and frame rate already exist (M2).
