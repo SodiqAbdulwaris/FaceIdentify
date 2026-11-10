@@ -232,6 +232,14 @@ use only needs the source kept available): Python `tqdm` (MPL-2.0 AND MIT) and t
 as "declared licence only". The notices file is generated at build time; this section 7 is no longer
 "not verified" for the packages that were present, but the review of each licence's obligations is not done.
 
+**Build tool added 2026-11-10 (M8 step 2): PyInstaller 6.22.3** (and its `build` group packages
+`pyinstaller-hooks-contrib`, `altgraph`, `pefile`, `pywin32-ctypes`, `setuptools`, `packaging`). PyInstaller is
+GPL-2.0-or-later with a bootloader exception: the frozen application it produces may carry any licence (stated
+from its published terms, not re-read here). It is a build tool: none of these packages is in the runtime closure
+of the notices file except what the bootloader embeds. The frozen folder also holds the Python 3.12 runtime
+(PSF), OpenSSL (Apache-2.0), SQLite (public domain) and Microsoft's Visual C++ runtime DLLs, whose notices the
+installer must carry (step 3).
+
 ## 8. How to regenerate the inventory
 
 These print name, resolved version and licence, and work in PowerShell and Git Bash alike:
