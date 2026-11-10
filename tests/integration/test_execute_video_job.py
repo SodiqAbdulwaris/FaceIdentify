@@ -676,3 +676,7 @@ def test_commands_to_an_older_attempt_do_not_reach_the_current_one(
     with pytest.raises(PauseError, match="not the current attempt"):
         pauser(pipeline).resume(run_id, job_id=started.job.id)
     assert run_state(pipeline, run_id) == ProcessingRunState.PENDING  # the retry is untouched
+    canceller = CancelProcessingUseCase(pipeline.lib.unit_of_work, clock=pipeline.clock)
+    assert canceller.cancel(run_id).outcome == CancelOutcome.CANCELLED  # the run itself: fine
+    with pytest.raises(CancelError, match="not the current attempt"):  # not "already", via old job
+        canceller.cancel(run_id, job_id=started.job.id)
