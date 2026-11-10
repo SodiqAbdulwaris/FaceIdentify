@@ -180,3 +180,13 @@ def test_a_track_that_ends_drops_its_count() -> None:
     tracker.update(5, [])
 
     assert tracker.state()["kept"] == {}
+
+
+def test_a_track_that_ended_within_the_chunk_counts_nothing() -> None:
+    tracker = Tracker(max_gap=1)
+    (track,) = tracker.update(0, [(0.1, 0.1, 0.3, 0.4)])
+    tracker.update(3, [])  # gone before the chunk's selection is counted
+
+    tracker.kept(track)
+
+    assert tracker.state()["kept"] == {}
