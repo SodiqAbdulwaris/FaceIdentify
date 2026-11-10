@@ -41,9 +41,21 @@ class VideoProcessing:
     chunk_frames: int = 20  # a checkpoint every ten seconds of video at two frames a second
     frames_per_turn: int = 2  # measured, #242: see the step 5 entry
     keep_per_track: int = 3  # observations embedded and kept per track and chunk
+    # Frames are scaled so the longer side is at most this (4K exists in real libraries; the
+    # detector works at 640): a chunk of 4K frames then holds a quarter of the memory.
+    max_side: int = 1920
 
     def __post_init__(self) -> None:
-        if min(self.rate, self.chunk_frames, self.frames_per_turn, self.keep_per_track) <= 0:
+        if (
+            min(
+                self.rate,
+                self.chunk_frames,
+                self.frames_per_turn,
+                self.keep_per_track,
+                self.max_side,
+            )
+            <= 0
+        ):
             raise ValueError("every video processing setting must be positive")
 
 

@@ -14,8 +14,8 @@ at most one batch and a cancellation is seen at the next batch. The NumPy tracke
 into tracks (D6), selection keeps a few good observations per track and chunk, and only those are
 embedded and recorded, in ONE transaction with the chunk's checkpoint. After the last chunk,
 recognition and FINAL are as for an image, FINAL also carrying the run's tracks. A chunk holds its
-frames' pixels in memory: ponytail: `chunk_frames` full frames (about 120 MB of 1080p); crop the
-selected faces before the chunk ends if 4K video makes that too much.
+frames' pixels in memory: `chunk_frames` frames, scaled to a longest side of `max_side` (about
+120 MB at 1920 pixels).
 """
 
 import uuid
@@ -91,7 +91,7 @@ from backend.app.sources.models import (
 from backend.infrastructure.db.optimistic import optimistic_locked_update
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
-from backend.infrastructure.media.frames import Frame, sampled_frames
+from backend.infrastructure.media.frames import Frame, frame_size, sampled_frames
 from backend.infrastructure.media.image import ImageError, decode_image
 from backend.infrastructure.media.video import MediaTools, MediaToolsMissingError, VideoError
 from backend.infrastructure.storage.files import BytesMissingError, ManagedFileStore
@@ -681,7 +681,8 @@ class ExecuteProcessingJob:
     ) -> ExecutedProcessingJob:
         if self._video_tools is None or source.width is None or source.height is None:
             raise ProcessingExecutionError("video processing is not configured or has no size")
-        if source.width * source.height > self._max_pixels:
+        width, height = frame_size(source.width, source.height, self._video.max_side)
+        if width * height > self._max_pixels:
             raise ProcessingExecutionError("the video's frames have more pixels than allowed")
         client = self._client_for(plan)
         if not isinstance(client, _VideoPerception):
@@ -695,6 +696,7 @@ class ExecuteProcessingJob:
             height=source.height,
             rate=self._video.rate,
             after_slot=resume.slot,
+            max_side=self._video.max_side,
         )
         sequence = resume.sequence
         with closing(frames):

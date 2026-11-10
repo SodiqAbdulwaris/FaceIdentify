@@ -5,7 +5,9 @@ import pytest
 from backend.app.processing.video_chunks import VideoProcessing, frame_index
 
 
-@pytest.mark.parametrize("setting", ["rate", "chunk_frames", "frames_per_turn", "keep_per_track"])
+@pytest.mark.parametrize(
+    "setting", ["rate", "chunk_frames", "frames_per_turn", "keep_per_track", "max_side"]
+)
 def test_every_setting_must_be_positive(setting: str) -> None:
     with pytest.raises(ValueError, match="positive"):
         VideoProcessing(**{setting: 0})
