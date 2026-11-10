@@ -8,7 +8,10 @@ executor; only perception is planted, behind a real `WorkerLease`) and through t
 * no database transaction and no index lock is held while an inference runs;
 * a search that arrives during a job's detection is served before the job's representation (the
   next safe boundary, not the end of the source);
-* a worker that fails during a job's request hands the turn on: the waiting search runs.
+* a worker that fails during a job's representation hands the turn on (the waiting search runs),
+  the job and its run end `FAILED` with their output private, and a retry produces one face, not
+  two;
+* a cancellation check that cannot read the database is the caller's error and frees the turn.
 
 Every wait is for an event or for the lease's own queue (`Watched`), never for a delay.
 """
@@ -23,11 +26,13 @@ import pytest
 from sqlalchemy import select
 
 from backend.api.real import ClientPool
+from backend.app.identities.models import Identity
 from backend.app.jobs.models import Job
 from backend.app.memory.models import Observation, Representation
 from backend.app.processing.cancel import CancelOutcome, CancelProcessingUseCase
 from backend.app.processing.execute_job import ProcessingCancelledError
 from backend.app.processing.models import ProcessingRun
+from backend.app.processing.retry import RetryProcessingUseCase
 from backend.app.runtime.perception_client import Detected, Represented
 from backend.app.runtime.worker_config import PerceptionPlan
 from backend.ml.contracts.messages import Detection, ExecutionContext, MLRequest, MLResponse
@@ -53,6 +58,8 @@ class Leased:
         self.lease = lease
         self.before_represent: Callable[[], None] | None = None
 
+        self.inside_represent: Callable[[], None] | None = None
+
     def detect(self, pixels: Any) -> Detected:
         with self.lease.held():
             return self.planted.detect(pixels)
@@ -61,6 +68,8 @@ class Leased:
         if self.before_represent is not None:
             self.before_represent()
         with self.lease.held():
+            if self.inside_represent is not None:
+                self.inside_represent()
             return self.planted.represent(pixels, detections)
 
 
@@ -88,6 +97,12 @@ def execute_in_thread(
     pipeline: Pipeline,
 ) -> tuple[threading.Thread, list[BaseException], uuid.UUID]:
     """Claim the queued job and execute it on a thread: the thread, what it raised, the run."""
+    return _execute_in_thread(pipeline)[:3]
+
+
+def _execute_in_thread(
+    pipeline: Pipeline,
+) -> tuple[threading.Thread, list[BaseException], uuid.UUID, uuid.UUID]:
     started = pipeline.scheduler().claim_source_job("worker")
     assert started is not None
     run_id = started.job.processing_run_id
@@ -103,7 +118,7 @@ def execute_in_thread(
 
     thread = threading.Thread(target=execute)
     thread.start()
-    return thread, raised, run_id
+    return thread, raised, run_id, started.job.id
 
 
 def states(pipeline: Pipeline, run_id: uuid.UUID) -> tuple[str, str]:
@@ -193,6 +208,97 @@ def test_no_database_transaction_or_index_lock_is_held_across_an_inference(
 
     assert checking.checked == 2  # the detection and the representation
     assert states(pipeline, run_id) == ("FINALIZING", "RUNNING")  # (it ran to its FINAL)
+
+
+def test_a_worker_failing_during_a_jobs_inference_fails_the_job_hands_the_turn_on_and_retries(
+    pipeline: Pipeline,
+) -> None:
+    """The worker dies under the job's representation while a search waits: the search runs, the
+    job and run end FAILED with their detection kept private, and a retry (a new job and run)
+    yields one active face and one identity, not a duplicate."""
+    lease = WorkerLease()
+    condition = watched(lease)
+    planted = pipeline.perception
+    leased = Leased(planted, lease)
+    pipeline.perception = leased  # type: ignore[assignment]
+    inside, go = threading.Event(), threading.Event()
+
+    def dies() -> None:
+        inside.set()
+        reached(go)
+        raise WorkerFailedError("the worker died during a request")
+
+    leased.inside_represent = dies
+    pipeline.enqueue(pipeline.import_image())
+    thread, raised, run_id, job_id = _execute_in_thread(pipeline)
+    reached(inside)  # the job's representation holds the worker
+    condition.queued_one()  # (the detection's turn)
+    condition.queued_one()  # (the representation's turn)
+    served: list[str] = []
+
+    def search() -> None:
+        with interactive(), lease.held():
+            served.append("search")
+
+    searching = threading.Thread(target=search)
+    searching.start()
+    condition.queued_one()  # the search waits for the dying inference
+    go.set()
+    finish([thread, searching])
+
+    assert len(raised) == 1
+    assert isinstance(raised[0], WorkerFailedError)
+    assert served == ["search"]  # the turn was handed on, nothing hung
+    assert lease.queued(True) == lease.queued(False) == 0
+    assert states(pipeline, run_id) == ("FAILED", "FAILED")
+    assert pipeline.count(Observation) == 1  # the detection settled before the failure, private
+    assert pipeline.count(Representation) == 0
+
+    leased.inside_represent = None  # the restarted worker answers
+    retried = RetryProcessingUseCase(
+        pipeline.lib.unit_of_work, new_id=pipeline.new_id, clock=pipeline.clock,
+        wake_scheduler=lambda: None,
+    ).retry(job_id)  # fmt: skip
+    new_run = pipeline.run_next()
+    assert new_run == retried.processing_run_id
+    pipeline.accept(new_run, apply_index=True)
+    with pipeline.lib.session_factory() as session:
+        observed = sorted(str(o.state) for o in session.scalars(select(Observation)))
+    assert observed == ["ACTIVE", "PENDING"]  # the failed attempt's stays private, no duplicate
+    assert pipeline.count(Identity) == 1
+
+
+def test_a_cancellation_check_that_cannot_read_the_database_frees_the_turn_and_raises(
+    pipeline: Pipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Like the boundary check, a failing read is not a cancellation: the error is raised (the
+    runner settles it as an unexpected error), the request never reaches the worker, and the turn
+    is free."""
+    lease = WorkerLease()
+    planted = pipeline.perception
+    pipeline.perception = Leased(planted, lease)  # type: ignore[assignment]
+    pipeline.enqueue(pipeline.import_image())
+    started = pipeline.scheduler().claim_source_job("worker")
+    assert started is not None
+    executor = pipeline.executor()
+    reads = 0
+    read = executor._cancellation_requested  # noqa: SLF001 - the check the turn asks
+
+    def failing_at_the_turn(session: Any, claimed: Any) -> bool:
+        nonlocal reads
+        reads += 1
+        if reads == 3:  # (the two boundary checks before the detection read the database fine)
+            raise RuntimeError("database is locked")
+        return read(session, claimed)
+
+    monkeypatch.setattr(executor, "_cancellation_requested", failing_at_the_turn)
+    with pytest.raises(RuntimeError, match="locked"):
+        executor.execute(started)
+
+    assert reads == 3
+    assert planted.calls == 0  # the detection never reached the worker
+    with lease.held():  # and the worker is free
+        pass
 
 
 # --- through the client pool ----------------------------------------------------------------
