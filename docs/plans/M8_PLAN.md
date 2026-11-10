@@ -66,6 +66,8 @@ Each step is one or more small PRs with an implementation entry and an independe
 
 ### Step 1. The licence inventory and the notices file
 
+**Built 2026-11-10** ([entry](../implementations/2026-11-10-m8-step1-notices-inventory.md)): `scripts/generate_notices.py` (inventory, notices file, `--check`, run in CI). Left for M6: FFmpeg's `LICENSE.txt` and notices.
+
 - Run the three inventory commands of licensing record section 8 (Python including transitive packages,
   JavaScript, Rust with `cargo-license` or `cargo deny`) and record the results in sections 5 to 7. Rust
   crates, transitive Python packages and the build tools are currently "not verified".
