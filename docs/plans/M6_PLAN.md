@@ -2,7 +2,7 @@
 
 **Status:** **approved by the owner on 2026-10-21** (drafted 2026-10-16 during the unattended overnight
 run). The owner decided D1 to D10 as recommended and added D11 and D12; the outcomes are recorded in
-section 7. Nothing here is built yet. **Scope:** tracker milestone M6 (TST-060 to TST-070) in
+section 7. Built so far (2026-11-10): step 1 for images and the first part of step 2 (one worker process across plans, #221); the rest is not built. **Scope:** tracker milestone M6 (TST-060 to TST-070) in
 [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md), the Roadmap's Phase G
 (source reprocessing, issue #180) and video phase ([`Roadmap-Plan.md`](Roadmap-Plan.md) sections 66
 to 70), and the worker arbitration that long runs need (issue #175). **Milestone gate (tracker):**
