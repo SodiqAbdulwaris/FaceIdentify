@@ -12,6 +12,7 @@ from sqlalchemy import update
 from backend.api.pagination import encode_cursor
 from backend.app.jobs.models import Job
 from backend.app.processing.models import ProcessingRun
+from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, error, imported
 from tests.fixtures.media import make_clip
 from tests.integration.test_api_processing_routes import finished, process
@@ -253,3 +254,18 @@ async def test_a_paused_video_job_can_be_cancelled(processing_api: Api) -> None:
 
     assert response.status_code == 202
     assert (response.json()["state"], response.json()["job"]["state"]) == ("CANCELLED", "CANCELLED")
+
+
+async def test_a_run_with_a_resuming_retry_shows_its_newest_job(processing_api: Api) -> None:
+    api = processing_api
+    run = await queued(api)
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        build = ModelFactory(session, api.backend.settings.clock, api.backend.settings.new_id)  # type: ignore[arg-type]
+        newest = build.job(processing_run_id=uuid.UUID(run["id"]), attempt_number=2)
+        session.commit()
+        newest_id = str(newest.id)
+
+    detail = (await api.client.get(f"{RUNS}/{run['id']}")).json()
+
+    assert detail["job"]["id"] == newest_id  # a video run resumed by a retry (D10) has two jobs
