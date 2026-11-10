@@ -90,8 +90,10 @@ class Tracker:
         return max(0, cap - self._kept.get(str(track), 0))
 
     def kept(self, track: int) -> None:
-        """Count one more face kept for `track`."""
-        self._kept[str(track)] = self._kept.get(str(track), 0) + 1
+        """Count one more face kept for `track`; a track that has already ended counts nothing (it
+        will never be seen again, so its count would only linger in the checkpoint)."""
+        if any(live[0] == track for live in self._live):
+            self._kept[str(track)] = self._kept.get(str(track), 0) + 1
 
     def update(
         self, slot: int, boxes: Sequence[Box], landmarks: Sequence[Points] | None = None
