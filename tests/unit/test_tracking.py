@@ -5,7 +5,14 @@ import json
 import numpy as np
 import pytest
 
-from backend.app.processing.tracking import Candidate, Tracker, iou, select_kept
+from backend.app.processing.tracking import (
+    Candidate,
+    Tracker,
+    agreement,
+    iou,
+    select_kept,
+    shape,
+)
 
 
 def test_overlap_of_boxes() -> None:
@@ -88,3 +95,53 @@ def test_a_track_with_only_poor_faces_keeps_its_single_best() -> None:
     )
 
     assert [c.key for c in chosen] == [2]
+
+
+def test_two_faces_crossing_keep_their_tracks() -> None:
+    tracker = Tracker()
+    tracks = []
+    for slot in range(7):
+        rightwards = (0.1 + 0.1 * slot, 0.3, 0.3 + 0.1 * slot, 0.5)
+        leftwards = (0.7 - 0.1 * slot, 0.32, 0.9 - 0.1 * slot, 0.52)
+        tracks.append(tracker.update(slot, [rightwards, leftwards]))
+
+    assert tracks == [[0, 1]] * 7  # the motion model carries each through the other
+
+
+LEVEL = ((0.3, 0.3), (0.7, 0.3), (0.5, 0.5), (0.35, 0.7), (0.65, 0.7))
+
+
+def turned(dx: float) -> tuple[tuple[float, float], ...]:
+    return tuple((x + dx if i == 2 else x, y) for i, (x, y) in enumerate(LEVEL))
+
+
+def test_landmarks_decide_between_two_boxes_that_overlap_alike() -> None:
+    box = (0.0, 0.0, 1.0, 1.0)
+    tracker = Tracker()
+    tracker.update(0, [box], [LEVEL])
+
+    # Two detections overlap the track's box equally; the one whose landmarks agree joins it.
+    assert tracker.update(1, [box, box], [turned(0.45), LEVEL]) == [1, 0]
+    assert agreement(None, [0.0, 0.0]) == 1.0  # (no landmarks: the overlap alone decides)
+    assert shape(box, None) is None
+
+
+def test_a_frontal_face_is_kept_before_one_turned_away() -> None:
+    profile = Candidate(0, 0.9, (0.0, 0.0, 0.4, 0.4), "profile", turned(0.18), slot=0)
+    frontal = Candidate(0, 0.9, (0.0, 0.0, 0.4, 0.4), "frontal", LEVEL, slot=4)
+
+    assert [c.key for c in select_kept([profile, frontal], keep=1, min_score=0.5)] == ["frontal"]
+    assert frontal.frontal == 1.0
+    assert (
+        Candidate(0, 0.9, (0, 0, 1, 1), "flat", ((0.5, 0.5), (0.5, 0.5), (0.5, 0.5))).frontal == 0.1
+    )
+
+
+def test_kept_faces_are_spread_over_the_chunk() -> None:
+    near = [Candidate(0, 0.9, (0.0, 0.0, 0.4, 0.4), slot, None, slot) for slot in (0, 1, 2)]
+    far = Candidate(0, 0.9, (0.0, 0.0, 0.3, 0.3), "far", None, 9)  # smaller, so ranked last
+
+    kept = select_kept([*near, far], keep=3, min_score=0.5)
+
+    assert [c.key for c in kept] == [0, 2, "far"]  # 1 is next to 0; then the gap is filled
+    assert [c.key for c in select_kept(near, keep=3, min_score=0.5)] == [0, 2, 1]

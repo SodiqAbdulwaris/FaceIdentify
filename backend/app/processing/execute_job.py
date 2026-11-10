@@ -701,7 +701,7 @@ class ExecuteProcessingJob:
         sequence = resume.sequence
         with closing(frames):
             for chunk in batched(frames, self._video.chunk_frames):
-                started, sequence = self._video_chunk(
+                started, sequence, tracker = self._video_chunk(
                     started, source, frozen, client, cancelled, tracker, chunk, sequence
                 )
         observations, representations = self._uow.read(
@@ -746,9 +746,42 @@ class ExecuteProcessingJob:
         tracker: Tracker,
         chunk: tuple[Frame, ...],
         sequence: int,
-    ) -> tuple[StartedProcessingJob, int]:
+    ) -> tuple[StartedProcessingJob, int, Tracker]:
         """Detect, track, select, embed and settle one chunk. Returns the claim (advanced past any
-        provider fallback) and the next observation's sequence."""
+        provider fallback), the next observation's sequence and the tracker after the chunk.
+
+        A provider that falls back part way through a chunk starts a new execution segment; the
+        chunk is then done again from its first frame under the variant that now runs (with the
+        tracker as it was before the chunk), so every row it settles names the segment that
+        produced it. A fallback is rare and a chunk is ten seconds of video."""
+        before = tracker.state()
+        while True:
+            segment = started.execution_segment_id
+            started, found = self._chunk_work(
+                started, source, frozen, client, cancelled, tracker, chunk
+            )
+            if started.execution_segment_id == segment:
+                break
+            tracker = Tracker(state=before)
+        current = started
+        sequence = self._uow.write(
+            lambda session: self._settle_chunk(
+                session, source, current, frozen, chunk, found, sequence, tracker
+            )
+        )
+        self._cancel_if_requested(started)
+        return started, sequence, tracker
+
+    def _chunk_work(
+        self,
+        started: StartedProcessingJob,
+        source: _Input,
+        frozen: "_FrozenConfiguration",
+        client: _VideoPerception,
+        cancelled: Callable[[], bool],
+        tracker: Tracker,
+        chunk: tuple[Frame, ...],
+    ) -> tuple[StartedProcessingJob, Any]:
         detected: list[Detected] = []
         for batch in batched(chunk, self._video.frames_per_turn):
             with cancellable(cancelled), client.turn():
@@ -762,13 +795,21 @@ class ExecuteProcessingJob:
         for position, (frame, result) in enumerate(zip(chunk, detected, strict=True)):
             index = frame_index(frame.timestamp_ms, frame.slot, source.frame_rate)
             boxes = [detection.box for detection in result.detections]
+            points = [detection.landmarks for detection in result.detections]
             for detection, track in zip(
-                result.detections, tracker.update(frame.slot, boxes), strict=True
+                result.detections, tracker.update(frame.slot, boxes, points), strict=True
             ):
                 span = spans.setdefault(track, [frame.timestamp_ms, 0, index, 0])
                 span[1], span[3] = frame.timestamp_ms, index
                 candidates.append(
-                    Candidate(track, detection.score, detection.box, (position, detection))
+                    Candidate(
+                        track,
+                        detection.score,
+                        detection.box,
+                        (position, detection),
+                        detection.landmarks,
+                        frame.slot,
+                    )
                 )
         kept = select_kept(
             candidates,
@@ -789,21 +830,7 @@ class ExecuteProcessingJob:
                 started = self._advance_after_fallbacks(source, started, vectors.fallbacks)
                 represented[position] = vectors
             self._cancel_if_requested(started)
-        current = started
-        sequence = self._uow.write(
-            lambda session: self._settle_chunk(
-                session,
-                source,
-                current,
-                frozen,
-                chunk,
-                (detected, faces, represented, spans),
-                sequence,
-                tracker,
-            )
-        )
-        self._cancel_if_requested(started)
-        return started, sequence
+        return started, (detected, faces, represented, spans)
 
     def _settle_chunk(
         self,

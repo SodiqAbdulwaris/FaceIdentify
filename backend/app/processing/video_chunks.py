@@ -11,7 +11,8 @@ checkpoint whose payload is small (positions and ids, never pixels):
         "observations": [["<observation id>", <track>], ...]}}            # this chunk's
 
 A resumed run starts after the newest such checkpoint's slot with its tracker state
-(`resume_point`), so a frame is never processed twice and a track continues across the boundary.
+(`resume_point`): only a chunk that was not committed is done again, so no observation is
+recorded twice, and a track continues across the boundary.
 The run's tracks are the chunks' entries merged in order (`video_tracks`): the FINAL hand-off
 carries them, and acceptance turns each into an occurrence over time (step 6).
 """

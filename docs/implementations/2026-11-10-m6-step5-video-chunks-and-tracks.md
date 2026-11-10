@@ -30,7 +30,7 @@
 - Tests: `tests/integration/test_execute_video_job.py` (the real executor, lease, decoder and database on a clip
   of painted squares, `tests/fixtures/video_pipeline.py`: chunks and tracks, one turn per batch, a search served
   after at most one batch, a cancellation seen at the next batch with nothing half-written, a crash then resume
-  doing no frame twice with the tracks continuing, every failure settled `FAILED`, a clip with no faces, the
+  redoing only the chunk that was not committed (no committed observation twice) with the tracks continuing, every failure settled `FAILED`, a clip with no faces, the
   retry refusal), `tests/unit/test_tracking.py`, `tests/unit/test_video_chunks.py`, the client's turn in
   `tests/integration/test_runtime_perception_client.py`, the benchmark's batch in
   `tests/unit/test_worker_lease_stress.py`.
@@ -64,10 +64,24 @@ Delegated (owner, 2026-11-09; reversible):
    association (embeddings exist only for kept faces). To be checked on owner video in step 8 (D8).
 4. **Selection:** 3 per track and chunk, score times square-root area, at or above the decision policy's
    quality gate when any is; only those are embedded and recorded.
-5. **Checkpoint and FINAL payloads** (spec text, D1): recorded in `PERSISTENCE_IMPLEMENTATION.md` section 15.
+5. **Checkpoint and FINAL payloads** (spec text, D1): recorded in `PERSISTENCE_IMPLEMENTATION.md` section 16.
 6. **A video run is not retried until step 7** (D10 builds resume from the checkpoint).
 7. **Frames are scaled to a longest side of 1920** (`VideoProcessing.max_side`) before detection: the owner's
    library has 3840x1920 HEVC (step 4 entry), and a 20-frame chunk of 4K would otherwise hold about 440 MB.
+
+## Review of PR #247 (Codex, read-only) and what changed
+
+1. **Landmarks in association (D6).** The tracker's fit is the predicted-box IoU weighed by how well the
+   landmark shapes (the five points within their boxes) agree; a crossing of two faces keeps both tracks
+   (motion model), and between two boxes that overlap alike the one whose landmarks agree joins.
+2. **Pose and diversity in selection.** Merit is score x sqrt(area) x frontalness (the nose between the
+   eyes); kept faces are spread over the chunk (at least 2 slots apart unless nothing else is left).
+3. **Segment provenance on a mid-chunk fallback.** A provider fallback during a chunk closes the segment
+   and the chunk is done again from its first frame under the new one (tracker restored to before the
+   chunk), so every observation and representation names the segment that produced it. Test:
+   `test_a_provider_fallback_inside_a_chunk_redoes_it_under_the_new_segment`.
+4. **Wording:** a resume redoes at most the chunk that was not committed; no committed observation twice.
+5. **Section reference:** the payloads are in persistence section 16.
 
 ## Verification
 
