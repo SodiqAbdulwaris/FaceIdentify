@@ -38,7 +38,7 @@ Status: **approved by the owner on 2026-11-09; phase 2 (code) follows in separat
 4. `AcceptProcessingRunUseCase` gains the supersession branch: compare-and-swap on the pointer, `SUPERSEDED`
    updates, REMOVE/ADD operations, carry-over, `_validate_completed` for the repeat case.
 5. `correspondence.py` (pure): human-decided test, IoU/cosine/mutual-unique pairing with the D3 constants.
-6. Candidate revalidation (`recognition`/coordinator) also requires `processing_run_id == source.current_processing_run_id`.
+6. Candidate revalidation (`recognition`/coordinator) also requires `processing_run_id == source.current_processing_run_id`. (Delegated decision 2026-11-10: met by the one-`ACTIVE`-generation invariant instead of a second condition; persistence 12.1 note.)
 7. Forget/erasure interaction: suppression of V2 faces over erased V1 faces (item 9a).
 8. Job-type-aware scheduling, acceptance, retry and run views: the scheduler claims only `PROCESS_SOURCE` jobs (`processing/scheduler.py`), acceptance selects only the `PROCESS_SOURCE` job, retry always creates one, and the run detail and retry route select only `PROCESS_SOURCE` (`api/routes/processing.py`), so all of them accept `REPROCESS_SOURCE` for a run with `supersedes_run_id` (end-to-end test: a reprocess job is claimed, runs, is accepted, and a failed one can be retried); retry preserves the job type and copies `supersedes_run_id`; recovery routes a `FINALIZING` reprocess run through the same acceptance. Tests: a reprocess run is accepted; its retry keeps `REPROCESS_SOURCE` and `supersedes_run_id`.
 9. Permanent deletion clears `supersedes_run_id` as it clears `parent_run_id` (test: delete a reprocessed source).
@@ -61,7 +61,7 @@ Coverage stays at 100%.
 
 ## Order of work (phase 2)
 
-Progress: migration and tests done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocessing-schema.md)).
+Progress: migration and tests done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocessing-schema.md)); use cases, activation, correspondence, forget interaction, route and crash tests done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocess-activation.md)); the source-screen control remains.
 
 migration and tests; domain and `ReprocessSourceUseCase`; pool exclusion and revalidation filter; activation
 branch; correspondence and carry-over; forget interaction; route; crash tests; docs (implementation entry, README
