@@ -178,8 +178,11 @@ def write_observation(
     detector: PlannedVariant,
     new_id: Callable[[], uuid.UUID],
     now: datetime,
+    frame_index: int | None = None,
+    timestamp_ms: int | None = None,
 ) -> WrittenObservation:
-    """Persist one detector result as a PENDING observation before embedding begins."""
+    """Persist one detector result as a PENDING observation before embedding begins. A video's
+    observation also has its frame and presentation time (both or neither)."""
     _check_context(
         session,
         source_id=source_id,
@@ -195,6 +198,8 @@ def write_observation(
         execution_segment_id=execution_segment_id,
         state=ObservationState.PENDING,
         sequence_in_run=sequence_in_run,
+        frame_index=frame_index,
+        timestamp_ms=timestamp_ms,
         bbox_x=x0,
         bbox_y=y0,
         bbox_width=x1 - x0,  # (the worker's box is inside the image, so x + width <= 1 holds)

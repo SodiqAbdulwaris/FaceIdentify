@@ -51,6 +51,7 @@ from backend.app.recovery.startup import StartupReport
 from backend.app.runtime.worker_config import PerceptionPlan, plan_perception
 from backend.app.sources.permanent_delete import DeletionReport, PermanentSourceDeletion
 from backend.infrastructure.db.unit_of_work import TransactionRetry
+from backend.infrastructure.media.video import media_tools
 
 NOT_CONFIGURED: Final = "NOT_CONFIGURED"
 UNAVAILABLE: Final = "UNAVAILABLE"  # a capability the library needs cannot be provided here
@@ -287,6 +288,7 @@ class Backend:
                 max_pixels=processing.max_pixels,
                 recognition_k=processing.recognition_k,
                 planner=processing.planner,
+                video_tools=lambda: media_tools(library.roots.local_state_root),
             ),
             AcceptProcessingRunUseCase(
                 uow,

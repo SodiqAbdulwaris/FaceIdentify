@@ -1,18 +1,31 @@
-"""Execute one claimed image-processing job without making its output authoritative.
+"""Execute one claimed processing job without making its output authoritative.
 
 The scheduler has already made the short claim/start transition.  This module deliberately keeps
 every expensive operation -- opening media, decoding, package verification and worker inference --
 outside SQLite write transactions.  Each resulting detector/embedding result is settled in a short
 transaction as private ``PENDING`` output.  A valid FINAL checkpoint is the hand-off to the
 acceptance use case; it is *not* acceptance and creates neither ANN operations nor active rows.
+
+A video (M6 steps 4 and 5) is decoded once, from where its run last stopped, through the pinned
+ffmpeg, two frames a second by presentation time (D4), and taken in chunks; a chunk is a checkpoint
+boundary (`video_chunks.py`). Within a chunk, detection and then representation go in batches of
+frames, each batch ONE turn on the worker asked for inside `cancellable` (#242): a face search waits
+at most one batch and a cancellation is seen at the next batch. The NumPy tracker links detections
+into tracks (D6), selection keeps a few good observations per track and chunk, and only those are
+embedded and recorded, in ONE transaction with the chunk's checkpoint. After the last chunk,
+recognition and FINAL are as for an image, FINAL also carrying the run's tracks. A chunk holds its
+frames' pixels in memory: ponytail: `chunk_frames` full frames (about 120 MB of 1080p); crop the
+selected faces before the chunk ends if 4K video makes that too much.
 """
 
 import uuid
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from contextlib import AbstractContextManager, closing
+from dataclasses import dataclass, field, replace
 from datetime import datetime
+from itertools import batched
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 from sqlalchemy import select
@@ -39,6 +52,14 @@ from backend.app.processing.pending_output import (
 from backend.app.processing.repository import CheckpointRepository, SegmentRepository
 from backend.app.processing.run_repository import ProcessingRunRepository
 from backend.app.processing.scheduler import StartedProcessingJob
+from backend.app.processing.tracking import Candidate, Tracker, select_kept
+from backend.app.processing.video_chunks import (
+    VideoProcessing,
+    chunk_payload,
+    frame_index,
+    resume_point,
+    video_tracks,
+)
 from backend.app.recognition.assessment import ObservationQuality, RecognitionService
 from backend.app.recognition.reasoner import (
     DecisionPolicy,
@@ -70,12 +91,15 @@ from backend.app.sources.models import (
 from backend.infrastructure.db.optimistic import optimistic_locked_update
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.indexing.representation_index import RepresentationIndex
+from backend.infrastructure.media.frames import Frame, sampled_frames
 from backend.infrastructure.media.image import ImageError, decode_image
+from backend.infrastructure.media.video import MediaTools, MediaToolsMissingError, VideoError
 from backend.infrastructure.storage.files import BytesMissingError, ManagedFileStore
 from backend.ml.supervisor.lease import RequestCancelledError, cancellable
 from backend.ml.supervisor.supervisor import WorkerFailedError
 
 CHECKPOINT_SCHEMA_VERSION = 1
+DEFAULT_VIDEO = VideoProcessing()
 
 
 class ProcessingExecutionError(RuntimeError):
@@ -91,6 +115,8 @@ SETTLED_FAILURES: tuple[type[BaseException], ...] = (
     RuntimeUnavailableError,
     WorkerFailedError,
     ProcessingExecutionError,
+    VideoError,
+    MediaToolsMissingError,
     OSError,
 )
 
@@ -121,6 +147,12 @@ class _Perception(Protocol):
     def represent(self, pixels: Any, detections: tuple[Any, ...]) -> Represented: ...
 
 
+@runtime_checkable
+class _VideoPerception(_Perception, Protocol):
+    def turn(self) -> AbstractContextManager[None]:
+        """One worker turn for a batch of requests (#242)."""
+
+
 @dataclass(frozen=True, slots=True)
 class _Input:
     source_id: uuid.UUID
@@ -130,6 +162,10 @@ class _Input:
     storage_key: str | None
     external_path: str | None
     supersedes_run_id: uuid.UUID | None = None  # the generation a reprocess run will replace
+    kind: str = SourceKind.IMAGE
+    width: int | None = None  # a video's size as shown, its frames' size
+    height: int | None = None
+    frame_rate: tuple[int, int] | None = field(default=None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,7 +218,11 @@ class ExecuteProcessingJob:
         max_pixels: int,
         recognition_k: int,
         planner: PerceptionPlanner = plan_perception,
+        video_tools: Callable[[], MediaTools] | None = None,
+        video: VideoProcessing = DEFAULT_VIDEO,
     ) -> None:
+        """`video_tools` finds the pinned FFmpeg when a video is processed; without it a video
+        run fails (`ProcessingExecutionError`)."""
         if max_pixels < 1:
             raise ValueError("max_pixels must be positive")
         self._planner = planner
@@ -195,6 +235,8 @@ class ExecuteProcessingJob:
         self._clock = clock
         self._max_pixels = max_pixels
         self._recognition = RecognitionService(recognition_k)
+        self._video_tools = video_tools
+        self._video = video
 
     def execute(self, started: StartedProcessingJob) -> ExecutedProcessingJob:
         """Perform decode, perception, private recognition, and FINAL settlement.
@@ -209,13 +251,16 @@ class ExecuteProcessingJob:
             self._cancel_if_requested(started)
             frozen = _frozen(source.snapshot)
             plan = self._uow.read(lambda session: self._plan(session, frozen))
-            pixels = decode_image(self._read_original(source), max_pixels=self._max_pixels).pixels
-            client = self._client_for(plan)
 
             # A cancellation requested while a request waits for the worker is seen at its turn,
             # so it never enters inference (#175); the cancellation is then settled as below.
             def cancelled() -> bool:
                 return self._uow.read(lambda s: self._cancellation_requested(s, started))
+
+            if source.kind == SourceKind.VIDEO:
+                return self._execute_video(started, source, frozen, plan, cancelled)
+            pixels = decode_image(self._read_original(source), max_pixels=self._max_pixels).pixels
+            client = self._client_for(plan)
 
             with cancellable(cancelled):
                 detected = client.detect(pixels)
@@ -365,8 +410,11 @@ class ExecuteProcessingJob:
             else (ProcessingRunState.RUNNING,)
         ):
             raise ProcessingExecutionError(f"the processing run is {run.state}, not RUNNING")
-        if source.kind != SourceKind.IMAGE or source.state != SourceState.ACTIVE:
-            raise ProcessingExecutionError("the source is no longer an active image")
+        if (
+            source.kind not in (SourceKind.IMAGE, SourceKind.VIDEO)
+            or source.state != SourceState.ACTIVE
+        ):
+            raise ProcessingExecutionError("the source is no longer an active image or video")
         if artifact.state != ArtifactState.AVAILABLE:
             raise ProcessingExecutionError("the source original is not available")
         return _Input(
@@ -377,6 +425,12 @@ class ExecuteProcessingJob:
             artifact.storage_key,
             artifact.external_path,
             run.supersedes_run_id,
+            source.kind,
+            source.width,
+            source.height,
+            None
+            if source.frame_rate_num is None or source.frame_rate_den is None
+            else (source.frame_rate_num, source.frame_rate_den),
         )
 
     def _revalidate_settlement_context(
@@ -600,20 +654,221 @@ class ExecuteProcessingJob:
             },
             now=self._clock(),
         )
+        self._point_run_at(session, run, checkpoint.id)
+        return checkpoint.id
+
+    def _point_run_at(self, session: Session, run: ProcessingRun, checkpoint_id: uuid.UUID) -> None:
         changed = optimistic_locked_update(
             session,
             ProcessingRun,
             run.id,
             expected_revision=run.revision,
-            values={
-                "current_checkpoint_id": checkpoint.id,
-                "updated_at": self._clock(),
-            },
+            values={"current_checkpoint_id": checkpoint_id, "updated_at": self._clock()},
             extra_where=(ProcessingRun.state == ProcessingRunState.RUNNING,),
         )
         if changed != 1:
             raise ProcessingExecutionError("the processing run changed while checkpointing")
-        return checkpoint.id
+
+    # --- video (M6 steps 4 and 5) -------------------------------------------------------------
+
+    def _execute_video(
+        self,
+        started: StartedProcessingJob,
+        source: _Input,
+        frozen: "_FrozenConfiguration",
+        plan: PerceptionPlan,
+        cancelled: Callable[[], bool],
+    ) -> ExecutedProcessingJob:
+        if self._video_tools is None or source.width is None or source.height is None:
+            raise ProcessingExecutionError("video processing is not configured or has no size")
+        if source.width * source.height > self._max_pixels:
+            raise ProcessingExecutionError("the video's frames have more pixels than allowed")
+        client = self._client_for(plan)
+        if not isinstance(client, _VideoPerception):
+            raise ProcessingExecutionError("this perception cannot process a video")
+        resume = self._uow.read(lambda session: resume_point(session, source.run_id))
+        tracker = Tracker(state=resume.tracker)
+        frames = sampled_frames(
+            self._video_tools(),
+            self._original_path(source),
+            width=source.width,
+            height=source.height,
+            rate=self._video.rate,
+            after_slot=resume.slot,
+        )
+        sequence = resume.sequence
+        with closing(frames):
+            for chunk in batched(frames, self._video.chunk_frames):
+                started, sequence = self._video_chunk(
+                    started, source, frozen, client, cancelled, tracker, chunk, sequence
+                )
+        observations, representations = self._uow.read(
+            lambda session: _run_output(session, source.run_id)
+        )
+        decisions = self._decide(source, frozen, representations)
+        decisions = self._uow.write(
+            lambda session: self._persist_decisions(session, source, started, decisions)
+        )
+        self._cancel_if_requested(started)
+        tracks = self._uow.read(lambda session: video_tracks(session, source.run_id))
+        checkpoint = self._uow.write(
+            lambda session: self._finalize(
+                session, source, started, observations, decisions, tracks=tracks
+            )
+        )
+        return ExecutedProcessingJob(
+            source.run_id,
+            checkpoint,
+            tuple(observations),
+            tuple(decision.representation_id for decision in decisions),
+        )
+
+    def _original_path(self, source: _Input) -> Path:
+        # (one location form per storage mode: the artifacts table's `location` constraint)
+        path = (
+            self._files.roots.path_for(str(source.storage_key))
+            if source.storage_mode == StorageMode.MANAGED
+            else Path(str(source.external_path))
+        )
+        if not path.is_file():
+            raise BytesMissingError(f"the original of {source.source_id} is missing")
+        return path
+
+    def _video_chunk(
+        self,
+        started: StartedProcessingJob,
+        source: _Input,
+        frozen: "_FrozenConfiguration",
+        client: _VideoPerception,
+        cancelled: Callable[[], bool],
+        tracker: Tracker,
+        chunk: tuple[Frame, ...],
+        sequence: int,
+    ) -> tuple[StartedProcessingJob, int]:
+        """Detect, track, select, embed and settle one chunk. Returns the claim (advanced past any
+        provider fallback) and the next observation's sequence."""
+        detected: list[Detected] = []
+        for batch in batched(chunk, self._video.frames_per_turn):
+            with cancellable(cancelled), client.turn():
+                results = [client.detect(frame.pixels) for frame in batch]
+            for result in results:
+                started = self._advance_after_fallbacks(source, started, result.fallbacks)
+            detected.extend(results)
+            self._cancel_if_requested(started)
+        spans: dict[int, list[int]] = {}
+        candidates: list[Candidate] = []
+        for position, (frame, result) in enumerate(zip(chunk, detected, strict=True)):
+            index = frame_index(frame.timestamp_ms, frame.slot, source.frame_rate)
+            boxes = [detection.box for detection in result.detections]
+            for detection, track in zip(
+                result.detections, tracker.update(frame.slot, boxes), strict=True
+            ):
+                span = spans.setdefault(track, [frame.timestamp_ms, 0, index, 0])
+                span[1], span[3] = frame.timestamp_ms, index
+                candidates.append(
+                    Candidate(track, detection.score, detection.box, (position, detection))
+                )
+        kept = select_kept(
+            candidates,
+            keep=self._video.keep_per_track,
+            min_score=frozen.decision_policy.min_detection_score,
+        )
+        faces: dict[int, list[tuple[int, Any]]] = {}
+        for candidate in sorted(kept, key=lambda c: (c.key[0], c.key[1].detection_index)):
+            faces.setdefault(candidate.key[0], []).append((candidate.track, candidate.key[1]))
+        represented: dict[int, Represented] = {}
+        for pairs in batched(faces.items(), self._video.frames_per_turn):
+            with cancellable(cancelled), client.turn():
+                embedded = [
+                    client.represent(chunk[position].pixels, tuple(d for _t, d in found))
+                    for position, found in pairs
+                ]
+            for (position, _found), vectors in zip(pairs, embedded, strict=True):
+                started = self._advance_after_fallbacks(source, started, vectors.fallbacks)
+                represented[position] = vectors
+            self._cancel_if_requested(started)
+        current = started
+        sequence = self._uow.write(
+            lambda session: self._settle_chunk(
+                session,
+                source,
+                current,
+                frozen,
+                chunk,
+                (detected, faces, represented, spans),
+                sequence,
+                tracker,
+            )
+        )
+        self._cancel_if_requested(started)
+        return started, sequence
+
+    def _settle_chunk(
+        self,
+        session: Session,
+        source: _Input,
+        started: StartedProcessingJob,
+        frozen: "_FrozenConfiguration",
+        chunk: tuple[Frame, ...],
+        found: tuple[
+            list[Detected], dict[int, list[tuple[int, Any]]], dict[int, Represented],
+            dict[int, list[int]],
+        ],
+        sequence: int,
+        tracker: Tracker,
+    ) -> int:  # fmt: skip
+        detected, faces, represented, spans = found
+        run, segment, _job = self._revalidate_settlement_context(session, source, started)
+        kept: list[tuple[uuid.UUID, int]] = []
+        for position, pairs in faces.items():
+            frame, result = chunk[position], represented[position]
+            if result.ran is None or len(result.vectors) != len(pairs):
+                raise ProcessingExecutionError("the embedder did not settle every selected face")
+            index = frame_index(frame.timestamp_ms, frame.slot, source.frame_rate)
+            for (track, detection), vector in zip(pairs, result.vectors, strict=True):
+                observation_id = write_observation(
+                    session,
+                    source_id=source.source_id,
+                    processing_run_id=source.run_id,
+                    execution_segment_id=started.execution_segment_id,
+                    sequence_in_run=sequence,
+                    detection=detection,
+                    detector=detected[position].ran,
+                    new_id=self._new_id,
+                    now=self._clock(),
+                    frame_index=index,
+                    timestamp_ms=frame.timestamp_ms,
+                ).observation_id
+                write_representation(
+                    session,
+                    observation_id=observation_id,
+                    execution_segment_id=started.execution_segment_id,
+                    detection_index=detection.detection_index,
+                    vector=vector,
+                    embedder=result.ran,
+                    representation_space_id=frozen.representation_space_id,
+                    new_id=self._new_id,
+                    now=self._clock(),
+                )
+                kept.append((observation_id, track))
+                sequence += 1
+        checkpoint = CheckpointRepository(session).append(
+            run.id,
+            checkpoint_id=self._new_id(),
+            segment_id=segment.id,
+            kind=CheckpointKind.INTERMEDIATE,
+            payload_schema_version=CHECKPOINT_SCHEMA_VERSION,
+            payload=chunk_payload(
+                slot=chunk[-1].slot,
+                sequence=sequence,
+                tracker=tracker.state(),
+                spans=spans,
+                observations=kept,
+            ),
+            now=self._clock(),
+        )
+        self._point_run_at(session, run, checkpoint.id)
+        return sequence
 
     def _decide(
         self, source: _Input, frozen: _FrozenConfiguration, representations: list[uuid.UUID]
@@ -740,9 +995,11 @@ class ExecuteProcessingJob:
         started: StartedProcessingJob,
         observations: list[uuid.UUID],
         decisions: list[_Decision],
+        *,
+        tracks: list[dict[str, Any]] | None = None,
     ) -> uuid.UUID:
         run, segment, _job = self._revalidate_settlement_context(session, source, started)
-        payload = {
+        payload: dict[str, Any] = {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
             "observations": [str(identifier) for identifier in observations],
             "decisions": [
@@ -764,6 +1021,8 @@ class ExecuteProcessingJob:
                 for entry in decisions
             ],
         }
+        if tracks is not None:  # a video's tracks, for its occurrences over time (step 6)
+            payload["tracks"] = tracks
         checkpoint = CheckpointRepository(session).append(
             run.id,
             checkpoint_id=self._new_id(),
@@ -851,6 +1110,17 @@ class ExecuteProcessingJob:
             # A failed post-lock transition rolls back the entire short settlement. The original
             # external error remains the caller's failure; startup recovery owns this live claim.
             return
+
+
+def _run_output(session: Session, run_id: uuid.UUID) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    """A video run's observations and their representations, in sequence order."""
+    rows = session.execute(
+        select(Observation.id, Representation.id)
+        .join(Representation, Representation.observation_id == Observation.id)
+        .where(Observation.processing_run_id == run_id)
+        .order_by(Observation.sequence_in_run)
+    ).all()
+    return [row[0] for row in rows], [row[1] for row in rows]
 
 
 def _frozen(value: object) -> _FrozenConfiguration:
