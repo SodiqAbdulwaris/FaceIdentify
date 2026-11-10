@@ -13,8 +13,10 @@ from collections.abc import Callable
 import pytest
 
 from backend.ml.supervisor.lease import (
+    RequestCancelledError,
     WorkerClosedError,
     WorkerLease,
+    cancellable,
     interactive,
     is_interactive,
 )
@@ -278,3 +280,55 @@ def test_closing_refuses_the_requests_that_wait_and_the_ones_that_come_later() -
     with pytest.raises(WorkerClosedError), line.lease.held():
         raise AssertionError("a request made after the close must not get the worker")
     assert line.let_go() == []  # the holder finished normally
+
+
+def test_a_request_cancelled_while_it_waits_gives_its_turn_up_and_the_next_one_runs() -> None:
+    """Decision point 5: a queued request can be cancelled without entering inference. It is asked
+    when its turn comes, not when it queues, so a cancellation made while it waited is seen."""
+    line = Line(WorkerLease())
+    cancelled = threading.Event()
+    asked: list[bool] = []
+    outcome: list[BaseException] = []
+
+    def check() -> bool:
+        asked.append(cancelled.is_set())
+        return cancelled.is_set()
+
+    def waiting() -> None:
+        try:
+            with cancellable(check), line.lease.held():
+                line.served.append("cancelled")  # must never happen
+        except RequestCancelledError as error:
+            outcome.append(error)
+
+    thread = threading.Thread(target=waiting)
+    thread.start()
+    line.threads.append(thread)
+    line.condition.queued_one()
+    line.join("after", is_interactive=False)
+    cancelled.set()  # while it waits behind the holder
+
+    assert line.let_go() == ["after"]  # the cancelled request never held the worker
+    assert asked == [True]  # asked once, at its turn
+    assert len(outcome) == 1
+    assert line.lease.queued(False) == 0
+
+
+def test_a_request_that_is_not_cancelled_runs_and_the_scope_ends_with_its_block() -> None:
+    lease = WorkerLease()
+    asked = 0
+
+    def check() -> bool:
+        nonlocal asked
+        asked += 1
+        return False
+
+    with cancellable(check):
+        with lease.held():
+            pass
+        with lease.held():
+            pass
+    with lease.held():  # outside the scope nothing is asked
+        pass
+
+    assert asked == 2
