@@ -1310,6 +1310,8 @@ export interface components {
             current_processing_run_id: string | null;
             /** Display Name */
             display_name: string;
+            /** Duration Ms */
+            duration_ms: number | null;
             /** Height */
             height: number | null;
             /** Id */

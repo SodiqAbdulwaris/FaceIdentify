@@ -82,15 +82,18 @@ class LibrarySettings:
 # Provisional (unmeasured) bounds on one imported image: the host's choice until they are measured.
 PROVISIONAL_MAX_PIXELS: Final = 100_000_000
 PROVISIONAL_MAX_BYTES: Final = 512 * 1024 * 1024
+# A video is streamed, never held in memory, so its bound protects only the disk (M6 step 3).
+PROVISIONAL_MAX_VIDEO_BYTES: Final = 64 * 1024**3
 
 
 @dataclass(frozen=True)
 class MediaLimits:
     """Bounds on one imported image (its bytes read, its pixels decoded). No defaults: both are
-    measured choices, so the host chooses them."""
+    measured choices, so the host chooses them. The video bound has one: it bounds no memory."""
 
     max_pixels: int
     max_bytes: int
+    max_video_bytes: int = PROVISIONAL_MAX_VIDEO_BYTES
 
 
 class ProcessingUnavailableError(Exception):
