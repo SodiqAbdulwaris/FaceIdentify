@@ -7,6 +7,7 @@ depends on how long anything takes: every wait is for an event or for the lease'
 every wait is asserted to have succeeded.
 """
 
+import logging
 import threading
 from collections.abc import Callable
 
@@ -14,6 +15,7 @@ import pytest
 
 from backend.ml.supervisor.lease import (
     RequestCancelledError,
+    TurnRecord,
     WorkerClosedError,
     WorkerLease,
     cancellable,
@@ -370,3 +372,52 @@ def test_a_cancellation_check_that_fails_releases_the_turn_and_raises() -> None:
         raise AssertionError("the body must not run")
     with lease.held():  # the worker is free again
         pass
+
+
+def test_every_turn_is_measured_its_wait_its_hold_and_its_outcome() -> None:
+    """Decision point 8 (D5): per class, the wait and the time holding the worker, and whether the
+    request ran, failed or gave its turn up."""
+    ticks = iter(range(100))
+    records: list[TurnRecord] = []
+    lease = WorkerLease(clock=lambda: float(next(ticks)), observe=records.append)
+
+    with interactive(), lease.held():  # asked at 0, granted at 1, released at 2
+        pass
+    with pytest.raises(RuntimeError), lease.held():  # 3, 4, 5
+        raise RuntimeError("the inference failed")
+    with pytest.raises(RequestCancelledError), cancellable(lambda: True), lease.held():
+        raise AssertionError("a cancelled request must not run")  # 6, 7, 8
+
+    assert records == [
+        TurnRecord(True, 1.0, 1.0, 0, 0, "RAN"),
+        TurnRecord(False, 1.0, 1.0, 0, 0, "FAILED"),
+        TurnRecord(False, 1.0, 1.0, 0, 0, "CANCELLED"),
+    ]
+
+
+def test_each_turn_records_how_many_of_each_class_were_still_waiting() -> None:
+    records: list[TurnRecord] = []
+    line = Line(WorkerLease(observe=records.append))
+    line.join("background", is_interactive=False)
+    line.join("search 1", is_interactive=True)
+    line.join("search 2", is_interactive=True)
+
+    assert line.let_go() == ["search 1", "search 2", "background"]
+    depths = [(r.interactive, r.queued_interactive, r.queued_background) for r in records]
+    assert depths == [
+        (False, 0, 0),  # the holder, granted at once
+        (True, 1, 1),  # search 1: search 2 and the background request still waiting
+        (True, 0, 1),
+        (False, 0, 0),
+    ]
+
+
+def test_by_default_each_turn_is_logged_at_debug_level(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.DEBUG, logger="backend.ml.supervisor.lease"), WorkerLease().held():
+        pass
+
+    (record,) = caplog.records
+    assert record.getMessage().startswith("worker: a background request waited ")
+    assert record.getMessage().endswith(
+        "(RAN); 0 interactive and 0 background waiting at its grant"
+    )
