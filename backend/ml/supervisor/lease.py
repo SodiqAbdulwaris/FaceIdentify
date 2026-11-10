@@ -140,13 +140,14 @@ class WorkerLease:
                 raise
             self._waiting[cls].popleft()
             self._held = True
-            self._streak = self._streak + 1 if cls else 0
         try:
             cancelled = _cancelled.get()
             if cancelled is not None and cancelled():  # (asked holding the turn, never the lock)
                 raise RequestCancelledError(
                     "the request was cancelled before it reached the worker"
                 )
+            with self._condition:  # (a turn given up does not count towards the burst)
+                self._streak = self._streak + 1 if cls else 0
             LOG.debug(
                 "worker granted to a %s request after %.3fs",
                 "interactive" if cls else "background",
