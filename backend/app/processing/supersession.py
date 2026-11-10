@@ -61,6 +61,17 @@ HUMAN_DECISION_KINDS = (
     EvidenceKind.REPROCESS_DECISION_CARRIED_OVER,
 )
 PAYLOAD_SCHEMA_VERSION = 1
+RULE = {"version": RULE_VERSION, "min_iou": MIN_IOU, "min_cosine": MIN_COSINE}
+CARRIED_KEYS = {
+    "representation_id",
+    "previous_representation_id",
+    "run_id",
+    "previous_run_id",
+    "identity_id",
+    "iou",
+    "cosine",
+    "rule",
+}
 _ERASED_STATES = (RepresentationState.ERASING, RepresentationState.ERASED)
 
 
@@ -277,7 +288,7 @@ def carried_payload(
         "identity_id": str(carried.identity_id),
         "iou": carried.iou,
         "cosine": carried.cosine,
-        "rule": {"version": RULE_VERSION, "min_iou": MIN_IOU, "min_cosine": MIN_COSINE},
+        "rule": RULE,
     }
 
 
@@ -308,7 +319,7 @@ def record_reviews(
                     "candidate_representation_ids": [str(c) for c in review.candidate_ids],
                     "run_id": str(run.id),
                     "previous_run_id": str(run.supersedes_run_id),
-                    "rule": {"version": RULE_VERSION, "min_iou": MIN_IOU, "min_cosine": MIN_COSINE},
+                    "rule": RULE,
                 },
                 created_at=now,
             ),
@@ -322,21 +333,15 @@ def record_reviews(
         )
 
 
-def carried_evidence(
-    session: Session, run_id: uuid.UUID
-) -> Mapping[uuid.UUID, tuple[Evidence, uuid.UUID]]:
-    """The run's `REPROCESS_DECISION_CARRIED_OVER` rows by the new representation they name, each
-    with that representation's identity as recorded."""
-    found: dict[uuid.UUID, tuple[Evidence, uuid.UUID]] = {}
+def carried_evidence(session: Session, run_id: uuid.UUID) -> Mapping[str, list[Evidence]]:
+    """The run's `REPROCESS_DECISION_CARRIED_OVER` rows, grouped by the new representation each
+    names (as its payload records it, unparsed), so a duplicate is visible to the caller."""
+    found: dict[str, list[Evidence]] = {}
     for row in session.scalars(
         select(Evidence).where(
             Evidence.processing_run_id == run_id,
             Evidence.kind == EvidenceKind.REPROCESS_DECISION_CARRIED_OVER,
         )
     ):
-        payload = row.payload_json
-        found[uuid.UUID(str(payload["representation_id"]))] = (
-            row,
-            uuid.UUID(str(payload["identity_id"])),
-        )
+        found.setdefault(str(row.payload_json.get("representation_id")), []).append(row)
     return found

@@ -56,7 +56,7 @@ from backend.app.memory.models import (
     RepresentationState,
 )
 from backend.app.memory.repository import ObservationRepository, RepresentationRepository
-from backend.app.processing.correspondence import Face, geometric_pairs
+from backend.app.processing.correspondence import MIN_COSINE, MIN_IOU, Face, geometric_pairs
 from backend.app.processing.models import (
     CheckpointKind,
     CheckpointState,
@@ -68,7 +68,9 @@ from backend.app.processing.models import (
 from backend.app.processing.repository import CheckpointRepository
 from backend.app.processing.run_repository import ProcessingRunRepository
 from backend.app.processing.supersession import (
+    CARRIED_KEYS,
     PAYLOAD_SCHEMA_VERSION,
+    RULE,
     CarriedDecision,
     SupersessionPlan,
     box_of,
@@ -755,10 +757,14 @@ class AcceptProcessingRunUseCase:
         for decision in decisions:
             representation = session.get(Representation, decision.representation_id)
             observation = session.get(Observation, decision.observation_id)
-            if decision.representation_id in carried:
-                evidence, identity_id = carried[decision.representation_id]
+            if str(decision.representation_id) in carried:
                 self._validate_carried(
-                    session, run, decision, representation, observation, evidence, identity_id
+                    session,
+                    run,
+                    decision,
+                    representation,
+                    observation,
+                    carried[str(decision.representation_id)],
                 )
                 continue
             if observation is not None and observation.state == ObservationState.REJECTED:
@@ -832,11 +838,22 @@ class AcceptProcessingRunUseCase:
         decision: _Decision,
         representation: Representation | None,
         observation: Observation | None,
-        evidence: Evidence,
-        identity_id: uuid.UUID,
+        rows: Sequence[Evidence],
     ) -> None:
-        """A carried face: `ACTIVE` under the carried identity, with its evidence (the new face as
-        subject), its occurrence and its `ADD` operation."""
+        """A carried face: `ACTIVE` under the carried identity, with exactly one
+        `REPROCESS_DECISION_CARRIED_OVER` row whose payload names this face, this run, the run it
+        replaced, the identity, the measured overlap and similarity over the rule's thresholds
+        and the rule, and whose links are exactly this face (`SUBJECT`) and the replaced
+        generation's face (`SUPPORTING`); and its occurrence and its `ADD` operation."""
+        if len(rows) != 1 or representation is None or representation.identity_id is None:
+            raise AcceptanceError("completed processing run has an inconsistent carried face")
+        evidence = rows[0]
+        payload = evidence.payload_json
+        links = EvidenceRepository(session).links(evidence.id)
+        previous = (
+            None if len(links) != 2 else session.get(Representation, links[1].representation_id)
+        )
+        identity_id = representation.identity_id
         occurrences = list(
             session.scalars(
                 select(Occurrence)
@@ -859,10 +876,25 @@ class AcceptProcessingRunUseCase:
             or representation.state != RepresentationState.ACTIVE
             or observation.state != ObservationState.ACTIVE
             or representation.ann_key is None
-            or representation.identity_id != identity_id
             or evidence.subject_identity_id != identity_id
-            or EvidenceRepository(session).links(evidence.id)[:1]
-            != [EvidenceLink(representation.id, EvidenceRepresentationRole.SUBJECT)]
+            or set(payload) != CARRIED_KEYS
+            or payload["representation_id"] != str(representation.id)
+            or payload["run_id"] != str(run.id)
+            or payload["previous_run_id"] != str(run.supersedes_run_id)
+            or payload["identity_id"] != str(identity_id)
+            or payload["rule"] != RULE
+            or not AcceptProcessingRunUseCase._number(payload["iou"])
+            or not AcceptProcessingRunUseCase._number(payload["cosine"])
+            or payload["iou"] < MIN_IOU
+            or payload["cosine"] < MIN_COSINE
+            or previous is None
+            or previous.processing_run_id != run.supersedes_run_id
+            or payload["previous_representation_id"] != str(previous.id)
+            or links
+            != [
+                EvidenceLink(representation.id, EvidenceRepresentationRole.SUBJECT),
+                EvidenceLink(previous.id, EvidenceRepresentationRole.SUPPORTING),
+            ]
             or len(occurrences) != 1
             or occurrences[0].identity_id != identity_id
             or occurrences[0].state != OccurrenceState.ACTIVE
