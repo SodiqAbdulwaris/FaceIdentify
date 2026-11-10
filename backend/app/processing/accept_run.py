@@ -9,6 +9,12 @@ A reprocess run (one with `supersedes_run_id`) is activated by the same transact
 supersedes that generation, carries human decisions over through the face correspondence of
 identity model 60.1, records what needs review, and keeps a forgotten or erased face suppressed
 (`supersession.py`). Exactly one generation is authoritative before and after the commit.
+
+A video run's FINAL also names its tracks (M6 step 6). Each kept face is validated against its own
+evidence as an image's is; then the track rule (D7, `agreed_identity`) is checked on what that
+evidence decides: a track whose faces all match the same identity keeps those matches, and any
+other track's faces must all abstain as `TRACK_UNSETTLED`. A settled track becomes ONE `TRACK`
+occurrence over the time it spans, its matched faces its members; an unsettled one has none.
 """
 
 import uuid
@@ -81,6 +87,7 @@ from backend.app.processing.supersession import (
     record_reviews,
     supersede_previous,
 )
+from backend.app.processing.video_chunks import agreed_identity
 from backend.app.recognition.assessment import (
     ASSESSMENT_VERSION,
     INTERPRETATION,
@@ -94,6 +101,7 @@ from backend.app.recognition.reasoner import (
     DecisionPolicy,
     IdentityReasoner,
     Reason,
+    RecognitionDecision,
     RecognitionOutcome,
 )
 from backend.app.recognition.retrieval import Pool
@@ -128,8 +136,10 @@ _REASONS_BY_OUTCOME = {
         Reason.AMBIGUOUS_CANDIDATES,
         Reason.UNRESOLVED_NEIGHBOUR,
         Reason.UNCERTAIN_SIMILARITY,
+        Reason.TRACK_UNSETTLED,
     },
 }
+_TRACK_KEYS = {"track", "observations", "start_ms", "end_ms", "start_frame", "end_frame"}
 
 
 class AcceptanceError(RuntimeError):
@@ -153,6 +163,15 @@ class _Decision:
     reason: Reason
     identity_id: uuid.UUID | None
     evidence: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class _Track:
+    observations: tuple[uuid.UUID, ...]
+    start_ms: int
+    end_ms: int
+    start_frame: int
+    end_frame: int
 
 
 class AcceptProcessingRunUseCase:
@@ -188,11 +207,13 @@ class AcceptProcessingRunUseCase:
         run = ProcessingRunRepository(session).lock(run_id)
         if run is None:
             raise AcceptanceError("processing run does not exist")
-        checkpoint, decisions = self._final(session, run)
+        checkpoint, decisions, tracks = self._final(session, run)
         self._configuration_snapshot(session, run)
         source, job = self._context(session, run)
+        if (source.kind == SourceKind.VIDEO) != (tracks is not None):
+            raise AcceptanceError("FINAL checkpoint tracks do not fit the source")
         if run.state == ProcessingRunState.COMPLETED:
-            self._validate_completed(session, run, source, job, decisions)
+            self._validate_completed(session, run, source, job, decisions, tracks)
             return AcceptedProcessingRun(run.id, already_accepted=True)
         if run.state != ProcessingRunState.FINALIZING:
             raise AcceptanceError(f"processing run is {run.state}, not FINALIZING")
@@ -200,7 +221,7 @@ class AcceptProcessingRunUseCase:
             raise AcceptanceError(f"processing job is {job.state}, not RUNNING")
         self._require_source_is_acceptable(session, source)
         self._require_generation(session, run, source)
-        self._validate_private_output(session, run, decisions)
+        self._validate_private_output(session, run, decisions, tracks)
         plan = self._plan(session, run, decisions)
         now = self._clock()
         if run.supersedes_run_id is not None:
@@ -214,7 +235,11 @@ class AcceptProcessingRunUseCase:
                 carried = plan.carried[decision.representation_id]
                 self._carry(session, run, source, decision, carried, now)
             else:
-                self._accept_decision(session, run, source, decision, now)
+                self._accept_decision(
+                    session, run, source, decision, now, occurrence=tracks is None
+                )
+        for track, identity_id, members in _settled_tracks(decisions, tracks, plan):
+            self._track_occurrence(session, run, source, identity_id, track, members, now)
         self._dispose_pending_identities(session, decisions, plan, now)
         record_reviews(session, run, plan.reviews, now=now, new_id=self._new_id)
         for observation_id in self._observation_ids(decisions, checkpoint):
@@ -389,7 +414,7 @@ class AcceptProcessingRunUseCase:
 
     def _final(
         self, session: Session, run: ProcessingRun
-    ) -> tuple[ProcessingCheckpoint, tuple[_Decision, ...]]:
+    ) -> tuple[ProcessingCheckpoint, tuple[_Decision, ...], tuple[_Track, ...] | None]:
         checkpoint = CheckpointRepository(session).final_valid(run.id)
         if (
             checkpoint is None
@@ -400,7 +425,7 @@ class AcceptProcessingRunUseCase:
         ):
             raise AcceptanceError("processing run has no current supported FINAL checkpoint")
         payload = checkpoint.payload_json
-        if set(payload) != {"schema_version", "observations", "decisions"}:
+        if set(payload) - {"tracks"} != {"schema_version", "observations", "decisions"}:
             raise AcceptanceError("FINAL checkpoint has an unknown or missing field")
         if payload["schema_version"] != FINAL_SCHEMA_VERSION:
             raise AcceptanceError("FINAL checkpoint has an unsupported payload schema")
@@ -416,7 +441,32 @@ class AcceptProcessingRunUseCase:
             raise AcceptanceError("FINAL checkpoint decisions do not cover its observations")
         if len({decision.representation_id for decision in decisions}) != len(decisions):
             raise AcceptanceError("FINAL checkpoint repeats a representation")
-        return checkpoint, decisions
+        tracks = None if "tracks" not in payload else self._tracks(payload["tracks"])
+        if tracks is not None and sorted(o for t in tracks for o in t.observations) != sorted(
+            observation_ids
+        ):
+            raise AcceptanceError("FINAL checkpoint tracks do not hold each observation once")
+        return checkpoint, decisions, tracks
+
+    def _tracks(self, value: object) -> tuple[_Track, ...]:
+        if not isinstance(value, list):
+            raise AcceptanceError("FINAL checkpoint tracks must be a list")
+        tracks = []
+        for entry in value:
+            if not isinstance(entry, dict) or set(entry) != _TRACK_KEYS:
+                raise AcceptanceError("FINAL checkpoint track has an unknown or missing field")
+            times = [entry[k] for k in ("start_ms", "end_ms", "start_frame", "end_frame")]
+            if (
+                not all(type(t) is int and t >= 0 for t in times)
+                or times[0] > times[1]
+                or times[2] > times[3]
+                or not isinstance(entry["observations"], list)
+                or not entry["observations"]
+            ):
+                raise AcceptanceError("FINAL checkpoint track has an invalid span")
+            observations = tuple(self._uuid(o, "track observation") for o in entry["observations"])
+            tracks.append(_Track(observations, *times))
+        return tuple(tracks)
 
     def _context(self, session: Session, run: ProcessingRun) -> tuple[Source, Job]:
         source = SourceRepository(session).get(run.source_id)
@@ -436,7 +486,7 @@ class AcceptProcessingRunUseCase:
     def _require_source_is_acceptable(session: Session, source: Source) -> None:
         artifact = session.get(Artifact, source.original_artifact_id)
         if (
-            source.kind != SourceKind.IMAGE
+            source.kind not in (SourceKind.IMAGE, SourceKind.VIDEO)
             or source.state != SourceState.ACTIVE
             or artifact is None
             or artifact.state != ArtifactState.AVAILABLE
@@ -444,7 +494,11 @@ class AcceptProcessingRunUseCase:
             raise AcceptanceError("processing source or original is no longer valid")
 
     def _validate_private_output(
-        self, session: Session, run: ProcessingRun, decisions: Sequence[_Decision]
+        self,
+        session: Session,
+        run: ProcessingRun,
+        decisions: Sequence[_Decision],
+        tracks: tuple[_Track, ...] | None,
     ) -> None:
         observation_ids = set(self._observation_ids(decisions, None))
         pending_observations = set(
@@ -469,6 +523,7 @@ class AcceptProcessingRunUseCase:
                 "FINAL checkpoint does not name exactly the private representations"
             )
         by_id = {representation.id: representation for representation in representations}
+        proposals: dict[uuid.UUID, RecognitionDecision] = {}
         for decision in decisions:
             representation = by_id[decision.representation_id]
             if (
@@ -482,7 +537,10 @@ class AcceptProcessingRunUseCase:
                     "a representation is not the private output described by FINAL"
                 )
             self._validate_decision_identity(session, run, decision, representation)
-            self._validate_reasoned_decision(session, run, decision, representation)
+            proposals[decision.observation_id] = self._validate_reasoned_decision(
+                session, run, decision, representation
+            )
+        _validate_track_rule(decisions, proposals, tracks)
 
     def _validate_reasoned_decision(
         self,
@@ -490,7 +548,9 @@ class AcceptProcessingRunUseCase:
         run: ProcessingRun,
         decision: _Decision,
         representation: Representation,
-    ) -> None:
+    ) -> RecognitionDecision:
+        """What the face's own evidence decides; the decision must be it, or (a face of an
+        unsettled video track) an abstention whose recorded proposal is it."""
         evidence = decision.evidence
         policy_data = evidence["policy"]
         assert isinstance(policy_data, dict)
@@ -593,13 +653,25 @@ class AcceptProcessingRunUseCase:
             tuple(groups),
         )
         expected = IdentityReasoner(policy).decide(assessment)
+        claimed = (
+            (decision.outcome, decision.reason, decision.identity_id)
+            if decision.reason is not Reason.TRACK_UNSETTLED
+            else (
+                RecognitionOutcome(evidence["proposal"]["outcome"]),
+                Reason(evidence["proposal"]["reason"]),
+                None
+                if evidence["proposal"]["identity_id"] is None
+                else self._uuid(evidence["proposal"]["identity_id"], "proposal identity"),
+            )
+        )
         if (
-            expected.outcome != decision.outcome
-            or expected.reason != decision.reason
-            or decision.outcome is RecognitionOutcome.MATCH_EXISTING
-            and expected.identity_id != decision.identity_id
+            expected.outcome != claimed[0]
+            or expected.reason != claimed[1]
+            or claimed[0] is RecognitionOutcome.MATCH_EXISTING
+            and expected.identity_id != claimed[2]
         ):
             raise AcceptanceError("FINAL checkpoint decision does not follow its evidence")
+        return expected
 
     @staticmethod
     def _configuration_snapshot(
@@ -648,7 +720,10 @@ class AcceptProcessingRunUseCase:
         source: Source,
         decision: _Decision,
         now: datetime,
+        *,
+        occurrence: bool = True,
     ) -> None:
+        """`occurrence` False: a video face, whose occurrence is its track's (`_track_occurrence`)."""
         candidates = self._candidates(decision.evidence)
         payload: dict[str, object] = {**decision.evidence}
         if decision.outcome is RecognitionOutcome.CREATE_NEW:
@@ -684,9 +759,10 @@ class AcceptProcessingRunUseCase:
                 payload=payload,
                 candidates=candidates,
             )
-            self._occurrence(
-                session, run, source, decision.identity_id, decision.observation_id, now
-            )
+            if occurrence:
+                self._occurrence(
+                    session, run, source, decision.identity_id, decision.observation_id, now
+                )
             return
         representation = session.get(Representation, decision.representation_id)
         assert representation is not None
@@ -742,6 +818,35 @@ class AcceptProcessingRunUseCase:
             (observation_id,),
         )
 
+    def _track_occurrence(
+        self,
+        session: Session,
+        run: ProcessingRun,
+        source: Source,
+        identity_id: uuid.UUID,
+        track: _Track,
+        members: tuple[uuid.UUID, ...],
+        now: datetime,
+    ) -> None:
+        OccurrenceRepository(session).add(
+            Occurrence(
+                id=self._new_id(),
+                source_id=source.id,
+                identity_id=identity_id,
+                processing_run_id=run.id,
+                representative_observation_id=members[0],
+                kind=OccurrenceKind.TRACK,
+                state=OccurrenceState.ACTIVE,
+                start_frame=track.start_frame,
+                end_frame=track.end_frame,
+                start_timestamp_ms=track.start_ms,
+                end_timestamp_ms=track.end_ms,
+                created_at=now,
+                activated_at=now,
+            ),
+            members,
+        )
+
     def _validate_completed(
         self,
         session: Session,
@@ -749,6 +854,7 @@ class AcceptProcessingRunUseCase:
         source: Source,
         job: Job,
         decisions: Sequence[_Decision],
+        tracks: tuple[_Track, ...] | None,
     ) -> None:
         if source.current_processing_run_id != run.id or job.state != JobState.COMPLETED:
             raise AcceptanceError("completed processing run is missing its accepted owners")
@@ -756,6 +862,11 @@ class AcceptProcessingRunUseCase:
         if set(carried) - {str(decision.representation_id) for decision in decisions}:
             raise AcceptanceError("completed processing run has carry-over evidence for no face")
         suppressible = self._suppressible(session, run, decisions)
+        members = {
+            observation: members
+            for _track, _identity, members in _settled_tracks(decisions, tracks, None)
+            for observation in members
+        }
         for decision in decisions:
             representation = session.get(Representation, decision.representation_id)
             observation = session.get(Observation, decision.observation_id)
@@ -785,7 +896,9 @@ class AcceptProcessingRunUseCase:
                     raise AcceptanceError("accepted ABSTAIN acquired an identity")
             elif representation.identity_id != decision.identity_id:
                 raise AcceptanceError("accepted representation changed identity")
-            self._validate_accepted_artifacts(session, run, source, decision, representation)
+            self._validate_accepted_artifacts(
+                session, run, source, decision, representation, members.get(decision.observation_id)
+            )
 
     @staticmethod
     def _suppressible(
@@ -955,8 +1068,11 @@ class AcceptProcessingRunUseCase:
     ) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise AcceptanceError("FINAL checkpoint decision evidence is not an object")
-        if set(value) != _EVIDENCE_KEYS or value.get("schema_version") != EVIDENCE_SCHEMA_VERSION:
+        keys = _EVIDENCE_KEYS | ({"proposal"} if reason is Reason.TRACK_UNSETTLED else set())
+        if set(value) != keys or value.get("schema_version") != EVIDENCE_SCHEMA_VERSION:
             raise AcceptanceError("FINAL checkpoint decision has an unsupported evidence schema")
+        if reason is Reason.TRACK_UNSETTLED:
+            self._proposal(value["proposal"])
         if (
             value["outcome"] != outcome.value
             or value["reason"] != reason.value
@@ -1042,6 +1158,19 @@ class AcceptProcessingRunUseCase:
             raise AcceptanceError("FINAL checkpoint decision evidence has an inconsistent margin")
         return value
 
+    def _proposal(self, value: object) -> None:
+        """An unsettled track face's own proposal: a decision the reasoner can make."""
+        if not isinstance(value, dict) or set(value) != {"outcome", "reason", "identity_id"}:
+            raise AcceptanceError("FINAL checkpoint proposal has an unknown or missing field")
+        try:
+            outcome, reason = RecognitionOutcome(value["outcome"]), Reason(value["reason"])
+        except (TypeError, ValueError) as error:
+            raise AcceptanceError("FINAL checkpoint proposal is not a decision") from error
+        if reason is Reason.TRACK_UNSETTLED or reason not in _REASONS_BY_OUTCOME[outcome]:
+            raise AcceptanceError("FINAL checkpoint proposal reason does not fit its outcome")
+        if value["identity_id"] is not None:
+            self._uuid(value["identity_id"], "proposal identity")
+
     @staticmethod
     def _number(value: object) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
@@ -1123,7 +1252,9 @@ class AcceptProcessingRunUseCase:
         source: Source,
         decision: _Decision,
         representation: Representation,
+        track_members: tuple[uuid.UUID, ...] | None = None,
     ) -> None:
+        """`track_members`: a video face's settled track (its occurrence's members)."""
         kind = {
             RecognitionOutcome.CREATE_NEW: EvidenceKind.IDENTITY_CREATED,
             RecognitionOutcome.MATCH_EXISTING: EvidenceKind.IDENTITY_MATCHED,
@@ -1191,9 +1322,10 @@ class AcceptProcessingRunUseCase:
             len(occurrences) != 1
             or occurrences[0].identity_id != decision.identity_id
             or occurrences[0].state != OccurrenceState.ACTIVE
-            or occurrences[0].kind != OccurrenceKind.IMAGE
+            or occurrences[0].kind
+            != (OccurrenceKind.IMAGE if track_members is None else OccurrenceKind.TRACK)
             or OccurrenceRepository(session).observation_ids(occurrences[0].id)
-            != [decision.observation_id]
+            != list(track_members or (decision.observation_id,))
         ):
             raise AcceptanceError("completed processing run is missing its accepted occurrence")
         operations = list(
@@ -1208,3 +1340,50 @@ class AcceptProcessingRunUseCase:
         )
         if len(operations) != 1:
             raise AcceptanceError("completed processing run is missing its ADD operation")
+
+
+def _validate_track_rule(
+    decisions: Sequence[_Decision],
+    proposals: Mapping[uuid.UUID, RecognitionDecision],
+    tracks: tuple[_Track, ...] | None,
+) -> None:
+    """D7 on what each face's own evidence decides: a track keeps its matches only when they all
+    name the same identity; otherwise every one of its faces abstains as `TRACK_UNSETTLED`."""
+    by_observation = {decision.observation_id: decision for decision in decisions}
+    if tracks is None:
+        if any(d.reason is Reason.TRACK_UNSETTLED for d in decisions):
+            raise AcceptanceError("only a video track's face can be left unsettled")
+        return
+    for track in tracks:
+        agreed = agreed_identity(
+            [(proposals[o].outcome, proposals[o].identity_id) for o in track.observations]
+        )
+        unsettled = [by_observation[o].reason is Reason.TRACK_UNSETTLED for o in track.observations]
+        if any(unsettled) if agreed is not None else not all(unsettled):
+            raise AcceptanceError("FINAL checkpoint track does not follow the track rule")
+
+
+def _settled_tracks(
+    decisions: Sequence[_Decision], tracks: tuple[_Track, ...] | None, plan: Any
+) -> list[tuple[_Track, uuid.UUID, tuple[uuid.UUID, ...]]]:
+    """Each settled track with its identity and its faces accepted as matches (`plan`: leave out
+    faces a reprocess carries over or suppresses)."""
+    if tracks is None:
+        return []
+    matched = {
+        d.observation_id: d.identity_id
+        for d in decisions
+        if d.outcome is RecognitionOutcome.MATCH_EXISTING
+        and d.identity_id is not None
+        and (
+            plan is None
+            or d.representation_id not in plan.suppressed
+            and d.representation_id not in plan.carried
+        )
+    }
+    settled = []
+    for track in tracks:
+        members = tuple(o for o in track.observations if o in matched)
+        if members:
+            settled.append((track, matched[members[0]], members))
+    return settled

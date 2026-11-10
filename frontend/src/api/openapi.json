@@ -789,6 +789,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "end_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Ms"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -870,6 +881,17 @@
           "source_recycled": {
             "title": "Source Recycled",
             "type": "boolean"
+          },
+          "start_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ms"
           }
         },
         "required": [
@@ -884,6 +906,8 @@
           "placement",
           "match_similarity",
           "match_margin",
+          "start_ms",
+          "end_ms",
           "created_at"
         ],
         "title": "OccurrenceSummary",

@@ -19,6 +19,7 @@ carries them, and acceptance turns each into an occurrence over time (step 6).
 
 import math
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.processing.models import CheckpointKind, CheckpointState, ProcessingCheckpoint
 from backend.app.processing.repository import CheckpointRepository
+from backend.app.recognition.reasoner import RecognitionOutcome
 from backend.infrastructure.media.frames import SAMPLE_RATE
 
 VIDEO = "video"
@@ -126,6 +128,22 @@ def video_tracks(session: Session, run_id: uuid.UUID) -> list[dict[str, Any]]:
         for observation, track in video["observations"]:
             tracks[str(track)]["observations"].append(observation)
     return [track for track in tracks.values() if track["observations"]]
+
+
+def agreed_identity(
+    proposals: Sequence[tuple[RecognitionOutcome, uuid.UUID | None]],
+) -> uuid.UUID | None:
+    """The identity a track is automatically placed with (M6 D7): every kept face's own decision,
+    at the per-face operating point, matched the SAME identity. Anything else (a face that
+    abstains, one that would start a new identity, two identities) leaves the track unsettled."""
+    identities = {identity for outcome, identity in proposals}
+    if (
+        proposals
+        and all(outcome is RecognitionOutcome.MATCH_EXISTING for outcome, _ in proposals)
+        and len(identities) == 1
+    ):
+        return next(iter(identities))
+    return None
 
 
 def frame_index(timestamp_ms: int, slot: int, frame_rate: tuple[int, int] | None) -> int:

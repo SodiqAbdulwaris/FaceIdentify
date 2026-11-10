@@ -55,6 +55,7 @@ from backend.app.processing.scheduler import StartedProcessingJob
 from backend.app.processing.tracking import Candidate, Tracker, select_kept
 from backend.app.processing.video_chunks import (
     VideoProcessing,
+    agreed_identity,
     chunk_payload,
     frame_index,
     resume_point,
@@ -64,6 +65,7 @@ from backend.app.recognition.assessment import ObservationQuality, RecognitionSe
 from backend.app.recognition.reasoner import (
     DecisionPolicy,
     IdentityReasoner,
+    Reason,
     RecognitionDecision,
     RecognitionOutcome,
 )
@@ -185,6 +187,9 @@ class _Decision:
     representation_id: uuid.UUID
     decision: RecognitionDecision
     identity_id: uuid.UUID | None
+    # A face of an unsettled video track (D7): `decision` is then its abstention and this is what
+    # the reasoner proposed for the face alone, kept in its evidence.
+    proposal: RecognitionDecision | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -707,12 +712,12 @@ class ExecuteProcessingJob:
         observations, representations = self._uow.read(
             lambda session: _run_output(session, source.run_id)
         )
-        decisions = self._decide(source, frozen, representations)
+        tracks = self._uow.read(lambda session: video_tracks(session, source.run_id))
+        decisions = _settle_tracks(self._decide(source, frozen, representations), tracks)
         decisions = self._uow.write(
             lambda session: self._persist_decisions(session, source, started, decisions)
         )
         self._cancel_if_requested(started)
-        tracks = self._uow.read(lambda session: video_tracks(session, source.run_id))
         checkpoint = self._uow.write(
             lambda session: self._finalize(
                 session, source, started, observations, decisions, tracks=tracks
@@ -1048,6 +1053,7 @@ class ExecuteProcessingJob:
                         "identity_id": None
                         if entry.identity_id is None
                         else str(entry.identity_id),
+                        **_proposal(entry),
                     },
                 }
                 for entry in decisions
@@ -1142,6 +1148,46 @@ class ExecuteProcessingJob:
             # A failed post-lock transition rolls back the entire short settlement. The original
             # external error remains the caller's failure; startup recovery owns this live claim.
             return
+
+
+def _settle_tracks(decisions: list[_Decision], tracks: list[dict[str, Any]]) -> list[_Decision]:
+    """M6 D7: a track's faces keep their matches only when every one matched the same identity;
+    otherwise each abstains (`TRACK_UNSETTLED`), its own proposal kept. A video never creates an
+    identity automatically: an unknown track is left for the person to name."""
+    by_observation = {str(entry.observation_id): entry for entry in decisions}
+    unsettled: set[str] = set()
+    for track in tracks:
+        faces = [by_observation[observation] for observation in track["observations"]]
+        if agreed_identity([(f.decision.outcome, f.decision.identity_id) for f in faces]) is None:
+            unsettled.update(track["observations"])
+    return [
+        replace(
+            entry,
+            decision=replace(
+                entry.decision,
+                outcome=RecognitionOutcome.ABSTAIN,
+                reason=Reason.TRACK_UNSETTLED,
+                identity_id=None,
+            ),
+            proposal=entry.decision,
+        )
+        if str(entry.observation_id) in unsettled
+        else entry
+        for entry in decisions
+    ]
+
+
+def _proposal(entry: _Decision) -> dict[str, Any]:
+    if entry.proposal is None:
+        return {}
+    proposed = entry.proposal
+    return {
+        "proposal": {
+            "outcome": proposed.outcome.value,
+            "reason": proposed.reason.value,
+            "identity_id": None if proposed.identity_id is None else str(proposed.identity_id),
+        }
+    }
 
 
 def _run_output(session: Session, run_id: uuid.UUID) -> tuple[list[uuid.UUID], list[uuid.UUID]]:

@@ -91,6 +91,9 @@ class OccurrenceSummary(BaseModel):
     # The score behind an AUTOMATIC_MATCH, from its Evidence (no margin with one candidate).
     match_similarity: float | None
     match_margin: float | None
+    # A video appearance (kind TRACK): when it starts and ends in the video. None for an image.
+    start_ms: int | None
+    end_ms: int | None
     created_at: datetime
 
 
@@ -230,6 +233,8 @@ def occurrence_summaries(
             placement=placements.get(occ.id, _NOT_PLACED)[0],
             match_similarity=placements.get(occ.id, _NOT_PLACED)[1],
             match_margin=placements.get(occ.id, _NOT_PLACED)[2],
+            start_ms=occ.start_timestamp_ms,
+            end_ms=occ.end_timestamp_ms,
             created_at=occ.created_at,
         )
         for occ, source in rows
