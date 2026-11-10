@@ -68,11 +68,11 @@ class CancelProcessingUseCase:
         run = ProcessingRunRepository(session).lock(run_id)
         if run is None:
             raise RunNotFoundError(f"run {run_id} does not exist")
+        job = JobRepository(session).current_for_run(run_id)
+        if job_id is not None and (job is None or job.id != job_id):  # (before any repeat answer)
+            raise CancelError(f"job {job_id} is not the current attempt of run {run_id}")
         if run.state in (ProcessingRunState.CANCELLING, ProcessingRunState.CANCELLED):
             return CancelResult(run_id, CancelOutcome.ALREADY)
-        job = JobRepository(session).current_for_run(run_id)
-        if job_id is not None and (job is None or job.id != job_id):
-            raise CancelError(f"job {job_id} is not the current attempt of run {run_id}")
         if job and job.state == JobState.QUEUED:  # its run is PENDING: nothing has started
             self._settle(
                 session, run, job, JobState.QUEUED, JobState.CANCELLED, ProcessingRunState.CANCELLED
