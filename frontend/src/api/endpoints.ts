@@ -10,6 +10,7 @@ import type {
   Page,
   FaceSearchResponse,
   SearchResponse,
+  ReprocessReview,
   UnresolvedFace,
   PersonSummary,
   ProcessingRun,
@@ -37,6 +38,9 @@ export const endpoints = (api: ApiClient) => ({
   sourceRuns: (id: string, cursor?: string) =>
     api.get<Page<ProcessingRun>>(`${V1}/sources/${id}/processing-runs`, { cursor, limit: 50 }),
   processSource: (id: string) => api.post<ProcessingRun>(`${V1}/sources/${id}/process`),
+  reprocessSource: (id: string) => api.post<ProcessingRun>(`${V1}/sources/${id}/reprocess`),
+  reprocessReviews: (id: string) =>
+    api.get<{ items: ReprocessReview[] }>(`${V1}/sources/${id}/reprocess-reviews`),
   recheckSource: (id: string) => api.post<SourceDetail>(`${V1}/sources/${id}/recheck`),
   relinkSource: (id: string, path: string) =>
     api.post<SourceDetail>(`${V1}/sources/${id}/relink`, { path }),

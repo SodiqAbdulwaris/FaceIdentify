@@ -29,6 +29,11 @@ export function useRunActions(onNotice: (message: string | null) => void) {
     ...settle,
     onSettled: (run, _error, sourceId) => refresh(run, sourceId),
   })
+  const reprocess = useMutation({
+    mutationFn: (sourceId: string) => endpoints.reprocessSource(sourceId),
+    ...settle,
+    onSettled: (run, _error, sourceId) => refresh(run, sourceId),
+  })
   const cancel = useMutation({
     mutationFn: (run: ProcessingRun) => endpoints.cancelRun(run.id),
     ...settle,
@@ -40,5 +45,11 @@ export function useRunActions(onNotice: (message: string | null) => void) {
     onSettled: (run, _error, requested) => refresh(run ?? requested, requested.source_id),
   })
 
-  return { process, cancel, retry, busy: process.isPending || cancel.isPending || retry.isPending }
+  return {
+    process,
+    reprocess,
+    cancel,
+    retry,
+    busy: process.isPending || reprocess.isPending || cancel.isPending || retry.isPending,
+  }
 }

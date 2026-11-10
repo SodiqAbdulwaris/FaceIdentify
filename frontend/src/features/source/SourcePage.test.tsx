@@ -142,6 +142,129 @@ describe('a source', () => {
     )
   })
 
+  it('reprocesses an image that has a result, instead of offering to process it', async () => {
+    const user = userEvent.setup()
+    const { calls } = open([
+      {
+        path: SOURCE,
+        respond: detail({ processing_status: 'COMPLETED', current_processing_run_id: 'r1' }),
+      },
+      media,
+      noFaces,
+      {
+        path: `${SOURCE}/processing-runs`,
+        respond: page([run({ id: 'r1', state: 'COMPLETED' })]),
+      },
+      { method: 'POST', path: `${SOURCE}/reprocess`, status: 202, respond: run({ id: 'r2' }) },
+    ])
+
+    await user.click(await screen.findByRole('button', { name: 'Reprocess' }))
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.path.endsWith('/reprocess'))).toBe(true),
+    )
+    expect(screen.queryByRole('button', { name: 'Process' })).toBeNull()
+  })
+
+  it('offers both reprocessing and a retry when a reprocess failed', async () => {
+    open([
+      {
+        path: SOURCE,
+        respond: detail({ processing_status: 'FAILED', current_processing_run_id: 'r1' }),
+      },
+      media,
+      noFaces,
+      {
+        path: `${SOURCE}/processing-runs`,
+        respond: page([run({ id: 'r2', state: 'FAILED' }), run({ id: 'r1', state: 'COMPLETED' })]),
+      },
+    ])
+
+    expect(await screen.findByRole('button', { name: 'Reprocess' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Process' })).toBeNull() // it has a result
+  })
+
+  it('offers no reprocessing while a run is under way or before a first result', async () => {
+    open([
+      {
+        path: SOURCE,
+        respond: detail({ processing_status: 'RUNNING', current_processing_run_id: 'r1' }),
+      },
+      media,
+      noFaces,
+      { path: `${SOURCE}/processing-runs`, respond: page([run({ id: 'r2', state: 'RUNNING' })]) },
+    ])
+
+    expect(await screen.findByText(/Processing is under way/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reprocess' })).toBeNull()
+  })
+
+  it('lists the corrected faces that reprocessing could not match, with why', async () => {
+    open([
+      {
+        path: SOURCE,
+        respond: detail({ processing_status: 'COMPLETED', current_processing_run_id: 'r2' }),
+      },
+      media,
+      noFaces,
+      noRuns,
+      {
+        path: `${SOURCE}/reprocess-reviews`,
+        respond: {
+          items: [
+            {
+              id: 'e1',
+              identity_id: 'i1',
+              person: 'Ada',
+              reason: 'AMBIGUOUS',
+              processing_run_id: 'r2',
+              created_at: '2026-11-10T10:00:00Z',
+            },
+            {
+              id: 'e2',
+              identity_id: 'i2',
+              person: null,
+              reason: 'SPACE_CHANGED',
+              processing_run_id: 'r2',
+              created_at: '2026-11-10T10:00:00Z',
+            },
+          ],
+        },
+      },
+    ])
+
+    const list = (await screen.findByRole('heading', { name: 'Check after reprocessing' }))
+      .parentElement!
+    expect(within(list).getByRole('link', { name: 'Ada' })).toHaveAttribute(
+      'href',
+      '/identities/i1',
+    )
+    expect(within(list).getByText(/more than one face could be it/)).toBeInTheDocument()
+    expect(within(list).getByRole('link', { name: 'A person you corrected' })).toHaveAttribute(
+      'href',
+      '/identities/i2',
+    )
+    expect(within(list).getByText(/describes faces differently/)).toBeInTheDocument()
+  })
+
+  it('says so when the faces to check cannot be loaded', async () => {
+    open([
+      { path: SOURCE, respond: detail() },
+      media,
+      noFaces,
+      noRuns,
+      {
+        path: `${SOURCE}/reprocess-reviews`,
+        respond: () => failure(500, 'INTERNAL_ERROR', 'Something went wrong.'),
+      },
+    ])
+
+    expect(
+      await screen.findByText(/faces to check after reprocessing could not be loaded/),
+    ).toBeInTheDocument()
+  })
+
   it('lets a queued or running run be cancelled, and says it is under way', async () => {
     const user = userEvent.setup()
     const { calls } = open([
@@ -483,9 +606,9 @@ describe('a source', () => {
     await user.click(screen.getByRole('button', { name: 'Yes, delete it' }))
 
     await waitFor(() =>
-      expect(calls.some((c) => c.method === 'POST' && c.path === `${SOURCE}/permanent-delete`)).toBe(
-        true,
-      ),
+      expect(
+        calls.some((c) => c.method === 'POST' && c.path === `${SOURCE}/permanent-delete`),
+      ).toBe(true),
     )
   })
 })
