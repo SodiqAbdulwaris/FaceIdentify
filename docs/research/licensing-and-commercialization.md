@@ -18,7 +18,7 @@ a row here in the same change (`.agents/rules/documentation.md`).
 | 3 | **Biometric-privacy law** | Face recognition of identifiable people is regulated separately from copyright (section 9). | Legal review per market, consent flows, retention and deletion. |
 | 4 | **NVIDIA runtime libraries** | The GPU path uses NVIDIA's CUDA and cuDNN runtime libraries, which are proprietary and have their own redistribution terms (section 4). | Read the current NVIDIA licence for every file that would be shipped; or ship the CPU path only. |
 | 4b | **Microsoft DirectML** (since 2026-10-15) | The shipped Windows build bundles `DirectML.dll` under Microsoft's proprietary DirectML terms (section 4). They permit distribution inside an application for Windows (read 2026-10-15). | Ship the terms with the installer and keep Microsoft's notices; confirm the wheel's copy is covered (section 4). |
-| 5 | **Unverified Rust crates and the build tools of M8** | `cargo-license` has not been run; the installer and signing are not chosen yet (the FFmpeg build is chosen: section 4.1). | Run the inventory in section 8 and fill sections 5 to 7. |
+| 5 | **Unverified Rust crates and the build tools of M8** | `cargo-license` has not been run; the installer and signing are not chosen yet (an FFmpeg build is recommended: section 4.1). | Run the inventory in section 8 and fill sections 5 to 7. |
 
 > **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) CUDA is developer-only and never shipped (the shipped Windows build is `onnxruntime-windowsml`, DirectML then the CPU), so blocker 4 no longer applies to a release; blocker 4b replaces it.
 
@@ -80,7 +80,7 @@ of that training data must be checked before anyone relies on it.
 | ONNX Runtime DirectML builds (`onnxruntime-directml` 1.23.0, `onnxruntime-windowsml` 1.30.0) | MIT (wheel `LICENSE`); each bundles Microsoft's `DirectML.dll`, whose redistribution terms are not verified | **evaluated only** (2026-10-15, installed into a scratch folder outside the repository, never a dependency) | candidate shipped build, owner decision pending (`docs/research/onnx-runtime-gpu-packaging.md`); read the `DirectML.dll` terms before shipping |
 | USearch (`usearch` 2.26.2) | Apache-2.0 | the vector index | verified |
 | `av` (PyAV) 19.0.2 Windows wheel, **evaluated and rejected** (2026-11-09) | wheel metadata `BSD-3-Clause` for PyAV's own code; **bundles `libx264` and `libx265`** (section 4.1) | evaluated only, in a scratch environment outside the repository, never a dependency | fails D2 (no GPL components); section 4.1 |
-| FFmpeg 9.0.2 LGPL shared build for Windows (BtbN `ffmpeg-n9.0.2-48-gd4070a14ce-win64-lgpl-shared-9.0.zip`, `ffmpeg.exe` and `ffprobe.exe` run as subprocesses) | LGPL-3.0-or-later (its `LICENSE.txt`; `--enable-version3`, no `--enable-gpl`, no `--enable-nonfree`), read 2026-11-09 | **chosen for M6 video and M7 cameras** (decision 2026-11-10, delegated; recommendation, see 4.1) | the third-party libraries linked inside it are not individually read; section 4.1 |
+| FFmpeg 9.0.2 LGPL shared build for Windows (BtbN `ffmpeg-n9.0.2-48-gd4070a14ce-win64-lgpl-shared-9.0.zip`, `ffmpeg.exe` and `ffprobe.exe` run as subprocesses) | LGPL-3.0-or-later (its `LICENSE.txt`; `--enable-version3`, no `--enable-gpl`, no `--enable-nonfree`), read 2026-11-09 | **recommended candidate for M6 video and M7 cameras**, pending confirmation and a review of the libraries linked in it (section 4.1) | the third-party libraries linked inside it are not individually read; section 4.1 |
 
 > **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) `onnxruntime-windowsml` 1.30.0 is the shipped Windows build and a dependency (rows above); `onnxruntime-directml` stays evaluated only. The `DirectML.dll` terms were read (row above); CUDA is developer-only and never shipped, so the NVIDIA libraries are not part of a release (blocker 4).
 
@@ -111,7 +111,7 @@ inspected, in a scratch virtual environment and folders outside the repository (
   time base; H.264, HEVC, VP9, AV1, MPEG-2 and ProRes decoders are present. It is the smaller option
   technically (one 28 MB wheel, no separate binary) and is rejected only on licence grounds.
 
-**FFmpeg 9.0.2 LGPL shared build for Windows x64, chosen.** BtbN FFmpeg-Builds (the repository has moved to
+**FFmpeg 9.0.2 LGPL shared build for Windows x64, recommended candidate.** BtbN FFmpeg-Builds (the repository has moved to
 `github.com/FFmpeg-Builds/FFmpeg-Builds`), release `autobuild-2026-11-09-12-42`, asset
 `ffmpeg-n9.0.2-48-gd4070a14ce-win64-lgpl-shared-9.0.zip`, 76,530,124 bytes, SHA-256
 `b0981aea79d223dd78e769ce3c9106e4b3f62f56464e243537e8976d957bb2a6` (GitHub's digest, the release's
@@ -153,7 +153,7 @@ session's confirmation).**
    `docs/research/tech-stack.md` section 6 ("that flow may use direct FFmpeg subprocess/pipe processing")
    and by the M6 plan ("direct FFmpeg pipes are allowed where PyAV fails a flow"). Verified above to give
    probe metadata, exact per-frame presentation times, sampled raw frames and seeking.
-- **Recommendation: option 4.** It is the only option that meets D2 with an artifact that exists today, it adds
+- **Recommendation: option 4.** It is the only option checked whose own licence and configuration meet D2 (the licences of the libraries linked inside it are still to be reviewed, above) with an artifact that exists today, it adds
   no Python dependency, it reuses the same binary for M7's DirectShow capture, and the hash-pinned zip is
   checkable. Costs: a 181 MB runtime package (about 150 MB without `ffplay`), one subprocess per chunk or
   stream, and M6 step 4 parses `pts_time` from `showinfo` or `ffprobe` instead of reading `frame.pts`.
@@ -204,7 +204,7 @@ Rust crates used directly (`desktop/src-tauri/Cargo.toml`): `tauri` (MIT OR Apac
 known), `tauri-plugin-log`, `tauri-plugin-dialog`, `tauri-plugin-single-instance`, `serde`,
 `serde_json`, `log`, `base64`, `getrandom`; build: `tauri-build`; dev: `tempfile`. All are expected
 to be MIT and/or Apache-2.0 but **none has been checked**: run `cargo license` (or `cargo deny`) before a release.
-Not chosen yet (M8), each needing a row when it is: FFmpeg for video (chosen: section 4.1; an LGPL build is
+Not chosen yet (M8), each needing a row when it is: FFmpeg for video (recommended: section 4.1; an LGPL build is
 usable in a closed product only if its conditions are met: dynamic linking, the exact build
 configuration, the licence text and notices, a source offer where it applies, and the user's ability to
 replace the library; a GPL or `--enable-nonfree` build is not suitable for a closed product); PyInstaller or another bundler for the Python sidecar; the Windows installer toolkit; code

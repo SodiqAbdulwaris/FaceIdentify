@@ -3,7 +3,7 @@
 - **Date:** 2026-11-09 (inspection), 2026-11-10 (record)
 - **Milestone / tracker IDs:** M6 step 3 prerequisite (D2); M7 and M8 inputs
 - **Status:** done; documentation only (no code, dependency, spec or `tech-stack.md` change)
-- **Commits:** PR (number recorded when merged): `docs:` commits on `docs/d2-ffmpeg-licence-record`
+- **Commits:** PR #233: `docs: record the FFmpeg and PyAV licences for M6 D2`
 
 ## What changed
 
