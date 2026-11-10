@@ -216,7 +216,12 @@ def test_a_run_local_candidate_that_is_no_longer_pending_is_dropped_and_counted(
     world.build.session.execute(
         update(Representation)
         .where(Representation.id == stale.id)
-        .values(state=state, identity_id=world.build.identity().id, ann_key=77)
+        .values(
+            state=state,
+            identity_id=world.build.identity().id,
+            ann_key=77,
+            superseded_at=world.build.clock() if state == "SUPERSEDED" else None,
+        )
     )
     world.build.session.expire_all()
     found = world.ask(unit(1, 0, 0, 0))

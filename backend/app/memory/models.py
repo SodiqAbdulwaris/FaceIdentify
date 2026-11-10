@@ -110,6 +110,11 @@ class Observation(Base):
             name="frame_time_non_negative",
         ),
         CheckConstraint("sequence_in_run >= 0", name="sequence_non_negative"),
+        CheckConstraint(
+            "state != 'SUPERSEDED'"
+            " OR (superseded_at IS NOT NULL AND superseded_by_run_id IS NOT NULL)",
+            name="superseded_has_time",
+        ),
         UniqueConstraint("processing_run_id", "sequence_in_run"),
         Index(None, "source_id", "state", "created_at"),
         Index(None, "face_crop_artifact_id"),
@@ -150,6 +155,8 @@ class Observation(Base):
     runtime_variant_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("runtime_variants.id", ondelete="RESTRICT")
     )
+    # Set with `SUPERSEDED` by the reprocessing activation (persistence 5, 12.1).
+    superseded_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     # §22: bounded to-one navigation only.
     source: Mapped["Source"] = relationship()
@@ -195,6 +202,9 @@ class Representation(Base):
         # rule, and that an identity is itself ACTIVE is a cross-row rule enforced by the use case
         # (§20).
         CheckConstraint("state != 'ACTIVE' OR ann_key IS NOT NULL", name="active_eligible"),
+        CheckConstraint(
+            "state != 'SUPERSEDED' OR superseded_at IS NOT NULL", name="superseded_has_time"
+        ),
         UniqueConstraint("observation_id", "representation_space_id"),
         UniqueConstraint("representation_space_id", "ann_key"),
         Index(None, "representation_space_id", "state", "ann_key"),
@@ -232,6 +242,9 @@ class Representation(Base):
     runtime_variant_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("runtime_variants.id", ondelete="RESTRICT")
     )
+    # Set with `SUPERSEDED` by the reprocessing activation (persistence 6.2, 12.1); the row keeps
+    # its vector and `ann_key` as history and is never ANN-eligible again.
+    superseded_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     # §22: bounded to-one navigation only.
     observation: Mapped["Observation"] = relationship()
@@ -275,6 +288,9 @@ class Occurrence(Base):
             " OR start_timestamp_ms <= end_timestamp_ms",
             name="time_range_ordered",
         ),
+        CheckConstraint(
+            "state != 'SUPERSEDED' OR superseded_at IS NOT NULL", name="superseded_has_time"
+        ),
         Index(None, "source_id", "state", "created_at"),
         Index(None, "identity_id", "state", "created_at"),
         Index(None, "processing_run_id", "state"),
@@ -299,6 +315,8 @@ class Occurrence(Base):
     # "Lifecycle timestamps" (§11), decision 2026-09-23: creation and acceptance.
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # The supersede timestamp deferred on 2026-09-23, added with reprocessing (persistence 11).
+    superseded_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     # §22: bounded to-one navigation only.
     source: Mapped["Source"] = relationship()

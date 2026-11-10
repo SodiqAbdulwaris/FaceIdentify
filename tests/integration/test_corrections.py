@@ -521,6 +521,8 @@ def test_a_face_whose_observation_is_no_longer_current_cannot_be_resolved(
     observation = build.session.get(Observation, representation.observation_id)
     assert observation is not None
     observation.state = "SUPERSEDED"
+    observation.superseded_at = build.clock()
+    observation.superseded_by_run_id = observation.processing_run_id
     build.session.flush()
 
     with pytest.raises(IdentityManagerError, match="SUPERSEDED"):
@@ -560,6 +562,7 @@ def test_a_refused_resolution_writes_nothing(build: ModelFactory, how: str) -> N
         representation.identity_id = target.id
     if how == "retired":
         representation.state = "SUPERSEDED"
+        representation.superseded_at = build.clock()
     if how == "has_occurrence":
         build.occurrence(
             build.session.get(Observation, representation.observation_id),

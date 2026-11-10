@@ -275,6 +275,7 @@ def test_an_add_for_a_representation_that_is_no_longer_active_is_applied_but_add
     rep = active(build, space, 9)
     operation = queue(build, rep, "ADD")
     rep.state = "SUPERSEDED"  # it lost eligibility after the ADD was queued
+    rep.superseded_at = build.clock()
 
     report = run(coordinator, build)
 
@@ -698,7 +699,8 @@ def test_an_unusable_index_is_rebuilt_from_every_active_representation_in_sqlite
     (coordinator.index_directory(space.id) / "manifest.json").write_text("{broken")
     # Active in SQLite but never queued here, and one that must not be in a rebuild:
     active(build, space, 3)
-    active(build, space, 4).state = "SUPERSEDED"
+    superseded = active(build, space, 4)
+    superseded.state, superseded.superseded_at = "SUPERSEDED", build.clock()
     queue(build, active(build, space, 5), "ADD")
 
     report = run(coordinator, build)

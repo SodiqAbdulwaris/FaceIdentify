@@ -925,7 +925,7 @@ def test_a_keyed_superseded_representation_whose_earlier_remove_was_applied_is_s
     sqlite_engine: Engine, space: RepresentationSpace, build: ModelFactory,
 ) -> None:  # fmt: skip
     victim, _ = indexed(build, coordinator, space, 1, 2)
-    victim.state = "SUPERSEDED"
+    victim.state, victim.superseded_at = "SUPERSEDED", build.clock()
     build.index_operation(victim, operation="REMOVE")
     build.session.commit()
     coordinator.apply_pending(limit=10)  # applied in place: the bytes stay in the live file

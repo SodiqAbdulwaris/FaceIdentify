@@ -62,6 +62,8 @@ def new_representation(build: ModelFactory, observation: Observation, **kw: Any)
         execution_segment_id=observation.execution_segment_id, state="PENDING",
         vector=float32_vector([0.5, 0.5, 0.5, 0.5]), vector_dimension=4, created_at=build.clock(),
     )  # fmt: skip
+    if kw.get("state") == "SUPERSEDED":  # (revision 0011: a superseded row records when)
+        fields_["superseded_at"] = build.clock()
     return Representation(**(fields_ | kw))
 
 
@@ -170,13 +172,14 @@ def test_an_observation_changes_state_only_from_a_state_the_caller_expects(
         assert repo.transition(observation_id, from_states=["ACTIVE"], to_state="REJECTED") is False
         assert repo.transition(
             observation_id, from_states=["PENDING", "ACTIVE"], to_state="SUPERSEDED",
-            superseded_by_run_id=newer_run.id,
+            superseded_by_run_id=newer_run.id, now=build.clock(),
         )  # fmt: skip
         session.commit()
     with factory() as session:
         row = session.get(Observation, observation_id)
         assert row is not None
         assert (row.state, row.superseded_by_run_id) == ("SUPERSEDED", newer_run.id)
+        assert row.superseded_at == build.clock()
         assert run_id != newer_run.id
 
 

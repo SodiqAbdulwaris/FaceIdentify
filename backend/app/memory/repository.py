@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from backend.app.memory.models import (
     AnnKeySequence,
     Observation,
+    ObservationState,
     Representation,
     RepresentationState,
 )
@@ -93,12 +94,17 @@ class ObservationRepository:
         from_states: Collection[str],
         to_state: str,
         superseded_by_run_id: uuid.UUID | None = None,
+        now: datetime | None = None,
     ) -> bool:
         """Move the observation to `to_state` only if it is in one of `from_states` now: one
-        guarded `UPDATE`. `superseded_by_run_id` is recorded when given. False if it was not."""
+        guarded `UPDATE`. `superseded_by_run_id` is recorded when given, and `now` as
+        `superseded_at` on becoming `SUPERSEDED` (the schema requires both then, revision 0011).
+        False if it was not."""
         values: dict[str, Any] = {"state": to_state}
         if superseded_by_run_id is not None:
             values["superseded_by_run_id"] = superseded_by_run_id
+        if to_state == ObservationState.SUPERSEDED and now is not None:
+            values["superseded_at"] = now
         result = _execute(
             self._session,
             update(Observation)
@@ -217,7 +223,8 @@ class RepresentationRepository:
         now: datetime,
     ) -> bool:
         """Move the representation to `to_state` only if it is in one of `from_states` now: one
-        guarded `UPDATE`; `activated_at` is set when it becomes `ACTIVE`. False if it was not.
+        guarded `UPDATE`; `activated_at` is set when it becomes `ACTIVE`, `superseded_at` when it
+        becomes `SUPERSEDED`. False if it was not.
 
         `ERASING` and `ERASED` are refused on either side (`ValueError`): erasure is
         `RepresentationEraser`, not a state change. Moving to `ACTIVE` still needs an identity and
@@ -228,6 +235,8 @@ class RepresentationRepository:
         values: dict[str, Any] = {"state": to_state}
         if to_state == RepresentationState.ACTIVE:
             values["activated_at"] = now
+        if to_state == RepresentationState.SUPERSEDED:
+            values["superseded_at"] = now
         result = _execute(
             self._session,
             update(Representation)

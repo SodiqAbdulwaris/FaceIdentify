@@ -368,7 +368,7 @@ def test_vectors_left_on_an_identity_that_was_merged_into_the_forgotten_one_go_t
             session.execute(
                 update(Representation)
                 .where(Representation.identity_id == loser)
-                .values(state="SUPERSEDED")
+                .values(state="SUPERSEDED", superseded_at=lib.clock())
             )
             session.commit()
         revision = only(lib, select(Identity.revision).where(Identity.id == loser))[0]

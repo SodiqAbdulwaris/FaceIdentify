@@ -107,6 +107,10 @@ class EvidenceKind(StrEnum):
     PERSON_RENAMED = "PERSON_RENAMED"
     # A Source was permanently deleted: a non-biometric historical entry (identity model §41).
     SOURCE_PERMANENTLY_DELETED = "SOURCE_PERMANENTLY_DELETED"
+    # Reprocessing (identity model 60.1, revision 0011): a human decision on a previous-generation
+    # face was carried to its corresponding new face, or it had no trustworthy counterpart.
+    REPROCESS_DECISION_CARRIED_OVER = "REPROCESS_DECISION_CARRIED_OVER"
+    REPROCESS_REVIEW_REQUIRED = "REPROCESS_REVIEW_REQUIRED"
 
 
 class Evidence(Base):

@@ -422,6 +422,8 @@ SPEC_VALUE_SETS: dict[type[StrEnum], set[str]] = {
         "IDENTITY_REMOVED_FROM_PERSON", "IDENTITY_MERGED", "IDENTITY_SPLIT",
         "IDENTITY_FORGOTTEN", "USER_CORRECTION", "PERSON_RENAMED",
         "SOURCE_PERMANENTLY_DELETED",
+        # revision 0011 (persistence 10, reprocessing)
+        "REPROCESS_DECISION_CARRIED_OVER", "REPROCESS_REVIEW_REQUIRED",
     },
     EvidenceRepresentationRole: {"SUBJECT", "SELECTED_CANDIDATE", "CANDIDATE", "SUPPORTING"},
     OccurrenceKind: {"IMAGE", "TRACK", "SEGMENT"},
