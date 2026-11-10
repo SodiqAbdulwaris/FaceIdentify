@@ -300,6 +300,14 @@ labelled uncalibrated):
 | TST-069 | P1 | Resource-policy tests | Bounded queues and backpressure |
 | TST-070 | P1 | Movie-processing E2E | Complete movie workflow succeeds |
 
+**Current evidence** (2026-11-10; M6 step 1, reprocessing images, issue #180; the video halves follow with M6 steps 3 to 7):
+
+| ID | Status | Evidence / remaining work |
+|---|---|---|
+| TST-061 | `IN_PROGRESS` | Image half passing: `tests/integration/test_reprocess_images.py` (the current generation stays until one transaction replaces it; superseded rows keep their history; no view, stale index entry or old index file shows the replaced generation; human decisions carry over only through the correspondence rule, otherwise review evidence), `tests/unit/test_correspondence.py`, `tests/integration/test_migration_0011.py`. Remaining: video runs |
+| TST-064 | `IN_PROGRESS` | Image half passing: `test_reprocess_images.py` (a cancelled, failed or refused reprocess leaves the current generation; a retry keeps what it replaces; repeated requests and activations make no second generation; a second first run is never accepted over a result). Remaining: video retries |
+| TST-067 | `IN_PROGRESS` | Image half passing: `tests/recovery/test_reprocess_process_kill.py` (a real child process killed before FINAL, after FINAL, inside the open activation transaction and after its commit converges to one generation, without perception) and `test_reprocess_images.py` (forget and erasure survive reprocessing and a restart). Remaining: video recovery |
+
 **Dependencies:** M5 and the processing implementation.
 
 **Milestone gate:** Movie processing can be interrupted and recovered without corrupting identity memory.

@@ -224,3 +224,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-10 | [M8 plan: packaging and release for personal use](2026-11-10-m8-plan.md) | done; documentation only; delegated decisions R1 to R12 |
 | 2026-11-10 | [M6 step 1: reprocessing schema (revision 0011)](2026-11-10-m6-step1-reprocessing-schema.md) | done; schema only, use cases follow |
 | 2026-11-09 | [One ML worker process across plans (#221)](2026-11-09-one-worker-process-across-plans.md) | done; M6 step 2, first part |
+| 2026-11-10 | [M6 step 1: reprocessing request, activation and API](2026-11-10-m6-step1-reprocess-activation.md) | done for the backend; UI next |
