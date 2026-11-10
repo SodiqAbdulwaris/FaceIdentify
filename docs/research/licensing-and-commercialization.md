@@ -18,7 +18,7 @@ a row here in the same change (`.agents/rules/documentation.md`).
 | 3 | **Biometric-privacy law** | Face recognition of identifiable people is regulated separately from copyright (section 9). | Legal review per market, consent flows, retention and deletion. |
 | 4 | **NVIDIA runtime libraries** | The GPU path uses NVIDIA's CUDA and cuDNN runtime libraries, which are proprietary and have their own redistribution terms (section 4). | Read the current NVIDIA licence for every file that would be shipped; or ship the CPU path only. |
 | 4b | **Microsoft DirectML** (since 2026-10-15) | The shipped Windows build bundles `DirectML.dll` under Microsoft's proprietary DirectML terms (section 4). They permit distribution inside an application for Windows (read 2026-10-15). | Ship the terms with the installer and keep Microsoft's notices; confirm the wheel's copy is covered (section 4). |
-| 5 | **Unverified Rust crates and the build tools of M8** | `cargo-license` has not been run; the installer, signing and any bundled FFmpeg are not chosen yet. | Run the inventory in section 8 and fill sections 5 to 7. |
+| 5 | **Unverified Rust crates and the build tools of M8** | `cargo-license` has not been run; the installer and signing are not chosen yet (the FFmpeg build is chosen: section 4.1). | Run the inventory in section 8 and fill sections 5 to 7. |
 
 > **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) CUDA is developer-only and never shipped (the shipped Windows build is `onnxruntime-windowsml`, DirectML then the CPU), so blocker 4 no longer applies to a release; blocker 4b replaces it.
 
@@ -79,8 +79,90 @@ of that training data must be checked before anyone relies on it.
 | NVIDIA CUDA runtime 12.9, cuDNN 9.27, cuBLAS, cuFFT, cuRAND, NVRTC, nvJitLink (pip `nvidia-*-cu12`, installed 2026-10-07 into the Git-ignored `local-models/ort-gpu`) | NVIDIA proprietary licences (not verified in detail) | GPU inference only (`FACEIDENTIFY_ORT_GPU_DIR`) | redistribution inside an installer is governed by NVIDIA's terms; read them per file before shipping |
 | ONNX Runtime DirectML builds (`onnxruntime-directml` 1.23.0, `onnxruntime-windowsml` 1.30.0) | MIT (wheel `LICENSE`); each bundles Microsoft's `DirectML.dll`, whose redistribution terms are not verified | **evaluated only** (2026-10-15, installed into a scratch folder outside the repository, never a dependency) | candidate shipped build, owner decision pending (`docs/research/onnx-runtime-gpu-packaging.md`); read the `DirectML.dll` terms before shipping |
 | USearch (`usearch` 2.26.2) | Apache-2.0 | the vector index | verified |
+| `av` (PyAV) 19.0.2 Windows wheel, **evaluated and rejected** (2026-11-09) | wheel metadata `BSD-3-Clause` for PyAV's own code; **bundles `libx264` and `libx265`** (section 4.1) | evaluated only, in a scratch environment outside the repository, never a dependency | fails D2 (no GPL components); section 4.1 |
+| FFmpeg 9.0.2 LGPL shared build for Windows (BtbN `ffmpeg-n9.0.2-48-gd4070a14ce-win64-lgpl-shared-9.0.zip`, `ffmpeg.exe` and `ffprobe.exe` run as subprocesses) | LGPL-3.0-or-later (its `LICENSE.txt`; `--enable-version3`, no `--enable-gpl`, no `--enable-nonfree`), read 2026-11-09 | **chosen for M6 video and M7 cameras** (decision 2026-11-10, delegated; recommendation, see 4.1) | the third-party libraries linked inside it are not individually read; section 4.1 |
 
 > **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) `onnxruntime-windowsml` 1.30.0 is the shipped Windows build and a dependency (rows above); `onnxruntime-directml` stays evaluated only. The `DirectML.dll` terms were read (row above); CUDA is developer-only and never shipped, so the NVIDIA libraries are not part of a release (blocker 4).
+
+### 4.1 Video: PyAV and FFmpeg (D2, read 2026-11-09)
+
+M6 D2 asks for a pinned LGPL-only FFmpeg and ffprobe with no GPL components (x264, x265), plus PyAV. What was
+inspected, in a scratch virtual environment and folders outside the repository (nothing was added to the project):
+
+**PyAV 19.0.2, Windows wheel `av-19.0.2-cp312-abi3-win_amd64.whl` (PyPI; 28,150,949 bytes; SHA-256
+`3ce5a1d7b916d13c16ac58f1756f0fee4af2d53f02bc1403e18550b50d375a22`). Not LGPL-only.**
+- *Verified by reading:* the wheel metadata says `License-Expression: BSD-3-Clause` (PyAV's own code) and ships
+  only PyAV's `LICENSE.txt` and `AUTHORS`: **no FFmpeg, x264 or x265 licence text**. It bundles FFmpeg 9.0.2
+  as `av.libs/avcodec-63`, `avformat-63`, `avfilter-12`, `avutil-61`, `swscale-10`, `swresample-7` and
+  `avdevice-63`, plus `libx264-165`, `libx265`, `libvpx`, `libsvtav1enc`, `libdav1d`, `libopus`, `libwebp`,
+  `libvpl` (Intel) and others. The configuration string read from the DLLs has `--enable-version3`,
+  `--enable-libx264`, `--enable-libx265`, `--enable-libvpx`, `--enable-libsvtav1`, `--enable-nvenc`,
+  `--enable-nvdec`, `--enable-amf`, `--enable-libvpl` and `--enable-mediafoundation`, and no `--enable-gpl`.
+  The import table of `avcodec-63.dll` names `libx264-165-...dll` and `libx265-...dll`, so they cannot be
+  deleted from the wheel. PyAV's wheel builder (`pyav-ffmpeg`, `scripts/build-ffmpeg.py` and its README) lists
+  x264 and x265 as enabled packages. The installed package reports encoders `libx264` and `libx265`.
+- *Unexplained:* `avcodec_license()` and `avutil_license()` called through `ctypes` return "LGPL version 3 or
+  later" although x264 and x265 are linked. A compile-time flag is not evidence about the DLLs shipped
+  beside it; this is not relied on.
+- *Assumed, not verified in the wheel:* x264 and x265 are GPL-2.0-or-later upstream. Their DLLs carry no
+  readable licence text.
+- *Can PyAV's bundled FFmpeg alone probe and decode?* Yes (verified): it opened an MP4, reported container,
+  stream, duration and frame rate, and decoded every frame with exact presentation timestamps in the stream's
+  time base; H.264, HEVC, VP9, AV1, MPEG-2 and ProRes decoders are present. It is the smaller option
+  technically (one 28 MB wheel, no separate binary) and is rejected only on licence grounds.
+
+**FFmpeg 9.0.2 LGPL shared build for Windows x64, chosen.** BtbN FFmpeg-Builds (the repository has moved to
+`github.com/FFmpeg-Builds/FFmpeg-Builds`), release `autobuild-2026-11-09-12-42`, asset
+`ffmpeg-n9.0.2-48-gd4070a14ce-win64-lgpl-shared-9.0.zip`, 76,530,124 bytes, SHA-256
+`b0981aea79d223dd78e769ce3c9106e4b3f62f56464e243537e8976d957bb2a6` (GitHub's digest, the release's
+`checksums.sha256` and a download made here agree). The version is FFmpeg tag n9.0.2 plus 48 commits
+(`gd4070a14ce`), built 2026-11-09.
+- *Verified by reading and running:* `LICENSE.txt` is the GNU LGPL version 3; `ffmpeg -L` prints the LGPL v3
+  notice; the configuration has `--enable-version3`, `--disable-libx264`, `--disable-libx265`, no
+  `--enable-gpl` and no `--enable-nonfree`; `ffmpeg -encoders` lists no `libx264` or `libx265`. The build
+  recipe (`variants/win64-lgpl-shared`, `defaults-lgpl.sh`: `--enable-version3 --disable-debug`,
+  `LICENSE_FILE=COPYING.LGPLv3`) agrees. Decoders present: H.264, HEVC, VP8, VP9, AV1, MPEG-2, MPEG-4, MJPEG,
+  ProRes. Devices: DirectShow (`dshow`, for M7), `gdigrab`, `lavfi`. Run on this machine: `ffprobe` JSON of an
+  H.264 MP4 (stream, duration, frame rate, per-frame `pts` and `pts_time`); `ffmpeg -vf fps=5,showinfo -f
+  rawvideo -pix_fmt rgb24 pipe:1` wrote the expected 15 frames of 3 s with `pts_time` on standard error;
+  `-ss` seeking; a truncated file fails with exit status 1 ("moov atom not found"). Unpacked it is 181 MB
+  (`avcodec-63.dll` 91 MB; `ffplay.exe`, 19 MB, is not needed).
+- *Not verified:* the licences of the libraries linked statically or dynamically inside the DLLs (it lists,
+  among others, openh264, kvazaar, libvvenc, libaom, rav1e, libsrt, libzmq, libssh, libsoxr, libplacebo,
+  twolame, opencore-amr, zimg, libass; several are LGPL or MPL, one or two are BSD or Apache), their notices,
+  and any patent position of the codecs (OpenH264's patent grant covers Cisco's own binaries only). Whether
+  the BtbN scripts are themselves redistributable was not read. Obligations if it is ever distributed: ship
+  `LICENSE.txt`, keep the DLLs replaceable (shared build, dynamic linking), keep the exact build
+  configuration, and offer the corresponding source (FFmpeg `gd4070a14ce` and the BtbN scripts).
+- *Pinning:* BtbN autobuilds are rolling and old ones are removed, so the URL is not a pin. The pin is the
+  SHA-256 above; mirror the exact zip into the Git-ignored local runtime store and verify the hash on
+  install.
+
+**Options checked and the recommendation (decision 2026-11-10, delegated; pending the orchestrating
+session's confirmation).**
+1. *The PyAV wheel as it is.* Technically simplest; fails D2 (hard-linked x264 and x265), carries no licence
+   texts. Acceptable for a machine on which the application is never given to anyone (GPL conditions apply
+   on distribution), but then a public release needs the decoder replaced, which is rework late.
+2. *An older PyAV wheel.* Not tested. `pyav-ffmpeg` is the same builder across versions, so an older wheel
+   is expected to bundle x264 as well (an assumption); nothing suggests one that does not.
+3. *PyAV built from source against the LGPL shared build above* (its zip carries the headers and import
+   libraries). Possible in principle, not tried: it needs Cython and the MSVC build tools and a build of
+   PyAV on Windows that the project would have to maintain and cache in CI, and the result is not on PyPI,
+   so `uv` cannot lock it by hash the way it locks wheels.
+4. *Decode through the pinned LGPL `ffmpeg` and `ffprobe` over pipes, with no PyAV.* Allowed by
+   `docs/research/tech-stack.md` section 6 ("that flow may use direct FFmpeg subprocess/pipe processing")
+   and by the M6 plan ("direct FFmpeg pipes are allowed where PyAV fails a flow"). Verified above to give
+   probe metadata, exact per-frame presentation times, sampled raw frames and seeking.
+- **Recommendation: option 4.** It is the only option that meets D2 with an artifact that exists today, it adds
+  no Python dependency, it reuses the same binary for M7's DirectShow capture, and the hash-pinned zip is
+  checkable. Costs: a 181 MB runtime package (about 150 MB without `ffplay`), one subprocess per chunk or
+  stream, and M6 step 4 parses `pts_time` from `showinfo` or `ffprobe` instead of reading `frame.pts`.
+  M6's step text that says "PyAV" is then read as "the pinned ffmpeg over a pipe"; the step 3 PR that adds
+  the runtime states this. Reversal to option 1 for personal use only is a one-adapter change and would add a
+  public-release blocker (below). `docs/research/tech-stack.md` and the specs are not edited by this record.
+
+> **Decision 2026-11-10:** (delegated by the owner; recommendation pending the orchestrating session's
+> confirmation) option 4. Until confirmed, M6 step 3 must not add `av` to `pyproject.toml`.
 
 ## 5. Python dependencies (verified from installed metadata, 2026-10-07)
 
@@ -122,7 +204,7 @@ Rust crates used directly (`desktop/src-tauri/Cargo.toml`): `tauri` (MIT OR Apac
 known), `tauri-plugin-log`, `tauri-plugin-dialog`, `tauri-plugin-single-instance`, `serde`,
 `serde_json`, `log`, `base64`, `getrandom`; build: `tauri-build`; dev: `tempfile`. All are expected
 to be MIT and/or Apache-2.0 but **none has been checked**: run `cargo license` (or `cargo deny`) before a release.
-Not chosen yet (M6 to M8), each needing a row when it is: FFmpeg or PyAV for video (an LGPL build is
+Not chosen yet (M8), each needing a row when it is: FFmpeg for video (chosen: section 4.1; an LGPL build is
 usable in a closed product only if its conditions are met: dynamic linking, the exact build
 configuration, the licence text and notices, a source offer where it applies, and the user's ability to
 replace the library; a GPL or `--enable-nonfree` build is not suitable for a closed product); PyInstaller or another bundler for the Python sidecar; the Windows installer toolkit; code
@@ -282,3 +364,4 @@ whether results measured on them may be published (a question for the licence ho
 6. Legal review of the biometric-privacy obligations for each target market.
 7. Remove or relabel everything marked developer-only (the development profile, local weights,
    evaluation scripts).
+8. Video: keep the LGPL FFmpeg build of section 4.1 (never the PyAV wheel's bundled one): ship its licence text, notices for the libraries linked in it, the build configuration and a source offer; re-read the licences listed there as not verified.
