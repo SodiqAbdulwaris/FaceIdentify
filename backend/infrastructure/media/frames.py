@@ -52,13 +52,17 @@ def sampled_frames(
 ) -> Generator[Frame]:
     """The first frame of every slot after `after_slot`, in order. `width` and `height` are the
     size the Source records (as shown). Raises `CorruptVideoError` when decoding fails."""
-    if rate <= 0 or width <= 0 or height <= 0:
-        raise ValueError("the rate and the size must be positive")
-    start = (after_slot + 1) / rate
+    if not (math.isfinite(rate) and rate > 0) or width <= 0 or height <= 0:
+        raise ValueError("the rate and the size must be positive (and the rate finite)")
+    # The seek is rounded DOWN to the microsecond, so a frame exactly on the slot boundary is never
+    # skipped; a frame before it, still in a slot already given, is dropped below. One rendering of
+    # the rate serves ffmpeg's select and the slot arithmetic here.
+    start = math.floor((after_slot + 1) / rate * 1_000_000) / 1_000_000
+    rate_text = repr(float(rate))
     command = [str(tools.ffmpeg), "-hide_banner", "-nostats", "-v", "info", "-copyts"]
     command += ["-ss", f"{start:.6f}", "-i", str(path), "-an", "-sn", "-dn"]
-    command += ["-vf", f"select='isnan(prev_selected_t)+gt(floor(t*{rate}),"]
-    command[-1] += f"floor(prev_selected_t*{rate}))',showinfo"
+    command += ["-vf", f"select='isnan(prev_selected_t)+gt(floor(t*{rate_text}),"]
+    command[-1] += f"floor(prev_selected_t*{rate_text}))',showinfo"
     command += ["-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     process = subprocess.Popen(
         command,
