@@ -314,7 +314,7 @@ async def test_only_active_things_are_found(processing_api: Api) -> None:
         session.execute(
             update(Occurrence)
             .where(Occurrence.source_id == uuid.UUID(sources[3]["id"]))
-            .values(state=OccurrenceState.SUPERSEDED)
+            .values(state=OccurrenceState.SUPERSEDED, superseded_at=Occurrence.created_at)
         )
         session.execute(update(ProcessingRun).values(state=ProcessingRunState.RUNNING))
 

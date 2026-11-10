@@ -25,6 +25,8 @@ EXPECTED_FOREIGN_KEYS = {
         "RESTRICT",
     ),
     ("processing_runs", "parent_run_id"): ("processing_runs", "RESTRICT"),
+    # reprocessing lineage, revision 0011 (persistence 12.1 item 1)
+    ("processing_runs", "supersedes_run_id"): ("processing_runs", "RESTRICT"),
     ("processing_runs", "current_checkpoint_id"): ("processing_checkpoints", "SET NULL"),
     ("execution_segments", "processing_run_id"): ("processing_runs", "RESTRICT"),
     ("execution_segments", "runtime_variant_id"): ("runtime_variants", "RESTRICT"),

@@ -210,10 +210,13 @@ class OccurrenceRepository:
         now: datetime,
     ) -> bool:
         """Move the occurrence to `to_state` only if it is in one of `from_states` now: one guarded
-        `UPDATE`; `activated_at` is set on becoming `ACTIVE`. False if it was not."""
+        `UPDATE`; `activated_at` is set on becoming `ACTIVE`, `superseded_at` on becoming
+        `SUPERSEDED`. False if it was not."""
         values: dict[str, Any] = {"state": to_state}
         if to_state == OccurrenceState.ACTIVE:
             values["activated_at"] = now
+        if to_state == OccurrenceState.SUPERSEDED:
+            values["superseded_at"] = now
         result = cast(
             "CursorResult[Any]",
             self._session.execute(

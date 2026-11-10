@@ -250,7 +250,7 @@ def case_index_has_a_key_sqlite_no_longer_stands_behind(library: Library) -> Ind
     with library.factory() as session:
         row = session.get(Representation, operation.representation_id)
         assert row is not None
-        row.state = "SUPERSEDED"
+        row.state, row.superseded_at = "SUPERSEDED", library.build.clock()
         session.commit()
     return operation
 

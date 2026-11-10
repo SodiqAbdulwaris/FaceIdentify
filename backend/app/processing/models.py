@@ -117,6 +117,9 @@ class ProcessingRun(Base):
     __table_args__ = (
         enum_check("state", ProcessingRunState),
         CheckConstraint("revision >= 1", name="revision_positive"),
+        CheckConstraint(
+            "supersedes_run_id IS NULL OR supersedes_run_id != id", name="supersedes_not_self"
+        ),
         Index(None, "source_id", "created_at"),
         Index(None, "state", "updated_at"),
         Index(
@@ -125,6 +128,13 @@ class ProcessingRun(Base):
             sqlite_where=text(
                 "state IN (" + ", ".join(f"'{s.value}'" for s in TRANSIENT_RUN_STATES) + ")"
             ),
+        ),
+        # A run is superseded by at most one completed run (persistence 12.1 item 1).
+        Index(
+            "uq_processing_runs_one_completed_superseder",
+            "supersedes_run_id",
+            unique=True,
+            sqlite_where=text("state = 'COMPLETED'"),
         ),
     )
 
@@ -151,6 +161,11 @@ class ProcessingRun(Base):
     revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # Reprocessing lineage (persistence 12.1): the generation this run replaces once it is
+    # accepted. `parent_run_id` is retry lineage; a retry of a reprocess run copies this.
+    supersedes_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("processing_runs.id", ondelete="RESTRICT")
+    )
 
     # §22: bounded to-one navigation only. `source_id` is named explicitly because
     # sources.current_processing_run_id links the same two tables the other way.

@@ -155,7 +155,8 @@ def test_an_active_representation_without_an_identity_is_accepted_only_with_its_
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0004(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "0005")
+    # (through to head: the current models cannot write to a database stopped at 0005)
+    migrate(monkeypatch, path, "head")
     engine = create_sqlite_engine(path)
     try:
         with Session(engine) as session:
@@ -186,7 +187,8 @@ def test_the_variant_columns_take_a_real_variant_refuse_an_unknown_one_and_restr
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0004(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "0005")
+    # (through to head: the current models cannot write to a database stopped at 0005)
+    migrate(monkeypatch, path, "head")
     engine = create_sqlite_engine(path)
     try:
         with Session(engine) as session:

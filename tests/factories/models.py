@@ -177,7 +177,18 @@ class ModelFactory:
             ),
             created_at=self.clock(),
         )  # fmt: skip
-        return self.add(Observation(**(fields | kw)))
+        return self.add(Observation(**(fields | self._superseded(kw, run_id=run.id) | kw)))
+
+    def _superseded(self, kw: dict[str, Any], *, run_id: uuid.UUID | None = None) -> dict[str, Any]:
+        """A `SUPERSEDED` row needs the time it was superseded (revision 0011), and an observation
+        the run that superseded it: defaulted here (the row's own run stands in for a successor),
+        and a test that wants either missing passes it explicitly as None."""
+        if kw.get("state") != "SUPERSEDED":
+            return {}
+        defaults: dict[str, Any] = {"superseded_at": self.clock()}
+        if run_id is not None:
+            defaults["superseded_by_run_id"] = run_id
+        return defaults
 
     def _run_segment(self, run: ProcessingRun) -> ExecutionSegment:
         cached = self._segments.get(run.id)
@@ -213,7 +224,7 @@ class ModelFactory:
             vector=float32_vector([0.5, 0.5, 0.5, 0.5]), vector_dimension=4,
             created_at=self.clock(),
         )  # fmt: skip
-        return self.add(Representation(**(fields | kw)))
+        return self.add(Representation(**(fields | self._superseded(kw) | kw)))
 
     def occurrence(self, observation: Observation | None = None, /, **kw: Any) -> Occurrence:
         observation = observation or self.observation()
@@ -224,7 +235,7 @@ class ModelFactory:
             representative_observation_id=observation.id, kind="IMAGE", state="PENDING",
             created_at=self.clock(),
         )  # fmt: skip
-        return self.add(Occurrence(**(fields | kw)))
+        return self.add(Occurrence(**(fields | self._superseded(kw) | kw)))
 
     def evidence(self, **kw: Any) -> Evidence:
         fields: dict[str, Any] = dict(

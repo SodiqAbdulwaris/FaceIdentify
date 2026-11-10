@@ -254,7 +254,8 @@ def test_a_new_snapshot_can_still_be_created_and_a_second_run_cannot_reuse_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
     path = populated_0002(tmp_path, monkeypatch, clock, new_id)
-    migrate(monkeypatch, path, "0003")
+    # (through to head: the current models cannot write to a database stopped at 0003)
+    migrate(monkeypatch, path, "head")
     used, _ = snapshot_ids(path)
     engine = create_sqlite_engine(path)
     try:
