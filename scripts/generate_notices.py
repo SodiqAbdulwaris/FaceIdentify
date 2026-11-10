@@ -32,9 +32,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DIRECTML_TERMS = ROOT / "packaging" / "third-party" / "DirectML-LICENSE.txt"
 CARGO_TARGET = "x86_64-pc-windows-msvc"
 LICENCE_FILE = re.compile(r"(licen[cs]e|notice|copying|copyright|third[-_ ]?party)", re.IGNORECASE)
-FORBIDDEN = re.compile(r"\b(A?GPL|SSPL)", re.IGNORECASE)
-# An `LGPL` match of FORBIDDEN is a false positive of the pattern above and is let through: the
-# LGPL is allowed for a dynamically linked component (FFmpeg, M6), and `needs_review` lists it.
+# A GPL, AGPL or SSPL token (the `(?<![A-Za-z])` keeps the LGPL out of it).
+FORBIDDEN = re.compile(r"(?<![A-Za-z])(A?GPL|SSPL)", re.IGNORECASE)
 REVIEW = re.compile(r"\b(LGPL|MPL|EPL|CDDL)", re.IGNORECASE)
 
 
@@ -52,7 +51,10 @@ class Component:
         found = list(self.missing)
         if not self.licence:
             found.append("no licence identifier")
-        if FORBIDDEN.search(self.licence) and not re.search(r"\bLGPL", self.licence):
+        # `X OR Y` lets the user choose, so one alternative without a forbidden licence suffices; an
+        # `AND` (or a bare name) binds every part.
+        alternatives = re.split(r"\s+OR\s+", self.licence, flags=re.IGNORECASE)
+        if all(FORBIDDEN.search(alternative) for alternative in alternatives):
             found.append(f"licence {self.licence!r} cannot be shipped")
         return found
 

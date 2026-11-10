@@ -23,6 +23,13 @@ def test_copyleft_licences_that_cannot_ship_are_problems_but_the_lgpl_only_needs
     assert lgpl.needs_review
 
 
+def test_a_gpl_part_is_never_hidden_by_an_lgpl_part_but_an_or_may_choose_around_it() -> None:
+    assert component("GPL-2.0-only AND LGPL-2.1-only").problems
+    assert component("LGPL-2.1-only AND GPL-3.0-or-later").problems
+    assert component("GPL-2.0-only OR MIT").problems == []
+    assert component("GPL-2.0-only OR AGPL-3.0-only").problems
+
+
 def test_a_permissive_component_is_clean_and_file_level_copyleft_needs_review() -> None:
     assert component("MIT").problems == []
     assert not component("MIT").needs_review
