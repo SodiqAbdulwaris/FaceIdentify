@@ -128,6 +128,7 @@ evidence (D5). Needed before long videos, useful for images now (a face search d
 - A chunk is a checkpoint boundary: `INTERMEDIATE` checkpoints record the last completed chunk, so a
   crash or pause resumes there, never from the start and never twice.
 - Tracker: TST-063, TST-065, TST-066, TST-067.
+- Progress: frames sampled by presentation time over the pinned ffmpeg, built 2026-11-10 ([entry](../implementations/2026-11-10-m6-step4-frame-sampling.md)); the chunk checkpoints come with step 5's executor.
 
 ### Step 5. Detect, track and select
 
