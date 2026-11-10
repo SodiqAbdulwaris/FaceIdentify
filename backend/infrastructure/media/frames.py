@@ -49,9 +49,12 @@ def sampled_frames(
     height: int,
     rate: float = SAMPLE_RATE,
     after_slot: int = -1,
+    max_side: int | None = None,
 ) -> Generator[Frame]:
     """The first frame of every slot after `after_slot`, in order. `width` and `height` are the
-    size the Source records (as shown). Raises `CorruptVideoError` when decoding fails."""
+    size the Source records (as shown); with `max_side`, a larger frame is scaled down (aspect
+    kept, `frame_size`) after it is chosen, so a 4K video holds a quarter of the memory.
+    Raises `CorruptVideoError` when decoding fails."""
     if not (math.isfinite(rate) and rate > 0) or width <= 0 or height <= 0:
         raise ValueError("the rate and the size must be positive (and the rate finite)")
     # The seek is rounded DOWN to the microsecond, so a frame exactly on the slot boundary is never
@@ -62,7 +65,10 @@ def sampled_frames(
     command = [str(tools.ffmpeg), "-hide_banner", "-nostats", "-v", "info", "-copyts"]
     command += ["-ss", f"{start:.6f}", "-i", str(path), "-an", "-sn", "-dn"]
     command += ["-vf", f"select='isnan(prev_selected_t)+gt(floor(t*{rate_text}),"]
-    command[-1] += f"floor(prev_selected_t*{rate_text}))',showinfo"
+    scaled = frame_size(width, height, max_side)
+    scale = "" if scaled == (width, height) else f"scale={scaled[0]}:{scaled[1]},"
+    width, height = scaled
+    command[-1] += f"floor(prev_selected_t*{rate_text}))',{scale}showinfo"
     command += ["-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     process = subprocess.Popen(
         command,
@@ -100,6 +106,14 @@ def sampled_frames(
         process.stdout.close()
         reader.join()
         process.stderr.close()
+
+
+def frame_size(width: int, height: int, max_side: int | None) -> tuple[int, int]:
+    """The size frames come in: as shown, or scaled so the longer side is at most `max_side`."""
+    longest = max(width, height)
+    if max_side is None or longest <= max_side:
+        return width, height
+    return max(1, round(width * max_side / longest)), max(1, round(height * max_side / longest))
 
 
 def _read_times(stream: object, times: "queue.Queue[object]", tail: deque[bytes]) -> None:
