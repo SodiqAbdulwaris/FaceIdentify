@@ -61,7 +61,7 @@ Coverage stays at 100%.
 
 ## Order of work (phase 2)
 
-Progress: migration and tests done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocessing-schema.md)); use cases, activation, correspondence, forget interaction, route and crash tests done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocess-activation.md)); the source-screen control remains.
+Progress: migration and tests done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocessing-schema.md)); use cases, activation, correspondence, forget interaction, route and crash tests done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocess-activation.md)); the Reprocess control and review items on the source screen done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocess-source-control.md)). Step 1 is complete for images.
 
 migration and tests; domain and `ReprocessSourceUseCase`; pool exclusion and revalidation filter; activation
 branch; correspondence and carry-over; forget interaction; route; crash tests; docs (implementation entry, README
