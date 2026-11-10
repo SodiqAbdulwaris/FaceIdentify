@@ -79,6 +79,7 @@ function stubBackend(handlers: Handler[]) {
   const all: Handler[] = [
     { path: '/api/v1/processing-runs', respond: page([]) }, // the layout asks for the newest run
     { path: /\/unresolved-faces$/, respond: { items: [] } }, // a source screen asks for these
+    { path: /\/reprocess-reviews$/, respond: { items: [] } }, // and for these
     ...handlers,
   ].reverse() // the test's own handlers win over the default
   vi.stubGlobal('WebSocket', QuietSocket)
@@ -171,6 +172,7 @@ export const run = (over: Record<string, unknown> = {}) => ({
   source_id: 's1',
   state: 'PENDING',
   parent_run_id: null,
+  supersedes_run_id: null,
   requested_at: '2026-01-01T00:00:00Z',
   started_at: null,
   completed_at: null,

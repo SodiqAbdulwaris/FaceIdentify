@@ -122,6 +122,9 @@ class SourceDetail(SourceSummary):
     size_bytes: int | None
     original_filename: str | None
     latest_processing_run: ProcessingRunBrief | None
+    # The run whose result is current (its generation, persistence 12.1); None until one is
+    # accepted. A source with one is reprocessed, not processed (API 5.4).
+    current_processing_run_id: str | None
     recycled_at: datetime | None
 
 
@@ -212,6 +215,9 @@ def _detail(source: Source, artifact: Artifact, run: ProcessingRun | None) -> So
         latest_processing_run=None
         if run is None
         else ProcessingRunBrief(id=str(run.id), state=run.state),
+        current_processing_run_id=None
+        if source.current_processing_run_id is None
+        else str(source.current_processing_run_id),
         recycled_at=source.recycled_at,
     )
 

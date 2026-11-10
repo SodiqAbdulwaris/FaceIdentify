@@ -636,6 +636,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{source_id}/reprocess-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reprocess Reviews
+         * @description The source's open review items: `REPROCESS_REVIEW_REQUIRED` evidence (persistence 10)
+         *     whose identity is still `ACTIVE` and has had no correction since, newest first.
+         */
+        get: operations["reprocess_reviews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{source_id}/restore": {
         parameters: {
             query?: never;
@@ -1222,6 +1243,34 @@ export interface components {
             /** Expected Revision */
             expected_revision: number;
         };
+        /**
+         * ReprocessReview
+         * @description A human decision that reprocessing could not carry over (identity model 60.1): the identity
+         *     it was about, who that is if named, and why (`NO_CORRESPONDENCE`, `AMBIGUOUS`,
+         *     `SPACE_CHANGED`, `MISSING_VECTOR`).
+         */
+        ReprocessReview: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Identity Id */
+            identity_id: string;
+            /** Person */
+            person: string | null;
+            /** Processing Run Id */
+            processing_run_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /** ReprocessReviews */
+        ReprocessReviews: {
+            /** Items */
+            items: components["schemas"]["ReprocessReview"][];
+        };
         /** Resolve */
         Resolve: {
             /** Identity Id */
@@ -1257,6 +1306,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Current Processing Run Id */
+            current_processing_run_id: string | null;
             /** Display Name */
             display_name: string;
             /** Height */
@@ -2620,6 +2671,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProcessingRunDetail"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reprocess_reviews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReprocessReviews"];
                 };
             };
             /** @description The one error shape. */

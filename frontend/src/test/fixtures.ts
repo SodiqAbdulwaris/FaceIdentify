@@ -24,6 +24,7 @@ export const detail = (over: Record<string, unknown> = {}) => ({
   size_bytes: 20480,
   original_filename: 'beach.png',
   latest_processing_run: null,
+  current_processing_run_id: null,
   recycled_at: null,
   ...over,
 })
