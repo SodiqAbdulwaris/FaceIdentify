@@ -151,6 +151,7 @@ evidence (D5). Needed before long videos, useful for images now (a face search d
 - Movie-local reconciliation of unknown tracks before comparing with global memory; ambiguous goes to
   review, never to an automatic new identity (the 2026-10-08 rule that abstain is not new identity).
 - Tracker: TST-061, TST-070.
+- Progress: built 2026-11-10 ([entry](../implementations/2026-11-10-m6-step6-video-occurrences.md)); no automatic movie-local grouping of unknown tracks (delegated decision 3 there).
 
 ### Step 7. Pause, resume, cancel, and the movie workflow end to end
 
