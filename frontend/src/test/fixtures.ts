@@ -20,6 +20,7 @@ export const detail = (over: Record<string, unknown> = {}) => ({
   },
   width: 800,
   height: 600,
+  duration_ms: null,
   mime_type: 'image/png',
   size_bytes: 20480,
   original_filename: 'beach.png',
@@ -46,6 +47,8 @@ export const occurrence = (over: Record<string, unknown> = {}) => ({
   placement: null,
   match_similarity: null,
   match_margin: null,
+  start_ms: null,
+  end_ms: null,
   created_at: '2026-01-01T00:00:00Z',
   ...over,
 })

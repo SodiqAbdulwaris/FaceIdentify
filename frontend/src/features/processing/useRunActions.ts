@@ -39,6 +39,16 @@ export function useRunActions(onNotice: (message: string | null) => void) {
     ...settle,
     onSettled: (run, _error, requested) => refresh(run ?? requested, requested.source_id),
   })
+  const pause = useMutation({
+    mutationFn: (run: ProcessingRun) => endpoints.pauseJob(run.job?.id ?? ''),
+    ...settle,
+    onSettled: (run, _error, requested) => refresh(run ?? requested, requested.source_id),
+  })
+  const resume = useMutation({
+    mutationFn: (run: ProcessingRun) => endpoints.resumeJob(run.job?.id ?? ''),
+    ...settle,
+    onSettled: (run, _error, requested) => refresh(run ?? requested, requested.source_id),
+  })
   const retry = useMutation({
     mutationFn: (run: ProcessingRun) => endpoints.retryRun(run.id),
     ...settle,
@@ -50,6 +60,14 @@ export function useRunActions(onNotice: (message: string | null) => void) {
     reprocess,
     cancel,
     retry,
-    busy: process.isPending || reprocess.isPending || cancel.isPending || retry.isPending,
+    pause,
+    resume,
+    busy:
+      process.isPending ||
+      reprocess.isPending ||
+      cancel.isPending ||
+      retry.isPending ||
+      pause.isPending ||
+      resume.isPending,
   }
 }

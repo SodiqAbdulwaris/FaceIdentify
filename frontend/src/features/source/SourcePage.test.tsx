@@ -626,4 +626,86 @@ describe('a source', () => {
       ).toBe(true),
     )
   })
+
+  describe('a video', () => {
+    const video = (over: Record<string, unknown> = {}) =>
+      detail({
+        type: 'VIDEO',
+        display_name: 'party.mp4',
+        mime_type: 'video/mp4',
+        width: 1920,
+        height: 1080,
+        duration_ms: 3_725_000,
+        ...over,
+      })
+
+    it('shows who appears when, and never downloads the video', async () => {
+      const { calls } = open([
+        { path: SOURCE, respond: video({ processing_status: 'COMPLETED' }) },
+        {
+          path: `${SOURCE}/occurrences`,
+          respond: page([
+            occurrence({ id: 'o1', kind: 'TRACK', start_ms: 261_000, end_ms: 287_000 }),
+            occurrence({ id: 'o2', kind: 'TRACK', start_ms: 3_600_000, end_ms: 3_600_000 }),
+            occurrence({ id: 'o3', identity_id: 'i2', kind: 'TRACK', start_ms: 0, end_ms: 5_000 }),
+          ]),
+        },
+        noRuns,
+      ])
+
+      expect(await screen.findByText(/Video, 1:02:05 long, 1920 × 1080/)).toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: 'Appearances' })).toBeInTheDocument()
+      expect(screen.getByText('4:21 to 4:47, at 1:00:00')).toBeInTheDocument()
+      expect(screen.getByText('0:00 to 0:05')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'People in this video' })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Faces' })).toBeNull()
+      expect(calls.some((c) => c.path.endsWith('/media'))).toBe(false)
+    })
+
+    it('pauses a running video and shows how far it has got', async () => {
+      const user = userEvent.setup()
+      const running = run({
+        id: 'r9',
+        state: 'RUNNING',
+        started_at: new Date(Date.now() - 60_000).toISOString(),
+        job: { id: 'j9', state: 'RUNNING', priority: 'NORMAL', attempt_number: 1, progress: { completed: 25, total: 100 } },
+      })
+      const { calls } = open([
+        { path: SOURCE, respond: video({ processing_status: 'RUNNING' }) },
+        noFaces,
+        { path: `${SOURCE}/processing-runs`, respond: page([running]) },
+        { method: 'POST', path: '/api/v1/jobs/j9/pause', status: 202, respond: running },
+      ])
+
+      const bar = await screen.findByRole('progressbar', { name: 'Video processed' })
+      expect(bar).toHaveAttribute('aria-valuenow', '25')
+      expect(screen.getByText(/25% of the video checked, about 3:0\d left/)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull()
+      await user.click(screen.getByRole('button', { name: 'Pause' }))
+
+      await waitFor(() => expect(calls.some((c) => c.path === '/api/v1/jobs/j9/pause')).toBe(true))
+    })
+
+    it('resumes a paused video, which can also be cancelled', async () => {
+      const user = userEvent.setup()
+      const paused = run({
+        id: 'r9',
+        state: 'PAUSED',
+        job: { id: 'j9', state: 'PAUSED', priority: 'NORMAL', attempt_number: 1, progress: null },
+      })
+      const { calls } = open([
+        { path: SOURCE, respond: video({ processing_status: 'PAUSED' }) },
+        noFaces,
+        { path: `${SOURCE}/processing-runs`, respond: page([paused]) },
+        { method: 'POST', path: '/api/v1/jobs/j9/resume', status: 202, respond: paused },
+      ])
+
+      expect(await screen.findByRole('button', { name: 'Cancel processing' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull()
+      expect(screen.queryByRole('progressbar')).toBeNull()  // no progress recorded yet
+      await user.click(screen.getByRole('button', { name: 'Resume' }))
+
+      await waitFor(() => expect(calls.some((c) => c.path === '/api/v1/jobs/j9/resume')).toBe(true))
+    })
+  })
 })
