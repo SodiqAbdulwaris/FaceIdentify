@@ -15,6 +15,7 @@ import { FaceOverlay } from './FaceOverlay'
 import { MissingOriginal } from './MissingOriginal'
 import { missingReason } from './missing'
 import { RecycleControl } from './RecycleControl'
+import { ReprocessReviews } from './ReprocessReviews'
 import { UnresolvedFaces } from './UnresolvedFaces'
 import { labelFaces } from './faces'
 
@@ -106,9 +107,24 @@ export function SourcePage() {
 
         <div className="flex flex-col gap-5">
           <div className="flex flex-wrap gap-2">
-            {canProcess(detail.processing_status) && !missing && detail.state === 'ACTIVE' ? (
+            {canProcess(detail.processing_status) &&
+            detail.current_processing_run_id === null &&
+            !missing &&
+            detail.state === 'ACTIVE' ? (
               <Button disabled={actions.busy} onClick={() => actions.process.mutate(sourceId)}>
                 Process
+              </Button>
+            ) : null}
+            {detail.current_processing_run_id !== null &&
+            !(latest && isActive(latest.state)) &&
+            !missing &&
+            detail.state === 'ACTIVE' ? (
+              <Button
+                variant="outline"
+                disabled={actions.busy}
+                onClick={() => actions.reprocess.mutate(sourceId)}
+              >
+                Reprocess
               </Button>
             ) : null}
             {latest && canCancel(latest.state) ? (
@@ -161,6 +177,8 @@ export function SourcePage() {
           </div>
 
           <UnresolvedFaces sourceId={sourceId} />
+
+          <ReprocessReviews sourceId={sourceId} />
 
           {faces.length > 0 ? (
             <div>
