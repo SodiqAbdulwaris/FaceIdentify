@@ -101,7 +101,7 @@ evidence (D5). Needed before long videos, useful for images now (a face search d
 - Acceptance: #175's remaining acceptance tests (batch yields for long runs, queued cancellation, the
   measured fairness parameter) and, for #221, a test that the pool never holds more than one live worker
   process across plans, shutdown and crash recovery included.
-- Progress: #221 built 2026-11-10 ([entry](../implementations/2026-11-09-one-worker-process-across-plans.md)).
+- Progress: #221 built 2026-11-10 ([entry](../implementations/2026-11-09-one-worker-process-across-plans.md)); queued cancellation and #175's remaining acceptance tests built 2026-11-10 ([entry](../implementations/2026-11-10-worker-arbitration-acceptance.md)).
 - Tracker: TST-069 (first half). (TST-068, one heavy movie pipeline at a time, is a job-admission rule, not
   this lease: step 7 owns it.)
 
