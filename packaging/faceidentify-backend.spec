@@ -19,7 +19,8 @@ def backend_modules():
 
 
 hiddenimports = (
-    list(backend_modules())  # the worker factory, the use cases and what the migrations import
+    ["frozen_probe"]  # the model-free worker of the build check
+    + list(backend_modules())  # the worker factory, the use cases and what the migrations import
     + collect_submodules("alembic", filter=lambda name: "testing" not in name)  # the SQLite dialect and the runtime are loaded by name
     + collect_submodules("uvicorn")
     + collect_submodules("websockets")
@@ -35,7 +36,7 @@ datas = (
 
 a = Analysis(
     [os.path.join(SPECPATH, "frozen_entry.py")],
-    pathex=[ROOT],
+    pathex=[ROOT, SPECPATH],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
