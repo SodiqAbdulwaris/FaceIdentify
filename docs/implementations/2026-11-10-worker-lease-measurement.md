@@ -13,7 +13,8 @@
   inference and its output protocol), how many requests of each class were still waiting when it was
   granted (the queue depth), and its outcome (`RAN`, `FAILED`, `CANCELLED`). It goes to the lease's
   `observe` callback, which by default logs one debug line per turn; the benchmark collects them.
-  Every turn gets its record: a clock reading that fails leaves that time `None`.
+  Every granted turn gets its record; a clock reading that fails after the grant leaves that time
+  `None`.
   The lease's default clock is now `time.perf_counter` (monotonic, and fine-grained on Windows,
   where `time.monotonic` ticks every 15.6 ms and the first benchmark run showed every short wait as
   0, 15.6 or 31.2 ms).
@@ -22,7 +23,7 @@
   turn), while face searches arrive at random (exponential gaps, seeded) with at most three in
   flight (the route's `face_search_slots`). It is run once per fairness value and reports, per class,
   the wait for the worker (nearest-rank p50, p95, and the max), the mean inference time, the queue
-  depth and the outcomes (ran, failed, cancelled), plus the fairness grants (background grants made
+  depth and the outcomes (ran, failed, cancelled, printed per class), plus the fairness grants (background grants made
   while searches waited), the background throughput and the searches' end-to-end time. `--real` runs the installed models through
   the real `ClientPool` and worker process (and reports the provider that actually ran); the default
   holds the real lease for simulated inference times.
@@ -30,7 +31,9 @@
   request that ran, failed and was cancelled (a deterministic clock); the queue depth recorded at
   each grant; the default debug line; a clock failing at the release or at the grant still records
   the turn with the time unknown; a failing cancellation check is recorded `FAILED`.
-  `tests/unit/test_worker_lease_stress_percentile.py`: the benchmark's nearest-rank percentile.
+  `tests/unit/test_worker_lease_stress.py`: the benchmark's nearest-rank percentile, and its
+  per-class outcomes, kept and reported when the workload raises (the benchmark then exits with an
+  error after printing what it measured).
 
 ## Why
 
@@ -90,9 +93,13 @@ jitter ±10%):
 
 > **Decision 2026-11-10 (delegated decision):** the per-turn measurement is logged at debug level
 > and kept nowhere else (no metrics store, no readiness field): it is diagnosis and benchmark input,
-> and two lines per image at info level would flood the log during an import. A clock that fails
-> while a turn is measured leaves that time unknown (`None`) and never fails the turn or loses its
-> record (found by the Codex review).
+> and two lines per image at info level would flood the log during an import. Every turn that is
+> granted gets its record: a clock failing at the release leaves the hold unknown (`None`) and the
+> turn as it was; a clock failing at the grant fails that request as before (released, the error
+> raised) and its record shows both times unknown. A clock failing before the request is queued
+> fails it before it is a turn at all, with nothing to record. The clock is `time.perf_counter`,
+> which does not fail in practice; these paths exist so a fault never loses a record or a turn
+> (found by the Codex review).
 
 ## Verification
 

@@ -116,8 +116,7 @@ def run_once(
     elapsed = time.perf_counter() - began
     for thread in asked:
         thread.join()
-    if errors:
-        raise errors[0]
+    # (a workload error is reported with what was measured, not instead of it: see main)
 
     def of(cls: bool) -> dict[str, Any]:
         mine = [r for r in records if r.interactive is cls]
@@ -145,6 +144,7 @@ def run_once(
         # a background grant made while searches waited: the burst ran out (a fairness grant)
         "fairness_grants": sum(not r.interactive and r.queued_interactive > 0 for r in records),
         "background_images_per_s": round(images / elapsed, 2),
+        "errors": sorted({type(error).__name__ for error in errors}),
         "searches": len(searches),
         "search_ms_p50": round(percentile([s * 1000 for s in searches], 50), 1),
         "search_ms_p95": round(percentile([s * 1000 for s in searches], 95), 1),
@@ -236,7 +236,7 @@ def main() -> None:
         close()
     print(
         "burst | search wait p50/p95/max ms | job wait p50/p95/max ms | images/s | search ms"
-        " | fairness grants | cancelled"
+        " | fairness grants | search ran/failed/cancelled | job ran/failed/cancelled"
     )
     for run in report["runs"]:
         i, b = run["interactive"], run["background"]
@@ -244,11 +244,18 @@ def main() -> None:
             f"{run['burst']:>5} | {i['wait_ms_p50']}/{i['wait_ms_p95']}/{i['wait_ms_max']}"
             f" | {b['wait_ms_p50']}/{b['wait_ms_p95']}/{b['wait_ms_max']}"
             f" | {run['background_images_per_s']} | {run['search_ms_p50']}/{run['search_ms_p95']}"
-            f" | {run['fairness_grants']}"
-            f" | {i['outcomes']['CANCELLED'] + b['outcomes']['CANCELLED']}"
+            f" | {run['fairness_grants']} | {_outcomes(i)} | {_outcomes(b)}"
         )
     if arguments.json:
         arguments.json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    failed = {name for run in report["runs"] for name in run["errors"]}
+    if failed:
+        raise SystemExit(f"the workload raised {', '.join(sorted(failed))}: see the report above")
+
+
+def _outcomes(of_class: dict[str, Any]) -> str:
+    counts = of_class["outcomes"]
+    return f"{counts['RAN']}/{counts['FAILED']}/{counts['CANCELLED']}"
 
 
 if __name__ == "__main__":
