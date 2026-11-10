@@ -332,3 +332,41 @@ def test_a_request_that_is_not_cancelled_runs_and_the_scope_ends_with_its_block(
         pass
 
     assert asked == 2
+
+
+def test_a_turn_given_up_does_not_count_towards_the_burst() -> None:
+    """With a burst of one, a cancelled search must not use the searches' one turn: the next
+    search still goes before the waiting background request."""
+    line = Line(WorkerLease(burst=1))
+
+    def cancelled_search() -> None:
+        with (
+            pytest.raises(RequestCancelledError),
+            interactive(),
+            cancellable(lambda: True),
+            line.lease.held(),
+        ):
+            line.served.append("cancelled")  # must never happen
+
+    thread = threading.Thread(target=cancelled_search)
+    thread.start()
+    line.threads.append(thread)
+    line.condition.queued_one()
+    line.join("background", is_interactive=False)
+    line.join("search", is_interactive=True)
+
+    assert line.let_go() == ["search", "background"]
+
+
+def test_a_cancellation_check_that_fails_releases_the_turn_and_raises() -> None:
+    """The executor's check reads the database; if that read fails the error is the caller's (the
+    runner settles an unexpected error), and the worker is not left held."""
+    lease = WorkerLease()
+
+    def broken() -> bool:
+        raise RuntimeError("database is locked")
+
+    with pytest.raises(RuntimeError, match="locked"), cancellable(broken), lease.held():
+        raise AssertionError("the body must not run")
+    with lease.held():  # the worker is free again
+        pass
