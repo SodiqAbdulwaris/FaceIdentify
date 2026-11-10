@@ -1,12 +1,18 @@
 """Retry an interrupted or failed source-processing attempt as a new Job and a new Run.
 
 Persistence §15: "A retry creates a new Job with `previous_job_id`, not a state reset"; §12:
-`parent_run_id` records reprocessing lineage. Recovery never requeues the old job (decided
+`parent_run_id` records this retry lineage (persistence 12.1: reprocessing lineage is
+`supersedes_run_id`). Recovery never requeues the old job (decided
 2026-10-01 and clarified 2026-10-06), and the old run's PENDING output stays private: the retry
 starts from nothing and the old attempt is left exactly as it ended.
 
 The new run freezes a *copy* of the old run's configuration snapshot (one immutable snapshot per
 run, §13), so the retry executes the same semantic intent; it does not re-resolve mutable settings.
+
+A retry keeps what it retries: the job type, and for a reprocess run the generation it replaces
+(`supersedes_run_id`). A first run is not retried once its source has an accepted result, and a
+reprocess run only while the generation it would replace is still current and nothing else of the
+source is in flight: either way acceptance would have to refuse it.
 """
 
 import uuid
@@ -16,15 +22,18 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.jobs.models import Job, JobState, JobType
+from backend.app.jobs.models import SOURCE_JOB_TYPES, Job, JobState
 from backend.app.jobs.repository import JobRepository
 from backend.app.processing.models import ProcessingRun, ProcessingRunState
 from backend.app.processing.process_source import (
     ProcessSourceError,
     ScheduledProcessing,
+    SourceAlreadyProcessedError,
+    require_no_run_in_flight,
     require_processable_image,
 )
 from backend.app.processing.run_repository import ProcessingRunRepository, SnapshotRepository
+from backend.app.sources.models import Source
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 
 _RETRYABLE_JOB_STATES = (JobState.INTERRUPTED, JobState.FAILED)
@@ -60,7 +69,7 @@ class RetryProcessingUseCase:
 
     def _retry(self, session: Session, job_id: uuid.UUID) -> ScheduledProcessing:
         old_job = JobRepository(session).get(job_id)
-        if old_job is None or old_job.type != JobType.PROCESS_SOURCE:
+        if old_job is None or old_job.type not in SOURCE_JOB_TYPES:
             raise ProcessSourceError(f"job {job_id} is not a source-processing job")
         if old_job.state not in _RETRYABLE_JOB_STATES or old_job.processing_run_id is None:
             raise ProcessSourceError(f"job {job_id} is {old_job.state}, which cannot be retried")
@@ -73,6 +82,20 @@ class RetryProcessingUseCase:
         if session.scalar(select(Job.id).where(Job.previous_job_id == old_job.id).limit(1)):
             raise ProcessSourceError(f"job {job_id} has already been retried")
         require_processable_image(session, old_run.source_id)
+        current = session.scalar(
+            select(Source.current_processing_run_id).where(Source.id == old_run.source_id)
+        )
+        if old_run.supersedes_run_id is None:
+            if current is not None:
+                raise SourceAlreadyProcessedError(
+                    f"source {old_run.source_id} already has a result; reprocess it instead"
+                )
+        else:
+            if current != old_run.supersedes_run_id:
+                raise ProcessSourceError(
+                    f"the generation run {old_run.id} would replace is no longer current"
+                )
+            require_no_run_in_flight(session, old_run.source_id)
         old_snapshot = SnapshotRepository(session).get(old_run.configuration_snapshot_id)
         assert old_snapshot is not None  # the run's foreign key guarantees the snapshot
 
@@ -90,6 +113,7 @@ class RetryProcessingUseCase:
                 source_id=old_run.source_id,
                 configuration_snapshot_id=snapshot.id,
                 parent_run_id=old_run.id,
+                supersedes_run_id=old_run.supersedes_run_id,
                 state=ProcessingRunState.PENDING,
                 requested_at=now,
                 created_at=now,
@@ -99,7 +123,7 @@ class RetryProcessingUseCase:
         job = JobRepository(session).add(
             Job(
                 id=self._new_id(),
-                type=JobType.PROCESS_SOURCE,
+                type=old_job.type,
                 processing_run_id=run.id,
                 previous_job_id=old_job.id,
                 state=JobState.QUEUED,

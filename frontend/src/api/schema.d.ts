@@ -615,6 +615,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{source_id}/reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reprocess Source
+         * @description Reprocess a source that has a result (API 5.4). The current result stays current until the
+         *     new run is accepted; then the source emits `source.updated`.
+         */
+        post: operations["reprocess_source"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources/{source_id}/restore": {
         parameters: {
             query?: never;
@@ -1150,6 +1171,8 @@ export interface components {
             started_at: string | null;
             /** State */
             state: string;
+            /** Supersedes Run Id */
+            supersedes_run_id: string | null;
         };
         /**
          * ProcessingRunState
@@ -2566,6 +2589,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourceDetail"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reprocess_source: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessingRunDetail"];
                 };
             };
             /** @description The one error shape. */

@@ -1318,6 +1318,17 @@
           "state": {
             "title": "State",
             "type": "string"
+          },
+          "supersedes_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Run Id"
           }
         },
         "required": [
@@ -1325,6 +1336,7 @@
           "source_id",
           "state",
           "parent_run_id",
+          "supersedes_run_id",
           "requested_at",
           "started_at",
           "completed_at",
@@ -3916,6 +3928,50 @@
         "summary": "Relink",
         "tags": [
           "sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{source_id}/reprocess": {
+      "post": {
+        "description": "Reprocess a source that has a result (API 5.4). The current result stays current until the\nnew run is accepted; then the source emits `source.updated`.",
+        "operationId": "reprocess_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingRunDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Reprocess Source",
+        "tags": [
+          "processing"
         ]
       }
     },

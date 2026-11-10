@@ -22,6 +22,11 @@ class JobType(StrEnum):
     CLEAN_STORAGE = "CLEAN_STORAGE"
 
 
+# The jobs that execute a source's processing run: a first run, or a reprocess run that will
+# replace the current generation (persistence 12.1). The same executor and acceptance serve both.
+SOURCE_JOB_TYPES = (JobType.PROCESS_SOURCE, JobType.REPROCESS_SOURCE)
+
+
 class JobState(StrEnum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"

@@ -18,6 +18,7 @@ from backend.api.app import create_app
 from backend.api.events import EventHub
 from backend.app.jobs.models import Job
 from backend.app.processing.models import ProcessingRun
+from backend.app.sources.models import Source
 from tests.fixtures.api import Api, imported
 from tests.fixtures.deterministic import EPOCH, FrozenClock, SeededUUIDs
 from tests.fixtures.ws import WsClient
@@ -306,6 +307,7 @@ async def test_a_retry_is_announced_as_a_new_run(processing_api: Api) -> None:
     with api.backend.library.session_factory() as session:
         session.execute(update(ProcessingRun).values(state="FAILED", failure_code="X"))
         session.execute(update(Job).values(state="FAILED", failure_code="X"))
+        session.execute(update(Source).values(current_processing_run_id=None))  # (never accepted)
         session.commit()
     async with WsClient(api.app, api.secret) as client:
         await client.next_event()

@@ -47,24 +47,47 @@ def unit(*values: float) -> np.ndarray:
     return np.asarray(vector / np.linalg.norm(vector), dtype="<f4")
 
 
+Box = tuple[float, float, float, float]  # normalized x0, y0, x1, y1
+WHOLE = (0.2, 0.2, 0.8, 0.8)
+
+
 class PlantedPerception:
-    """Detects one face and embeds it as whatever vector was planted; counts its calls."""
+    """Detects one face and embeds it as whatever vector was planted, or (`faces`) several faces,
+    each a normalized box with its vector; counts its calls."""
 
     def __init__(self, detector: PlannedVariant, embedder: PlannedVariant) -> None:
         self.detector, self.embedder = detector, embedder
         self.vector = unit(1, 0, 0, 0)
+        self.faces: list[tuple[Box, np.ndarray]] | None = None
         self.calls = 0
         self.on_represent: Callable[[], None] | None = None
 
+    def _planted(self) -> list[tuple[Box, np.ndarray]]:
+        return [(WHOLE, self.vector)] if self.faces is None else self.faces
+
     def detect(self, pixels: Any) -> Detected:
         self.calls += 1
-        return Detected((Detection(0, 0, (0.2, 0.2, 0.8, 0.8), 0.9, None),), self.detector)
+        return Detected(
+            tuple(
+                Detection(0, index, box, 0.9, None)
+                for index, (box, _vector) in enumerate(self._planted())
+            ),
+            self.detector,
+        )
 
     def represent(self, pixels: Any, detections: tuple[Detection, ...]) -> Represented:
         self.calls += 1
         if self.on_represent is not None:
             self.on_represent()
-        return Represented((FaceVector(0, self.vector, "L2_NORMALIZED"),), self.embedder, ())
+        planted = self._planted()
+        return Represented(
+            tuple(
+                FaceVector(d.detection_index, planted[d.detection_index][1], "L2_NORMALIZED")
+                for d in detections
+            ),
+            self.embedder,
+            (),
+        )
 
 
 def planned_variant(session: Session, export_id: str) -> PlannedVariant:
@@ -176,6 +199,29 @@ class Pipeline:
             .job_id
         )
 
+    def enqueue_reprocess(self, source_id: uuid.UUID) -> uuid.UUID:
+        """Request reprocessing: a run that will replace the current generation. Returns the job."""
+        return (
+            ProcessSourceUseCase(
+                self.lib.unit_of_work,
+                new_id=self.new_id,
+                clock=self.clock,
+                wake_scheduler=lambda: None,
+            )
+            .reprocess(
+                source_id,
+                processing_request=self.request,
+                priority="NORMAL",
+                created_by_user_action=None,
+            )
+            .job_id
+        )
+
+    def reexecute(self, source_id: uuid.UUID) -> uuid.UUID:
+        """Request reprocessing, claim and privately execute; the new run is left FINALIZING."""
+        self.enqueue_reprocess(source_id)
+        return self.run_next()
+
     def execute(self, source_id: uuid.UUID) -> uuid.UUID:
         """Request, claim and privately execute; the run is left FINALIZING. Returns its id."""
         self.enqueue(source_id)
@@ -210,7 +256,11 @@ class Pipeline:
             self.scheduler(),
             self.executor(),
             AcceptProcessingRunUseCase(
-                uow, new_id=self.new_id, clock=self.clock, wake_index=wake_index
+                uow,
+                new_id=self.new_id,
+                clock=self.clock,
+                wake_index=wake_index,
+                erase=self.lib.eraser.erase,
             ),
             owner="runner",
             clock=self.clock,
@@ -231,6 +281,7 @@ class Pipeline:
             new_id=self.new_id,
             clock=self.clock,
             wake_index=self.apply_index if apply_index else None,
+            erase=self.lib.eraser.erase if apply_index else None,
         ).accept(run_id)
 
     def apply_index(self) -> None:

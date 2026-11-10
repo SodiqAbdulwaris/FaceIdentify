@@ -44,7 +44,7 @@ from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.processing.accept_run import AcceptProcessingRunUseCase
 from backend.app.processing.execute_job import ExecuteProcessingJob, PerceptionPlanner
-from backend.app.processing.models import ProcessingRun
+from backend.app.processing.models import ProcessingRun, ProcessingRunState
 from backend.app.processing.runner import ProcessingRunner, RunOutcome
 from backend.app.processing.scheduler import ProcessingScheduler
 from backend.app.recovery.startup import StartupReport
@@ -226,6 +226,24 @@ class Backend:
                 type_, "processing_run", str(run_id), {"state": state, "source_id": str(source_id)}
             )
 
+    def _announce_new_generation(self, run_id: uuid.UUID) -> None:
+        """If the run is a reprocess run that is now accepted (`COMPLETED`), it replaced its
+        source's result: the source changed (API 5.4). Best effort, like every announcement."""
+        library = self.library
+        assert library is not None
+        with suppress(Exception):
+            source_id = library.unit_of_work.read(
+                lambda session: session.scalar(
+                    select(ProcessingRun.source_id).where(
+                        ProcessingRun.id == run_id,
+                        ProcessingRun.supersedes_run_id.is_not(None),
+                        ProcessingRun.state == ProcessingRunState.COMPLETED,
+                    )
+                )
+            )
+            if source_id is not None:
+                self.announce("source.updated", "source", str(source_id))
+
     def wake_scheduler(self) -> None:
         """Ask the scheduler to look at the queue now (a job was queued). Safe from any thread."""
         if self.scheduler is not None:
@@ -268,7 +286,12 @@ class Backend:
                 planner=processing.planner,
             ),
             AcceptProcessingRunUseCase(
-                uow, new_id=settings.new_id, clock=settings.clock, wake_index=wake_index
+                uow,
+                new_id=settings.new_id,
+                clock=settings.clock,
+                wake_index=wake_index,
+                # a reprocessed face that was forgotten is suppressed `ERASING`: erase it now
+                erase=library.eraser.erase,
             ),
             owner=processing.owner,
             clock=settings.clock,
@@ -279,6 +302,7 @@ class Backend:
             outcome = runner.run_once()
             if outcome.processing_run_id is not None:
                 self.announce_run(outcome.processing_run_id)
+                self._announce_new_generation(outcome.processing_run_id)
             return outcome
 
         return run_once

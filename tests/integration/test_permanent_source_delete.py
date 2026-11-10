@@ -749,8 +749,8 @@ def test_a_long_history_is_deleted_in_bounded_statements(
 
     with opened() as lib:
         source_id, _ = process(lib, C)
-        for _ in range(2):  # two more runs of the same image
-            lib.accept(lib.execute(source_id), apply_index=True)
+        for _ in range(2):  # two more generations of the same image (supersedes_run_id is set)
+            lib.accept(lib.reexecute(source_id), apply_index=True)
         recycle(lib, source_id)
         monkeypatch.setattr(permanent_delete, "CHUNK", 1)
         statements: list[str] = []

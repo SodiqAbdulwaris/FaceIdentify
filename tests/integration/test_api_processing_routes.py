@@ -26,10 +26,15 @@ from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 RUNS = "/api/v1/processing-runs"
 
 
-async def process(api: Api, source: dict[str, Any], *, tick: bool = True) -> dict[str, Any]:
+async def process(
+    api: Api, source: dict[str, Any], *, tick: bool = True, again: bool = False
+) -> dict[str, Any]:
+    """Process the source, or (`again`) reprocess it: a source with a result is not processed a
+    second time (persistence 12.1 item 10)."""
     if tick:
         api.clock.advance(seconds=1)  # runs are ordered by creation time
-    response = await api.client.post(f"/api/v1/sources/{source['id']}/process")
+    command = "reprocess" if again else "process"
+    response = await api.client.post(f"/api/v1/sources/{source['id']}/{command}")
     assert response.status_code == 202, response.text
     run: dict[str, Any] = response.json()
     return run
@@ -57,7 +62,8 @@ async def finished(api: Api, run_id: str, state: str = "COMPLETED") -> dict[str,
 
 
 def break_run(api: Api, run_id: str) -> None:
-    """Leave a run and its job as a crash or a failure would: FAILED."""
+    """Leave a run and its job as a crash or a failure would: FAILED, and so never its source's
+    current result."""
     assert api.backend.library is not None
     with api.backend.library.session_factory() as session:
         run_uuid = uuid.UUID(run_id)
@@ -71,6 +77,11 @@ def break_run(api: Api, run_id: str) -> None:
             update(Job)
             .where(Job.processing_run_id == run_uuid)
             .values(state="FAILED", ended_at=now, failure_code="TEST_FAILURE")
+        )
+        session.execute(
+            update(Source)
+            .where(Source.current_processing_run_id == run_uuid)
+            .values(current_processing_run_id=None)
         )
         session.commit()
 
@@ -201,8 +212,8 @@ async def test_runs_are_paged_by_cursor_and_the_cursor_is_bound_to_the_query(
     api = processing_api
     source = await imported(api, path=str(api.image()))
     ids = []
-    for _ in range(3):
-        run = await process(api, source)
+    for n in range(3):
+        run = await process(api, source, again=n > 0)
         await finished(api, run["id"])
         ids.append(run["id"])
 
@@ -238,8 +249,8 @@ async def test_runs_created_at_the_same_instant_are_paged_without_loss_or_repeat
     api = processing_api
     source = await imported(api, path=str(api.image()))
     ids = []
-    for _ in range(4):  # the clock is frozen: every run has the same creation time
-        run = await process(api, source, tick=False)
+    for n in range(4):  # the clock is frozen: every run has the same creation time
+        run = await process(api, source, tick=False, again=n > 0)
         await finished(api, run["id"])
         ids.append(run["id"])
 

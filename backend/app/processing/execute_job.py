@@ -128,6 +128,7 @@ class _Input:
     storage_mode: str
     storage_key: str | None
     external_path: str | None
+    supersedes_run_id: uuid.UUID | None = None  # the generation a reprocess run will replace
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,6 +364,7 @@ class ExecuteProcessingJob:
             artifact.storage_mode,
             artifact.storage_key,
             artifact.external_path,
+            run.supersedes_run_id,
         )
 
     def _revalidate_settlement_context(
@@ -629,6 +631,20 @@ class ExecuteProcessingJob:
                 raise ProcessingExecutionError(
                     "a settled representation disappeared before recognition"
                 )
+            # A generation is never evidence for its successor (persistence 12.1 item 3): the faces
+            # of the generation a reprocess run replaces are left out of its candidates.
+            predecessor = (
+                []
+                if source.supersedes_run_id is None
+                else list(
+                    session.scalars(
+                        select(Representation.id).where(
+                            Representation.processing_run_id == source.supersedes_run_id,
+                            Representation.representation_space_id == space.id,
+                        )
+                    )
+                )
+            )
             result: list[_Decision] = []
             for representation, observation in rows:
                 assert representation.vector is not None  # PENDING rows retain their vector
@@ -642,7 +658,7 @@ class ExecuteProcessingJob:
                     global_index=global_index,
                     processing_run_id=source.run_id,
                     run_local=run_local,
-                    exclude=representations,
+                    exclude=[*representations, *predecessor],
                 )
                 result.append(
                     _Decision(

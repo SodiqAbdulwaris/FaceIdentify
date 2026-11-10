@@ -3,6 +3,12 @@
 Perception leaves only private PENDING rows and a FINAL checkpoint.  This use case validates that
 handoff and atomically makes the result visible; the derived ANN work is merely queued here and is
 woken only after the transaction commits.
+
+A reprocess run (one with `supersedes_run_id`) is activated by the same transaction (persistence
+12.1 item 5): it also checks that the generation it replaces is still the Source's current one,
+supersedes that generation, carries human decisions over through the face correspondence of
+identity model 60.1, records what needs review, and keeps a forgotten or erased face suppressed
+(`supersession.py`). Exactly one generation is authoritative before and after the commit.
 """
 
 import uuid
@@ -23,8 +29,17 @@ from backend.app.identities.models import (
     Identity,
     IdentityState,
 )
-from backend.app.identities.repository import EvidenceLink, EvidenceRepository, OccurrenceRepository
-from backend.app.identities.use_cases import activate_identity, assign_representation_to_identity
+from backend.app.identities.repository import (
+    EvidenceLink,
+    EvidenceRepository,
+    IdentityRepository,
+    OccurrenceRepository,
+)
+from backend.app.identities.use_cases import (
+    activate_identity,
+    assign_representation_to_identity,
+    touch_identity,
+)
 from backend.app.jobs.models import Job, JobState, JobType
 from backend.app.jobs.repository import JobRepository
 from backend.app.memory.index_operation_repository import IndexOperationRepository, NewOperation
@@ -41,6 +56,7 @@ from backend.app.memory.models import (
     RepresentationState,
 )
 from backend.app.memory.repository import ObservationRepository, RepresentationRepository
+from backend.app.processing.correspondence import Face, geometric_pairs
 from backend.app.processing.models import (
     CheckpointKind,
     CheckpointState,
@@ -51,6 +67,18 @@ from backend.app.processing.models import (
 )
 from backend.app.processing.repository import CheckpointRepository
 from backend.app.processing.run_repository import ProcessingRunRepository
+from backend.app.processing.supersession import (
+    PAYLOAD_SCHEMA_VERSION,
+    CarriedDecision,
+    SupersessionPlan,
+    box_of,
+    carried_evidence,
+    carried_payload,
+    erased_faces,
+    plan_supersession,
+    record_reviews,
+    supersede_previous,
+)
 from backend.app.recognition.assessment import (
     ASSESSMENT_VERSION,
     INTERPRETATION,
@@ -110,6 +138,9 @@ class AcceptanceError(RuntimeError):
 class AcceptedProcessingRun:
     processing_run_id: uuid.UUID
     already_accepted: bool
+    # New representations suppressed as a forgotten or erased face again (reprocessing): `ERASING`,
+    # handed to the eraser after the commit.
+    erasing: tuple[uuid.UUID, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,18 +163,23 @@ class AcceptProcessingRunUseCase:
         new_id: Callable[[], uuid.UUID],
         clock: Callable[[], datetime],
         wake_index: Callable[[], None] | None = None,
+        erase: Callable[[Sequence[uuid.UUID]], object] | None = None,
     ) -> None:
         self._uow = uow
         self._new_id = new_id
         self._clock = clock
         self._wake_index = wake_index
+        self._erase = erase
 
     def accept(self, processing_run_id: uuid.UUID) -> AcceptedProcessingRun:
         result = self._uow.write(lambda session: self._accept(session, processing_run_id))
         # This is intentionally after `write` returns: a crash or error here leaves SQLite
-        # authoritative and the durable ADD operations are replayable by the coordinator.
+        # authoritative and the durable ADD operations are replayable by the coordinator; an
+        # `ERASING` representation left behind is finished by the eraser at the next start.
         if self._wake_index is not None:
             self._wake_index()
+        if result.erasing and self._erase is not None:
+            self._erase(result.erasing)
         return result
 
     def _accept(self, session: Session, run_id: uuid.UUID) -> AcceptedProcessingRun:
@@ -161,11 +197,27 @@ class AcceptProcessingRunUseCase:
         if job.state != JobState.RUNNING:
             raise AcceptanceError(f"processing job is {job.state}, not RUNNING")
         self._require_source_is_acceptable(session, source)
+        self._require_generation(session, run, source)
         self._validate_private_output(session, run, decisions)
+        plan = self._plan(session, run, decisions)
         now = self._clock()
+        if run.supersedes_run_id is not None:
+            supersede_previous(session, run, now=now, new_id=self._new_id)
+        suppressed_observations: set[uuid.UUID] = set()
         for decision in decisions:
-            self._accept_decision(session, run, source, decision, now)
+            if decision.representation_id in plan.suppressed:
+                self._suppress(session, decision)
+                suppressed_observations.add(decision.observation_id)
+            elif decision.representation_id in plan.carried:
+                carried = plan.carried[decision.representation_id]
+                self._carry(session, run, source, decision, carried, now)
+            else:
+                self._accept_decision(session, run, source, decision, now)
+        self._dispose_pending_identities(session, decisions, plan, now)
+        record_reviews(session, run, plan.reviews, now=now, new_id=self._new_id)
         for observation_id in self._observation_ids(decisions, checkpoint):
+            if observation_id in suppressed_observations:
+                continue
             if not ObservationRepository(session).transition(
                 observation_id,
                 from_states=(ObservationState.PENDING,),
@@ -194,7 +246,144 @@ class AcceptProcessingRunUseCase:
             job.id, (JobState.RUNNING,), JobState.COMPLETED, now=now
         ):
             raise AcceptanceError("processing job changed while accepting")
-        return AcceptedProcessingRun(run.id, already_accepted=False)
+        return AcceptedProcessingRun(
+            run.id, already_accepted=False, erasing=tuple(sorted(plan.suppressed))
+        )
+
+    @staticmethod
+    def _require_generation(session: Session, run: ProcessingRun, source: Source) -> None:
+        """A first run may only become a Source's first generation; a reprocess run may only
+        replace the generation it was started from, and only while that is still current (the
+        compare-and-swap of persistence 12.1 item 5a). Anything else would leave two generations
+        active, so it is refused."""
+        if run.supersedes_run_id is None:
+            if source.current_processing_run_id is not None:
+                raise AcceptanceError("the source already has an accepted generation")
+            return
+        previous = session.get(ProcessingRun, run.supersedes_run_id)
+        if (
+            source.current_processing_run_id != run.supersedes_run_id
+            or previous is None
+            or previous.state != ProcessingRunState.COMPLETED
+        ):
+            raise AcceptanceError("the generation this run replaces is no longer current")
+
+    def _plan(
+        self, session: Session, run: ProcessingRun, decisions: Sequence[_Decision]
+    ) -> SupersessionPlan:
+        if run.supersedes_run_id is None:
+            return SupersessionPlan()
+        return plan_supersession(
+            session,
+            run,
+            space_id=self._frozen_space(session, run),
+            representation_ids=[decision.representation_id for decision in decisions],
+        )
+
+    def _frozen_space(self, session: Session, run: ProcessingRun) -> uuid.UUID:
+        space = self._configuration_snapshot(session, run).canonical_json.get(
+            "representation_space"
+        )
+        if not isinstance(space, dict):
+            raise AcceptanceError("the frozen configuration names no representation space")
+        return self._uuid(space.get("id"), "frozen representation space")
+
+    @staticmethod
+    def _suppress(session: Session, decision: _Decision) -> None:
+        """A new face that is a forgotten or erased face again: never activated (persistence 12.1
+        item 9a). Its observation is `REJECTED` and its representation `ERASING`, holding no key and
+        no identity, so it has no index work and the eraser clears its vector."""
+        representation = session.get(Representation, decision.representation_id)
+        assert representation is not None  # validated as this run's private output
+        representation.state = RepresentationState.ERASING
+        representation.identity_id = None
+        rejected = ObservationRepository(session).transition(
+            decision.observation_id,
+            from_states=(ObservationState.PENDING,),
+            to_state=ObservationState.REJECTED,
+        )
+        assert rejected  # (validated PENDING in this same transaction)
+
+    def _carry(
+        self,
+        session: Session,
+        run: ProcessingRun,
+        source: Source,
+        decision: _Decision,
+        carried: CarriedDecision,
+        now: datetime,
+    ) -> None:
+        """The new face takes the previous face's human decision instead of its own recognition
+        result (identity model 60.1): it joins that identity, with its own occurrence, index entry
+        and `REPROCESS_DECISION_CARRIED_OVER` evidence."""
+        identity = session.get(Identity, carried.identity_id)
+        if identity is None or identity.state != IdentityState.ACTIVE:
+            raise AcceptanceError("a carried-over identity is no longer ACTIVE")
+        representation = session.get(Representation, decision.representation_id)
+        assert representation is not None  # validated as this run's private output
+        representation.state = RepresentationState.ACTIVE
+        representation.identity_id = identity.id
+        representation.ann_key = RepresentationRepository(session).allocate_ann_key(
+            representation.representation_space_id
+        )
+        representation.activated_at = now
+        touch_identity(session, identity, now)
+        EvidenceRepository(session).append(
+            Evidence(
+                id=self._new_id(),
+                kind=EvidenceKind.REPROCESS_DECISION_CARRIED_OVER,
+                processing_run_id=run.id,
+                source_id=source.id,
+                subject_identity_id=identity.id,
+                payload_schema_version=PAYLOAD_SCHEMA_VERSION,
+                payload_json=carried_payload(run, representation.id, carried),
+                created_at=now,
+            ),
+            representations=(
+                EvidenceLink(representation.id, EvidenceRepresentationRole.SUBJECT),
+                EvidenceLink(
+                    carried.previous_representation_id, EvidenceRepresentationRole.SUPPORTING
+                ),
+            ),
+        )
+        IndexOperationRepository(session).append_batch(
+            (NewOperation(representation.id, representation.representation_space_id, "ADD"),),
+            now=now,
+            new_id=self._new_id,
+        )
+        self._occurrence(session, run, source, identity.id, decision.observation_id, now)
+
+    @staticmethod
+    def _dispose_pending_identities(
+        session: Session, decisions: Sequence[_Decision], plan: SupersessionPlan, now: datetime
+    ) -> None:
+        """A `PENDING` identity that a carried or suppressed face's `CREATE_NEW` made during
+        execution is `DELETED`, unless a face accepted on its own decision still names it (identity
+        model 60.1): no identity survives for a face that did not become one."""
+        replaced = plan.suppressed | plan.carried.keys()
+        used = {
+            decision.identity_id
+            for decision in decisions
+            if decision.representation_id not in replaced
+        }
+        for decision in decisions:
+            if (
+                decision.representation_id not in replaced
+                or decision.outcome is not RecognitionOutcome.CREATE_NEW
+                or decision.identity_id in used
+            ):
+                continue
+            assert decision.identity_id is not None  # (validated: CREATE_NEW names one)
+            identity = session.get(Identity, decision.identity_id)
+            assert identity is not None  # (validated)
+            deleted = IdentityRepository(session).transition(
+                identity.id,
+                expected_revision=identity.revision,
+                from_states=(IdentityState.PENDING,),
+                to_state=IdentityState.DELETED,
+                now=now,
+            )
+            assert deleted  # (validated PENDING, and read in this same transaction)
 
     def _final(
         self, session: Session, run: ProcessingRun
@@ -229,11 +418,12 @@ class AcceptProcessingRunUseCase:
 
     def _context(self, session: Session, run: ProcessingRun) -> tuple[Source, Job]:
         source = SourceRepository(session).get(run.source_id)
+        job_type = (
+            JobType.PROCESS_SOURCE if run.supersedes_run_id is None else JobType.REPROCESS_SOURCE
+        )
         jobs = list(
             session.scalars(
-                select(Job).where(
-                    Job.processing_run_id == run.id, Job.type == JobType.PROCESS_SOURCE
-                )
+                select(Job).where(Job.processing_run_id == run.id, Job.type == job_type)
             )
         )
         if source is None or len(jobs) != 1:
@@ -560,9 +750,20 @@ class AcceptProcessingRunUseCase:
     ) -> None:
         if source.current_processing_run_id != run.id or job.state != JobState.COMPLETED:
             raise AcceptanceError("completed processing run is missing its accepted owners")
+        carried = {} if run.supersedes_run_id is None else carried_evidence(session, run.id)
+        suppressible = self._suppressible(session, run, decisions)
         for decision in decisions:
             representation = session.get(Representation, decision.representation_id)
             observation = session.get(Observation, decision.observation_id)
+            if decision.representation_id in carried:
+                evidence, identity_id = carried[decision.representation_id]
+                self._validate_carried(
+                    session, run, decision, representation, observation, evidence, identity_id
+                )
+                continue
+            if observation is not None and observation.state == ObservationState.REJECTED:
+                self._validate_suppressed(session, decision, representation, suppressible)
+                continue
             if (
                 representation is None
                 or observation is None
@@ -577,6 +778,97 @@ class AcceptProcessingRunUseCase:
             elif representation.identity_id != decision.identity_id:
                 raise AcceptanceError("accepted representation changed identity")
             self._validate_accepted_artifacts(session, run, source, decision, representation)
+
+    @staticmethod
+    def _suppressible(
+        session: Session, run: ProcessingRun, decisions: Sequence[_Decision]
+    ) -> set[uuid.UUID]:
+        """The run's representations whose face corresponds geometrically to an erased face of the
+        generation it replaced: the only ones that may have been suppressed."""
+        if run.supersedes_run_id is None:
+            return set()
+        observations = {
+            observation.id: observation
+            for observation in session.scalars(
+                select(Observation).where(
+                    Observation.id.in_([decision.observation_id for decision in decisions])
+                )
+            )
+        }
+        found = [d for d in decisions if d.observation_id in observations]  # (a missing one is
+        # refused by the caller's loop)
+        current = [Face(d.representation_id, box_of(observations[d.observation_id])) for d in found]
+        return set(geometric_pairs(erased_faces(session, run.supersedes_run_id), current))
+
+    @staticmethod
+    def _validate_suppressed(
+        session: Session,
+        decision: _Decision,
+        representation: Representation | None,
+        suppressible: set[uuid.UUID],
+    ) -> None:
+        """The accepted shape of a suppressed face (persistence 12.1 item 9a): observation
+        `REJECTED`, representation `ERASING` or `ERASED` with no key and no identity, no occurrence,
+        and a geometric correspondent among the replaced generation's erased faces."""
+        occurrence = session.scalar(
+            select(OccurrenceObservation.occurrence_id)
+            .where(OccurrenceObservation.observation_id == decision.observation_id)
+            .limit(1)
+        )
+        if (
+            representation is None
+            or decision.representation_id not in suppressible
+            or representation.state not in (RepresentationState.ERASING, RepresentationState.ERASED)
+            or representation.ann_key is not None
+            or representation.identity_id is not None
+            or occurrence is not None
+        ):
+            raise AcceptanceError("completed processing run has an unexplained rejected face")
+
+    @staticmethod
+    def _validate_carried(
+        session: Session,
+        run: ProcessingRun,
+        decision: _Decision,
+        representation: Representation | None,
+        observation: Observation | None,
+        evidence: Evidence,
+        identity_id: uuid.UUID,
+    ) -> None:
+        """A carried face: `ACTIVE` under the carried identity, with its evidence (the new face as
+        subject), its occurrence and its `ADD` operation."""
+        occurrences = list(
+            session.scalars(
+                select(Occurrence)
+                .join(OccurrenceObservation)
+                .where(
+                    Occurrence.processing_run_id == run.id,
+                    OccurrenceObservation.observation_id == decision.observation_id,
+                )
+            )
+        )
+        operations = session.scalars(
+            select(IndexOperation.id).where(
+                IndexOperation.representation_id == decision.representation_id,
+                IndexOperation.operation == IndexOperationKind.ADD,
+            )
+        ).all()
+        if (
+            representation is None
+            or observation is None
+            or representation.state != RepresentationState.ACTIVE
+            or observation.state != ObservationState.ACTIVE
+            or representation.ann_key is None
+            or representation.identity_id != identity_id
+            or evidence.subject_identity_id != identity_id
+            or EvidenceRepository(session).links(evidence.id)[:1]
+            != [EvidenceLink(representation.id, EvidenceRepresentationRole.SUBJECT)]
+            or len(occurrences) != 1
+            or occurrences[0].identity_id != identity_id
+            or occurrences[0].state != OccurrenceState.ACTIVE
+            or len(operations) != 1
+        ):
+            raise AcceptanceError("completed processing run has an inconsistent carried face")
 
     @staticmethod
     def _uuid(value: object, field: str) -> uuid.UUID:
