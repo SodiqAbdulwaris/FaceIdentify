@@ -1130,15 +1130,23 @@ def test_create_decision_must_name_an_identity_owned_by_its_run(
         )
 
 
-def test_context_requires_exactly_one_processing_job(
+def test_context_takes_the_run_s_newest_job_and_requires_its_type(
     sqlite_engine: Engine, db_session: Session, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
-    run, _observation, _representation, _identity, _job = finalizing(
+    # A run has one job, or more when a video run is retried from its checkpoint (M6 D10): the
+    # newest attempt is the run's job, and it must be of the run's kind.
+    run, _observation, _representation, _identity, first = finalizing(
         db_session, clock, new_id, "NO_FACE"
     )
-    ModelFactory(db_session, clock, new_id).job(
-        processing_run_id=run.id, type="PROCESS_SOURCE", state="RUNNING"
-    )
+    build = ModelFactory(db_session, clock, new_id)
+    retried = build.job(
+        processing_run_id=run.id, type="PROCESS_SOURCE", state="RUNNING", attempt_number=2,
+        lease_owner="worker", lease_expires_at=clock(),
+    )  # fmt: skip
+    db_session.flush()
+    assert use_case(sqlite_engine, clock, new_id)._context(db_session, run)[1].id == retried.id
+    assert first is not None
+    build.job(processing_run_id=run.id, type="REPROCESS_SOURCE", state="QUEUED", attempt_number=3)
     db_session.flush()
 
     with pytest.raises(AcceptanceError, match="source or job"):
