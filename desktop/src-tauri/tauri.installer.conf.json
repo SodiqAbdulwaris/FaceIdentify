@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "resources": {
+      "../../build/dist/faceidentify-backend": "faceidentify-backend",
+      "../../build/THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      },
+      "webviewInstallMode": { "type": "embedBootstrapper" }
+    }
+  }
+}
