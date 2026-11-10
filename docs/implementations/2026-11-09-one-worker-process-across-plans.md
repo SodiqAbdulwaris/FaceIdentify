@@ -21,6 +21,10 @@
 - Readiness `ml_worker` now reports the state of the active supervisor (the one that last had the
   worker), not a combination of every plan's supervisor: a stopped supervisor of another plan is not
   the worker's state. `NOT_STARTED` until a request has had a turn.
+- `backend/ml/supervisor/process.py`: `ProcessWorker.kill` now waits (up to 30 s) for the killed
+  process to be reaped after `taskkill`. The real-process test found that `taskkill /F /T` can
+  return while the process still reads as alive, so without the wait a plan change could start the
+  next worker for a moment beside the dying one.
 - `backend/app/runtime/perception_client.py`: the client's `lease` parameter is typed by a small
   `Turn` protocol (anything with `held()`), so it accepts the `WorkerLease` or the pool's per-plan
   turn. Behaviour unchanged.
