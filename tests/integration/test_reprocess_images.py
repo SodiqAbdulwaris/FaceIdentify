@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.identities.corrections import confirm_occurrence
 from backend.app.identities.forget import ForgetIdentityUseCase
-from backend.app.identities.models import Evidence, Identity
+from backend.app.identities.models import Evidence, EvidenceRepresentation, Identity
 from backend.app.identities.use_cases import resolve_ann_candidates
 from backend.app.jobs.models import Job
 from backend.app.memory.models import IndexOperation, Observation, Occurrence, Representation
@@ -540,23 +540,72 @@ def test_a_carried_decision_whose_identity_was_retired_refuses_activation(
     assert current_run(lib, source_id) == v1
 
 
-@pytest.mark.parametrize("tamper", ["rejected", "carried"])
+CARRIED_TAMPERING = ["occurrence", "duplicate", "no_support", "extra_link", "payload", "rule"]
+
+
+def tamper_with_carried(lib: Pipeline, v2: uuid.UUID, how: str) -> None:
+    (carried,) = kinds(lib, "REPROCESS_DECISION_CARRIED_OVER")
+    links = select(EvidenceRepresentation).where(EvidenceRepresentation.evidence_id == carried.id)
+
+    def change(session: Session) -> None:
+        if how == "occurrence":  # the carried face lost its occurrence
+            session.execute(
+                update(Occurrence).where(Occurrence.processing_run_id == v2).values(state="DELETED")
+            )
+        elif how == "duplicate":  # a second carry-over row for the same face
+            copy = Evidence(
+                id=lib.new_id(),
+                kind=carried.kind,
+                processing_run_id=carried.processing_run_id,
+                source_id=carried.source_id,
+                subject_identity_id=carried.subject_identity_id,
+                payload_schema_version=carried.payload_schema_version,
+                payload_json=dict(carried.payload_json),
+                created_at=carried.created_at,
+            )
+            session.add(copy)
+        elif how == "no_support":  # the replaced face is no longer cited
+            supporting = [link for link in session.scalars(links) if link.role == "SUPPORTING"]
+            session.delete(supporting[0])
+        elif how == "extra_link":  # a third face is cited
+            (other,) = session.scalars(
+                select(Representation.id).where(Representation.processing_run_id == v2)
+            )
+            session.add(
+                EvidenceRepresentation(
+                    evidence_id=carried.id, representation_id=other, role="CANDIDATE"
+                )
+            )
+        else:  # the payload no longer says what was measured, or under which rule
+            payload = dict(carried.payload_json)
+            if how == "payload":
+                payload["cosine"] = 0.5
+            else:
+                payload["rule"] = {**payload["rule"], "min_iou": 0.1}
+            session.execute(
+                update(Evidence).where(Evidence.id == carried.id).values(payload_json=payload)
+            )
+
+    write(lib, change)
+
+
+@pytest.mark.parametrize("tamper", ["rejected", *CARRIED_TAMPERING])
 def test_a_completed_reprocess_run_whose_faces_were_changed_is_refused_on_repeat(
     pipeline: Pipeline, tamper: str
 ) -> None:
     lib = pipeline
     source_id, v1 = process(lib, A)
-    if tamper == "carried":
+    if tamper != "rejected":
         name(lib, identity_of(lib, v1))
     v2 = lib.reexecute(source_id)
     lib.accept(v2, apply_index=True)
+    assert accepted(lib, v2).already_accepted  # untouched, the repeat validates
     if tamper == "rejected":  # a face rejected without an erased face to explain it
         change = update(Observation).where(Observation.processing_run_id == v2)
         write(lib, lambda s: s.execute(change.values(state="REJECTED")))
         expected = "unexplained rejected face"
-    else:  # a carried face lost its occurrence
-        change = update(Occurrence).where(Occurrence.processing_run_id == v2)
-        write(lib, lambda s: s.execute(change.values(state="DELETED")))
+    else:
+        tamper_with_carried(lib, v2, tamper)
         expected = "inconsistent carried face"
 
     with pytest.raises(AcceptanceError, match=expected):
