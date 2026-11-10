@@ -503,7 +503,7 @@ def test_run_local_candidate_identity_must_be_active_or_owned_by_its_run(
     }
     db_session.commit()
 
-    _checkpoint, decisions = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+    _checkpoint, decisions, _tracks = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
     with pytest.raises(AcceptanceError, match="candidate member is not authoritative"):
         use_case(sqlite_engine, clock, new_id)._validate_reasoned_decision(
             db_session, run, decisions[0], representation
@@ -1059,10 +1059,12 @@ def test_private_output_must_be_exactly_pending_and_owned_by_its_final_checkpoin
         run, execution_segment_id=observation.execution_segment_id, sequence_in_run=1
     )
     db_session.flush()
-    _checkpoint, decisions = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+    _checkpoint, decisions, _tracks = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
 
     with pytest.raises(AcceptanceError, match="exactly the private observations"):
-        use_case(sqlite_engine, clock, new_id)._validate_private_output(db_session, run, decisions)
+        use_case(sqlite_engine, clock, new_id)._validate_private_output(
+            db_session, run, decisions, None
+        )
 
 
 def test_identity_decision_validation_rejects_unknown_and_wrong_lifecycle(
@@ -1151,10 +1153,12 @@ def test_private_representation_must_be_pending_and_match_its_observation(
     )
     assert representation is not None
     representation.state = "SUPERSEDED"
-    _checkpoint, decisions = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
+    _checkpoint, decisions, _tracks = use_case(sqlite_engine, clock, new_id)._final(db_session, run)
 
     with pytest.raises(AcceptanceError, match="not the private output"):
-        use_case(sqlite_engine, clock, new_id)._validate_private_output(db_session, run, decisions)
+        use_case(sqlite_engine, clock, new_id)._validate_private_output(
+            db_session, run, decisions, None
+        )
 
 
 @pytest.mark.parametrize("failure", ["observation", "source", "run", "job"])

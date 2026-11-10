@@ -1021,6 +1021,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** End Ms */
+            end_ms: number | null;
             /** Id */
             id: string;
             /** Identity Id */
@@ -1041,6 +1043,8 @@ export interface components {
             source_id: string;
             /** Source Recycled */
             source_recycled: boolean;
+            /** Start Ms */
+            start_ms: number | null;
         };
         /** PageInfo */
         PageInfo: {

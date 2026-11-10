@@ -57,6 +57,9 @@ class Reason(StrEnum):
     AMBIGUOUS_CANDIDATES = "AMBIGUOUS_CANDIDATES"
     UNRESOLVED_NEIGHBOUR = "UNRESOLVED_NEIGHBOUR"
     UNCERTAIN_SIMILARITY = "UNCERTAIN_SIMILARITY"
+    # A video track whose kept faces do not all match the same identity (M6 D7): each of its faces
+    # abstains, its own proposal kept in the evidence. Never the reasoner's own answer.
+    TRACK_UNSETTLED = "TRACK_UNSETTLED"
 
 
 MAX_SIMILARITY = 1.0  # a cosine similarity never exceeds this
