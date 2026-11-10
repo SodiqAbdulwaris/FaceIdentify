@@ -41,6 +41,23 @@ Delegated (owner, 2026-11-09; reversible):
 `uv run pytest -q tests/integration/test_video_frames.py` with the pinned build installed: 12 passed;
 `frames.py` 100% covered. ruff, mypy (Windows and Linux): clean. Full gate: in the PR.
 
+## Real containers (the owner's videos, read in place, 2026-11-10)
+
+The owner allowed read-only use of his own video folder (369 files, 188 GB) to make probe and decode robust;
+nothing from it (names, frames, faces) is in Git, a fixture or CI. Results, aggregates only:
+
+- Containers and codecs: 127 Matroska HEVC 10-bit, 120 Matroska H.264, 100 MP4 HEVC, 9 MP4 H.264, 9 Matroska
+  HEVC 8-bit, 2 AVI MPEG-4 Part 2, 1 MP4 HEVC 10-bit, 1 Matroska AV1 10-bit. Sizes up to 3840x1920.
+- **Every one of the 369 probes and decodes** with the pinned LGPL build (four frames sampled five minutes in);
+  none needed a codec the build lacks. The one uniform frame found was a black scene (later frames normal).
+- Decode speed through the pipe at two frames a second, 60 s of video from five minutes in: MPEG-4 SD 319x
+  real time, H.264 SD 180x, H.264 HD 115x, HEVC HD 59x, HEVC 10-bit HD 28x, AV1 10-bit HD 29x, **HEVC 10-bit 4K
+  10.5x**. Detection on the real models runs at about 20x real time (41.7 frames a second, step 5), so decoding
+  is never the slower stage.
+- Because 4K frames exist, `sampled_frames(max_side=...)` scales a chosen frame down so its longer side is at
+  most `max_side` (the executor uses 1920): a 4K chunk then holds a quarter of the memory, and the detector
+  works at 640 pixels anyway. Boxes are normalised, so nothing downstream changes.
+
 ## Open issues / follow-ups
 
 - Chunking, checkpoints and resume of a run: step 5's executor.

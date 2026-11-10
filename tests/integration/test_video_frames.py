@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from backend.infrastructure.media import frames as frames_module
-from backend.infrastructure.media.frames import sampled_frames
+from backend.infrastructure.media.frames import frame_size, sampled_frames
 from backend.infrastructure.media.video import CorruptVideoError
 from tests.fixtures.media import installed_tools, make_clip, rotate
 
@@ -165,3 +165,12 @@ def test_a_rate_and_a_size_must_be_positive(tmp_path: Path, rate: float, width: 
         next(
             sampled_frames(installed_tools(), tmp_path / "x.mp4", width=width, height=1, rate=rate)
         )
+
+
+def test_a_large_frame_is_scaled_down_to_the_longest_side_allowed(tmp_path: Path) -> None:
+    clip = make_clip(tmp_path / "wide.mp4", seconds=1, size="320x160")
+
+    frames = list(sampled_frames(installed_tools(), clip, width=320, height=160, max_side=100))
+
+    assert frames[0].pixels.shape == (50, 100, 3)
+    assert frame_size(80, 40, 100) == (80, 40)  # a frame already small enough is left alone
