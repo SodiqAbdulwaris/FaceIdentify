@@ -114,6 +114,13 @@ evidence (D5). Needed before long videos, useful for images now (a face search d
 - Thumbnails from a key frame.
 - Tracker: TST-063 (metadata half).
 
+> **Decision 2026-11-10:** (orchestrating session, under the owner's delegation of 2026-11-09; the owner
+> may reverse it) D2 is met without PyAV: steps 3 and 4 use the pinned LGPL `ffmpeg` and `ffprobe` over
+> pipes, so "PyAV" in this plan reads as "the pinned ffmpeg over a pipe" and no Python media dependency is
+> added. Thumbnails are not made in step 3 (images have none either; the video screen of step 7 shows the
+> original). Built 2026-11-10: import and probe, managed or referenced
+> ([entry](../implementations/2026-11-10-m6-step3-video-import.md)).
+
 ### Step 4. Decode, sample and chunk
 
 - PyAV decode into bounded chunks with exact timestamps (presentation time, not frame counting),

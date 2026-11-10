@@ -80,7 +80,7 @@ of that training data must be checked before anyone relies on it.
 | ONNX Runtime DirectML builds (`onnxruntime-directml` 1.23.0, `onnxruntime-windowsml` 1.30.0) | MIT (wheel `LICENSE`); each bundles Microsoft's `DirectML.dll`, whose redistribution terms are not verified | **evaluated only** (2026-10-15, installed into a scratch folder outside the repository, never a dependency) | candidate shipped build, owner decision pending (`docs/research/onnx-runtime-gpu-packaging.md`); read the `DirectML.dll` terms before shipping |
 | USearch (`usearch` 2.26.2) | Apache-2.0 | the vector index | verified |
 | `av` (PyAV) 19.0.2 Windows wheel, **evaluated and rejected** (2026-11-09) | wheel metadata `BSD-3-Clause` for PyAV's own code; **bundles `libx264` and `libx265`** (section 4.1) | evaluated only, in a scratch environment outside the repository, never a dependency | fails D2 (no GPL components); section 4.1 |
-| FFmpeg 9.0.2 LGPL shared build for Windows (BtbN `ffmpeg-n9.0.2-48-gd4070a14ce-win64-lgpl-shared-9.0.zip`, `ffmpeg.exe` and `ffprobe.exe` run as subprocesses) | LGPL-3.0-or-later (its `LICENSE.txt`; `--enable-version3`, no `--enable-gpl`, no `--enable-nonfree`), read 2026-11-09 | **recommended candidate for M6 video and M7 cameras**, pending confirmation and a review of the libraries linked in it (section 4.1) | the third-party libraries linked inside it are not individually read; section 4.1 |
+| FFmpeg 9.0.2 LGPL shared build for Windows (BtbN `ffmpeg-n9.0.2-39-g7adfbe40dc-win64-lgpl-shared-9.0.zip` of the month-end release `autobuild-2026-10-31-12-59`, re-pinned 2026-11-10 from the `-48-gd4070a14ce` build first read; `ffmpeg.exe` and `ffprobe.exe` run as subprocesses) | LGPL-3.0-or-later (its `LICENSE.txt`; `--enable-version3`, no `--enable-gpl`, no `--enable-nonfree`), read 2026-11-09 and again for the re-pinned build 2026-11-10 | **used by M6 video** (step 3: import and probe; confirmed 2026-11-10, section 4.1); M7 cameras planned; a review of the libraries linked in it is still owed (section 4.1) | the third-party libraries linked inside it are not individually read; section 4.1 |
 
 > **Decision 2026-10-15:** (owner; `.agents/CONTEXT.md` Known conflicts 32) `onnxruntime-windowsml` 1.30.0 is the shipped Windows build and a dependency (rows above); `onnxruntime-directml` stays evaluated only. The `DirectML.dll` terms were read (row above); CUDA is developer-only and never shipped, so the NVIDIA libraries are not part of a release (blocker 4).
 
@@ -163,6 +163,19 @@ session's confirmation).**
 
 > **Decision 2026-11-10:** (delegated by the owner; recommendation pending the orchestrating session's
 > confirmation) option 4. Until confirmed, M6 step 3 must not add `av` to `pyproject.toml`.
+
+> **Decision 2026-11-10:** (orchestrating session, under the owner's delegation; the owner may reverse
+> it) option 4 is confirmed: no PyAV, the pinned LGPL `ffmpeg` and `ffprobe` over pipes. **The pin moves**
+> to `ffmpeg-n9.0.2-39-g7adfbe40dc-win64-lgpl-shared-9.0.zip` of the month-end release
+> `autobuild-2026-10-31-12-59` (76,576,818 bytes, SHA-256
+> `e907b01fa4783913151237e37df2a10fa97d99a1598a021bf59d4ae62ffed4c0`, GitHub's digest and a download made
+> here agree), because BtbN prunes daily builds after about two weeks but keeps each month's last one, so
+> CI and a later install can still fetch it. Verified on the re-pinned build, 2026-11-10: `LICENSE.txt` is
+> the LGPL v3, `-version` shows `--enable-version3 --disable-libx264 --disable-libx265` and no `--enable-gpl`
+> or `--enable-nonfree`, `-L` prints the LGPL v3 notice, and the encoders include OpenH264 but no libx264 or
+> libx265. Installed by `scripts/install_ffmpeg.py` (checks the hash, unpacks `bin` and `LICENSE.txt` into
+> `<local state>/runtime/ffmpeg`); CI downloads the same zip, caches it by its hash and installs it the same
+> way. [Entry](../implementations/2026-11-10-m6-step3-video-import.md).
 
 ## 5. Python dependencies (verified from installed metadata, 2026-10-07)
 

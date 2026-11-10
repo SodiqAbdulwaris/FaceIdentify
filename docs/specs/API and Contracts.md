@@ -201,6 +201,8 @@ Referenced originals are never deleted by the application.
 
 > **Decision 2026-10-15 (owner; issue 188):** an image import also accepts an AVIF, through the same decoder and under the same byte and pixel limits as the other four formats, so the import formats are JPEG, PNG, BMP, WebP and AVIF. It is decoded by Pillow's built-in AVIF support (no new dependency). Authoritative source: `backend/infrastructure/media/image.py` and `docs/implementations/2026-10-15-avif-images.md`.
 
+> **Decision 2026-11-10 (agent, delegated by the owner on 2026-11-09, D1; M6 step 3; the owner may reverse it):** a file whose name ends in `.mp4`, `.m4v`, `.mov`, `.mkv`, `.webm` or `.avi` is imported as a `VIDEO` Source, managed or referenced, by the same request. The pinned `ffprobe` reads it before anything is written: it must be an MP4 or QuickTime, Matroska or WebM, or AVI container with a video stream that has a size and a duration; otherwise `415 MEDIA_FORMAT_UNSUPPORTED` (not such a video) or `422 MEDIA_CORRUPT` (named as a video but unreadable), and nothing is left behind. A video is never read into memory: a managed import streams it into storage (the three-step protocol above), a referenced one hashes it in place. Its byte limit is separate from the image limit (`413 SOURCE_FILE_TOO_LARGE`). When the FFmpeg tools are not installed the import answers `503 MEDIA_TOOLS_UNAVAILABLE`. The Source records the size as shown (a rotation of 90 or 270 degrees swaps width and height), `media_duration_ms` and the average frame rate; Source detail exposes `duration_ms`. No thumbnail is made. Authoritative source: `backend/infrastructure/media/video.py`, `docs/implementations/2026-11-10-m6-step3-video-import.md`.
+
 ---
 
 ## 5.2 Source queries
@@ -1034,6 +1036,8 @@ INVALID_CURSOR
 CONFLICT
 INTERNAL_ERROR
 ```
+
+> **Decision 2026-11-10 (agent, delegated, D1; M6 step 3):** `MEDIA_TOOLS_UNAVAILABLE` (`503`): a video was given but the pinned FFmpeg tools are not installed (section 5.1).
 
 Expected application errors are deliberately mapped.
 
