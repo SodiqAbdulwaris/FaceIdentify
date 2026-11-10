@@ -159,3 +159,13 @@ def test_geometric_pairs_ignore_vectors_and_spaces_but_require_uniqueness() -> N
     assert geometric_pairs([erased], [same_place, elsewhere]) == {same_place.id: erased.id}
     crowded = face(4, shifted(0.005))
     assert geometric_pairs([erased], [same_place, crowded]) == {}
+
+
+def test_video_faces_correspond_only_within_the_same_frame() -> None:
+    box = Box(0.1, 0.1, 0.3, 0.3)
+    earlier = Face(uuid.uuid4(), box, time_ms=500)
+    same_frame = Face(uuid.uuid4(), box, time_ms=500)
+    later = Face(uuid.uuid4(), box, time_ms=1000)
+
+    assert geometric_pairs([earlier], [later]) == {}
+    assert geometric_pairs([earlier], [same_frame]) == {same_frame.id: earlier.id}
