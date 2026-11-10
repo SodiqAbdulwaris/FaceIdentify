@@ -540,7 +540,11 @@ class AcceptProcessingRunUseCase:
             proposals[decision.observation_id] = self._validate_reasoned_decision(
                 session, run, decision, representation
             )
-        _validate_track_rule(decisions, proposals, tracks)
+        _validate_track_rule(
+            decisions,
+            {o: (p.outcome, p.identity_id) for o, p in proposals.items()},
+            tracks,
+        )
 
     def _validate_reasoned_decision(
         self,
@@ -862,9 +866,12 @@ class AcceptProcessingRunUseCase:
         if set(carried) - {str(decision.representation_id) for decision in decisions}:
             raise AcceptanceError("completed processing run has carry-over evidence for no face")
         suppressible = self._suppressible(session, run, decisions)
-        members = {
-            observation: members
-            for _track, _identity, members in _settled_tracks(decisions, tracks, None)
+        # The track rule again, on what was recorded (each face's decision, or its recorded proposal
+        # when it was left unsettled), so a changed FINAL cannot pass as the result accepted.
+        _validate_track_rule(decisions, _recorded_proposals(decisions), tracks)
+        settled = {
+            observation: (track, members)
+            for track, _identity, members in _settled_tracks(decisions, tracks, None)
             for observation in members
         }
         for decision in decisions:
@@ -897,7 +904,7 @@ class AcceptProcessingRunUseCase:
             elif representation.identity_id != decision.identity_id:
                 raise AcceptanceError("accepted representation changed identity")
             self._validate_accepted_artifacts(
-                session, run, source, decision, representation, members.get(decision.observation_id)
+                session, run, source, decision, representation, settled.get(decision.observation_id)
             )
 
     @staticmethod
@@ -1252,7 +1259,7 @@ class AcceptProcessingRunUseCase:
         source: Source,
         decision: _Decision,
         representation: Representation,
-        track_members: tuple[uuid.UUID, ...] | None = None,
+        settled: tuple["_Track", tuple[uuid.UUID, ...]] | None = None,
     ) -> None:
         """`track_members`: a video face's settled track (its occurrence's members)."""
         kind = {
@@ -1323,9 +1330,24 @@ class AcceptProcessingRunUseCase:
             or occurrences[0].identity_id != decision.identity_id
             or occurrences[0].state != OccurrenceState.ACTIVE
             or occurrences[0].kind
-            != (OccurrenceKind.IMAGE if track_members is None else OccurrenceKind.TRACK)
+            != (OccurrenceKind.IMAGE if settled is None else OccurrenceKind.TRACK)
             or OccurrenceRepository(session).observation_ids(occurrences[0].id)
-            != list(track_members or (decision.observation_id,))
+            != list(settled[1] if settled else (decision.observation_id,))
+            or settled is not None
+            and (
+                occurrences[0].representative_observation_id,
+                occurrences[0].start_timestamp_ms,
+                occurrences[0].end_timestamp_ms,
+                occurrences[0].start_frame,
+                occurrences[0].end_frame,
+            )
+            != (
+                settled[1][0],
+                settled[0].start_ms,
+                settled[0].end_ms,
+                settled[0].start_frame,
+                settled[0].end_frame,
+            )
         ):
             raise AcceptanceError("completed processing run is missing its accepted occurrence")
         operations = list(
@@ -1344,7 +1366,7 @@ class AcceptProcessingRunUseCase:
 
 def _validate_track_rule(
     decisions: Sequence[_Decision],
-    proposals: Mapping[uuid.UUID, RecognitionDecision],
+    proposals: Mapping[uuid.UUID, tuple[RecognitionOutcome, uuid.UUID | None]],
     tracks: tuple[_Track, ...] | None,
 ) -> None:
     """D7 on what each face's own evidence decides: a track keeps its matches only when they all
@@ -1355,9 +1377,7 @@ def _validate_track_rule(
             raise AcceptanceError("only a video track's face can be left unsettled")
         return
     for track in tracks:
-        agreed = agreed_identity(
-            [(proposals[o].outcome, proposals[o].identity_id) for o in track.observations]
-        )
+        agreed = agreed_identity([proposals[o] for o in track.observations])
         unsettled = [by_observation[o].reason is Reason.TRACK_UNSETTLED for o in track.observations]
         if any(unsettled) if agreed is not None else not all(unsettled):
             raise AcceptanceError("FINAL checkpoint track does not follow the track rule")
@@ -1387,3 +1407,21 @@ def _settled_tracks(
         if members:
             settled.append((track, matched[members[0]], members))
     return settled
+
+
+def _recorded_proposals(
+    decisions: Sequence[_Decision],
+) -> dict[uuid.UUID, tuple[RecognitionOutcome, uuid.UUID | None]]:
+    """Each face's own decision as recorded: its proposal when left unsettled, else itself."""
+    recorded: dict[uuid.UUID, tuple[RecognitionOutcome, uuid.UUID | None]] = {}
+    for d in decisions:
+        if d.reason is Reason.TRACK_UNSETTLED:
+            proposal = d.evidence["proposal"]
+            identity = proposal["identity_id"]
+            recorded[d.observation_id] = (
+                RecognitionOutcome(proposal["outcome"]),
+                None if identity is None else uuid.UUID(identity),
+            )
+        else:
+            recorded[d.observation_id] = (d.outcome, d.identity_id)
+    return recorded
