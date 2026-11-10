@@ -170,6 +170,7 @@ evidence (D5). Needed before long videos, useful for images now (a face search d
   the old run's committed output untouched. Test that neither path duplicates committed observations,
   occurrences or index operations.
 - Tracker: TST-060, TST-062, TST-064 (video half), TST-065, TST-066, TST-067, TST-068, TST-070.
+- Progress: built 2026-11-10 ([entry](../implementations/2026-11-10-m6-step7-movie-workflow.md)): pause and resume, D10 retry, two scheduler loops for one movie at a time, video reprocessing, the video screen (appearances, progress, pause), and real process-kill tests. Not in it: in-page playback (follow-up).
 
 ### M6 real-world check
 

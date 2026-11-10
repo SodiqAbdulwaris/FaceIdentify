@@ -234,3 +234,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-10 | [M6 steps 4 and 5: chunked video runs, tracks and batched turns (#242)](2026-11-10-m6-step5-video-chunks-and-tracks.md) | done; occurrences next (step 6) |
 | 2026-11-10 | [M8 step 2: the backend frozen with PyInstaller](2026-11-10-m8-step2-freeze-backend.md) | done |
 | 2026-11-10 | [M6 step 6: track-level recognition and occurrences over time](2026-11-10-m6-step6-video-occurrences.md) | done |
+| 2026-11-10 | [M6 step 7: pause, resume, retry, one movie at a time, video reprocessing and the video screen](2026-11-10-m6-step7-movie-workflow.md) | done; step 8 (D8) is the orchestrator's |
