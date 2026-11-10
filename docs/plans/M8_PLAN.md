@@ -77,6 +77,9 @@ Each step is one or more small PRs with an implementation entry and an independe
 
 ### Step 2. Freeze the backend
 
+Sized as three PRs: (a) the PyInstaller spec and the frozen host that starts and stops headless; (b) the native-library
+collection hooks and the worker started from the same executable; (c) the headless CI job and the size and start-time record.
+
 - A PyInstaller **onedir** build of the backend host and the ML worker (R3): `faceidentify-backend.exe` serving
   `backend.api.host`, and the worker started from the same executable (a flag, with
   `multiprocessing.freeze_support()` and the spawn guard the worker needs), plus a hook that collects
@@ -116,6 +119,9 @@ Each step is one or more small PRs with an implementation entry and an independe
 
 ### Step 5. First run: library, models, recognition mode, self-check
 
+Sized as four PRs: (a) the backend model-installation use case and routes with the integrity tests; (b) the recognition-mode
+choice and the self-check route; (c) the first-run screens; (d) the desktop end-to-end test through the flow.
+
 - A first-run flow in the desktop app (spec text proposed in the PR; the routes extend the existing runtime
   and system resources): (1) choose or accept the library folder; (2) **install the face models yourself**:
   the screen says what `buffalo_l` is and its research-only licence, shows where InsightFace publishes it,
@@ -124,7 +130,8 @@ Each step is one or more small PRs with an implementation entry and an independe
   the logic of `scripts/install_reference_models.py` moved into the backend (R6); (3) choose the recognition
   mode (R7); (4) run the self-check: load both models, report the execution provider and whether DirectML
   fell back to the CPU, and process a generated image to show the pipeline end to end.
-- Until step 2 of this flow is done, processing is unavailable and says why (the existing 503 and readiness
+- **The test-only trust path:** the hash table is the only thing a production build trusts. Under the explicit development-profile flag, and only then, a fixture package whose manifest declares itself a fixture is accepted so CI can exercise the same flow without the weights; a test proves that a production-mode backend rejects that fixture and any other unhashed package.
+- Until the model-installation part of this flow is done, processing is unavailable and says why (the existing 503 and readiness
   reporting), and everything else (browsing, an empty library) works.
 - Tests: backend tests for hash checking and installation with fixture models, frontend tests for the flow,
   the desktop end-to-end test through the flow on the development profile.
@@ -144,6 +151,8 @@ Each step is one or more small PRs with an implementation entry and an independe
 - Tracker: TST-081, TST-085.
 
 ### Step 7. Installer in CI and the clean-install tests
+
+Sized as three PRs: (a) the on-demand installer build and silent install job; (b) the first-run flow, process-tree and network checks on the installed build; (c) the integrity and rollback tests.
 
 - A CI job (on demand and before a release, not on every push, because it builds the frozen backend and the
   installer) builds the installer, installs it silently on a fresh Windows runner, launches it on the
@@ -185,7 +194,7 @@ Each step is one or more small PRs with an implementation entry and an independe
 |---|---|---|
 | The `buffalo_l` weights are research-only (licensing 1 and 2; PROGRESS 4) | **Ships without them**: the user installs them; the owner accepted the risk of using them for a personal application | **Blocks.** Needs a commercial licence or other weights whose licence and training-data terms allow it, and a new representation space with the evaluation redone |
 | LFW's own terms page not read, the Kaggle mirror grants nothing (#183; licensing 10.3) | Nothing from LFW or CelebA is shipped; they are evaluation data on the owner's machine. **No blocker** | **Blocks any publication of the numbers measured on them** until read; leakage with the training data is unassessed |
-| FFmpeg builds' licences (D2; PROGRESS 4) | Resolved in the D2 record: the pinned LGPL build is recommended, the libraries inside it are not yet read; the notices are generated in step 1 | The libraries inside the build are read and their notices, the build configuration and a source offer are shipped |
+| FFmpeg builds' licences (D2; PROGRESS 4) | **Not resolved yet.** The D2 record recommends the pinned LGPL build, pending confirmation, and the licences of the libraries inside it are unread. Step 4 packages FFmpeg only after the recommendation is confirmed; the notices are generated in step 1. Distribution to anyone but the owner is not involved, so the LGPL conditions are not triggered for the personal build, but the record is completed first | The libraries inside the build are read and their notices, the build configuration and a source offer are shipped |
 | Rust crates, transitive Python packages, build tools not inventoried (licensing 5 to 7, 11) | **Done in step 1 anyway** (cheap, and the notices file needs it) | Blocks until reviewed |
 | No licence file for our own code (licensing 3) | No blocker | **Blocks:** the owner chooses a licence or stays proprietary |
 | Microsoft `DirectML.dll` terms (licensing 4b) | Read: in-application redistribution is permitted; the terms file ships with the installer | Same, plus confirming the wheel's copy is covered by the terms that were read from the NuGet package |
