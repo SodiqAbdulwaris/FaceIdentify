@@ -139,6 +139,7 @@ evidence (D5). Needed before long videos, useful for images now (a face search d
 - Observation selection: keep a few good-quality, diverse observations per track (detection score, face
   size, pose from landmarks); embed only those. No crop is retained for every frame.
 - Tracker: TST-063 (segment correctness), TST-069.
+- Progress: built 2026-11-10 with step 4's chunk checkpoints and #242's batched turns (2 frames a turn, measured) ([entry](../implementations/2026-11-10-m6-step5-video-chunks-and-tracks.md)).
 
 ### Step 6. Recognition and occurrences over time
 
