@@ -310,7 +310,7 @@ async def test_a_run_deleted_while_it_is_being_cancelled_is_not_found(
     await processed(api, "alice.png")
     [run] = (await api.client.get("/api/v1/processing-runs")).json()["items"]
 
-    def vanished(_self: object, run_id: uuid.UUID) -> None:
+    def vanished(_self: object, run_id: uuid.UUID, **_options: object) -> None:
         raise RunNotFoundError(f"run {run_id} does not exist")  # deleted after the check
 
     monkeypatch.setattr(CancelProcessingUseCase, "cancel", vanished)
