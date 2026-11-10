@@ -37,6 +37,7 @@ from backend.app.processing.execute_job import (
     SETTLED_FAILURES,
     ExecuteProcessingJob,
     ProcessingCancelledError,
+    ProcessingPausedError,
 )
 from backend.app.processing.models import ProcessingRunState
 from backend.app.processing.scheduler import ProcessingScheduler
@@ -51,6 +52,7 @@ class RunOutcomeKind(StrEnum):
     IDLE = "IDLE"  # nothing was queued
     ACCEPTED = "ACCEPTED"
     CANCELLED = "CANCELLED"
+    PAUSED = "PAUSED"  # a video run stopped at a chunk boundary; resumed by a person
     FAILED = "FAILED"  # a failure the executor settled
     NOT_ACCEPTABLE = "NOT_ACCEPTABLE"  # a refused FINAL
 
@@ -100,6 +102,8 @@ class ProcessingRunner:
             self._executor.execute(started)
         except ProcessingCancelledError:
             return RunOutcome(RunOutcomeKind.CANCELLED, run_id)
+        except ProcessingPausedError:
+            return RunOutcome(RunOutcomeKind.PAUSED, run_id)
         except SETTLED_FAILURES as error:
             return RunOutcome(RunOutcomeKind.FAILED, run_id, type(error).__name__)
         except Exception as error:

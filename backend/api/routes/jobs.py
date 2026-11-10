@@ -29,10 +29,13 @@ from backend.api.routes.processing import (
     cancel_command,
     gone_runs,
     job_brief,
+    run_detail,
+    visible_run,
 )
 from backend.api.startup import Backend
 from backend.app.jobs.models import Job, JobState, JobType
 from backend.app.processing.models import ProcessingRun
+from backend.app.processing.pause import PauseError, PauseOutcome, PauseProcessingUseCase
 
 router = APIRouter(tags=["jobs"])
 
@@ -133,3 +136,44 @@ def cancel_job(
             details={"job_id": str(job_id)},
         )  # fmt: skip
     return cancel_command(library, backend, run_id)
+
+
+def _pause_command(
+    job_id: uuid.UUID, library: Library, backend: Backend, *, resume: bool
+) -> ProcessingRunDetail:
+    """Pause a running video job at its next chunk boundary, or put a paused one back in the queue
+    (M6 step 7; API 13 to 15). A repeat changes nothing."""
+    run_id = library.unit_of_work.read(lambda session: _get(session, job_id).processing_run_id)
+    if run_id is None:
+        raise ApiError(
+            409, "JOB_INVALID_TRANSITION", "The job has no processing run to pause or resume.",
+            details={"job_id": str(job_id)},
+        )  # fmt: skip
+    library.unit_of_work.read(lambda session: visible_run(session, run_id))
+    use_case = PauseProcessingUseCase(library.unit_of_work, clock=backend.settings.clock)
+    try:
+        outcome = use_case.resume(run_id) if resume else use_case.pause(run_id)
+    except PauseError as error:
+        raise ApiError(
+            409, "JOB_INVALID_TRANSITION", "The job cannot be paused or resumed now.",
+            details={"job_id": str(job_id), "reason": str(error)},
+        ) from None  # fmt: skip
+    if outcome != PauseOutcome.ALREADY:
+        backend.announce_run(run_id)
+    if outcome == PauseOutcome.RESUMED:
+        backend.wake_scheduler()
+    return library.unit_of_work.read(lambda session: run_detail(session, run_id))
+
+
+@router.post("/jobs/{job_id}/pause", status_code=202)
+def pause_job(
+    job_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> ProcessingRunDetail:
+    return _pause_command(job_id, library, backend, resume=False)
+
+
+@router.post("/jobs/{job_id}/resume", status_code=202)
+def resume_job(
+    job_id: uuid.UUID, library: Library, backend: Annotated[Backend, Depends(get_backend)]
+) -> ProcessingRunDetail:
+    return _pause_command(job_id, library, backend, resume=True)

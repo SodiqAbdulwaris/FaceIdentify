@@ -127,6 +127,10 @@ class ProcessingCancelledError(RuntimeError):
     """A cancellation request was observed at a durable processing boundary."""
 
 
+class ProcessingPausedError(RuntimeError):
+    """A pause request was observed at a chunk boundary: the video run is `PAUSED` (M6 step 7)."""
+
+
 class PerceptionPlanner(Protocol):
     """Turns a frozen selection into a plan: `plan_perception`, or the development profile's."""
 
@@ -392,7 +396,12 @@ class ExecuteProcessingJob:
                 raise ProcessingExecutionError("the processing job changed while cancelling")
 
     def _input(
-        self, session: Session, started: StartedProcessingJob, *, allow_cancelling: bool = False
+        self,
+        session: Session,
+        started: StartedProcessingJob,
+        *,
+        allow_cancelling: bool = False,
+        allow_pausing: bool = False,
     ) -> _Input:
         if started.job.processing_run_id is None:
             raise ProcessingExecutionError("the claimed job has no processing run")
@@ -410,9 +419,9 @@ class ExecuteProcessingJob:
             raise ProcessingExecutionError("the processing run/source/original is missing")
         run, snapshot, source, artifact = actual
         if run.state not in (
-            (ProcessingRunState.RUNNING, ProcessingRunState.CANCELLING)
-            if allow_cancelling
-            else (ProcessingRunState.RUNNING,)
+            (ProcessingRunState.RUNNING,)
+            + ((ProcessingRunState.CANCELLING,) if allow_cancelling else ())
+            + ((ProcessingRunState.PAUSING,) if allow_pausing else ())
         ):
             raise ProcessingExecutionError(f"the processing run is {run.state}, not RUNNING")
         if (
@@ -445,6 +454,7 @@ class ExecuteProcessingJob:
         started: StartedProcessingJob,
         *,
         allow_cancelling: bool = False,
+        allow_pausing: bool = False,
     ) -> tuple[ProcessingRun, ExecutionSegment, Job]:
         """Reload every mutable owner immediately before a private-output mutation.
 
@@ -453,7 +463,9 @@ class ExecuteProcessingJob:
         write UnitOfWork already owns SQLite's writer lock; the fresh reads below are therefore the
         state that the following settlement mutation protects, not cached pre-compute state.
         """
-        current = self._input(session, started, allow_cancelling=allow_cancelling)
+        current = self._input(
+            session, started, allow_cancelling=allow_cancelling, allow_pausing=allow_pausing
+        )
         run = ProcessingRunRepository(session).lock(current.run_id)
         assert run is not None  # _input just reloaded the same run in this write transaction
         segment = SegmentRepository(session).get(started.execution_segment_id)
@@ -469,7 +481,9 @@ class ExecuteProcessingJob:
             or job.processing_run_id != current.run_id
             or job.state
             not in (
-                (JobState.RUNNING, JobState.CANCELLING) if allow_cancelling else (JobState.RUNNING,)
+                (JobState.RUNNING,)
+                + ((JobState.CANCELLING,) if allow_cancelling else ())
+                + ((JobState.PAUSING,) if allow_pausing else ())
             )
         ):
             raise ProcessingExecutionError("the processing job is no longer running")
@@ -526,7 +540,7 @@ class ExecuteProcessingJob:
         fallbacks: tuple[ProviderFallback, ...],
     ) -> uuid.UUID:
         run, segment, _job = self._revalidate_settlement_context(
-            session, source, started, allow_cancelling=True
+            session, source, started, allow_cancelling=True, allow_pausing=True
         )
         repository = SegmentRepository(session)
         current = segment
@@ -669,7 +683,9 @@ class ExecuteProcessingJob:
             run.id,
             expected_revision=run.revision,
             values={"current_checkpoint_id": checkpoint_id, "updated_at": self._clock()},
-            extra_where=(ProcessingRun.state == ProcessingRunState.RUNNING,),
+            extra_where=(
+                ProcessingRun.state.in_((ProcessingRunState.RUNNING, ProcessingRunState.PAUSING)),
+            ),
         )
         if changed != 1:
             raise ProcessingExecutionError("the processing run changed while checkpointing")
@@ -709,6 +725,7 @@ class ExecuteProcessingJob:
                 started, sequence, tracker = self._video_chunk(
                     started, source, frozen, client, cancelled, tracker, chunk, sequence
                 )
+        self._pause_if_requested(started)  # (a pause asked after the last chunk: none to finish)
         observations, representations = self._uow.read(
             lambda session: _run_output(session, source.run_id)
         )
@@ -775,6 +792,7 @@ class ExecuteProcessingJob:
             )
         )
         self._cancel_if_requested(started)
+        self._pause_if_requested(started)
         return started, sequence, tracker
 
     def _chunk_work(
@@ -840,6 +858,35 @@ class ExecuteProcessingJob:
             self._cancel_if_requested(started)
         return started, (detected, faces, represented, spans)
 
+    def _pause_if_requested(self, started: StartedProcessingJob) -> None:
+        """At a chunk boundary (its checkpoint written): settle a requested pause `PAUSED`."""
+        if self._uow.write(lambda session: self._pause(session, started)):
+            raise ProcessingPausedError("the video run was paused")
+
+    def _pause(self, session: Session, started: StartedProcessingJob) -> bool:
+        run = ProcessingRunRepository(session).lock(started.job.processing_run_id)  # type: ignore[arg-type]
+        job = JobRepository(session).get(started.job.id)
+        if run is None or job is None or run.state != ProcessingRunState.PAUSING:
+            return False
+        now = self._clock()
+        if job.state != JobState.PAUSING or not SegmentRepository(session).close(
+            # (a pause ends the segment normally, at a checkpoint; the run says it is PAUSED)
+            started.execution_segment_id,
+            ExecutionSegmentState.COMPLETED,
+            reason="NORMAL",
+            now=now,
+        ):
+            raise ProcessingExecutionError("the paused job or its segment changed")
+        optimistic_locked_update(
+            session,
+            ProcessingRun,
+            run.id,
+            expected_revision=run.revision,
+            values={"state": ProcessingRunState.PAUSED, "updated_at": now},
+        )
+        JobRepository(session).transition(job.id, (JobState.PAUSING,), JobState.PAUSED, now=now)
+        return True
+
     def _settle_chunk(
         self,
         session: Session,
@@ -855,7 +902,9 @@ class ExecuteProcessingJob:
         tracker: Tracker,
     ) -> int:  # fmt: skip
         detected, faces, represented, spans = found
-        run, segment, _job = self._revalidate_settlement_context(session, source, started)
+        run, segment, _job = self._revalidate_settlement_context(
+            session, source, started, allow_pausing=True
+        )
         kept: list[tuple[uuid.UUID, int]] = []
         for position, pairs in faces.items():
             frame, result = chunk[position], represented[position]
@@ -1148,6 +1197,32 @@ class ExecuteProcessingJob:
             # A failed post-lock transition rolls back the entire short settlement. The original
             # external error remains the caller's failure; startup recovery owns this live claim.
             return
+
+
+def snapshot_runnable(
+    packages: RuntimePackageStore, planner: PerceptionPlanner
+) -> Callable[[Session, ProcessingRun], bool]:
+    """Whether a run's frozen snapshot can still be planned with what is installed (M6 D10: a
+    video run is resumed only then)."""
+
+    def runnable(session: Session, run: ProcessingRun) -> bool:
+        snapshot = session.get(ProcessingConfigurationSnapshot, run.configuration_snapshot_id)
+        try:
+            frozen = _frozen(None if snapshot is None else snapshot.canonical_json)
+            planner(
+                session,
+                packages,
+                detector_component_version_id=frozen.detector_component_version_id,
+                detector_model_export_id=frozen.detector_export_id,
+                embedder_model_export_id=frozen.embedder_export_id,
+                representation_space_id=frozen.representation_space_id,
+                providers=frozen.providers,
+            )
+        except (ProcessingExecutionError, RuntimeUnavailableError):
+            return False
+        return True
+
+    return runnable
 
 
 def _settle_tracks(decisions: list[_Decision], tracks: list[dict[str, Any]]) -> list[_Decision]:

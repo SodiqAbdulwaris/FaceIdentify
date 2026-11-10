@@ -171,6 +171,8 @@ class Backend:
     media_limits: MediaLimits | None = None
     state: LifecycleState = LifecycleState.INITIALIZING
     scheduler: SchedulerService | None = None
+    # The video loop (M6 step 7): one heavy movie at a time, beside the loop for everything else.
+    video_scheduler: SchedulerService | None = None
     library: OpenLibrary | None = None
     failure: str | None = None
     capabilities: dict[str, str] = field(default_factory=dict)
@@ -250,8 +252,9 @@ class Backend:
 
     def wake_scheduler(self) -> None:
         """Ask the scheduler to look at the queue now (a job was queued). Safe from any thread."""
-        if self.scheduler is not None:
-            self.scheduler.wake()
+        for scheduler in (self.scheduler, self.video_scheduler):
+            if scheduler is not None:
+                scheduler.wake()
 
     async def _boot(self) -> None:
         """Open the library, and only then start the scheduler: recovery has finished, so the loop
@@ -260,12 +263,18 @@ class Backend:
         library, processing = self.library, self.processing
         if library is not None and processing is not None and self.state != LifecycleState.FAILED:
             self.scheduler = SchedulerService(
-                self._run_once_for(library, processing), idle_seconds=processing.idle_seconds
+                self._run_once_for(library, processing, videos=False),
+                idle_seconds=processing.idle_seconds,
+            )
+            self.video_scheduler = SchedulerService(
+                self._run_once_for(library, processing, videos=True),
+                idle_seconds=processing.idle_seconds,
             )
             self.scheduler.start()
+            self.video_scheduler.start()
 
     def _run_once_for(
-        self, library: OpenLibrary, processing: ProcessingSettings
+        self, library: OpenLibrary, processing: ProcessingSettings, *, videos: bool
     ) -> Callable[[], RunOutcome]:
         settings, uow = self.settings, library.unit_of_work
 
@@ -275,7 +284,11 @@ class Backend:
         runner = ProcessingRunner(
             uow,
             ProcessingScheduler(
-                uow, new_id=settings.new_id, clock=settings.clock, lease_for=processing.lease_for
+                uow,
+                new_id=settings.new_id,
+                clock=settings.clock,
+                lease_for=processing.lease_for,
+                videos=videos,
             ),
             ExecuteProcessingJob(
                 uow,
@@ -298,7 +311,7 @@ class Backend:
                 # a reprocessed face that was forgotten is suppressed `ERASING`: erase it now
                 erase=library.eraser.erase,
             ),
-            owner=processing.owner,
+            owner=f"{processing.owner}-video" if videos else processing.owner,
             clock=settings.clock,
             on_started=self.announce_run,
         )
@@ -316,8 +329,9 @@ class Backend:
         self.state = LifecycleState.SHUTTING_DOWN
         try:
             try:
-                if self.scheduler is not None:
-                    await self.scheduler.stop()
+                for scheduler in (self.scheduler, self.video_scheduler):
+                    if scheduler is not None:
+                        await scheduler.stop()
             finally:  # the workers stop whatever the drain did
                 if self.processing is not None and self.processing.close is not None:
                     await anyio.to_thread.run_sync(self.processing.close)  # blocking

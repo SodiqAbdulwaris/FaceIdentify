@@ -9,6 +9,13 @@ starts from nothing and the old attempt is left exactly as it ended.
 The new run freezes a *copy* of the old run's configuration snapshot (one immutable snapshot per
 run, §13), so the retry executes the same semantic intent; it does not re-resolve mutable settings.
 
+A video run (M6 D10) that stopped part way (`INTERRUPTED` or `FAILED`) with at least one chunk
+checkpoint, and whose frozen snapshot can still be planned (the same models are installed: the
+caller's `runnable`), is retried by RESUMING it: a new Job on the SAME run (API 15: "a retry may
+continue the same logical ProcessingRun from a valid checkpoint with a new ExecutionSegment"), the
+run back to `PENDING`, so it continues after its last chunk and nothing committed is redone. Any
+other video retry is a new run as for an image, the old run's private output left untouched.
+
 A retry keeps what it retries: the job type, and for a reprocess run the generation it replaces
 (`supersedes_run_id`). A first run is not retried once its source has an accepted result, and a
 reprocess run only while the generation it would replace is still current and nothing else of the
@@ -32,8 +39,10 @@ from backend.app.processing.process_source import (
     require_no_run_in_flight,
     require_processable_source,
 )
+from backend.app.processing.repository import CheckpointRepository
 from backend.app.processing.run_repository import ProcessingRunRepository, SnapshotRepository
 from backend.app.sources.models import Source, SourceKind
+from backend.infrastructure.db.optimistic import optimistic_locked_update
 from backend.infrastructure.db.unit_of_work import UnitOfWork
 
 _RETRYABLE_JOB_STATES = (JobState.INTERRUPTED, JobState.FAILED)
@@ -52,7 +61,10 @@ class RetryProcessingUseCase:
         new_id: Callable[[], uuid.UUID],
         clock: Callable[[], datetime],
         wake_scheduler: Callable[[], None],
+        runnable: Callable[[Session, ProcessingRun], bool] = lambda _session, _run: True,
     ) -> None:
+        """`runnable`: whether a run's frozen snapshot can still be planned here (D10)."""
+        self._runnable = runnable
         self._uow = unit_of_work
         self._new_id = new_id
         self._clock = clock
@@ -81,9 +93,7 @@ class RetryProcessingUseCase:
             )
         if session.scalar(select(Job.id).where(Job.previous_job_id == old_job.id).limit(1)):
             raise ProcessSourceError(f"job {job_id} has already been retried")
-        if require_processable_source(session, old_run.source_id) == SourceKind.VIDEO:
-            # ponytail: until a video retry resumes from its checkpoint (M6 step 7, D10)
-            raise ProcessSourceError("a video run cannot be retried yet")
+        kind = require_processable_source(session, old_run.source_id)
         current = session.scalar(
             select(Source.current_processing_run_id).where(Source.id == old_run.source_id)
         )
@@ -98,10 +108,17 @@ class RetryProcessingUseCase:
                     f"the generation run {old_run.id} would replace is no longer current"
                 )
             require_no_run_in_flight(session, old_run.source_id)
+        now = self._clock()
+        if (
+            kind == SourceKind.VIDEO
+            and old_run.state in (ProcessingRunState.INTERRUPTED, ProcessingRunState.FAILED)
+            and CheckpointRepository(session).latest_valid(old_run.id) is not None
+            and self._runnable(session, old_run)
+        ):
+            return self._resume(session, old_job, old_run, now)
         old_snapshot = SnapshotRepository(session).get(old_run.configuration_snapshot_id)
         assert old_snapshot is not None  # the run's foreign key guarantees the snapshot
 
-        now = self._clock()
         snapshot = SnapshotRepository(session).create(
             snapshot_id=self._new_id(),
             schema_version=old_snapshot.schema_version,
@@ -122,20 +139,50 @@ class RetryProcessingUseCase:
                 updated_at=now,
             )
         )
-        job = JobRepository(session).add(
-            Job(
-                id=self._new_id(),
-                type=old_job.type,
-                processing_run_id=run.id,
-                previous_job_id=old_job.id,
-                state=JobState.QUEUED,
-                priority=old_job.priority,
-                payload_schema_version=old_job.payload_schema_version,
-                payload_json=old_job.payload_json,
-                progress_mode=old_job.progress_mode,
-                attempt_number=old_job.attempt_number + 1,
-                created_at=now,
-                updated_at=now,
-            )
+        job_id = self._next_job(session, old_job, run.id, now)
+        return ScheduledProcessing(old_run.source_id, run.id, job_id)
+
+    def _resume(
+        self, session: Session, old_job: Job, run: ProcessingRun, now: datetime
+    ) -> ScheduledProcessing:
+        """D10: the same run continues after its newest chunk checkpoint, under a new job."""
+        changed = optimistic_locked_update(
+            session,
+            ProcessingRun,
+            run.id,
+            expected_revision=run.revision,
+            values={
+                "state": ProcessingRunState.PENDING,
+                "failed_at": None,
+                "failure_code": None,
+                "failure_detail": None,
+                "updated_at": now,
+            },
         )
-        return ScheduledProcessing(old_run.source_id, run.id, job.id)
+        assert changed == 1  # the run's write lock was taken by the caller
+        job_id = self._next_job(session, old_job, run.id, now)
+        return ScheduledProcessing(run.source_id, run.id, job_id)
+
+    def _next_job(
+        self, session: Session, old_job: Job, run_id: uuid.UUID, now: datetime
+    ) -> uuid.UUID:
+        return (
+            JobRepository(session)
+            .add(
+                Job(
+                    id=self._new_id(),
+                    type=old_job.type,
+                    processing_run_id=run_id,
+                    previous_job_id=old_job.id,
+                    state=JobState.QUEUED,
+                    priority=old_job.priority,
+                    payload_schema_version=old_job.payload_schema_version,
+                    payload_json=old_job.payload_json,
+                    progress_mode=old_job.progress_mode,
+                    attempt_number=old_job.attempt_number + 1,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            .id
+        )

@@ -221,8 +221,8 @@ async def test_recovery_finishes_a_crashed_run_before_the_scheduler_claims_new_w
     async with app.router.lifespan_context(app):
         await until(lambda: states(backend, Job) == ["COMPLETED", "COMPLETED"])
 
-        assert len(seen_at_start) == 1
-        assert len(seen_at_start[0]) == 1  # the crashed run was accepted by recovery first
+        assert len(seen_at_start) == 2  # the loop for videos and the loop for the rest (M6)
+        assert all(len(seen) == 1 for seen in seen_at_start)  # recovery accepted the run first
         assert states(backend, ProcessingRun) == ["COMPLETED", "COMPLETED"]
         # Both faces are the same planted vector: the new job could only match the identity the
         # crashed run created if recovery had already accepted that run before it was claimed.

@@ -9,8 +9,9 @@ This use case writes it, in one transaction that takes the run's write lock firs
 * a **running** job asks to stop: job and run `CANCELLING`; the executor settles `CANCELLED` at its
   next safe boundary, and its private output stays private;
 * a run already `CANCELLING` or `CANCELLED` is a repeat: nothing changes, so a double click is safe;
+* a **paused** video run (M6 step 7) is cancelled outright, job and run `CANCELLED`;
 * anything else (`FINALIZING`, whose FINAL result is being made authoritative, or a run that is
-  over, paused or interrupted) cannot be cancelled here.
+  over or interrupted) cannot be cancelled here.
 """
 
 import uuid
@@ -19,7 +20,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.jobs.models import Job, JobState
@@ -64,14 +64,15 @@ class CancelProcessingUseCase:
             raise RunNotFoundError(f"run {run_id} does not exist")
         if run.state in (ProcessingRunState.CANCELLING, ProcessingRunState.CANCELLED):
             return CancelResult(run_id, CancelOutcome.ALREADY)
-        job = session.scalars(
-            select(Job)
-            .where(Job.processing_run_id == run_id)  # a run has exactly one job
-            .execution_options(populate_existing=True)
-        ).one_or_none()
+        job = JobRepository(session).current_for_run(run_id)
         if job and job.state == JobState.QUEUED:  # its run is PENDING: nothing has started
             self._settle(
                 session, run, job, JobState.QUEUED, JobState.CANCELLED, ProcessingRunState.CANCELLED
+            )
+            return CancelResult(run_id, CancelOutcome.CANCELLED)
+        if run.state == ProcessingRunState.PAUSED and job and job.state == JobState.PAUSED:
+            self._settle(
+                session, run, job, JobState.PAUSED, JobState.CANCELLED, ProcessingRunState.CANCELLED
             )
             return CancelResult(run_id, CancelOutcome.CANCELLED)
         if run.state == ProcessingRunState.RUNNING and job and job.state == JobState.RUNNING:

@@ -7,6 +7,7 @@ The real executor, lease, decoder and database on a clip of painted squares
 
 import threading
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,18 +16,28 @@ from sqlalchemy import select, update
 
 from backend.app.jobs.models import Job, JobState
 from backend.app.memory.models import Observation, Representation
-from backend.app.processing.execute_job import ProcessingCancelledError, ProcessingExecutionError
+from backend.app.processing.accept_run import AcceptProcessingRunUseCase
+from backend.app.processing.cancel import RunNotFoundError
+from backend.app.processing.execute_job import (
+    ProcessingCancelledError,
+    ProcessingExecutionError,
+    ProcessingPausedError,
+    snapshot_runnable,
+)
 from backend.app.processing.models import (
     CheckpointKind,
     ProcessingCheckpoint,
     ProcessingRun,
     ProcessingRunState,
 )
-from backend.app.processing.process_source import ProcessSourceError
+from backend.app.processing.pause import PauseError, PauseOutcome, PauseProcessingUseCase
 from backend.app.processing.repository import SegmentRepository
 from backend.app.processing.retry import RetryProcessingUseCase
-from backend.app.processing.scheduler import StartedProcessingJob
+from backend.app.processing.runner import ProcessingRunner, RunOutcomeKind
+from backend.app.processing.scheduler import ProcessingScheduler, StartedProcessingJob
+from backend.app.runtime.package_store import RuntimePackageStore
 from backend.app.runtime.perception_client import Detected, ProviderFallback, ProviderUnavailable
+from backend.app.runtime.worker_config import RuntimeUnavailableError
 from backend.app.sources.models import Source
 from backend.infrastructure.media.video import CorruptVideoError
 from backend.infrastructure.storage.files import BytesMissingError
@@ -292,21 +303,290 @@ def test_a_referenced_video_without_faces_finishes_with_no_tracks(
         assert session.scalars(select(Representation)).all() == []
 
 
-def test_a_failed_video_run_is_not_retried_yet(
+# --- pause and resume (M6 step 7; TST-066) ----------------------------------------------------
+
+
+def pauser(pipeline: Pipeline) -> PauseProcessingUseCase:
+    return PauseProcessingUseCase(pipeline.lib.unit_of_work, clock=pipeline.clock)
+
+
+def segments(pipeline: Pipeline, run_id: uuid.UUID) -> list[Any]:
+    with pipeline.lib.session_factory() as session:
+        return SegmentRepository(session).list_for_run(run_id)
+
+
+def job_state(pipeline: Pipeline, job_id: uuid.UUID) -> str:
+    with pipeline.lib.session_factory() as session:
+        job = session.get(Job, job_id)
+        assert job is not None
+        return job.state
+
+
+def test_a_paused_run_stops_at_its_chunk_and_resumes_after_it(
     pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
 ) -> None:
     started = claim(pipeline, video)
-    perception.drop_vector = True
-    with pytest.raises(ProcessingExecutionError):
+    run_id = started.job.processing_run_id
+    assert run_id is not None
+
+    def pause_at(number: int) -> None:
+        if number == 2:
+            pauser(pipeline).pause(run_id)
+
+    perception.on_detect = pause_at
+
+    with pytest.raises(ProcessingPausedError):
         video_executor(pipeline).execute(started)
 
-    with pytest.raises(ProcessSourceError, match="video run cannot be retried yet"):
-        RetryProcessingUseCase(
-            pipeline.lib.unit_of_work,
-            new_id=pipeline.new_id,
-            clock=pipeline.clock,
-            wake_scheduler=lambda: None,
-        ).retry(started.job.id)
+    assert run_state(pipeline, run_id) == ProcessingRunState.PAUSED
+    assert job_state(pipeline, started.job.id) == JobState.PAUSED
+    assert len(checkpoints(pipeline, run_id)) == 1  # the chunk in hand was finished first
+    assert [s.ended_reason for s in segments(pipeline, run_id)] == ["NORMAL"]
+    first_chunk = observations(pipeline, run_id)
+    assert pauser(pipeline).pause(run_id) == PauseOutcome.ALREADY
+
+    assert pauser(pipeline).resume(run_id) == PauseOutcome.RESUMED
+    assert pauser(pipeline).resume(run_id) == PauseOutcome.ALREADY  # (queued: a repeat)
+    perception.on_detect = None
+    again = pipeline.scheduler().claim_source_job("worker")
+    assert again is not None
+    executed = video_executor(pipeline).execute(again)
+
+    assert executed.processing_run_id == run_id
+    assert perception.log.count("detect") == 6  # every frame once, across the pause
+    assert [o.id for o in observations(pipeline, run_id)][: len(first_chunk)] == [
+        o.id for o in first_chunk
+    ]
+    assert len(segments(pipeline, run_id)) == 2  # a new segment after the resume
+
+
+def test_a_pause_asked_after_the_last_chunk_pauses_before_recognition(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    started = claim(pipeline, video)
+    run_id = started.job.processing_run_id
+    assert run_id is not None
+
+    def pause_at(number: int) -> None:
+        if number == 6:
+            pauser(pipeline).pause(run_id)
+
+    perception.on_detect = pause_at
+
+    with pytest.raises(ProcessingPausedError):
+        video_executor(pipeline).execute(started)
+
+    assert len(checkpoints(pipeline, run_id)) == 2  # every chunk done; nothing left but FINAL
+    pauser(pipeline).resume(run_id)
+    perception.on_detect = None
+    again = pipeline.scheduler().claim_source_job("worker")
+    assert again is not None
+    video_executor(pipeline).execute(again)
+    assert run_state(pipeline, run_id) == ProcessingRunState.FINALIZING
+    assert perception.log.count("detect") == 6
+
+
+def test_only_a_running_video_run_is_paused_and_only_a_paused_one_resumed(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    pipeline.enqueue(video)
+    with pipeline.lib.session_factory() as session:
+        run_id = session.scalars(select(ProcessingRun.id)).one()
+    image_run = pipeline.execute(pipeline.import_image())
+
+    with pytest.raises(PauseError, match="PENDING"):
+        pauser(pipeline).pause(run_id)  # queued, not running
+    with pytest.raises(PauseError, match="not a video"):
+        pauser(pipeline).pause(image_run)
+    with pytest.raises(PauseError, match="cannot be resumed"):
+        pauser(pipeline).resume(image_run)
+    with pytest.raises(RunNotFoundError):
+        pauser(pipeline).pause(uuid.uuid4())
+
+
+def test_a_settlement_that_finds_the_paused_job_changed_fails_safely(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    started = claim(pipeline, video)
+    run_id = started.job.processing_run_id
+    assert run_id is not None
+
+    def pause_run_only(number: int) -> None:
+        if number == 2:  # the run is PAUSING but its job is not: not ours to settle
+            with pipeline.lib.session_factory() as session:
+                session.execute(
+                    update(ProcessingRun)
+                    .where(ProcessingRun.id == run_id)
+                    .values(state=ProcessingRunState.PAUSING)
+                )
+                session.commit()
+
+    perception.on_detect = pause_run_only
+
+    with pytest.raises(ProcessingExecutionError, match="paused job or its segment changed"):
+        video_executor(pipeline).execute(started)
+
+
+def test_the_runner_reports_a_paused_run(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    pipeline.enqueue(video)
+    uow = pipeline.lib.unit_of_work
+    runner = ProcessingRunner(
+        uow,
+        pipeline.scheduler(),
+        video_executor(pipeline),
+        AcceptProcessingRunUseCase(uow, new_id=pipeline.new_id, clock=pipeline.clock),
+        owner="runner",
+        clock=pipeline.clock,
+    )
+
+    def pause_at(number: int) -> None:
+        if number == 1:
+            with pipeline.lib.session_factory() as session:
+                run_id = session.scalars(select(ProcessingRun.id)).one()
+            pauser(pipeline).pause(run_id)
+
+    perception.on_detect = pause_at
+
+    outcome = runner.run_once()
+
+    assert outcome.kind == RunOutcomeKind.PAUSED
+    assert runner.run_once().kind == RunOutcomeKind.IDLE  # a paused job is not claimed again
+
+
+# --- retry of a video run (M6 step 7, D10; TST-064 video half) --------------------------------
+
+
+def retrier(pipeline: Pipeline, runnable: bool = True) -> RetryProcessingUseCase:
+    return RetryProcessingUseCase(
+        pipeline.lib.unit_of_work,
+        new_id=pipeline.new_id,
+        clock=pipeline.clock,
+        wake_scheduler=lambda: None,
+        runnable=lambda _session, _run: runnable,
+    )
+
+
+def fail_at(perception: PaintedPerception, frame: int) -> None:
+    def broken(number: int) -> None:
+        if number == frame:
+            raise OSError("the disk went away")
+
+    perception.on_detect = broken
+
+
+def test_a_failed_video_run_is_retried_from_its_last_chunk(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    started = claim(pipeline, video)
+    run_id = started.job.processing_run_id
+    assert run_id is not None
+    fail_at(perception, 5)  # inside chunk two
+    with pytest.raises(OSError, match="disk went away"):
+        video_executor(pipeline).execute(started)
+    first_chunk = observations(pipeline, run_id)
+
+    scheduled = retrier(pipeline).retry(started.job.id)
+
+    assert scheduled.processing_run_id == run_id  # the same run continues
+    assert scheduled.job_id != started.job.id
+    perception.on_detect = None
+    again = pipeline.scheduler().claim_source_job("worker")
+    assert again is not None
+    assert again.job.id == scheduled.job_id
+    video_executor(pipeline).execute(again)
+    assert perception.log.count("detect") == 7  # frames 1-5, then 5 and 6 again: none of chunk one
+    resumed = observations(pipeline, run_id)
+    assert [o.id for o in resumed[: len(first_chunk)]] == [o.id for o in first_chunk]
+    assert len({(o.timestamp_ms, o.bbox_x) for o in resumed}) == len(resumed)  # none twice
+    pipeline.accept(run_id, apply_index=True)  # the resumed run's own (newest) job completes
+    assert run_state(pipeline, run_id) == ProcessingRunState.COMPLETED
+    assert job_state(pipeline, scheduled.job_id) == JobState.COMPLETED
+    assert job_state(pipeline, started.job.id) == JobState.FAILED  # history is not rewritten
+
+
+@pytest.mark.parametrize("why", ["models changed", "no chunk done"])
+def test_a_video_run_that_cannot_resume_is_retried_as_a_new_run(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID, why: str
+) -> None:
+    started = claim(pipeline, video)
+    run_id = started.job.processing_run_id
+    assert run_id is not None
+    fail_at(perception, 5 if why == "models changed" else 2)
+    with pytest.raises(OSError, match="disk went away"):
+        video_executor(pipeline).execute(started)
+    kept = observations(pipeline, run_id)
+
+    scheduled = retrier(pipeline, runnable=why != "models changed").retry(started.job.id)
+
+    assert scheduled.processing_run_id != run_id
+    with pipeline.lib.session_factory() as session:
+        new_run = session.get(ProcessingRun, scheduled.processing_run_id)
+        assert new_run is not None
+        assert new_run.parent_run_id == run_id
+    assert run_state(pipeline, run_id) == ProcessingRunState.FAILED  # left as it ended
+    assert [o.id for o in observations(pipeline, run_id)] == [o.id for o in kept]
+
+
+def test_a_snapshot_is_runnable_only_while_it_can_be_planned(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
+) -> None:
+    started = claim(pipeline, video)
+    packages = RuntimePackageStore(pipeline.lib.roots, new_id=pipeline.new_id)
+
+    def unplannable(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeUnavailableError("the model is not installed", ())
+
+    with pipeline.lib.session_factory() as session:
+        run = session.get(ProcessingRun, started.job.processing_run_id)
+        assert run is not None
+        assert snapshot_runnable(packages, lambda *a, **k: pipeline.plan)(session, run)
+        assert not snapshot_runnable(packages, unplannable)(session, run)
+        run.configuration_snapshot_id = uuid.uuid4()  # (no such snapshot: malformed)
+        assert not snapshot_runnable(packages, lambda *a, **k: pipeline.plan)(session, run)
+        session.rollback()
+
+
+# --- one heavy movie at a time (M6 step 7; TST-068) -------------------------------------------
+
+
+def scheduler_for(pipeline: Pipeline, videos: bool) -> ProcessingScheduler:
+    return ProcessingScheduler(
+        pipeline.lib.unit_of_work,
+        new_id=pipeline.new_id,
+        clock=pipeline.clock,
+        lease_for=timedelta(minutes=5),
+        videos=videos,
+    )
+
+
+def test_one_movie_runs_at_a_time_while_images_go_on_beside_it(
+    pipeline: Pipeline, perception: PaintedPerception, tmp_path: Path
+) -> None:
+    first = import_video(pipeline, painted_clip(tmp_path / "one.mp4", seconds=1))
+    second = import_video(pipeline, painted_clip(tmp_path / "two.mp4", seconds=1))
+    image = pipeline.import_image()
+    for source in (first, second, image):
+        pipeline.enqueue(source)
+    movies, others = scheduler_for(pipeline, True), scheduler_for(pipeline, False)
+
+    running = movies.claim_source_job("movies")
+    assert running is not None
+    assert movies.claim_source_job("movies") is None  # the second movie stays QUEUED
+    beside = others.claim_source_job("others")
+    assert beside is not None  # an image runs beside the movie
+    assert others.claim_source_job("others") is None  # the other queue never takes a movie
+    with pipeline.lib.session_factory() as session:
+        claimed = session.get(ProcessingRun, beside.job.processing_run_id)
+        assert claimed is not None
+        assert claimed.source_id == image
+
+    video_executor(pipeline).execute(running)  # (FINALIZING still holds the slot)
+    assert movies.claim_source_job("movies") is None
+    pipeline.accept(running.job.processing_run_id, apply_index=True)  # type: ignore[arg-type]
+    after = movies.claim_source_job("movies")
+    assert after is not None  # the first is done: the second starts
 
 
 def test_a_provider_fallback_inside_a_chunk_redoes_it_under_the_new_segment(
@@ -330,8 +610,7 @@ def test_a_provider_fallback_inside_a_chunk_redoes_it_under_the_new_segment(
 
     video_executor(pipeline).execute(started)
 
-    with pipeline.lib.session_factory() as session:
-        first, second = SegmentRepository(session).list_for_run(run_id)
+    first, second = segments(pipeline, run_id)
     assert first.ended_reason == "FALLBACK"
     with pipeline.lib.session_factory() as session:
         rows = session.scalars(
