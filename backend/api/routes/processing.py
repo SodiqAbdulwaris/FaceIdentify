@@ -4,7 +4,12 @@ and 6; M4 W3.3).
 * `POST /sources/{id}/process` is asynchronous: it commits a snapshot, a run and a queued job
   atomically, wakes the scheduler, and answers `202` with the run (and its job) to track. The
   request it runs under comes from the host's development policy profile
-  (`ProcessingSettings.request_for`), never from the client.
+  (`ProcessingSettings.request_for`), never from the client. A source that already has a result
+  is `409 SOURCE_ALREADY_PROCESSED`: it is reprocessed instead.
+* `POST /sources/{id}/reprocess` (API 5.4, persistence 12.1) does the same for a source that has a
+  result: the new run names the generation it will replace (`supersedes_run_id`), and until it is
+  accepted the current result stays what every view shows. `409 SOURCE_STATE_CONFLICT` when the
+  source has no result or cannot be processed, `409 SOURCE_BUSY` while a run of it is in flight.
 * A run is read with its job: the job is what is scheduled, the run is the logical history.
   `failure_code` is shown; failure detail text stays in the database.
 * `POST /processing-runs/{id}/cancel` cancels a queued run at once and asks a running one to stop
@@ -36,7 +41,7 @@ from backend.api.pagination import (
 )
 from backend.api.routes.sources import gone_sources, recheck_if_missing, require_visible_source
 from backend.api.startup import Backend, ProcessingSettings, ProcessingUnavailableError
-from backend.app.jobs.models import Job, JobPriority, JobType
+from backend.app.jobs.models import SOURCE_JOB_TYPES, Job, JobPriority
 from backend.app.processing.cancel import (
     CancelError,
     CancelOutcome,
@@ -52,6 +57,9 @@ from backend.app.processing.models import (
 from backend.app.processing.process_source import (
     ProcessSourceError,
     ProcessSourceUseCase,
+    ScheduledProcessing,
+    SourceAlreadyProcessedError,
+    SourceBusyError,
 )
 from backend.app.processing.retry import RetryProcessingUseCase
 from backend.app.recognition.reasoner import MAX_SIMILARITY
@@ -87,7 +95,8 @@ class ProcessingRunDetail(BaseModel):
     id: str
     source_id: str
     state: str
-    parent_run_id: str | None
+    parent_run_id: str | None  # retry lineage
+    supersedes_run_id: str | None  # reprocessing: the generation this run replaces once accepted
     requested_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -143,7 +152,7 @@ def _details(session: Session, runs: list[ProcessingRun]) -> list[ProcessingRunD
     jobs: dict[uuid.UUID, Job] = {}
     for job in session.scalars(
         select(Job).where(
-            Job.processing_run_id.in_([run.id for run in runs]), Job.type == JobType.PROCESS_SOURCE
+            Job.processing_run_id.in_([run.id for run in runs]), Job.type.in_(SOURCE_JOB_TYPES)
         )
     ):
         assert job.processing_run_id is not None  # selected by it
@@ -164,6 +173,7 @@ def _details(session: Session, runs: list[ProcessingRun]) -> list[ProcessingRunD
             source_id=str(run.source_id),
             state=run.state,
             parent_run_id=None if run.parent_run_id is None else str(run.parent_run_id),
+            supersedes_run_id=None if run.supersedes_run_id is None else str(run.supersedes_run_id),
             requested_at=run.requested_at,
             started_at=run.started_at,
             completed_at=run.completed_at,
@@ -208,12 +218,11 @@ def _still_there(library: Library, check: Callable[[Session], object]) -> None:
 # --- routes ---------------------------------------------------------------------------------
 
 
-@router.post("/sources/{source_id}/process", status_code=202)
-def process_source(
-    source_id: uuid.UUID,
-    library: Library,
-    backend: Annotated[Backend, Depends(get_backend)],
+def _schedule(
+    library: Library, backend: Backend, source_id: uuid.UUID, *, reprocess: bool
 ) -> ProcessingRunDetail:
+    """Shared by `process` and `reprocess`: check the source, resolve the host's request, commit
+    the run and its job, announce it, and show it."""
     library.unit_of_work.read(lambda session: _require_source(session, source_id))
     recheck_if_missing(library, backend, source_id)  # a missing original is verified on use (#179)
     settings = processing_settings(backend)  # (after the Source: a gone one is 404, not 503)
@@ -223,13 +232,15 @@ def process_source(
         raise ApiError(
             503, "PROCESSING_UNAVAILABLE", "No processing configuration is available."
         ) from None
+    use_case = ProcessSourceUseCase(
+        library.unit_of_work,
+        new_id=backend.settings.new_id,
+        clock=backend.settings.clock,
+        wake_scheduler=backend.wake_scheduler,
+    )
+    command = use_case.reprocess if reprocess else use_case.process
     try:
-        scheduled = ProcessSourceUseCase(
-            library.unit_of_work,
-            new_id=backend.settings.new_id,
-            clock=backend.settings.clock,
-            wake_scheduler=backend.wake_scheduler,
-        ).process(
+        scheduled: ScheduledProcessing = command(
             source_id,
             processing_request=request,
             priority=JobPriority.INTERACTIVE,
@@ -237,14 +248,49 @@ def process_source(
         )
     except ProcessSourceError as error:
         _still_there(library, lambda session: _require_source(session, source_id))
+        details = {"reason": str(error)}
+        if isinstance(error, SourceAlreadyProcessedError):
+            raise ApiError(
+                409, "SOURCE_ALREADY_PROCESSED",
+                "The source already has a result; reprocess it instead.", details=details,
+            ) from None  # fmt: skip
+        if isinstance(error, SourceBusyError):
+            raise ApiError(
+                409, "SOURCE_BUSY", "The source is being processed; cancel that first.",
+                details=details,
+            ) from None  # fmt: skip
+        if reprocess:
+            raise ApiError(
+                409, "SOURCE_STATE_CONFLICT", "The source cannot be reprocessed now.",
+                details=details,
+            ) from None  # fmt: skip
         raise ApiError(
-            409, "SOURCE_NOT_PROCESSABLE", "The source cannot be processed now.",
-            details={"reason": str(error)},
-        ) from None  # fmt: skip
+            409, "SOURCE_NOT_PROCESSABLE", "The source cannot be processed now.", details=details
+        ) from None
     backend.announce_run(scheduled.processing_run_id, "processing_run.created")
     return library.unit_of_work.read(
         lambda session: _run_detail(session, scheduled.processing_run_id)
     )
+
+
+@router.post("/sources/{source_id}/process", status_code=202)
+def process_source(
+    source_id: uuid.UUID,
+    library: Library,
+    backend: Annotated[Backend, Depends(get_backend)],
+) -> ProcessingRunDetail:
+    return _schedule(library, backend, source_id, reprocess=False)
+
+
+@router.post("/sources/{source_id}/reprocess", status_code=202)
+def reprocess_source(
+    source_id: uuid.UUID,
+    library: Library,
+    backend: Annotated[Backend, Depends(get_backend)],
+) -> ProcessingRunDetail:
+    """Reprocess a source that has a result (API 5.4). The current result stays current until the
+    new run is accepted; then the source emits `source.updated`."""
+    return _schedule(library, backend, source_id, reprocess=True)
 
 
 def _listing(
@@ -343,9 +389,7 @@ def retry_run(
     def find_job(session: Session) -> tuple[uuid.UUID, uuid.UUID | None]:
         run = visible_run(session, run_id)
         return run.source_id, session.scalar(
-            select(Job.id).where(
-                Job.processing_run_id == run_id, Job.type == JobType.PROCESS_SOURCE
-            )
+            select(Job.id).where(Job.processing_run_id == run_id, Job.type.in_(SOURCE_JOB_TYPES))
         )
 
     source_id, job_id = library.unit_of_work.read(find_job)

@@ -58,7 +58,13 @@ def main() -> None:
                 return result
 
             AcceptProcessingRunUseCase._accept = accept_then_park  # type: ignore[method-assign]
-        run_id = pipeline.execute(uuid.UUID(catalog["source_id"]))
+        source_id = uuid.UUID(catalog["source_id"])
+        # reprocess (M6 step 1): the parent accepted a first generation before starting the child
+        run_id = (
+            pipeline.reexecute(source_id)
+            if catalog.get("reprocess")
+            else pipeline.execute(source_id)
+        )
         if stage == "final":
             park()
         pipeline.accept(run_id, apply_index=False)

@@ -427,7 +427,7 @@ class PermanentSourceDeletion:
         run(
             update(ProcessingRun)
             .where(ProcessingRun.source_id == source_id)
-            .values(parent_run_id=None)
+            .values(parent_run_id=None, supersedes_run_id=None)
         )
         run(update(Source).where(Source.id == source_id).values(current_processing_run_id=None))
         run(delete(ProcessingRun).where(ProcessingRun.source_id == source_id))

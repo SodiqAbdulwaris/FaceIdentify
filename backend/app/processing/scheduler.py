@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from backend.app.jobs.models import JobState, JobType
+from backend.app.jobs.models import SOURCE_JOB_TYPES, JobState
 from backend.app.jobs.repository import ClaimedJob, JobRepository
 from backend.app.processing.models import ProcessingRun, ProcessingRunState
 from backend.app.processing.repository import SegmentRepository
@@ -30,7 +30,8 @@ class StartedProcessingJob:
 
 
 class ProcessingScheduler:
-    """Claims only PROCESS_SOURCE work and starts its run in one short write transaction."""
+    """Claims only source-processing work (a first run or a reprocess run) and starts its run in
+    one short write transaction."""
 
     def __init__(
         self,
@@ -63,7 +64,7 @@ class ProcessingScheduler:
             owner=owner,
             now=now,
             lease_for=self._lease_for,
-            types=(JobType.PROCESS_SOURCE,),
+            types=SOURCE_JOB_TYPES,
         )
         if job is None:
             return None
