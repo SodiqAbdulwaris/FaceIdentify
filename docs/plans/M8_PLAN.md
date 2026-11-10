@@ -2,7 +2,7 @@
 
 **Status:** drafted 2026-11-10 by the agent under the owner's delegation (2026-11-09: "i'll leave the rest of
 the decisions entirely to you"; scope "Everything through M8"). Every decision in section 8 is a **delegated
-decision**: the owner may reverse any of them. Nothing here is built. **Scope:** tracker milestone M8 (TST-078
+decision**: the owner may reverse any of them. Steps 1 and 2 are built (see their entries); the rest is not. **Scope:** tracker milestone M8 (TST-078
 to TST-086) and SEC-008 in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md): a Windows
 installer of FaceIdentify for **personal use** (the owner's own computers), not a public release.
 **Milestone gate (tracker):** "The exact packaged release candidate passes its applicable release gates."
