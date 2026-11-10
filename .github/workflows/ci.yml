@@ -135,6 +135,9 @@ jobs:
       # The shell embeds the built web app, so it must exist before the shell compiles.
       - run: npm ci
       - run: npm run build
+      # Every shipped component has a licence the application can ship (M8 step 1, SEC-008).
+      - name: Third-party licence inventory
+        run: uv run python scripts/generate_notices.py --check
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
