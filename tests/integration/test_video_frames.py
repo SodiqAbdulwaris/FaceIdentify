@@ -131,7 +131,35 @@ def drain(stream: Any, times: Any, tail: Any) -> None:
         pass
 
 
-@pytest.mark.parametrize(("rate", "width"), [(0, 160), (2, 0)])
+def test_a_variable_frame_rate_is_sampled_by_its_own_times(tmp_path: Path) -> None:
+    # Frames every 0.12 s, then a 0.56 s gap after 0.88 s (VFR, Matroska keeps the times).
+    clip = make_clip(
+        tmp_path / "vfr.mkv",
+        encode=("-vf", "setpts='(N*0.13+gte(N,8)*0.4)/TB'", "-fps_mode", "vfr", "-c:v", "mpeg4"),
+    )
+    tools = installed_tools()
+
+    whole = list(sampled_frames(tools, clip, width=160, height=120))
+    rest = list(sampled_frames(tools, clip, width=160, height=120, after_slot=1))
+
+    assert [(f.slot, f.timestamp_ms) for f in whole[:4]] == [(0, 0), (1, 520), (2, 1440), (3, 1560)]
+    assert [(f.slot, f.timestamp_ms) for f in rest] == [(f.slot, f.timestamp_ms) for f in whole[2:]]
+
+
+def test_a_resume_never_skips_a_frame_on_a_slot_boundary(tmp_path: Path) -> None:
+    clip = make_clip(tmp_path / "thirty.mp4", seconds=2, rate=30)  # a frame at exactly 2/3 s
+    tools = installed_tools()
+
+    whole = list(sampled_frames(tools, clip, width=160, height=120, rate=3))
+    rest = list(sampled_frames(tools, clip, width=160, height=120, rate=3, after_slot=1))
+
+    expected = [(f.slot, f.timestamp_ms) for f in whole if f.slot > 1]
+    assert [(f.slot, f.timestamp_ms) for f in rest] == expected
+
+
+@pytest.mark.parametrize(
+    ("rate", "width"), [(0, 160), (2, 0), (float("nan"), 160), (float("inf"), 160)]
+)
 def test_a_rate_and_a_size_must_be_positive(tmp_path: Path, rate: float, width: int) -> None:
     with pytest.raises(ValueError, match="positive"):
         next(
