@@ -723,7 +723,7 @@ class AcceptProcessingRunUseCase:
         *,
         occurrence: bool = True,
     ) -> None:
-        """`occurrence` False: a video face, whose occurrence is its track's (`_track_occurrence`)."""
+        """`occurrence` False: a video face; its occurrence is its track's (`_track_occurrence`)."""
         candidates = self._candidates(decision.evidence)
         payload: dict[str, object] = {**decision.evidence}
         if decision.outcome is RecognitionOutcome.CREATE_NEW:
