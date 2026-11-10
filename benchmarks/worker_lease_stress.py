@@ -80,13 +80,16 @@ def run_once(
     searches: list[float] = []
     slots = threading.BoundedSemaphore(SEARCH_SLOTS)
     errors: list[BaseException] = []
+    completed = 0  # background images detected and represented (written by `process` only)
 
     def process() -> None:
+        nonlocal completed
         try:
             for _ in range(images):
                 client = client_for(lease)  # a fresh client per job, as the executor gets
                 found = client.detect(pixels)
                 client.represent(pixels, _detections(found))
+                completed += 1
         except BaseException as error:  # noqa: BLE001 - reported below
             errors.append(error)
 
@@ -143,7 +146,8 @@ def run_once(
         "background": of(False),
         # a background grant made while searches waited: the burst ran out (a fairness grant)
         "fairness_grants": sum(not r.interactive and r.queued_interactive > 0 for r in records),
-        "background_images_per_s": round(images / elapsed, 2),
+        "background_images_completed": completed,
+        "background_images_per_s": round(completed / elapsed, 2),  # (completed, not asked)
         "errors": sorted({type(error).__name__ for error in errors}),
         "searches": len(searches),
         "search_ms_p50": round(percentile([s * 1000 for s in searches], 50), 1),
