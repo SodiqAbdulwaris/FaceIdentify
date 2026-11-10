@@ -61,6 +61,8 @@ Coverage stays at 100%.
 
 ## Order of work (phase 2)
 
+Progress: migration and tests done 2026-11-10 ([entry](../implementations/2026-11-10-m6-step1-reprocessing-schema.md)).
+
 migration and tests; domain and `ReprocessSourceUseCase`; pool exclusion and revalidation filter; activation
 branch; correspondence and carry-over; forget interaction; route; crash tests; docs (implementation entry, README
 row, tracker rows, CONTEXT, PROJECT_STATUS, M6 plan progress).
