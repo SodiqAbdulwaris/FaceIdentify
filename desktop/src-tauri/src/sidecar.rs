@@ -97,10 +97,18 @@ pub fn generate_token() -> Result<String, SidecarError> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
+/// The arguments that make a Python interpreter run the host.
+pub fn module_entry() -> Vec<String> {
+    vec!["-m".into(), "backend.api.host".into()]
+}
+
 /// Where and how to start the host.
 #[derive(Debug, Clone)]
 pub struct SidecarConfig {
+    /// The program to run: a Python interpreter in development, the frozen backend when packaged.
     pub python: PathBuf,
+    /// What follows the program: `-m backend.api.host` for Python, nothing for the frozen backend.
+    pub entry: Vec<String>,
     /// The directory `backend` is imported from (the repository root in development).
     pub working_dir: PathBuf,
     pub library_root: PathBuf,
@@ -118,7 +126,8 @@ impl SidecarConfig {
         let mut command = Command::new(&self.python);
         command
             .current_dir(&self.working_dir)
-            .args(["-m", "backend.api.host", "--library-root"])
+            .args(&self.entry)
+            .arg("--library-root")
             .arg(&self.library_root)
             .arg("--local-state-root")
             .arg(&self.local_state_root)
@@ -296,6 +305,7 @@ mod tests {
         fs::write(package.join("__init__.py"), "").unwrap();
         fs::write(package.join("host.py"), body).unwrap();
         SidecarConfig {
+            entry: module_entry(),
             python: python(),
             working_dir: dir.to_path_buf(),
             library_root: dir.join("library"),
@@ -348,6 +358,7 @@ mod tests {
     #[test]
     fn the_command_carries_the_token_only_in_the_environment() {
         let config = SidecarConfig {
+            entry: module_entry(),
             python: "python".into(),
             working_dir: "work".into(),
             library_root: "lib".into(),
@@ -393,6 +404,7 @@ mod tests {
     #[test]
     fn the_development_profile_is_requested_only_when_configured() {
         let mut config = SidecarConfig {
+            entry: module_entry(),
             python: "python".into(),
             working_dir: ".".into(),
             library_root: "l".into(),
@@ -415,6 +427,7 @@ mod tests {
     #[test]
     fn each_web_view_origin_is_passed_to_the_host_as_its_own_argument() {
         let config = SidecarConfig {
+            entry: module_entry(),
             python: "python".into(),
             working_dir: ".".into(),
             library_root: "l".into(),
@@ -584,6 +597,7 @@ while True:
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let dir = tempfile::tempdir().unwrap();
         let config = SidecarConfig {
+            entry: module_entry(),
             python: std::env::var("FACEIDENTIFY_PYTHON")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| repository.join(".venv").join("Scripts").join("python.exe")),

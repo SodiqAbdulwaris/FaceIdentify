@@ -127,9 +127,15 @@ fn start_backend(app: &AppHandle) {
         .unwrap_or_else(|_| std::env::temp_dir().join("FaceIdentify"))
         .join("state");
     let repository = repository_root();
+    let launch = config::resolve_launch(
+        std::env::var(config::PYTHON_ENV).ok(),
+        app.path().resource_dir().ok().as_deref(),
+        &repository,
+    );
     let config = SidecarConfig {
-        python: config::resolve_python(std::env::var(config::PYTHON_ENV).ok(), &repository),
-        working_dir: repository,
+        python: launch.program,
+        entry: launch.entry,
+        working_dir: launch.working_dir,
         library_root: backend.library_root.clone(),
         local_state_root,
         allowed_origins: config::web_view_origins(cfg!(debug_assertions)),
@@ -190,7 +196,10 @@ pub fn run() {
                 )?;
             }
             let config_dir = app.path().app_config_dir()?;
-            let default_root = app.path().app_data_dir()?.join("library");
+            let default_root = config::default_library_root(
+                app.path().document_dir().ok(),
+                app.path().app_data_dir()?.join("library"),
+            );
             let library_root = config::resolve_library_root(
                 std::env::var(config::LIBRARY_ROOT_ENV).ok(),
                 config::load_saved_library_root(&config_dir),

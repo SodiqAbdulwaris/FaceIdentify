@@ -4,6 +4,7 @@
 //! development and tests), the user's saved choice, then a default under the application's data
 //! directory. The saved choice is one small JSON file the shell writes; nothing else is stored here.
 
+use crate::sidecar::module_entry;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -76,6 +77,57 @@ pub fn resolve_python(from_environment: Option<String>, repository: &Path) -> Pa
             };
             repository.join(".venv").join(scripts).join(name)
         }
+    }
+}
+
+/// The folder the installer puts the frozen backend in, beside the application's other resources.
+pub const PACKAGED_BACKEND_DIR: &str = "faceidentify-backend";
+const PACKAGED_BACKEND_EXE: &str = "faceidentify-backend.exe";
+
+/// What to run to start the host, and from where.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Launch {
+    pub program: PathBuf,
+    pub entry: Vec<String>,
+    pub working_dir: PathBuf,
+}
+
+/// How the backend is started. `FACEIDENTIFY_PYTHON` wins (development and the tests that name an
+/// interpreter); otherwise the frozen backend the installer shipped, when it is there; otherwise the
+/// repository's own environment. A packaged build needs no Python on the machine.
+pub fn resolve_launch(
+    python_from_environment: Option<String>,
+    resource_dir: Option<&Path>,
+    repository: &Path,
+) -> Launch {
+    let packaged = resource_dir
+        .map(|dir| dir.join(PACKAGED_BACKEND_DIR))
+        .filter(|dir| dir.join(PACKAGED_BACKEND_EXE).is_file());
+    match (
+        python_from_environment.filter(|value| !value.is_empty()),
+        packaged,
+    ) {
+        (None, Some(dir)) => Launch {
+            program: dir.join(PACKAGED_BACKEND_EXE),
+            entry: Vec::new(),
+            working_dir: dir,
+        },
+        (python, _) => Launch {
+            program: resolve_python(python, repository),
+            entry: module_entry(),
+            working_dir: repository.to_path_buf(),
+        },
+    }
+}
+
+/// The library folder when the user has chosen none: `Documents\FaceIdentify`, where the user can see
+/// and back it up and no uninstaller option can reach it (M8 decision R8). A library that already
+/// exists at the older default under the application's data folder keeps being used.
+pub fn default_library_root(documents: Option<PathBuf>, legacy: PathBuf) -> PathBuf {
+    let has_library = legacy.join("database").join("library.db").is_file();
+    match documents {
+        Some(documents) if !has_library => documents.join("FaceIdentify"),
+        _ => legacy,
     }
 }
 
@@ -218,6 +270,87 @@ mod tests {
         );
         assert!(found.to_string_lossy().contains("python"));
         assert_eq!(resolve_python(Some(String::new()), repository), found);
+    }
+
+    fn packaged_backend(resources: &Path) {
+        let dir = resources.join(PACKAGED_BACKEND_DIR);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(PACKAGED_BACKEND_EXE), "").unwrap();
+    }
+
+    #[test]
+    fn a_packaged_build_runs_its_own_backend_without_python() {
+        let resources = tempfile::tempdir().unwrap();
+        packaged_backend(resources.path());
+
+        let launch = resolve_launch(None, Some(resources.path()), Path::new("repo"));
+
+        let dir = resources.path().join(PACKAGED_BACKEND_DIR);
+        assert_eq!(launch.program, dir.join(PACKAGED_BACKEND_EXE));
+        assert!(launch.entry.is_empty(), "the frozen host has no -m module");
+        assert_eq!(launch.working_dir, dir);
+    }
+
+    #[test]
+    fn python_from_the_environment_beats_a_packaged_backend() {
+        let resources = tempfile::tempdir().unwrap();
+        packaged_backend(resources.path());
+
+        let launch = resolve_launch(
+            Some("C:/py/python.exe".into()),
+            Some(resources.path()),
+            Path::new("repo"),
+        );
+
+        assert_eq!(launch.program, PathBuf::from("C:/py/python.exe"));
+        assert_eq!(launch.entry, ["-m", "backend.api.host"]);
+        assert_eq!(launch.working_dir, PathBuf::from("repo"));
+    }
+
+    #[test]
+    fn without_a_packaged_backend_the_repository_environment_runs_the_module() {
+        let empty = tempfile::tempdir().unwrap();
+        let folder_only = tempfile::tempdir().unwrap();
+        fs::create_dir_all(folder_only.path().join(PACKAGED_BACKEND_DIR)).unwrap();
+
+        for resources in [None, Some(empty.path()), Some(folder_only.path())] {
+            let launch = resolve_launch(None, resources, Path::new("repo"));
+            assert!(
+                launch.program.to_string_lossy().contains("python"),
+                "{launch:?}"
+            );
+            assert_eq!(launch.entry, ["-m", "backend.api.host"]);
+            assert_eq!(launch.working_dir, PathBuf::from("repo"));
+        }
+    }
+
+    #[test]
+    fn the_default_library_is_in_documents_unless_one_already_exists_at_the_old_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let documents = dir.path().join("Documents");
+        let legacy = dir.path().join("AppData").join("library");
+
+        assert_eq!(
+            default_library_root(Some(documents.clone()), legacy.clone()),
+            documents.join("FaceIdentify")
+        );
+        assert_eq!(
+            default_library_root(None, legacy.clone()),
+            legacy,
+            "no Documents folder known: the old place"
+        );
+
+        fs::create_dir_all(legacy.join("database")).unwrap();
+        assert_eq!(
+            default_library_root(Some(documents.clone()), legacy.clone()),
+            documents.join("FaceIdentify"),
+            "an empty folder is not a library"
+        );
+        fs::write(legacy.join("database").join("library.db"), "").unwrap();
+        assert_eq!(
+            default_library_root(Some(documents), legacy.clone()),
+            legacy
+        );
     }
 
     #[test]
