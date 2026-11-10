@@ -116,6 +116,10 @@ def test_a_video_is_processed_chunk_by_chunk_into_tracks(
     kinds = [c.kind for c in checkpoints(pipeline, run_id)]
     assert kinds == [CheckpointKind.INTERMEDIATE] * 2 + [CheckpointKind.FINAL]
     assert perception.log.count("detect") == 6  # every sampled frame once
+    with pipeline.lib.session_factory() as session:
+        job = session.get(Job, started.job.id)
+        assert job is not None
+        assert (job.progress_completed, job.progress_total) == (6, 6)  # slots of the whole video
     final = checkpoints(pipeline, run_id)[-1].payload_json
     tracks = {t["track"]: t for t in final["tracks"]}
     red, green = tracks[0], tracks[1]

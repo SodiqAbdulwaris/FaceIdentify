@@ -18,6 +18,7 @@ frames' pixels in memory: `chunk_frames` frames, scaled to a longest side of `ma
 120 MB at 1920 pixels).
 """
 
+import math
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, closing
@@ -172,6 +173,7 @@ class _Input:
     width: int | None = None  # a video's size as shown, its frames' size
     height: int | None = None
     frame_rate: tuple[int, int] | None = field(default=None)
+    duration_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,6 +447,7 @@ class ExecuteProcessingJob:
             None
             if source.frame_rate_num is None or source.frame_rate_den is None
             else (source.frame_rate_num, source.frame_rate_den),
+            source.media_duration_ms,
         )
 
     def _revalidate_settlement_context(
@@ -954,6 +957,12 @@ class ExecuteProcessingJob:
             now=self._clock(),
         )
         self._point_run_at(session, run, checkpoint.id)
+        # Progress in sampled slots of the whole video (API 17), for the screen's bar and ETA.
+        done = chunk[-1].slot + 1
+        total = math.ceil((source.duration_ms or 0) / 1000 * self._video.rate)
+        JobRepository(session).set_progress(
+            started.job.id, completed=done, total=max(done, total), now=self._clock()
+        )
         return sequence
 
     def _decide(
