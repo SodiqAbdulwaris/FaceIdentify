@@ -55,8 +55,13 @@ def sampled_frames(
     size the Source records (as shown); with `max_side`, a larger frame is scaled down (aspect
     kept, `frame_size`) after it is chosen, so a 4K video holds a quarter of the memory.
     Raises `CorruptVideoError` when decoding fails."""
-    if not (math.isfinite(rate) and rate > 0) or width <= 0 or height <= 0:
-        raise ValueError("the rate and the size must be positive (and the rate finite)")
+    if (
+        not (math.isfinite(rate) and rate > 0)
+        or width <= 0
+        or height <= 0
+        or (max_side is not None and max_side <= 0)
+    ):
+        raise ValueError("the rate, the size and max_side must be positive (the rate finite)")
     # The seek is rounded DOWN to the microsecond, so a frame exactly on the slot boundary is never
     # skipped; a frame before it, still in a slot already given, is dropped below. One rendering of
     # the rate serves ffmpeg's select and the slot arithmetic here.
