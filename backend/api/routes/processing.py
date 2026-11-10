@@ -169,12 +169,13 @@ def _policy(frozen: dict[str, Any]) -> PolicyProvenance:
 
 
 def _details(session: Session, runs: list[ProcessingRun]) -> list[ProcessingRunDetail]:
-    """Each run with its source-processing job (a run has exactly one; a retry is a new run)."""
+    """Each run with its current source-processing job: its newest attempt (a run has one, or
+    more when a video run is resumed by a retry, M6 D10)."""
     jobs: dict[uuid.UUID, Job] = {}
     for job in session.scalars(
-        select(Job).where(
-            Job.processing_run_id.in_([run.id for run in runs]), Job.type.in_(SOURCE_JOB_TYPES)
-        )
+        select(Job)
+        .where(Job.processing_run_id.in_([run.id for run in runs]), Job.type.in_(SOURCE_JOB_TYPES))
+        .order_by(Job.attempt_number)  # (the newest attempt is kept: it comes last)
     ):
         assert job.processing_run_id is not None  # selected by it
         jobs[job.processing_run_id] = job
