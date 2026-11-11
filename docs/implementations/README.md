@@ -235,3 +235,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-10 | [M8 step 2: the backend frozen with PyInstaller](2026-11-10-m8-step2-freeze-backend.md) | done |
 | 2026-11-10 | [M6 step 6: track-level recognition and occurrences over time](2026-11-10-m6-step6-video-occurrences.md) | done |
 | 2026-11-10 | [M6 step 7: pause, resume, retry, one movie at a time, video reprocessing and the video screen](2026-11-10-m6-step7-movie-workflow.md) | done; step 8 (D8) is the orchestrator's |
+| 2026-11-11 | [M7 step 1: camera source schema and spec text (revision 0012)](2026-11-11-m7-step1-camera-source-schema.md) | done; capture next (step 2) |

@@ -84,6 +84,8 @@ read-only review, as in M5 and M6.
 
 ### Step 1. Spec text, schema and the camera source (no capture yet)
 
+> **Built 2026-11-11:** revision `0012` and the spec text as dated delegated decisions ([entry](../implementations/2026-11-11-m7-step1-camera-source-schema.md)).
+
 - **Spec proposal in the PR** (delegated decision, reviewed): the `CAMERA` source kind and
   `camera_source_metadata` (device identity and a display name, nothing else); that a camera session is
   a `PROCESS_CAMERA_SESSION` job with one processing run, so the frozen policy, models and settings are
