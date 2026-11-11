@@ -29,7 +29,7 @@ under different metrics and a similarity is never a mislabelled distance.
 
 import math
 import uuid
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -113,8 +113,11 @@ def retrieve(
     """`exclude` holds the representations that must never be their own or each other's
     candidates: the query's own representation (it exists, `PENDING`, before it is recognised, and
     would be its own nearest neighbour) and, for an image, the other faces of that image. They are
-    left out of the shortlist and are not counted as dropped; each pool is asked for that many more
-    candidates, so excluding them does not shorten the shortlist."""
+    left out of the shortlist and are not counted as dropped. Each pool is asked for `k` and then,
+    while excluded ones leave it short of `k`, for more (up to `k` plus every excluded one), so
+    excluding them never shortens the shortlist and a long exclusion list (a video's thousands of
+    faces) costs nothing when they are not among the nearest (D8, 2026-11-11: asking every pool for
+    `k + len(exclude)` made recognising a video's faces quadratic)."""
     if (
         global_index.representation_space_id != representation_space_id
         or global_index.ndim != dimension
@@ -133,30 +136,43 @@ def retrieve(
         )
     found: list[RetrievedCandidate] = []
     left_out = frozenset(exclude)
-    fetch = k + len(left_out)
+    most = k + len(left_out)
 
-    hits = global_index.search(vector, fetch)
-    distance_of = {hit.key: hit.distance for hit in hits}
-    kept_global = resolve_ann_candidates(session, representation_space_id, list(distance_of))
-    dropped = len(hits) - len(kept_global)
-    found.extend(
-        RetrievedCandidate(
-            Pool.GLOBAL, kept.representation_id, kept.identity_id, distance_of[kept.ann_key]
-        )
-        for kept in kept_global
-        if kept.representation_id not in left_out
-    )
+    def from_global(fetch: int) -> tuple[int, int, list[RetrievedCandidate]]:
+        hits = global_index.search(vector, fetch)
+        distance_of = {hit.key: hit.distance for hit in hits}
+        kept = resolve_ann_candidates(session, representation_space_id, list(distance_of))
+        usable = [
+            RetrievedCandidate(
+                Pool.GLOBAL, row.representation_id, row.identity_id, distance_of[row.ann_key]
+            )
+            for row in kept
+            if row.representation_id not in left_out
+        ]
+        return len(hits), len(hits) - len(kept), usable
+
+    dropped, candidates = _enough(from_global, k, most)
+    found.extend(candidates)
 
     if run_local is not None:
-        near = run_local.search(vector, fetch)
-        distances = {hit.representation_id: hit.distance for hit in near}
-        alive = _still_pending(session, processing_run_id, representation_space_id, list(distances))
-        found.extend(
-            RetrievedCandidate(Pool.RUN_LOCAL, identifier, identity, distances[identifier])
-            for identifier, identity in alive.items()
-            if identifier not in left_out
-        )
-        dropped += len(near) - len(alive)
+        local = run_local
+
+        def from_run(fetch: int) -> tuple[int, int, list[RetrievedCandidate]]:
+            near = local.search(vector, fetch)
+            distances = {hit.representation_id: hit.distance for hit in near}
+            alive = _still_pending(
+                session, processing_run_id, representation_space_id, list(distances)
+            )
+            usable = [
+                RetrievedCandidate(Pool.RUN_LOCAL, identifier, identity, distances[identifier])
+                for identifier, identity in alive.items()
+                if identifier not in left_out
+            ]
+            return len(near), len(near) - len(alive), usable
+
+        more_dropped, candidates = _enough(from_run, k, most)
+        dropped += more_dropped
+        found.extend(candidates)
 
     found.sort(key=lambda c: (c.distance, c.pool, str(c.representation_id)))
     return Retrieval(
@@ -166,6 +182,20 @@ def retrieve(
         dropped,
         index_converged(session, representation_space_id),
     )
+
+
+def _enough[T](
+    ask: Callable[[int], tuple[int, int, list[T]]], k: int, most: int
+) -> tuple[int, list[T]]:
+    """Ask a pool for `k`, then for more (doubling, never past `most`) while what is left after the
+    exclusions is short of `k` and the pool had more to give. Returns what the last ask dropped and
+    found. The nearest usable candidates are the same as one ask for `most` would give."""
+    fetch = min(k, most)
+    while True:
+        returned, dropped, usable = ask(fetch)
+        if len(usable) >= k or returned < fetch or fetch >= most:
+            return dropped, usable
+        fetch = min(fetch * 2, most)
 
 
 def index_converged(session: Session, representation_space_id: uuid.UUID) -> bool:
