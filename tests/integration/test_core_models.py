@@ -403,7 +403,7 @@ SPEC_VALUE_SETS: dict[type[StrEnum], set[str]] = {
     ArtifactKind: {"SOURCE_ORIGINAL", "FACE_CROP", "THUMBNAIL", "MODEL_EXPORT", "RUNTIME_PACKAGE"},
     StorageMode: {"MANAGED", "REFERENCED"},
     ArtifactState: {"PENDING", "AVAILABLE", "MISSING", "DELETING", "DELETE_FAILED", "DELETED"},
-    SourceKind: {"IMAGE", "VIDEO"},
+    SourceKind: {"IMAGE", "VIDEO", "CAMERA"},
     SourceState: {"ACTIVE", "RECYCLED", "DELETING", "DELETED", "UNAVAILABLE"},
     RepresentationSpaceState: {"ACTIVE", "DEPRECATED"},
     RepresentationMetric: {"COSINE"},
@@ -419,7 +419,7 @@ SPEC_VALUE_SETS: dict[type[StrEnum], set[str]] = {
     CheckpointState: {"VALID", "INVALIDATED"},
     JobType: {
         "PROCESS_SOURCE", "REPROCESS_SOURCE", "REBUILD_INDEX", "RETRAIN_MODEL",
-        "INSTALL_RUNTIME", "CLEAN_STORAGE",
+        "INSTALL_RUNTIME", "CLEAN_STORAGE", "PROCESS_CAMERA_SESSION",
     },
     JobState: {
         "QUEUED", "RUNNING", "PAUSING", "PAUSED", "CANCELLING", "CANCELLED", "COMPLETED",

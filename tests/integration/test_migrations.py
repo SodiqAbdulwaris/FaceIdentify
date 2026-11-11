@@ -159,7 +159,8 @@ def test_models_and_migration_have_no_drift(
 
 def test_the_revision_history_is_one_linear_chain_starting_at_0001() -> None:
     script = ScriptDirectory.from_config(alembic_config())
-    assert script.get_heads() == ["0011"]
+    assert script.get_heads() == ["0012"]
+    assert script.get_revision("0012").down_revision == "0011"
     assert script.get_revision("0011").down_revision == "0010"
     assert script.get_revision("0010").down_revision == "0009"
     assert script.get_revision("0007").down_revision == "0006"
@@ -179,7 +180,7 @@ def test_upgrade_stamps_the_head_revision_and_is_idempotent(
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [
-            ("0011",)
+            ("0012",)
         ]
     assert len(schema_objects(path)) == len(schema_objects(create_all_database(tmp_path / "c.db")))
 

@@ -93,6 +93,7 @@ class Artifact(Base):
 class SourceKind(StrEnum):
     IMAGE = "IMAGE"
     VIDEO = "VIDEO"
+    CAMERA = "CAMERA"  # a configured live camera: no original artifact (revision 0012)
 
 
 class SourceState(StrEnum):
@@ -104,7 +105,8 @@ class SourceState(StrEnum):
 
 
 class Source(Base):
-    """A user-facing imported image or video. Owns its library lifecycle, not its bytes."""
+    """A user-facing imported image or video, or a configured camera. Owns its library
+    lifecycle, not its bytes."""
 
     __tablename__ = "sources"
     __table_args__ = (
@@ -122,6 +124,11 @@ class Source(Base):
             )
         ),
         CheckConstraint("revision >= 1", name="revision_positive"),
+        # Every Source but a camera has its original; a camera never has one (ERD: "Camera Sources
+        # are exempt").
+        CheckConstraint(
+            "(kind = 'CAMERA') = (original_artifact_id IS NULL)", name="original_unless_camera"
+        ),
         Index(None, "state", "created_at", "id"),
         Index(None, "current_processing_run_id"),
         Index(None, "original_artifact_id"),
@@ -131,7 +138,7 @@ class Source(Base):
     kind: Mapped[str] = mapped_column(String)
     state: Mapped[str] = mapped_column(String)
     display_name: Mapped[str] = mapped_column(String)
-    original_artifact_id: Mapped[uuid.UUID] = mapped_column(
+    original_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("artifacts.id", ondelete="RESTRICT")
     )
     thumbnail_artifact_id: Mapped[uuid.UUID | None] = mapped_column(

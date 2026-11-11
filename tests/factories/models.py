@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
+from backend.app.cameras.models import CameraSourceMetadata
 from backend.app.identities.models import Evidence, Identity, IdentityLineage
 from backend.app.jobs.models import Job
 from backend.app.memory.models import (
@@ -82,6 +83,16 @@ class ModelFactory:
             created_at=self.clock(), updated_at=self.clock(),
         )  # fmt: skip
         return self.add(Source(**(fields | kw)))
+
+    def camera(self, **kw: Any) -> CameraSourceMetadata:
+        """A configured camera: a `CAMERA` Source (no original) and its device row."""
+        source_id = self._parent(
+            kw,
+            "source_id",
+            lambda: self.source(kind="CAMERA", original_artifact_id=None, display_name="Doorway"),
+        )
+        fields: dict[str, Any] = dict(source_id=source_id, device_name="Integrated Camera")
+        return self.add(CameraSourceMetadata(**(fields | kw)))
 
     def snapshot(self, **kw: Any) -> ProcessingConfigurationSnapshot:
         fields: dict[str, Any] = dict(
