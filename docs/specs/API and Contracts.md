@@ -161,6 +161,8 @@ media
 
 The REST API describes application capabilities rather than mirroring the ERD.
 
+> **Decision 2026-11-11 (agent, delegated by the owner on 2026-11-09, D1; M7 step 1, plan C1 to C10 and section 5; reversible):** the `cameras` family, under `/api/v1`, with the existing error shape, cursor pagination and library gating. A camera is a capture device on this computer, opened through the pinned `ffmpeg` (DirectShow); network cameras are not supported (offline operation, #174). `GET /cameras/devices` lists the devices the computer offers now. `POST /cameras` configures one (a `CAMERA` Source with its device, `201`); `GET /cameras` and `GET /cameras/{id}` read configured cameras; `DELETE /cameras/{id}` removes the configuration only (its history stays unless deleted on purpose). `POST /cameras/{id}/start` begins a session (a `PROCESS_CAMERA_SESSION` job, `202`; one session runs at a time) and `POST /cameras/{id}/stop` ends it; `GET /cameras/{id}/status` reports the session; `GET /cameras/{id}/preview` returns the newest annotated frame from memory (never stored); `POST /cameras/{id}/search` captures one frame and answers as face search does (section 12.2), storing nothing. Camera history is read through the occurrence and unplaced-face reads filtered by the camera's Source and a UTC time range. The step that builds each route records its request and response shapes and its deletion routes beside this note. [Plan](../plans/M7_PLAN.md), [entry](../implementations/2026-11-11-m7-step1-camera-source-schema.md).
+
 Internal concepts such as the following do not automatically receive CRUD endpoints:
 
 - IdentityAssociation
@@ -1043,6 +1045,8 @@ INTERNAL_ERROR
 
 > **Decision 2026-11-10 (agent, delegated, D1; M6 step 3):** `MEDIA_TOOLS_UNAVAILABLE` (`503`): a video was given but the pinned FFmpeg tools are not installed (section 5.1).
 
+> **Decision 2026-11-11 (agent, delegated by the owner on 2026-11-09, D1; M7 step 1; reversible):** camera errors: `CAMERA_NOT_FOUND` (`404`), `CAMERA_BUSY` (`409`: a session is already running), `CAMERA_IN_USE` (`409`: another program holds the device), `CAMERA_ACCESS_DENIED` (`403`: Windows refuses camera access to desktop apps) and `CAMERA_DISCONNECTED` (`503`: the device is not present). [Entry](../implementations/2026-11-11-m7-step1-camera-source-schema.md).
+
 Expected application errors are deliberately mapped.
 
 Unexpected errors return `INTERNAL_ERROR` and a diagnostic ID without exposing tracebacks.
@@ -1282,6 +1286,8 @@ camera.*      future
 ```
 
 Events are notifications.
+
+> **Decision 2026-11-11 (agent, delegated by the owner on 2026-11-09, D1; M7 step 1; reversible):** the `camera.*` namespace holds `camera.session.updated` (a session started, reconnected or ended) and `camera.encounter.closed` (an encounter was persisted), best effort like every event. [Entry](../implementations/2026-11-11-m7-step1-camera-source-schema.md).
 
 The frontend should normally invalidate/refetch authoritative REST data instead of reconstructing complex state exclusively from events.
 

@@ -745,6 +745,8 @@ active offline Job, and close resources.
 After a crash, camera sessions close or become interrupted and a new
 session begins after restart; continuity is not fabricated.
 
+> **Decision 2026-11-11 (agent, delegated by the owner on 2026-11-09, D1; M7 step 1, plan C4; reversible):** "a new session begins after restart" means a new session the user starts: no camera starts on its own, at launch, after a restart or after a crash. Startup marks the interrupted session's run `INTERRUPTED`; encounters closed before the crash stay, open ones are discarded, and a reconnected or restarted stream starts new tracks. [Entry](../implementations/2026-11-11-m7-step1-camera-source-schema.md).
+
 Ordinary Search requests are ephemeral and do not require recovery.
 Explicit durable actions such as feedback do.
 

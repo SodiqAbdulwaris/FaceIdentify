@@ -336,6 +336,12 @@ labelled uncalibrated):
 | TST-076 | P1 | Runtime compatibility tests | Validated representation/calibration compatibility |
 | TST-077 | P1 | Resource benchmarks | Reproducible hardware baselines |
 
+**Current evidence** (2026-11-11; [M7 plan](M7_PLAN.md)):
+
+| ID | Status | Evidence / remaining work |
+|---|---|---|
+| TST-071 | `IN_PROGRESS` | Model half (M7 step 1, revision 0012): a camera is a `CAMERA` Source without an original, with one device row, and a session is a `PROCESS_CAMERA_SESSION` job (`tests/integration/test_migration_0012.py`). Remaining: start, stop and reconnection (steps 2 and 4), history (step 5), search (step 6). |
+
 **Dependencies:** M6 and available supported hardware.
 
 **Milestone gate:** Included camera and runtime functionality satisfies its correctness and compatibility requirements.
