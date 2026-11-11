@@ -20,6 +20,7 @@ class JobType(StrEnum):
     RETRAIN_MODEL = "RETRAIN_MODEL"
     INSTALL_RUNTIME = "INSTALL_RUNTIME"
     CLEAN_STORAGE = "CLEAN_STORAGE"
+    PROCESS_CAMERA_SESSION = "PROCESS_CAMERA_SESSION"  # one live camera session (revision 0012)
 
 
 # The jobs that execute a source's processing run: a first run, or a reprocess run that will
