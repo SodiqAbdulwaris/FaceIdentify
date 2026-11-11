@@ -227,6 +227,8 @@ One-to-zero-or-one extension for video/movie metadata.
 
 One-to-zero-or-one extension for camera configuration/source metadata.
 
+> **Decision 2026-11-11 (agent, delegated by the owner on 2026-11-09, D1; M7 step 1, plan C3; reversible):** `camera_source_metadata` is built as `source_id` (PK, FK to Source), `device_name` and nullable `device_path`. `encounter`, `appearance` and `track` stay conceptual, as M6 already assumes for movies: an encounter is an `Occurrence` of kind `TRACK` on the camera's Source, with UTC start and end (PERSISTENCE_IMPLEMENTATION.md section 15). [Entry](../implementations/2026-11-11-m7-step1-camera-source-schema.md).
+
 ### `encounter` --- **Authoritative**
 
 -   `id` PK
