@@ -3,6 +3,7 @@
 Import this module wherever the full schema is needed (Alembic's env.py, test fixtures).
 """
 
+from backend.app.cameras import models as cameras
 from backend.app.identities import models as identities
 from backend.app.jobs import models as jobs
 from backend.app.memory import models as memory
@@ -15,6 +16,7 @@ from backend.infrastructure.db.engine import Base
 
 __all__ = [
     "Base",
+    "cameras",
     "identities",
     "jobs",
     "memory",

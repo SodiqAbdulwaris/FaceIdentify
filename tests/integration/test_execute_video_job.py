@@ -277,6 +277,7 @@ def test_a_video_that_cannot_be_processed_fails_its_run(
         with pipeline.lib.session_factory() as session:
             source = session.get(Source, video)
             assert source is not None
+            assert source.original_artifact_id is not None
             path = pipeline.lib.store.roots.path_for(f"originals/{source.original_artifact_id.hex}")
         if problem == "missing original":
             path.unlink()

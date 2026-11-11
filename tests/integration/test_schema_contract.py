@@ -20,6 +20,8 @@ EXPECTED_FOREIGN_KEYS = {
     ("sources", "thumbnail_artifact_id"): ("artifacts", "SET NULL"),
     ("sources", "current_processing_run_id"): ("processing_runs", "SET NULL"),
     ("processing_runs", "source_id"): ("sources", "RESTRICT"),
+    # a camera's device row goes with its Source (revision 0012, persistence 4.3)
+    ("camera_source_metadata", "source_id"): ("sources", "CASCADE"),
     ("processing_runs", "configuration_snapshot_id"): (
         "processing_configuration_snapshots",
         "RESTRICT",
