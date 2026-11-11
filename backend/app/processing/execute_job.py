@@ -976,12 +976,18 @@ class ExecuteProcessingJob:
             space = session.get(RepresentationSpace, frozen.representation_space_id)
             if space is None or space.dimension != frozen.dimension:
                 raise ProcessingExecutionError("the frozen representation space is no longer valid")
-            run_local = rebuild_run_local_index(
-                session,
-                processing_run_id=source.run_id,
-                representation_space_id=space.id,
-                dimension=space.dimension,
-                metric="cos",
+            # A video's faces are all left out of each other's candidates below, so a run-local
+            # pool would only cost (D8): it is not built for a video.
+            run_local = (
+                None
+                if source.kind == SourceKind.VIDEO
+                else rebuild_run_local_index(
+                    session,
+                    processing_run_id=source.run_id,
+                    representation_space_id=space.id,
+                    dimension=space.dimension,
+                    metric="cos",
+                )
             )
             rows = session.execute(
                 select(Representation, Observation)
@@ -1007,6 +1013,7 @@ class ExecuteProcessingJob:
                     )
                 )
             )
+            left_out = frozenset([*representations, *predecessor])  # (built once)
             result: list[_Decision] = []
             for representation, observation in rows:
                 assert representation.vector is not None  # PENDING rows retain their vector
@@ -1020,7 +1027,7 @@ class ExecuteProcessingJob:
                     global_index=global_index,
                     processing_run_id=source.run_id,
                     run_local=run_local,
-                    exclude=[*representations, *predecessor],
+                    exclude=left_out,
                 )
                 result.append(
                     _Decision(
