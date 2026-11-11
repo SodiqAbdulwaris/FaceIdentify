@@ -121,11 +121,13 @@ fn repository_root() -> PathBuf {
 
 fn start_backend(app: &AppHandle) {
     let backend = app.state::<Backend>();
-    let local_state_root = app
-        .path()
-        .app_local_data_dir()
-        .unwrap_or_else(|_| std::env::temp_dir().join("FaceIdentify"))
-        .join("state");
+    let local_state_root = config::resolve_local_state_root(
+        std::env::var(config::LOCAL_STATE_ENV).ok(),
+        app.path()
+            .app_local_data_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("FaceIdentify"))
+            .join("state"),
+    );
     let repository = repository_root();
     let launch = config::resolve_launch(
         std::env::var(config::PYTHON_ENV).ok(),

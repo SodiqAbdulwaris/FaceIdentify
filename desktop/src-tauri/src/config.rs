@@ -11,6 +11,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub const LIBRARY_ROOT_ENV: &str = "FACEIDENTIFY_LIBRARY_ROOT";
+pub const LOCAL_STATE_ENV: &str = "FACEIDENTIFY_LOCAL_STATE_ROOT";
 pub const PYTHON_ENV: &str = "FACEIDENTIFY_PYTHON";
 pub const DEVELOPMENT_PROFILE_ENV: &str = "FACEIDENTIFY_DEVELOPMENT_PROFILE";
 const SETTINGS_FILE: &str = "shell.json";
@@ -61,6 +62,14 @@ pub fn resolve_library_root(
         .map(PathBuf::from)
         .or(saved)
         .unwrap_or(default)
+}
+
+/// The machine-local state root (models, policies, indexes): `FACEIDENTIFY_LOCAL_STATE_ROOT` when
+/// set (installer checks and tests keep it away from the real one), else the default.
+pub fn resolve_local_state_root(from_environment: Option<String>, default: PathBuf) -> PathBuf {
+    from_environment
+        .filter(|value| !value.is_empty())
+        .map_or(default, PathBuf::from)
 }
 
 /// The Python that runs the backend. In development that is the repository's own environment; a
@@ -253,6 +262,20 @@ mod tests {
             "an empty variable is not a choice"
         );
         assert_eq!(resolve_library_root(None, None, default.clone()), default);
+    }
+
+    #[test]
+    fn the_local_state_root_comes_from_the_environment_unless_it_is_empty() {
+        let default = PathBuf::from("default");
+        assert_eq!(
+            resolve_local_state_root(Some("scratch".into()), default.clone()),
+            PathBuf::from("scratch")
+        );
+        assert_eq!(
+            resolve_local_state_root(Some(String::new()), default.clone()),
+            default
+        );
+        assert_eq!(resolve_local_state_root(None, default.clone()), default);
     }
 
     #[test]
