@@ -11,20 +11,20 @@ library folder and the private state folder, and it fences the page with a Conte
 |---|---|
 | Library root choice (environment, saved choice, default) | `config::resolve_library_root`, `load_saved_library_root`, `save_library_root` in `config.rs` |
 | The saved choice | `shell.json` in the app config directory (one small JSON file, written atomically) |
-| The local state root | `<app local data dir>/state` (`start_backend` in `lib.rs`) |
-| Environment overrides | `FACEIDENTIFY_LIBRARY_ROOT`, `FACEIDENTIFY_PYTHON`, `FACEIDENTIFY_DEVELOPMENT_PROFILE` (constants in `config.rs`) |
+| The local state root | `FACEIDENTIFY_LOCAL_STATE_ROOT`, else `<app local data dir>/state` (`resolve_local_state_root`, used by `start_backend` in `lib.rs`) |
+| Environment overrides | `FACEIDENTIFY_LIBRARY_ROOT`, `FACEIDENTIFY_LOCAL_STATE_ROOT`, `FACEIDENTIFY_PYTHON`, `FACEIDENTIFY_DEVELOPMENT_PROFILE` (constants in `config.rs`) |
 | The window's limits | `app.security.csp` in `desktop/src-tauri/tauri.conf.json` |
 
 ## 3. How it works
 
 - **Library root** (the user's data: database and originals; the vector indexes live under the local state root), first match wins: the environment variable
   `FACEIDENTIFY_LIBRARY_ROOT` (empty counts as unset) → the folder saved by `choose_library` (only if absolute; a broken or relative
-  file means "nothing saved") → `<app data dir>/library`. The shell creates it if missing. A new choice takes effect **at the next start**: the
+  file means "nothing saved") → the default: `Documents\FaceIdentify`, unless a library already exists at the old default `<app data dir>/library`, which keeps being used (`default_library_root`). The shell creates it if missing. A new choice takes effect **at the next start**: the
   library cannot change under a running backend.
-- **Local state root** (`<app local data dir>/state`): machine-local things that must not travel with a library (installed model packages,
+- **Local state root** (`<app local data dir>/state` unless `FACEIDENTIFY_LOCAL_STATE_ROOT` names another): machine-local things that must not travel with a library (installed model packages,
   the policy file). Two roots must not be nested; the host refuses nested or relative roots ([host lesson](../03-backend/architecture/03-host-and-startup.md)).
-- **Python**: `FACEIDENTIFY_PYTHON`, else the repository's `.venv` (`Scripts\python.exe` on Windows, `bin/python` elsewhere). A packaged build will ship its own
-  (not built yet: M8 in the code's comment).
+- **Python**: `FACEIDENTIFY_PYTHON`, else the frozen `faceidentify-backend` folder beside an installed application, else the
+  repository's `.venv` (`Scripts\python.exe` on Windows, `bin/python` elsewhere): `resolve_launch` in `config.rs`.
 - **Development profile**: on in debug builds, off in release; the variable `1`/`true` or `0`/`false` overrides; anything else lets the build decide
   (the profile guard in the library stops you from mixing, [profiles](../03-backend/architecture/04-profiles.md)).
 - **The Content Security Policy** (`tauri.conf.json`): `default-src 'self'`; scripts only from the app itself, styles from the app plus inline styles (`style-src 'self' 'unsafe-inline'`);

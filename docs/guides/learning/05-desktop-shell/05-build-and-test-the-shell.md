@@ -19,8 +19,9 @@ Tauri's system libraries. This lesson is explicit about what could and could not
 
 - **`npm run tauri dev`**: starts Vite (`beforeDevCommand`), compiles the Rust shell, opens the window pointing at `http://localhost:5173`; the shell then
   starts the backend with `--development-profile` (a debug build) from the repository's `.venv`. Edits to the front end reload live; edits to Rust recompile.
-- **`npm run tauri build`**: builds the front end (`beforeBuildCommand`) and bundles an installer. A **packaged** build does not yet ship its own
-  Python (the code says so); packaging is a later milestone.
+- **`npm run tauri build`**: builds the front end (`beforeBuildCommand`) and bundles an installer. A **packaged** build ships no Python of its own to
+  find: it starts the frozen backend that `packaging/build_installer.py` puts beside the application (`resolve_launch` in `config.rs`).
+  `uv run --group build python packaging/build_installer.py` builds the whole installer (M8 step 3).
 - **Checks**: `cargo fmt --check` (format), `cargo clippy ... -D warnings` (lint, warnings are errors), `cargo test` (unit tests: the `config.rs` logic and `sidecar.rs`
   with fake hosts), `cargo test -- --ignored` (the one test that starts the **real** backend and needs `uv sync`).
 - **The fake-host trick**: shell tests write a tiny `backend/api/host.py` into a temp folder, so start-up, handshake errors, timeouts and the stop grace
