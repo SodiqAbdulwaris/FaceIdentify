@@ -105,7 +105,7 @@ collection hooks and the worker started from the same executable; (c) the headle
 - The default library folder moves out of the application-data folder (R8) so no uninstaller option can
   delete it; an existing library at the old default keeps being used.
 - Tests: Rust unit tests for the resolution and the default-folder rule; a local `tauri build` produces the
-  installer; CI builds it on demand (R12).
+  installer; CI builds it on demand (R12; that job is step 7a).
 - Tracker: TST-078.
 
 **Built 2026-11-11** ([entry](../implementations/2026-11-11-m8-step3-shell-packaged-installer.md)): launch resolution, `Documents\FaceIdentify` default, `FACEIDENTIFY_LOCAL_STATE_ROOT`, NSIS config and `packaging/build_installer.py`; installed, launched and uninstalled in a scratch folder.
