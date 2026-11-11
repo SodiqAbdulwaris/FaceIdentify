@@ -525,6 +525,23 @@ def test_a_failed_load_is_tried_again_by_the_next_request(
     assert len(run(handlers, detect_request((image,)), ledger).detections) == 1
 
 
+def test_loading_a_session_turns_onnx_runtimes_telemetry_off_first(
+    models: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    steps: list[str] = []
+    monkeypatch.setattr(ort, "disable_telemetry_events", lambda: steps.append("telemetry off"))
+    real_session = ort.InferenceSession
+
+    def session(*args: Any, **kwargs: Any) -> ort.InferenceSession:
+        steps.append("session")
+        return real_session(*args, **kwargs)
+
+    monkeypatch.setattr(ort, "InferenceSession", session)
+    path = models["dir"] / "detector.onnx"
+    load_session(path, hashlib.sha256(path.read_bytes()).digest(), "CPUExecutionProvider")
+    assert steps == ["telemetry off", "session"]
+
+
 def test_a_changed_model_file_is_refused_by_its_digest(
     models: dict[str, Any], ledger: SegmentLedger
 ) -> None:

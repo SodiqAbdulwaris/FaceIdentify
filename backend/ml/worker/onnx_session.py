@@ -40,6 +40,7 @@ MODEL_ERRORS = (
 
 
 def load_session(path: Path, sha256: bytes, provider: str) -> ort.InferenceSession:
+    ort.disable_telemetry_events()  # the app is offline and local; no trace events (M8 R4)
     try:
         data = path.read_bytes()
     except OSError as error:
