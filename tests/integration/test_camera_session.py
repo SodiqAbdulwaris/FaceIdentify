@@ -344,8 +344,14 @@ def test_a_session_without_its_run_fails(pipeline: Pipeline, camera: Camera) -> 
 def test_a_crop_that_cannot_be_written_fails_the_session_and_is_recorded_missing(
     pipeline: Pipeline, red: uuid.UUID, camera: Camera, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def full(_key: str, _source: Any) -> Any:
-        raise OSError("the disk is full")
+    real = pipeline.lib.store.store
+    written: list[str] = []
+
+    def full(key: str, source: Any) -> Any:
+        if written:  # the first crop is written, the second is not
+            raise OSError("the disk is full")
+        written.append(key)
+        return real(key, source)
 
     monkeypatch.setattr(pipeline.lib.store, "store", full)
     started = camera.start()
@@ -353,6 +359,36 @@ def test_a_crop_that_cannot_be_written_fails_the_session_and_is_recorded_missing
         camera.executor().run(started, frames(*visit("red", 0, 1), *empty(1, 1.6)))
 
     crops = rows(pipeline, Artifact, Artifact.kind == ArtifactKind.FACE_CROP)
-    assert crops
+    assert len(crops) >= 2
     assert {(c.state, c.failure_code) for c in crops} == {("MISSING", "WRITE_NOT_COMPLETED")}
+    assert pipeline.lib.store.digest(written[0]) is None  # the crop already written is gone
     assert rows(pipeline, Observation, Observation.source_id == camera.id) == []
+
+
+def test_a_fallback_while_embedding_embeds_the_encounter_again_under_the_new_provider(
+    pipeline: Pipeline, red: uuid.UUID, camera: Camera
+) -> None:
+    """TST-075 (live half): every face of the encounter names the segment that produced it."""
+    from backend.app.runtime.perception_client import ProviderFallback, ProviderUnavailable
+    from backend.ml.contracts.protocol import MLErrorCode
+
+    failed = ProviderUnavailable(
+        pipeline.perception.embedder, MLErrorCode.RUNTIME_INITIALIZATION_FAILED, "gone"
+    )
+    camera.perception.represent_fallbacks = [
+        ProviderFallback((failed,), pipeline.perception.embedder)
+    ]
+    started = camera.start()
+    camera.executor().run(started, frames(*visit("red", 0, 2), *empty(2, 1.6)))
+
+    segments = rows(
+        pipeline, ExecutionSegment,
+        ExecutionSegment.processing_run_id == started.job.processing_run_id,
+    )  # fmt: skip
+    assert [s.ended_reason for s in segments] == ["FALLBACK", "NORMAL"]
+    faces = rows(pipeline, Observation, Observation.source_id == camera.id)
+    assert faces
+    assert {face.execution_segment_id for face in faces} == {segments[1].id}
+    reps = rows(pipeline, Representation, Representation.observation_id.in_([f.id for f in faces]))
+    assert {r.execution_segment_id for r in reps} == {segments[1].id}
+    assert camera.perception.represented == 2 * len(faces)  # embedded twice: before and after

@@ -67,6 +67,8 @@ class PaintedCameraPerception:
         self.lease = WorkerLease()
         self.classes: list[str] = []  # the lease class of each request, in order
         self.fallbacks: list[Any] = []  # given with the next detection, then cleared
+        self.represent_fallbacks: list[Any] = []  # given with the next embedding
+        self.represented = 0  # how many faces were embedded
         self.fail_represent: Exception | None = None
         self.drop_vector = False  # embed nothing for the face asked
 
@@ -97,8 +99,12 @@ class PaintedCameraPerception:
         if self.drop_vector:
             return Represented((), self.embedder)
         colour = next(vector for painted, vector in COLOURS if painted(pixels).sum() > 20)
+        self.represented += 1
+        fallbacks, self.represent_fallbacks = tuple(self.represent_fallbacks), []
         return Represented(
-            (FaceVector(detection.detection_index, colour, "L2_NORMALIZED"),), self.embedder
+            (FaceVector(detection.detection_index, colour, "L2_NORMALIZED"),),
+            self.embedder,
+            fallbacks,
         )
 
 

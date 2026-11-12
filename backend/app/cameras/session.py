@@ -284,13 +284,15 @@ class CameraSessionExecutor(ExecuteProcessingJob):
                 pool=settings.pool_per_encounter,
             )
             began: float | None = None
+            began_ms = 0  # UTC milliseconds when the first frame arrived
             try:
                 for item in frames:
                     if isinstance(item, Gap):
                         for encounter in encounters.close_all():
                             closed(self._record(state, source, frozen, settings, client, encounter))
                         continue
-                    began = item.received_at if began is None else began
+                    if began is None:  # (the clock is read once: frame times follow it)
+                        began, began_ms = item.received_at, self._epoch_ms()
                     with live(), client.turn():  # type: ignore[attr-defined]
                         detected = client.detect(item.pixels)
                     state.started = self._advance_after_fallbacks(
@@ -299,7 +301,8 @@ class CameraSessionExecutor(ExecuteProcessingJob):
                     for encounter in encounters.see(
                         elapsed=item.received_at - began,
                         sequence=item.sequence,
-                        at_ms=self._epoch_ms(),
+                        # when the frame arrived, however long the worker took to see it
+                        at_ms=began_ms + round((item.received_at - began) * 1000),
                         pixels=item.pixels,
                         detections=detected.detections,
                         detector=detected.ran,
@@ -369,12 +372,21 @@ class CameraSessionExecutor(ExecuteProcessingJob):
         )
         if not sightings:
             return None
-        with live(), client.turn():
-            represented: list[Represented] = [
-                client.represent(sighting.crop, (sighting.detection,)) for sighting in sightings
-            ]
-        for result in represented:
-            state.started = self._advance_after_fallbacks(source, state.started, result.fallbacks)
+        while True:
+            # A provider that falls back part way starts a new segment; the encounter is then
+            # embedded again from its first face under the provider that now runs (as a video's
+            # chunk is), so every face names the segment that produced it.
+            segment = state.started.execution_segment_id
+            with live(), client.turn():
+                represented: list[Represented] = [
+                    client.represent(sighting.crop, (sighting.detection,)) for sighting in sightings
+                ]
+            for result in represented:
+                state.started = self._advance_after_fallbacks(
+                    source, state.started, result.fallbacks
+                )
+            if state.started.execution_segment_id == segment:
+                break
         crops = self._store_crops(sightings)
         observations, representations = self._uow.write(
             lambda session: self._write_private(
@@ -422,13 +434,13 @@ class CameraSessionExecutor(ExecuteProcessingJob):
             try:
                 stored.append(self._files.store(key, io.BytesIO(_jpeg(sighting.crop))))
             except Exception as error:
-                unwritten = [artifact_id for artifact_id, _key in reserved[position:]]
                 detail = f"{type(error).__name__}: {error}"
+                for _artifact_id, written in reserved[:position]:  # (no face will ever name them)
+                    assert written is not None
+                    self._files.delete(written)
 
-                def give_up(
-                    session: Session, unwritten: list[uuid.UUID] = unwritten, detail: str = detail
-                ) -> None:
-                    for artifact_id in unwritten:  # (this one and those never tried)
+                def give_up(session: Session, detail: str = detail) -> None:
+                    for artifact_id, _key in reserved:  # (the whole encounter's reservations)
                         mark_write_not_completed(session, artifact_id, detail)
 
                 self._uow.write(give_up)
