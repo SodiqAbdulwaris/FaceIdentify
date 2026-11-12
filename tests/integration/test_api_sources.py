@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from backend.api.pagination import encode_cursor
 from backend.api.startup import Backend, create_backend_app
-from backend.app.sources.models import Artifact, ArtifactState
+from backend.app.sources.models import Artifact, ArtifactState, Source
 from backend.infrastructure.media.video import FFMPEG_DIR_ENV
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import MAX_BYTES, MAX_PIXELS, Api, error, imported, library_settings
@@ -396,3 +396,28 @@ async def test_video_import_failures_are_mapped_to_stable_codes(
     monkeypatch.setenv(FFMPEG_DIR_ENV, str(api.folder / "no-ffmpeg-here"))
     error(await api.client.post(url, json={"path": str(damaged)}), 503, "MEDIA_TOOLS_UNAVAILABLE")
     assert (await api.client.get("/api/v1/sources")).json()["items"] == []
+
+
+async def test_a_camera_is_not_served_by_the_source_routes(
+    api: Api, clock: FrozenClock, new_id: SeededUUIDs
+) -> None:
+    """A camera has no original and is managed through the camera routes (M7 step 1): every
+    Source route answers 404 for it, as for any id it does not serve, and changes nothing."""
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        camera = ModelFactory(session, clock, new_id).camera().source_id
+        session.commit()
+    base = f"/api/v1/sources/{camera}"
+    for response in (
+        await api.client.get(base),
+        await api.client.get(f"{base}/media"),
+        await api.client.delete(base),
+        await api.client.post(f"{base}/restore"),
+        await api.client.post(f"{base}/recheck"),
+        await api.client.post(f"{base}/relink", json={"path": str(api.image())}),
+    ):
+        error(response, 404, "SOURCE_NOT_FOUND")
+    with api.backend.library.session_factory() as session:
+        source = session.get(Source, camera)
+        assert source is not None
+        assert source.state == "ACTIVE"
