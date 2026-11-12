@@ -415,20 +415,23 @@ class CameraSessionExecutor(ExecuteProcessingJob):
             ]
         )
         stored = []
-        for (artifact_id, key), sighting in zip(reserved, sightings, strict=True):
+        for position, ((_artifact_id, key), sighting) in enumerate(
+            zip(reserved, sightings, strict=True)
+        ):
             assert key is not None
             try:
                 stored.append(self._files.store(key, io.BytesIO(_jpeg(sighting.crop))))
             except Exception as error:
+                unwritten = [artifact_id for artifact_id, _key in reserved[position:]]
+                detail = f"{type(error).__name__}: {error}"
 
-                def unwritten(
-                    session: Session,
-                    artifact_id: uuid.UUID = artifact_id,
-                    detail: str = f"{type(error).__name__}: {error}",
+                def give_up(
+                    session: Session, unwritten: list[uuid.UUID] = unwritten, detail: str = detail
                 ) -> None:
-                    mark_write_not_completed(session, artifact_id, detail)
+                    for artifact_id in unwritten:  # (this one and those never tried)
+                        mark_write_not_completed(session, artifact_id, detail)
 
-                self._uow.write(unwritten)
+                self._uow.write(give_up)
                 raise
         return [
             (artifact_id, bytes_)
