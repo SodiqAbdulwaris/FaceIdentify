@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from alembic import command
 from sqlalchemy import Engine, select
+from sqlalchemy.orm import Session
 
 from backend.app import lifecycle
 from backend.app.jobs.models import Job
@@ -38,6 +39,8 @@ from backend.infrastructure.storage.library_root import InvalidLibraryRootError
 from tests.factories.models import ModelFactory
 from tests.fixtures.deterministic import EPOCH, FrozenClock, SeededUUIDs
 from tests.fixtures.links import link_directory
+from tests.fixtures.migrations import dump, populate_legacy, version
+from tests.fixtures.migrations import migrate as migrate_to
 
 
 class Opener:
@@ -308,28 +311,39 @@ def backups(opener: Opener) -> list[Path]:
     return sorted((opener.library / "backups").glob("pre-migration-*"))
 
 
-def test_upgrading_an_older_library_first_copies_its_database_and_the_copy_restores(
-    opener: Opener,
+def test_upgrading_the_previous_release_copies_it_first_and_keeps_every_row(
+    opener: Opener, monkeypatch: pytest.MonkeyPatch, clock: FrozenClock, new_id: SeededUUIDs
 ) -> None:
-    old_library(opener)
-    with closing(sqlite3.connect(opener.database)) as connection:
-        tables_before = connection.execute(
-            "SELECT name FROM sqlite_master ORDER BY name"
-        ).fetchall()
+    (opener.library / "database").mkdir()
+
+    def fill(session: Session) -> None:
+        build = ModelFactory(session, clock, new_id)
+        run = build.run(state="COMPLETED")
+        observation = build.observation(run, state="ACTIVE")
+        identity = build.identity()
+        build.representation(observation, identity_id=identity.id, state="ACTIVE", ann_key=1)
+        build.occurrence(observation, identity_id=identity.id, state="ACTIVE")
+        build.evidence(kind="IDENTITY_MATCHED", processing_run_id=run.id, source_id=run.source_id)
+
+    migrate_to(monkeypatch, opener.database, "0010")  # the release before this one
+    populate_legacy(opener.library.parent / "scratch.db", monkeypatch, opener.database, fill)
+    before = dump(opener.database)
+    assert all(before[table] for table in ("processing_runs", "observations", "representations"))
 
     with opener():
         pass
 
     (copy,) = backups(opener)
-    assert copy.name == "pre-migration-0003-20260101T000000.db"  # revision, then the clock's time
-    with closing(sqlite3.connect(copy)) as connection:
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [
-            ("0003",)
-        ]
-        assert connection.execute("SELECT name FROM sqlite_master ORDER BY name").fetchall() == (
-            tables_before
-        )
+    assert copy.name == "pre-migration-0010-20260101T000000.db"  # revision, then the clock's time
+    assert version(copy) == "0010"
+    assert dump(copy) == before  # the copy is the library exactly as it was
     assert stamps(opener) == [("0011",)]  # and the library itself did upgrade
+    after = dump(opener.database)
+    assert after.keys() == before.keys()
+    for table, rows in before.items():
+        # every row is kept; opening may change a state (recovery interrupts a run still
+        # "running"), so rows are matched by id, and the copy above is the exact record
+        assert [row[0] for row in after[table]] == [row[0] for row in rows], table
 
 
 def test_a_new_library_and_one_already_at_head_need_no_copy(opener: Opener) -> None:

@@ -3,7 +3,13 @@
 - **Date:** 2026-11-12
 - **Milestone / tracker IDs:** M8 step 6 (decision R9) · TST-081 (not `PASSING`: the installer upgrade test is not built)
 - **Status:** done
-- **Commits:** PR (number added when opened): `feat(db): copy the database before upgrading a library`
+- **Commits:** PR #253: `feat(db): copy the database before upgrading a library`, `docs(m8): record the pre-migration database copy`, and the review fixes
+
+## Why
+
+M8 decision R9: an upgrade of a library is the one step that can damage the owner's data, and the
+installer upgrades in place, so the database is copied first and the copy kept (last three), as step 6
+of [the M8 plan](../plans/M8_PLAN.md) requires.
 
 ## What changed
 
@@ -14,8 +20,9 @@
   newest three (`BACKUPS_KEPT`) are kept. A copy that cannot be made raises and the upgrade does not
   start, so the library stays as it was. A new library, one already at head, a newer one and a foreign
   one make no copy (the last two were already refused untouched).
-- `tests/integration/test_library_lifecycle.py`: four tests (copy made and restorable, none at head or
-  when new, only three kept, a failed copy stops the upgrade and releases the lock) and two existing
+- `tests/integration/test_library_lifecycle.py`: four tests (a populated `0010` library, the previous
+  release, opens through `open_library`: the copy is exact and every row is kept at `0011`; none at head
+  or when new; only three kept; a failed copy stops the upgrade and releases the lock) and two existing
   helpers adapted to the new `migrate` signature (no assertion changed).
 
 ## Verification

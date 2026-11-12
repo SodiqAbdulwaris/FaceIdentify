@@ -156,6 +156,8 @@ choice and the self-check route; (c) the first-run screens; (d) the desktop end-
   policy in place; reinstall opens the same library.
 - Tracker: TST-081, TST-085.
 
+**Part built 2026-11-12** ([entry](../implementations/2026-11-12-m8-step6-pre-migration-backup.md)): the pre-migration copy (last three kept) with the previous-release upgrade test. Still open: the installer-level upgrade, uninstall and reinstall tests (step 7).
+
 ### Step 7. Installer in CI and the clean-install tests
 
 Sized as three PRs: (a) the on-demand installer build and silent install job; (b) the first-run flow, process-tree and network checks on the installed build; (c) the integrity and rollback tests.
