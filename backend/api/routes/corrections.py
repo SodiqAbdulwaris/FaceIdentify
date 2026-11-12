@@ -175,6 +175,8 @@ class UnresolvedFace(BaseModel):
     observation_id: str
     bounding_box: BoundingBox
     likely: list[Likely]  # who it resembled most, best first (a hint, not a decision)
+    # When the face was seen: a camera's UTC milliseconds, a video's time in it; None in an image.
+    seen_at_ms: int | None = None
 
 
 class UnresolvedFaces(BaseModel):
@@ -294,6 +296,7 @@ def unresolved_faces(source_id: uuid.UUID, library: Library) -> UnresolvedFaces:
                         x=o.bbox_x, y=o.bbox_y, width=o.bbox_width, height=o.bbox_height
                     ),
                     likely=likely.get(r.id, []),
+                    seen_at_ms=o.timestamp_ms,
                 )
                 for r, o in rows
             ]

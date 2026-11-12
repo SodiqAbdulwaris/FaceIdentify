@@ -40,6 +40,9 @@ from backend.api.app import BackendReadiness, create_app
 from backend.api.events import EventHub
 from backend.api.library_profile import LibraryProfile, claim_library_profile
 from backend.api.scheduler import SchedulerService
+from backend.app.cameras.capture import FrameSource
+from backend.app.cameras.service import CameraService
+from backend.app.cameras.session import CameraSessionExecutor, CameraSettings
 from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.processing.accept_run import AcceptProcessingRunUseCase
@@ -51,6 +54,12 @@ from backend.app.recovery.startup import StartupReport
 from backend.app.runtime.worker_config import PerceptionPlan, plan_perception
 from backend.app.sources.permanent_delete import DeletionReport, PermanentSourceDeletion
 from backend.infrastructure.db.unit_of_work import TransactionRetry
+from backend.infrastructure.media.camera import (
+    CaptureDevice,
+    FfmpegFrameSource,
+    capture_command,
+    device_input,
+)
 from backend.infrastructure.media.video import media_tools
 
 NOT_CONFIGURED: Final = "NOT_CONFIGURED"
@@ -129,6 +138,8 @@ class ProcessingSettings:
     profile: LibraryProfile = LibraryProfile.REAL
     # Runs at shutdown, after the scheduler has stopped (the real profile stops its workers).
     close: Callable[[], None] | None = None
+    # Where camera frames come from; None: the device through the pinned ffmpeg (M7 step 5).
+    open_camera: Callable[[CaptureDevice, CameraSettings], FrameSource] | None = None
 
 
 def capabilities_from(report: StartupReport) -> dict[str, str]:
@@ -173,6 +184,8 @@ class Backend:
     scheduler: SchedulerService | None = None
     # The video loop (M6 step 7): one heavy movie at a time, beside the loop for everything else.
     video_scheduler: SchedulerService | None = None
+    # Configured cameras and their one running session (M7 step 5); None without processing.
+    cameras: CameraService | None = None
     library: OpenLibrary | None = None
     failure: str | None = None
     capabilities: dict[str, str] = field(default_factory=dict)
@@ -272,6 +285,7 @@ class Backend:
             )
             self.scheduler.start()
             self.video_scheduler.start()
+            self.cameras = self._camera_service(library, processing)
 
     def _run_once_for(
         self, library: OpenLibrary, processing: ProcessingSettings, *, videos: bool
@@ -328,10 +342,62 @@ class Backend:
 
         return run_once
 
+    def _camera_service(
+        self, library: OpenLibrary, processing: ProcessingSettings
+    ) -> CameraService:
+        """Camera sessions share the worker (live class), the library and the frozen-request
+        builder with processing; frames come from the pinned ffmpeg unless the host says otherwise
+        (`ProcessingSettings.open_camera`, the development profile's scripted camera)."""
+        settings, uow = self.settings, library.unit_of_work
+
+        def wake_index() -> None:
+            library.coordinator.apply_pending(limit=settings.index_batch)
+
+        def executor() -> CameraSessionExecutor:
+            return CameraSessionExecutor(
+                uow,
+                packages=library.packages,
+                files=library.store,
+                client_for=processing.client_for,
+                global_index_for=library.coordinator.open_for_recognition,
+                new_id=settings.new_id,
+                clock=settings.clock,
+                max_pixels=processing.max_pixels,
+                recognition_k=processing.recognition_k,
+                planner=processing.planner,
+                accept=AcceptProcessingRunUseCase(
+                    uow, new_id=settings.new_id, clock=settings.clock
+                ),
+                wake_index=wake_index,
+            )
+
+        def ffmpeg_camera(device: CaptureDevice, camera: CameraSettings) -> FrameSource:
+            tools = media_tools(library.roots.local_state_root)
+            return FfmpegFrameSource(
+                capture_command(
+                    tools, device_input(device), rate=camera.sample_fps, max_side=camera.max_side
+                )
+            )
+
+        def announce(type_: str, camera_id: uuid.UUID, data: dict[str, Any]) -> None:
+            self.announce(type_, "camera", str(camera_id), data)
+
+        return CameraService(
+            uow,
+            new_id=settings.new_id,
+            clock=settings.clock,
+            executor=executor,
+            request_for=processing.request_for,
+            open_source=processing.open_camera or ffmpeg_camera,
+            announce=announce,
+        )
+
     async def _shutdown(self) -> None:
         self.state = LifecycleState.SHUTTING_DOWN
         try:
             try:
+                if self.cameras is not None:  # (records the open encounters, then ends)
+                    await anyio.to_thread.run_sync(self.cameras.close)
                 for scheduler in (self.scheduler, self.video_scheduler):
                     if scheduler is not None:
                         await scheduler.stop()

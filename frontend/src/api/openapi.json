@@ -29,6 +29,105 @@
         "title": "BoundingBox",
         "type": "object"
       },
+      "CameraCreate": {
+        "properties": {
+          "device_name": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Device Name",
+            "type": "string"
+          },
+          "device_path": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Path"
+          },
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name",
+          "device_name"
+        ],
+        "title": "CameraCreate",
+        "type": "object"
+      },
+      "CameraSummary": {
+        "properties": {
+          "device_name": {
+            "title": "Device Name",
+            "type": "string"
+          },
+          "device_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Path"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionStatus"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "device_name",
+          "device_path",
+          "session"
+        ],
+        "title": "CameraSummary",
+        "type": "object"
+      },
+      "CaptureDeviceModel": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "title": "CaptureDeviceModel",
+        "type": "object"
+      },
       "Confirm": {
         "properties": {
           "expected_identity_id": {
@@ -282,6 +381,69 @@
           "outstanding"
         ],
         "title": "ForgetPending",
+        "type": "object"
+      },
+      "HistoryDelete": {
+        "description": "Which history to delete: these encounters, and every face seen between `start_ms` and\n`end_ms` (UTC milliseconds, inclusive). An empty body deletes all of it.",
+        "properties": {
+          "end_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Ms"
+          },
+          "occurrence_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Occurrence Ids",
+            "type": "array"
+          },
+          "start_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Ms"
+          }
+        },
+        "title": "HistoryDelete",
+        "type": "object"
+      },
+      "HistoryDeleted": {
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "encounters": {
+            "title": "Encounters",
+            "type": "integer"
+          },
+          "faces": {
+            "title": "Faces",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "faces",
+          "encounters",
+          "complete"
+        ],
+        "title": "HistoryDeleted",
         "type": "object"
       },
       "IdentityHit": {
@@ -1734,6 +1896,71 @@
         "title": "SearchResponse",
         "type": "object"
       },
+      "SessionStatus": {
+        "description": "`state` None: no session since the application started.",
+        "properties": {
+          "dropped": {
+            "title": "Dropped",
+            "type": "integer"
+          },
+          "encounters": {
+            "title": "Encounters",
+            "type": "integer"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "frames": {
+            "title": "Frames",
+            "type": "integer"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "open_encounters": {
+            "title": "Open Encounters",
+            "type": "integer"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "state",
+          "job_id",
+          "frames",
+          "dropped",
+          "open_encounters",
+          "encounters",
+          "failure_code"
+        ],
+        "title": "SessionStatus",
+        "type": "object"
+      },
       "SourceDetail": {
         "properties": {
           "availability": {
@@ -2071,6 +2298,17 @@
           "representation_id": {
             "title": "Representation Id",
             "type": "string"
+          },
+          "seen_at_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seen At Ms"
           }
         },
         "required": [
@@ -2106,6 +2344,481 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/cameras": {
+      "get": {
+        "description": "Every configured camera (a short list: no pagination).",
+        "operationId": "list_cameras",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CameraSummary"
+                  },
+                  "title": "Response List Cameras",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "List Cameras",
+        "tags": [
+          "cameras"
+        ]
+      },
+      "post": {
+        "operationId": "configure",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CameraCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CameraSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Configure",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/devices": {
+      "get": {
+        "description": "The capture devices this computer offers now (asked of DirectShow every time).",
+        "operationId": "devices",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CaptureDeviceModel"
+                  },
+                  "title": "Response Devices",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Devices",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{camera_id}": {
+      "delete": {
+        "description": "Remove the configuration; its history stays unless `history=true` (C9).",
+        "operationId": "remove_camera",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Also delete all of its history, for good.",
+            "in": "query",
+            "name": "history",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also delete all of its history, for good.",
+              "title": "History",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Remove Camera",
+        "tags": [
+          "cameras"
+        ]
+      },
+      "get": {
+        "operationId": "get_camera",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CameraSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Get Camera",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{camera_id}/faces/{observation_id}/crop": {
+      "get": {
+        "description": "A camera face as it was kept (its face crop).",
+        "operationId": "face_crop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "observation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Observation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {}
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Face Crop",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{camera_id}/history/delete": {
+      "post": {
+        "description": "Delete encounters and faces for good (C9): no Recycle bin.",
+        "operationId": "delete_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoryDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Delete History",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{camera_id}/preview": {
+      "get": {
+        "description": "The newest frame with its faces outlined, while a session runs. Never stored.",
+        "operationId": "preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {}
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Preview",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{camera_id}/start": {
+      "post": {
+        "operationId": "start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Start",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{camera_id}/status": {
+      "get": {
+        "operationId": "status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Status",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
+    "/api/v1/cameras/{camera_id}/stop": {
+      "post": {
+        "description": "Stop the session; its open encounters are recorded before it ends.",
+        "operationId": "stop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Stop",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
     "/api/v1/identities": {
       "get": {
         "operationId": "list_identities",
