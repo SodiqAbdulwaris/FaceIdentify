@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from backend.ml.contracts.protocol import ContractError, MLErrorCode
 from backend.ml.perception.detection import (
@@ -67,6 +68,31 @@ def test_letterbox_scales_the_longer_side_and_pads_at_the_bottom_right() -> None
     assert boxed.tensor[0, 2, 319, 639] == pytest.approx(white)  # the last scaled row and column
     assert boxed.tensor[0, 1, 320, 0] == pytest.approx(padding)  # below the picture
     assert boxed.tensor[0, 1, 0, SIZE - 1] == pytest.approx(white)
+
+
+def _letterbox_before(image: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    """The tensor as letterbox built it before 2026-11-12: a float canvas, normalised."""
+    height, width = image.shape[:2]
+    scale = SIZE / max(height, width)
+    size = (round(width * scale), round(height * scale))
+    resized = Image.fromarray(image).resize(size, Image.Resampling.BILINEAR)
+    canvas = np.zeros((SIZE, SIZE, 3), dtype=np.float32)
+    canvas[: size[1], : size[0]] = np.asarray(resized, dtype=np.float32)
+    canvas = (canvas - CONTRACT.mean) / CONTRACT.std
+    return np.ascontiguousarray(canvas.transpose(2, 0, 1)[None])
+
+
+@pytest.mark.parametrize("shape", [(720, 1280), (798, 1916), (1080, 1920), (480, 360), (17, 5)])
+def test_letterbox_gives_the_very_same_tensor_as_before(shape: tuple[int, int]) -> None:
+    """Made faster for video (one lookup per pixel); every bit of the detector's input is kept."""
+    image = np.random.default_rng(sum(shape)).integers(0, 256, (*shape, 3), dtype=np.uint8)
+
+    tensor = letterbox(image, CONTRACT).tensor
+
+    expected = _letterbox_before(image)
+    assert tensor.dtype == expected.dtype
+    assert tensor.flags.c_contiguous
+    assert np.array_equal(tensor, expected)
 
 
 def test_letterbox_keeps_channels_in_rgb_order() -> None:

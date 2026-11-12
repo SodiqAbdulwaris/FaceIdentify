@@ -86,15 +86,27 @@ def align(
 ) -> NDArray[np.uint8]:
     """The aligned crop (crop_size x crop_size x 3, uint8) of one face. `landmarks` are the
     five points normalised to the image, in the order of `TEMPLATE`."""
-    if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
+    return align_image(image_of(image), landmarks, contract)
+
+
+def image_of(pixels: NDArray[np.uint8]) -> Image.Image:
+    """One canonical image (RGB, uint8, HWC) as the image `align_image` crops from."""
+    if pixels.ndim != 3 or pixels.shape[2] != 3 or pixels.dtype != np.uint8:
         raise _invalid("an image must be uint8 HWC, 3 channels")
+    return Image.fromarray(pixels)
+
+
+def align_image(
+    image: Image.Image, landmarks: tuple[Point, ...], contract: EmbedderContract
+) -> NDArray[np.uint8]:
+    """`align` on an image already converted once, so the faces of one frame share it."""
     if len(landmarks) != len(TEMPLATE):
         raise _invalid(f"alignment needs {len(TEMPLATE)} landmarks, got {len(landmarks)}")
-    height, width = image.shape[:2]
+    width, height = image.size
     points = np.array([(x * width, y * height) for x, y in landmarks], dtype=np.float64)
     forward = similarity_transform(points, TEMPLATE)
     inverse = np.linalg.inv(np.vstack([forward, [0.0, 0.0, 1.0]]))[:2]  # crop -> image
-    crop = Image.fromarray(image).transform(
+    crop = image.transform(
         (contract.crop_size, contract.crop_size),
         Image.Transform.AFFINE,
         tuple(inverse.reshape(-1)),
