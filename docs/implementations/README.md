@@ -249,3 +249,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-13 | [M8 step 5(a): installing the face models the user obtained](2026-11-13-m8-step5a-model-installation.md) | done; the first-run screens next |
 | 2026-11-12 | [M7 step 4: camera sessions and encounters](2026-11-12-m7-step4-camera-sessions.md) | done; routes and screen next (step 5) |
 | 2026-11-12 | [M7 step 5: the Cameras screen, camera history and its deletion](2026-11-12-m7-step5-cameras-screen-history.md) | done; search with a camera next (step 6) |
+| 2026-11-12 | [M7 step 6: search with the camera](2026-11-12-m7-step6-camera-search.md) | done |
