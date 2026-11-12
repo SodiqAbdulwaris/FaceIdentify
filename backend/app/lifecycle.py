@@ -58,6 +58,7 @@ from backend.infrastructure.storage.library_root import (
 )
 from backend.infrastructure.storage.workspaces import WorkspaceManager
 
+BACKUPS_KEPT = 3  # pre-migration copies of the database (M8 R9)
 ALEMBIC_DIRECTORY = Path(__file__).resolve().parents[1] / "alembic"
 
 
@@ -120,13 +121,35 @@ def _inspect(database_path: Path) -> tuple[set[str], bool]:
     return stamps, bool(tables - {"alembic_version"})
 
 
-def migrate(database_path: Path) -> None:
+def _back_up_before_upgrade(
+    database_path: Path, backups: Path, revisions: set[str], moment: datetime
+) -> None:
+    """A consistent copy of the database (SQLite's online backup, so its log is included) in
+    `backups/`, written under a temporary name and renamed so that a half-written copy never has a
+    backup's name. The newest `BACKUPS_KEPT` are kept (R9)."""
+    backups.mkdir(parents=True, exist_ok=True)
+    name = f"pre-migration-{'+'.join(sorted(revisions))}-{moment:%Y%m%dT%H%M%S}.db"
+    partial = backups / f"{name}.partial"
+    with (
+        closing(sqlite3.connect(database_path)) as source,
+        closing(sqlite3.connect(partial)) as copy,
+    ):
+        source.backup(copy)
+    partial.replace(backups / name)
+    taken = sorted(backups.glob("pre-migration-*.db"), key=lambda path: path.stem.rsplit("-", 1)[1])
+    for old in taken[:-BACKUPS_KEPT]:
+        old.unlink()
+
+
+def migrate(database_path: Path, *, backups: Path, clock: Callable[[], datetime]) -> None:
     """Bring the database to `head`. A database stamped with a revision this application does not
     have (newer, or foreign) and one that holds tables but no stamp are refused untouched; a
-    database stamped with an older known revision is upgraded."""
+    database stamped with an older known revision is copied into `backups` and then upgraded (a
+    copy that cannot be made stops the upgrade)."""
     config = _alembic_config(database_path)
     stamps, has_tables = _inspect(database_path)
-    known = {script.revision for script in ScriptDirectory.from_config(config).walk_revisions()}
+    scripts = ScriptDirectory.from_config(config)
+    known = {script.revision for script in scripts.walk_revisions()}
     if stamps - known:
         raise DatabaseNewerThanApplicationError(
             f"the library database is at revision {sorted(stamps - known)}, which this version of "
@@ -137,6 +160,8 @@ def migrate(database_path: Path) -> None:
             "the library database holds tables but no migration stamp: it is not a library this "
             "application created, so it is left as it is"
         )
+    if stamps and stamps != {scripts.get_current_head()}:
+        _back_up_before_upgrade(database_path, backups, stamps, clock())
     command.upgrade(config, "head")
 
 
@@ -159,7 +184,7 @@ def open_library(
     with ExitStack() as cleanup:
         cleanup.enter_context(LibraryLock(library_root))  # before anything else is changed
         roots = StorageRoots(library_root=library_root, local_state_root=local_state_root)
-        migrate(roots.database_path)
+        migrate(roots.database_path, backups=library_root / "backups", clock=clock)
         roots.ensure_layout()
         engine = create_sqlite_engine(roots.database_path)
         cleanup.callback(engine.dispose)  # the file and its log are released before the lock is
