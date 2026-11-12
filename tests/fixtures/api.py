@@ -7,7 +7,7 @@ route is exercised exactly as in the sidecar: authenticated HTTP through the rea
 import base64
 import secrets
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -27,11 +27,14 @@ from backend.api.startup import (
     ProcessingSettings,
     create_backend_app,
 )
+from backend.app.cameras.capture import FrameSource
+from backend.app.cameras.session import CameraSettings
 from backend.app.lifecycle import open_library
 from backend.app.memory.index_coordinator import RetryPolicy
 from backend.app.processing.execute_job import ExecuteProcessingJob
-from backend.app.runtime.worker_config import PerceptionPlan
+from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
 from backend.infrastructure.db.unit_of_work import TransactionRetry
+from backend.infrastructure.media.camera import CaptureDevice
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 from tests.fixtures.pipeline import NDIM, PlantedPerception, prepare_catalog, variant_from_json
 
@@ -104,6 +107,8 @@ async def processing_app(
     *,
     catalog: dict[str, Any] | None = None,
     folder: str = "user-files",
+    perceive: Callable[[PlannedVariant, PlannedVariant], Any] = PlantedPerception,
+    open_camera: Callable[[CaptureDevice, CameraSettings], FrameSource] | None = None,
 ) -> AsyncIterator[Api]:
     """One run of the application on the library under `tmp_path`. A test that restarts it passes
     the `catalog` the first run registered (`Api.catalog`) and a new `folder`."""
@@ -119,7 +124,7 @@ async def processing_app(
         variant_from_json(catalog["detector"]),
         variant_from_json(catalog["embedder"]),
     )
-    perception = PlantedPerception(detector, embedder)
+    perception = perceive(detector, embedder)
     plan = PerceptionPlan(uuid.UUID(catalog["space_id"]), NDIM, (detector,), (embedder,))
     monkeypatch.setattr(ExecuteProcessingJob, "_plan", lambda _self, _session, _frozen: plan)
 
@@ -139,6 +144,7 @@ async def processing_app(
             idle_seconds=60.0,
             owner="api-test",
             planner=planner,
+            open_camera=open_camera,
         ),
         media_limits=MediaLimits(max_pixels=MAX_PIXELS, max_bytes=MAX_BYTES),
     )
