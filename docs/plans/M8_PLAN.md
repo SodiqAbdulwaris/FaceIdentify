@@ -202,6 +202,8 @@ Sized as three PRs: (a) the on-demand installer build and silent install job; (b
   wrong hash is refused (TST-080); the installer's own SHA-256 is recorded in the release notes (R10).
 - Tracker: TST-078, TST-079, TST-080, TST-081, TST-082, TST-085, SEC-008.
 
+**Part built 2026-11-12** ([entry](../implementations/2026-11-12-m8-step7-installed-build-check.md)): `packaging/check_installed.py` and the path-filtered `installer.yml` job (installed backend, one image, one video through the shipped FFmpeg, both provider paths). Still open: the first-run flow checks, the integrity and rollback tests, the upgrade tests.
+
 ### Step 8. The real-model packaged check, release regression, release notes
 
 - On the owner's machine, with the weights installed by the user: install the release candidate, run the
