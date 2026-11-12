@@ -86,10 +86,17 @@ class ProcessingRunner:
         self._accept = accept
         self._owner = owner
         self._clock = clock
+        # Runs this loop executed whose acceptance failed before it committed (the database stayed
+        # busy, say). Each is still FINALIZING; the next turn accepts it before claiming more, so it
+        # never waits for a restart's recovery (M6 D8: a video run sat FINALIZING for an hour).
+        self._unaccepted: list[tuple[uuid.UUID, uuid.UUID]] = []
 
     def run_once(self) -> RunOutcome:
         """Process at most one queued job. Returns `IDLE` when there was none. `on_started` is told
-        the run's id once its job is claimed (best effort: it is a notification)."""
+        the run's id once its job is claimed (best effort: it is a notification). A run of this
+        loop whose acceptance failed before it committed is accepted first, before any claim."""
+        if self._unaccepted:
+            return self._finish(*self._unaccepted.pop(0))
         started = self._scheduler.claim_source_job(self._owner)
         if started is None:
             return RunOutcome(RunOutcomeKind.IDLE)
@@ -110,14 +117,21 @@ class ProcessingRunner:
             with suppress(Exception):  # best effort: the defect itself must not be masked
                 self._executor.fail_claimed(started, UNEXPECTED_CODE)
             raise RuntimeError(f"unexpected {type(error).__name__} while processing") from error
+        return self._finish(run_id, started.job.id)
+
+    def _finish(self, run_id: uuid.UUID, job_id: uuid.UUID) -> RunOutcome:
         try:
             self._accept.accept(run_id)
         except AcceptanceError as error:
-            self._refuse_final(run_id, started.job.id, str(error))
+            self._refuse_final(run_id, job_id, str(error))
             return RunOutcome(RunOutcomeKind.NOT_ACCEPTABLE, run_id, type(error).__name__)
         except Exception as error:
+            # Kept before the state is read: if that read fails too, the next turn still retries
+            # (accepting a run that did commit only finds it accepted).
+            self._unaccepted.append((run_id, job_id))
             if run_state(self._uow, run_id) != ProcessingRunState.COMPLETED:
-                raise  # the acceptance did not commit: the run stays FINALIZING for recovery
+                raise  # the acceptance did not commit: still FINALIZING, the next turn retries
+            self._unaccepted.pop()
             return RunOutcome(RunOutcomeKind.ACCEPTED, run_id, wake_error=type(error).__name__)
         return RunOutcome(RunOutcomeKind.ACCEPTED, run_id)
 

@@ -21,6 +21,7 @@ from backend.app.processing.runner import (
     RunOutcomeKind,
 )
 from backend.app.runtime.perception_client import PerceptionError
+from backend.infrastructure.db.unit_of_work import DatabaseBusyError
 from backend.ml.contracts.protocol import MLErrorCode
 from tests.fixtures.pipeline import Pipeline
 
@@ -33,6 +34,13 @@ def only[T](pipeline: Pipeline, model: type[T]) -> T:
 def states(pipeline: Pipeline, model: Any) -> list[str]:
     with pipeline.lib.session_factory() as session:
         return sorted(session.scalars(select(model.state)))
+
+
+def only_finalizing(pipeline: Pipeline) -> Any:
+    with pipeline.lib.session_factory() as session:
+        return session.scalars(
+            select(ProcessingRun.id).where(ProcessingRun.state == "FINALIZING")
+        ).one()
 
 
 def test_with_nothing_queued_the_runner_is_idle(pipeline: Pipeline) -> None:
@@ -167,9 +175,55 @@ def test_an_error_before_the_acceptance_commits_propagates_and_the_run_stays_fin
     with pytest.raises(RuntimeError, match="the database went away"):
         pipeline.runner().run_once()
 
-    assert states(pipeline, ProcessingRun) == ["FINALIZING"]  # recovery finishes it on restart
+    assert states(pipeline, ProcessingRun) == ["FINALIZING"]  # nothing committed
     assert states(pipeline, Job) == ["RUNNING"]
     assert states(pipeline, Observation) == ["PENDING"]
+
+
+def test_the_next_turn_accepts_a_run_whose_acceptance_failed_before_it_committed(
+    pipeline: Pipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M6 D8: a video run sat FINALIZING for an hour after its acceptance met a busy database;
+    only a restart's recovery accepted it. The loop now retries it on its next turn."""
+    accept = AcceptProcessingRunUseCase._accept
+    attempts: list[int] = []
+
+    def busy_once(self: AcceptProcessingRunUseCase, session: Any, run_id: Any) -> Any:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise DatabaseBusyError("the database stayed busy for 3 attempt(s)")
+        return accept(self, session, run_id)
+
+    monkeypatch.setattr(AcceptProcessingRunUseCase, "_accept", busy_once)
+    pipeline.enqueue(pipeline.import_image())
+    pipeline.enqueue(pipeline.import_image())
+    runner = pipeline.runner(wake_index=pipeline.apply_index)
+    with pytest.raises(DatabaseBusyError):
+        runner.run_once()
+    first = only_finalizing(pipeline)
+
+    retried = runner.run_once()  # before claiming the second job
+
+    assert (retried.kind, retried.processing_run_id) == (RunOutcomeKind.ACCEPTED, first)
+    assert sorted(states(pipeline, ProcessingRun)) == ["COMPLETED", "PENDING"]
+    assert states(pipeline, Observation).count("ACTIVE") >= 1
+    assert runner.run_once().kind is RunOutcomeKind.ACCEPTED  # then the queue goes on
+    assert runner.run_once().kind is RunOutcomeKind.IDLE
+
+
+def test_a_failed_acceptance_that_did_commit_is_not_retried(
+    pipeline: Pipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An error after the commit (the index wake) is reported, never queued again."""
+
+    def broken_wake() -> None:
+        raise RuntimeError("index unavailable")
+
+    pipeline.enqueue(pipeline.import_image())
+    runner = pipeline.runner(wake_index=broken_wake)
+
+    assert runner.run_once().wake_error == "RuntimeError"
+    assert runner.run_once().kind is RunOutcomeKind.IDLE  # nothing left to accept
 
 
 def test_a_defect_is_not_masked_when_settling_the_claim_fails_too(
