@@ -976,11 +976,11 @@ class ExecuteProcessingJob:
             space = session.get(RepresentationSpace, frozen.representation_space_id)
             if space is None or space.dimension != frozen.dimension:
                 raise ProcessingExecutionError("the frozen representation space is no longer valid")
-            # A video's faces are all left out of each other's candidates below, so a run-local
-            # pool would only cost (D8): it is not built for a video.
+            # A video's (or a camera encounter's) faces are all left out of each other's candidates
+            # below, so a run-local pool would only cost (D8): it is not built for either.
             run_local = (
                 None
-                if source.kind == SourceKind.VIDEO
+                if source.kind in (SourceKind.VIDEO, SourceKind.CAMERA)
                 else rebuild_run_local_index(
                     session,
                     processing_run_id=source.run_id,
