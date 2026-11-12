@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, delete, exists, select, text, update
+from sqlalchemy import CursorResult, delete, exists, func, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
@@ -135,6 +135,18 @@ class IndexOperationRepository:
             .limit(limit)
         ).all()
         return [DueOperation(*row) for row in rows]
+
+    def due_count(self, *, now: datetime) -> int:
+        """How many `PENDING` operations are due now (what `due` would return without a limit)."""
+        return (
+            self._session.scalar(
+                select(func.count()).where(
+                    IndexOperation.state == IndexOperationState.PENDING,
+                    IndexOperation.not_before_at <= now,
+                )
+            )
+            or 0
+        )
 
     def failed_ids(self) -> list[uuid.UUID]:
         """Every `FAILED` operation, newest first."""

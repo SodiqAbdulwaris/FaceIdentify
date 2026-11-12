@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from sqlalchemy import Engine, delete, update
+from sqlalchemy import Engine, delete, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.memory.index_coordinator import (
@@ -425,6 +425,33 @@ def test_drain_applies_every_due_operation_a_batch_at_a_time(
 
     assert {load_op(factory, operation.id).state for operation in operations} == {"APPLIED"}
     assert load_op(factory, later.id).state == "PENDING"  # not due: left for its time
+
+
+def test_drain_stops_at_what_was_due_when_it_started(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    for key in range(1, 6):
+        queue(build, active(build, space, key), "ADD")
+    build.session.commit()
+    keys = iter(range(100, 200))
+    apply_pending = coordinator.apply_pending
+
+    def another_loop_keeps_queueing(*, limit: int) -> CoordinatorReport:
+        build.clock.advance(seconds=1)  # later than the snapshot, but already due
+        queue(build, active(build, space, next(keys)), "ADD")
+        build.session.commit()
+        return apply_pending(limit=limit)
+
+    monkeypatch.setattr(coordinator, "apply_pending", another_loop_keeps_queueing)
+    coordinator.drain(batch=2)  # ends although every pass queues one more
+
+    with factory() as session:
+        rows = session.execute(
+            select(IndexOperation.state, func.count()).group_by(IndexOperation.state)
+        ).all()
+    states = {str(state): count for state, count in rows}
+    assert states == {"APPLIED": 5, "PENDING": 3}  # the five, then three left for the next drain
 
 
 def test_an_operation_that_is_not_yet_due_waits(
