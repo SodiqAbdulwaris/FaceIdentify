@@ -17,7 +17,7 @@ from backend.api.real import ClientPool
 from backend.app.runtime.perception_client import PerceptionClient
 from backend.app.runtime.worker_config import PerceptionPlan
 from backend.ml.contracts.messages import MLRequest, MLResponse
-from backend.ml.supervisor.lease import WorkerClosedError, interactive
+from backend.ml.supervisor.lease import ServiceClass, WorkerClosedError, interactive
 from backend.ml.supervisor.supervisor import MLSupervisor, MLUnavailableError
 from tests.concurrency.test_worker_lease import Watched, finish, reached, watched
 from tests.integration.test_real_profile import plan
@@ -104,7 +104,7 @@ def test_requests_on_two_plans_never_run_on_the_worker_together() -> None:
     start(pool, cpu_only, condition, search=False, threads=threads)
     reached(gate.arrived["first"])
     start(pool, directml, condition, search=False, threads=threads)
-    assert pool.lease.queued(False) == 1
+    assert pool.lease.queued(ServiceClass.BACKGROUND) == 1
     assert gate.entered == ["first"]  # the second plan's request waits for the first's
 
     gate.leave["first"].set()
@@ -125,11 +125,17 @@ def test_a_search_on_one_plan_goes_before_background_work_on_another() -> None:
     reached(gate.arrived["first"])
     start(pool, cpu_only, condition, search=False, threads=threads)  # another job queues first
     start(pool, directml, condition, search=True, threads=threads)  # a search, later, other plan
-    assert (pool.lease.queued(True), pool.lease.queued(False)) == (1, 1)
+    assert (
+        pool.lease.queued(ServiceClass.INTERACTIVE),
+        pool.lease.queued(ServiceClass.BACKGROUND),
+    ) == (1, 1)
 
     gate.leave["first"].set()
     reached(gate.arrived["second"])
-    assert (pool.lease.queued(True), pool.lease.queued(False)) == (0, 1)  # the search went first
+    assert (
+        pool.lease.queued(ServiceClass.INTERACTIVE),
+        pool.lease.queued(ServiceClass.BACKGROUND),
+    ) == (0, 1)  # the search went first
     gate.leave["second"].set()
     reached(gate.arrived["third"])
     gate.leave["third"].set()
@@ -146,7 +152,7 @@ def test_closing_the_pool_refuses_a_queued_request_instead_of_restarting_a_worke
     start(pool, cpu_only, condition, search=False, threads=threads)
     reached(gate.arrived["first"])
     start(pool, directml, condition, search=False, threads=threads, outcomes=outcomes)
-    assert pool.lease.queued(False) == 1
+    assert pool.lease.queued(ServiceClass.BACKGROUND) == 1
 
     closing = threading.Thread(target=pool.close)
     closing.start()

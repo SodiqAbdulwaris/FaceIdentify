@@ -47,7 +47,7 @@ from backend.app.sources.models import Source
 from backend.infrastructure.media.video import CorruptVideoError
 from backend.infrastructure.storage.files import BytesMissingError
 from backend.ml.contracts.protocol import MLErrorCode
-from backend.ml.supervisor.lease import interactive
+from backend.ml.supervisor.lease import ServiceClass, interactive
 from tests.fixtures.pipeline import Pipeline
 from tests.fixtures.video_pipeline import (
     PaintedPerception,
@@ -190,10 +190,10 @@ def test_a_search_waits_for_at_most_one_batch(
             inside_first_batch.set()
             waited = threading.Event()
             for _ in range(1000):
-                if perception.lease.queued(True) == 1:
+                if perception.lease.queued(ServiceClass.INTERACTIVE) == 1:
                     break
                 waited.wait(0.01)  # (polls a condition; the outcome never depends on timing)
-            assert perception.lease.queued(True) == 1
+            assert perception.lease.queued(ServiceClass.INTERACTIVE) == 1
 
     perception.on_detect = on_detect
 
