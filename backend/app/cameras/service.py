@@ -42,6 +42,7 @@ from backend.infrastructure.db.unit_of_work import UnitOfWork
 from backend.infrastructure.media.camera import CameraError, CaptureDevice
 
 PREVIEW_MAX_SIDE = 640
+CAPTURE_SECONDS = 10.0  # the longest a search waits for a camera's first picture
 PREVIEW_QUALITY = 75
 STOP_SECONDS = 30.0  # the longest a stop waits for the session to record and end
 
@@ -244,6 +245,27 @@ class CameraService:
             return None
         return _annotated(last.frame.pixels, [d.box for d in last.detected.detections])
 
+    def capture(self, camera_id: uuid.UUID) -> bytes:
+        """One picture from the camera, as a PNG held in memory, for a search (spec 10.4; plan C10):
+        the running session's newest frame when this camera runs (the device cannot be opened
+        twice), else one frame read from the device and the device closed again. Nothing is
+        stored. `CameraNotConfiguredError` for an unknown camera; `CameraError` (with its code) when
+        the device gives no picture."""
+        with self._lock:
+            running = self._sessions.get(camera_id)
+        if running is not None:
+            with running.lock:
+                last = running.last if running.ended is None else None
+            if last is not None:
+                return _png(last.frame.pixels)
+        device = self._uow.read(lambda session: self.device(session, camera_id))
+        source = self._open_source(device, self._settings)
+        source.start()
+        try:
+            return _png(source.latest(CAPTURE_SECONDS).pixels)
+        finally:
+            source.stop()
+
     # --- the session's thread ---------------------------------------------------------------
 
     def _run(self, running: _Session, started: Any) -> None:
@@ -289,4 +311,10 @@ def _annotated(pixels: NDArray[np.uint8], boxes: list[tuple[float, float, float,
         )
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=PREVIEW_QUALITY)
+    return buffer.getvalue()
+
+
+def _png(pixels: NDArray[np.uint8]) -> bytes:
+    buffer = io.BytesIO()
+    Image.fromarray(pixels, "RGB").save(buffer, format="PNG")
     return buffer.getvalue()

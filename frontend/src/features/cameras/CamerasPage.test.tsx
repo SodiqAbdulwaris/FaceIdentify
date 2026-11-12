@@ -288,3 +288,62 @@ describe('session words', () => {
     expect(failureMessage(null)).toBe('The camera session stopped unexpectedly.')
   })
 })
+
+describe('search with a camera', () => {
+  it('shows who is in front of the camera now', async () => {
+    renderApp('/cameras', [
+      { path: CAMERAS, respond: [camera()] },
+      { path: `${CAMERAS}/devices`, respond: [] },
+      {
+        method: 'POST',
+        path: `${CAMERAS}/c1/search`,
+        respond: {
+          faces: [
+            {
+              index: 0,
+              bounding_box: { x: 0.2, y: 0.2, width: 0.3, height: 0.3 },
+              detection_score: 0.9,
+              status: 'UNKNOWN',
+              reason: 'NO_CANDIDATE',
+              identity_answer: null,
+              possible_people: [],
+              retrieval_complete: true,
+            },
+          ],
+          ranking: { plan: 'p', policy_version: 'v', similarity: 'cosine' },
+        },
+      },
+    ])
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Search with this camera' }))
+
+    const answer = await screen.findByRole('region', { name: 'Who Front door sees' })
+    expect(
+      within(answer).getByText('No one in your library resembles this face.'),
+    ).toBeInTheDocument()
+  })
+
+  it('says when no face is in front of the camera, and when the camera gives no picture', async () => {
+    let fail = false
+    renderApp('/cameras', [
+      { path: CAMERAS, respond: [camera()] },
+      { path: `${CAMERAS}/devices`, respond: [] },
+      {
+        method: 'POST',
+        path: `${CAMERAS}/c1/search`,
+        respond: () =>
+          fail
+            ? failure(409, 'CAMERA_IN_USE', 'Another program is using the camera.')
+            : { faces: [], ranking: { plan: 'p', policy_version: 'v', similarity: 'cosine' } },
+      },
+    ])
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Search with this camera' }))
+    expect(await screen.findByText('No face in front of the camera.')).toBeInTheDocument()
+    fail = true
+    await userEvent.click(screen.getByRole('button', { name: 'Search with this camera' }))
+    expect(await screen.findByRole('status', { name: 'Cameras notice' })).toHaveTextContent(
+      'Another program is using the camera.',
+    )
+  })
+})

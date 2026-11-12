@@ -31,6 +31,7 @@ from backend.api.startup import (
     ProcessingUnavailableError,
 )
 from backend.app.identities.models import Identity
+from backend.app.lifecycle import OpenLibrary
 from backend.app.processing.configuration import ProcessingConfigurationError
 from backend.app.recognition.face_query import FaceQuery, FaceQueryResult, QueriedFace
 from backend.app.recognition.reasoner import RecognitionOutcome
@@ -227,46 +228,52 @@ async def _search(
     raw = bytes(received)
     del received  # (one copy, not two, while the picture waits for the worker)
 
-    def run() -> FaceSearchResponse:
-        image = _read_query(raw, content_type, limits)
-        query = FaceQuery(
-            library.unit_of_work,
-            packages=library.packages,
-            client_for=settings.client_for,
-            global_index_for=library.coordinator.open_for_recognition,
-            exclusive=library.coordinator.exclusive,
-            planner=settings.planner,
-            request_for=settings.request_for,
-            max_pixels=settings.max_pixels,
-            recognition_k=max(settings.recognition_k, SEARCH_SHORTLIST),
-        )
-        try:
-            return query.search(image, _answer)
-        except UnsupportedImageError:
-            raise ApiError(
-                415,
-                "MEDIA_FORMAT_UNSUPPORTED",
-                "Only JPEG, PNG, BMP, WebP and AVIF images are supported.",
-            ) from None
-        except CorruptImageError:
-            raise ApiError(422, "MEDIA_CORRUPT", "The image could not be read.") from None
-        except ImageTooLargeError:
-            raise ApiError(
-                413, "MEDIA_TOO_LARGE", "The image has more pixels than is allowed."
-            ) from None
-        except (ProcessingUnavailableError, ProcessingConfigurationError, RuntimeUnavailableError):
-            raise ApiError(
-                503, "PROCESSING_UNAVAILABLE", "No processing configuration is available."
-            ) from None
-        except (PerceptionError, WorkerFailedError, MLUnavailableError, ContractError):
-            raise ApiError(
-                503, "PERCEPTION_UNAVAILABLE", "The faces could not be looked for just now.",
-                retryable=True,
-            ) from None  # fmt: skip
-        except IndexUnusableError:
-            raise ApiError(
-                503, "SEARCH_INDEX_UNAVAILABLE",
-                "The memory's search index is not usable. It is rebuilt when the app starts.",
-            ) from None  # fmt: skip
+    return await anyio.to_thread.run_sync(
+        lambda: search_picture(library, settings, _read_query(raw, content_type, limits))
+    )
 
-    return await anyio.to_thread.run_sync(run)
+
+def search_picture(
+    library: OpenLibrary, settings: ProcessingSettings, image: bytes
+) -> FaceSearchResponse:
+    """Search the memory with one picture's faces (blocking; nothing is stored). Shared by
+    the upload route and the search with a camera (M7 step 6)."""
+    query = FaceQuery(
+        library.unit_of_work,
+        packages=library.packages,
+        client_for=settings.client_for,
+        global_index_for=library.coordinator.open_for_recognition,
+        exclusive=library.coordinator.exclusive,
+        planner=settings.planner,
+        request_for=settings.request_for,
+        max_pixels=settings.max_pixels,
+        recognition_k=max(settings.recognition_k, SEARCH_SHORTLIST),
+    )
+    try:
+        return query.search(image, _answer)
+    except UnsupportedImageError:
+        raise ApiError(
+            415,
+            "MEDIA_FORMAT_UNSUPPORTED",
+            "Only JPEG, PNG, BMP, WebP and AVIF images are supported.",
+        ) from None
+    except CorruptImageError:
+        raise ApiError(422, "MEDIA_CORRUPT", "The image could not be read.") from None
+    except ImageTooLargeError:
+        raise ApiError(
+            413, "MEDIA_TOO_LARGE", "The image has more pixels than is allowed."
+        ) from None
+    except (ProcessingUnavailableError, ProcessingConfigurationError, RuntimeUnavailableError):
+        raise ApiError(
+            503, "PROCESSING_UNAVAILABLE", "No processing configuration is available."
+        ) from None
+    except (PerceptionError, WorkerFailedError, MLUnavailableError, ContractError):
+        raise ApiError(
+            503, "PERCEPTION_UNAVAILABLE", "The faces could not be looked for just now.",
+            retryable=True,
+        ) from None  # fmt: skip
+    except IndexUnusableError:
+        raise ApiError(
+            503, "SEARCH_INDEX_UNAVAILABLE",
+            "The memory's search index is not usable. It is rebuilt when the app starts.",
+        ) from None  # fmt: skip

@@ -17,7 +17,7 @@ from typing import Any
 
 import anyio
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.api.routes import cameras as camera_routes
 from backend.api.startup import (
@@ -26,10 +26,12 @@ from backend.api.startup import (
     create_backend_app,
 )
 from backend.app.cameras.session import CameraSettings
+from backend.app.memory.models import Observation
 from backend.app.sources.models import Source
 from backend.infrastructure.media.camera import (
     CameraAccessDeniedError,
     CameraError,
+    CameraInUseError,
     CameraStalledError,
     CameraStreamError,
     CaptureDevice,
@@ -412,3 +414,85 @@ async def test_the_real_capture_reports_a_missing_device(
             lambda: _when(status(real, camera), lambda s: s["state"] == "FAILED" and s)
         )
         assert ended["failure_code"] == "CAMERA_DISCONNECTED"
+
+
+# --- search with the camera (M7 step 6; spec 10.4; plan C10) -----------------------------------
+
+
+def small() -> Any:
+    """A green face on a picture within the test library's pixel limit (10,000)."""
+    return picture(("green", 20, 40))[30:90, 0:80].copy()
+
+
+async def test_a_face_in_front_of_the_camera_is_searched_and_nothing_is_kept(
+    api: Api, cameras: Cameras
+) -> None:
+    camera = await configure(api)
+    planted = Planted([small()])
+    cameras.next["Integrated Camera"] = planted
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        before = session.scalar(select(func.count()).select_from(Observation))
+
+    found = await api.client.post(f"/api/v1/cameras/{camera}/search")
+
+    assert found.status_code == 200, found.text
+    (face,) = found.json()["faces"]
+    assert face["status"] in ("UNKNOWN", "POSSIBLE_PEOPLE")
+    assert planted.stopped.is_set()  # the device was closed again at once
+    with api.backend.library.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(Observation)) == before
+    assert api.perception is not None
+    assert api.perception.classes[0] == "detect:INTERACTIVE"  # type: ignore[attr-defined]
+
+
+async def test_a_search_while_the_camera_runs_uses_its_newest_frame(
+    api: Api, cameras: Cameras
+) -> None:
+    camera = await configure(api)
+    cameras.next["Integrated Camera"] = Planted([small()] * 2)
+    await api.client.post(f"/api/v1/cameras/{camera}/start")
+    await eventually(lambda: _when(status(api, camera), lambda s: s["frames"] == 2))
+
+    found = await api.client.post(f"/api/v1/cameras/{camera}/search")
+
+    assert found.status_code == 200, found.text
+    assert len(found.json()["faces"]) == 1
+    assert cameras.opened == ["Integrated Camera"]  # not opened a second time
+    await api.client.post(f"/api/v1/cameras/{camera}/stop")
+
+    cameras.next["Integrated Camera"] = Planted([small()])
+    again = await api.client.post(f"/api/v1/cameras/{camera}/search")  # (the session has ended)
+    assert again.status_code == 200, again.text
+    assert cameras.opened == ["Integrated Camera", "Integrated Camera"]
+
+
+@pytest.mark.parametrize(
+    ("failure", "status_code", "code"),
+    [
+        (CameraInUseError("busy"), 409, "CAMERA_IN_USE"),
+        (CameraAccessDeniedError("refused"), 403, "CAMERA_ACCESS_DENIED"),
+        (CameraStalledError("silent"), 503, "CAMERA_DISCONNECTED"),
+    ],
+)
+async def test_a_camera_that_gives_no_picture_is_reported(
+    api: Api, cameras: Cameras, failure: CameraError, status_code: int, code: str
+) -> None:
+    camera = await configure(api)
+    cameras.next["Integrated Camera"] = Planted([], fail=failure)
+
+    error(await api.client.post(f"/api/v1/cameras/{camera}/search"), status_code, code)
+    error(await api.client.post(f"/api/v1/cameras/{uuid.uuid4()}/search"), 404, "CAMERA_NOT_FOUND")
+
+
+async def test_a_camera_search_waits_its_turn_with_the_other_searches(api: Api) -> None:
+    camera = await configure(api)
+    slots = api.backend.face_search_slots
+    taken = 0
+    while slots.acquire(blocking=False):
+        taken += 1
+    try:
+        error(await api.client.post(f"/api/v1/cameras/{camera}/search"), 429, "FACE_SEARCH_BUSY")
+    finally:
+        for _ in range(taken):
+            slots.release()
