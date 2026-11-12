@@ -243,3 +243,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-12 | [M6 step 8: the real-world check on the owner's videos (D8)](2026-11-12-m6-real-world-check.md) | done; two defects fixed (PRs #252, #254); numbers only |
 | 2026-11-12 | [M7 step 2: live camera frames over the pinned ffmpeg](2026-11-12-m7-step2-camera-capture.md) | done; this machine's camera gives no frames (owner to check) |
 | 2026-11-12 | [M8 step 4: FFmpeg in the installer, ONNX Runtime telemetry off](2026-11-12-m8-step4-ffmpeg-bundle-and-telemetry.md) | done |
+| 2026-11-12 | [M7 step 3: a live class in the worker lease](2026-11-12-m7-step3-live-worker-class.md) | done |
