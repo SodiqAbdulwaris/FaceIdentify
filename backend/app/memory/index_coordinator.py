@@ -186,6 +186,17 @@ class IndexCoordinator:
                 self._apply_space(space_id, operations, report)
             return report
 
+    def drain(self, *, batch: int) -> None:
+        """Apply due operations `batch` at a time until a pass settles none: everything one
+        acceptance queued is in the index before the next recognition asks whether it converged.
+        One pass was not enough: a video accepts thousands of faces at once, and an index left
+        behind makes every later recognition abstain (`RETRIEVAL_INCOMPLETE`; M6 D8, 2026-11-12).
+        An operation backing off is not due, so it is left for its time and the loop ends."""
+        while True:
+            report = self.apply_pending(limit=batch)
+            if not (report.applied or report.retrying or report.failed):
+                return
+
     def validate_indexes(self, report: CoordinatorReport | None = None) -> list[uuid.UUID]:
         """Check the index of every ACTIVE space and rebuild any that is missing, unusable or stale.
 
