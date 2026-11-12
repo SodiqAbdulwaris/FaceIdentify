@@ -25,6 +25,8 @@
 
 > **Decision 2026-11-12 (delegated decision, M7 step 4):** an encounter keeps a pool of its 8 best sightings while open (bounded memory), and at most 3 are recorded (C3). A session's job is claimed with an effectively unbounded lease (one year): its claim lasts as long as the session, and startup recovery settles a crashed one.
 
+> **Decision 2026-11-12 (delegated decision, M7 step 4, after the review):** a provider fallback while an encounter is embedded starts a new segment and the whole encounter is embedded again under the provider that now runs (as a video chunk is redone), so every face and vector names the segment that produced it; an encounter's times are when its frames arrived (the session's UTC start plus each frame's monotonic arrival), not when the worker got to them; a crop write that fails settles all of the encounter's reservations and removes any crop already written.
+
 ## Verification
 
 Targeted (2026-11-12): the camera unit, integration and recovery tests pass (28 + 2); `encounters.py` and `session.py` 100% covered. The full backend gate is in the PR.
