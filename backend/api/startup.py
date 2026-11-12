@@ -376,7 +376,8 @@ class Backend:
             return FfmpegFrameSource(
                 capture_command(
                     tools, device_input(device), rate=camera.sample_fps, max_side=camera.max_side
-                )
+                ),
+                max_pixels=camera.max_side**2,
             )
 
         def announce(type_: str, camera_id: uuid.UUID, data: dict[str, Any]) -> None:
