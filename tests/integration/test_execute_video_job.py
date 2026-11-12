@@ -144,6 +144,25 @@ def test_a_video_is_processed_chunk_by_chunk_into_tracks(
     assert {str(o.id) for o in kept} == set(red["observations"]) | set(green["observations"])
 
 
+def test_a_video_never_builds_a_run_local_index(
+    pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    """Every face of the video is excluded from its own candidates, so a run-local index could
+    only ever hold excluded faces; building one per face made a long video quadratic (D8)."""
+    built: list[object] = []
+    monkeypatch.setattr(
+        "backend.app.processing.execute_job.rebuild_run_local_index",
+        lambda *args, **kwargs: built.append(args),
+    )
+
+    executed = video_executor(pipeline).execute(claim(pipeline, video))
+
+    assert run_state(pipeline, executed.processing_run_id) == ProcessingRunState.FINALIZING
+    assert executed.representation_ids  # faces were recognised...
+    assert built == []  # ...without one
+
+
 def test_each_batch_of_frames_takes_one_turn_on_the_worker(
     pipeline: Pipeline, perception: PaintedPerception, video: uuid.UUID
 ) -> None:
