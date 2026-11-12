@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 from alembic import command
+from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
@@ -337,9 +338,12 @@ def test_upgrading_the_previous_release_copies_it_first_and_keeps_every_row(
     assert copy.name == "pre-migration-0010-20260101T000000.db"  # revision, then the clock's time
     assert version(copy) == "0010"
     assert dump(copy) == before  # the copy is the library exactly as it was
-    assert stamps(opener) == [("0011",)]  # and the library itself did upgrade
+    head = ScriptDirectory.from_config(
+        lifecycle._alembic_config(opener.database)
+    ).get_current_head()
+    assert stamps(opener) == [(head,)]  # and the library itself did upgrade
     after = dump(opener.database)
-    assert after.keys() == before.keys()
+    assert before.keys() <= after.keys()  # (a later revision may add tables)
     for table, rows in before.items():
         # every row is kept; opening may change a state (recovery interrupts a run still
         # "running"), so rows are matched by id, and the copy above is the exact record
