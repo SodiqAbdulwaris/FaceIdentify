@@ -496,3 +496,57 @@ async def test_a_camera_search_waits_its_turn_with_the_other_searches(api: Api) 
     finally:
         for _ in range(taken):
             slots.release()
+
+
+class Slow(Planted):
+    """A camera whose first picture comes only when the test says so."""
+
+    def __init__(self, script: list[Any]) -> None:
+        super().__init__(script)
+        self.go = threading.Event()
+
+    def latest(self, timeout: float) -> LiveFrame:
+        if not self.go.wait(timeout):
+            raise CameraStalledError("silent")
+        return super().latest(timeout)
+
+
+async def test_a_search_just_after_start_waits_for_the_session_s_first_picture(
+    api: Api, cameras: Cameras
+) -> None:
+    camera = await configure(api)
+    slow = Slow([small()] * 2)
+    cameras.next["Integrated Camera"] = slow
+    await api.client.post(f"/api/v1/cameras/{camera}/start")
+
+    async with anyio.create_task_group() as group:
+        answers: list[Any] = []
+
+        async def search() -> None:
+            answers.append(await api.client.post(f"/api/v1/cameras/{camera}/search"))
+
+        group.start_soon(search)
+        await anyio.sleep(0.2)  # (the search is now waiting for the session's first picture)
+        slow.go.set()
+
+    assert answers[0].status_code == 200, answers[0].text
+    assert cameras.opened == ["Integrated Camera"]  # the device was never opened twice
+    await api.client.post(f"/api/v1/cameras/{camera}/stop")
+
+
+async def test_a_session_that_gives_no_picture_fails_the_search_without_reopening(
+    api: Api, cameras: Cameras, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.app.cameras import service as camera_service
+
+    monkeypatch.setattr(camera_service, "CAPTURE_SECONDS", 0.2)
+    camera = await configure(api)
+    slow = Slow([small()])
+    cameras.next["Integrated Camera"] = slow
+    await api.client.post(f"/api/v1/cameras/{camera}/start")
+
+    error(await api.client.post(f"/api/v1/cameras/{camera}/search"), 503, "CAMERA_DISCONNECTED")
+
+    assert cameras.opened == ["Integrated Camera"]
+    slow.go.set()
+    await api.client.post(f"/api/v1/cameras/{camera}/stop")
