@@ -147,7 +147,10 @@ def capture_command(
 def classify(log: str) -> type[CameraError]:
     """The error a failed capture's log describes."""
     text = log.lower()
-    if "could not find" in text and "device" in text:
+    # (a missing device, or a computer with no capture device at all)
+    if (
+        "could not find" in text and "device" in text
+    ) or "could not enumerate video devices" in text:
         return CameraNotFoundError
     if "access is denied" in text or "0x80070005" in text or "e_accessdenied" in text:
         return CameraAccessDeniedError

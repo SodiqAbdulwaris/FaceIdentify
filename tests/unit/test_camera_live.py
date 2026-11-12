@@ -134,6 +134,7 @@ def test_the_capture_command_samples_and_bounds_the_size_inside_the_tool() -> No
     ("log", "error"),
     [
         ("Could not find video device with name [X] among source devices", CameraNotFoundError),
+        ("Could not enumerate video devices (or none found).", CameraNotFoundError),
         ("Could not run graph (sometimes caused by a device already in use", CameraInUseError),
         ("Error: Access is denied.", CameraAccessDeniedError),
         ("returned 0x80070005", CameraAccessDeniedError),
