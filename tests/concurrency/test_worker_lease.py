@@ -15,6 +15,7 @@ import pytest
 
 from backend.ml.supervisor.lease import (
     RequestCancelledError,
+    ServiceClass,
     TurnRecord,
     WorkerClosedError,
     WorkerLease,
@@ -171,17 +172,17 @@ def test_only_one_request_holds_the_worker_at_a_time() -> None:
         thread.start()
         threads.append(thread)
         condition.queued_one()
-        assert lease.queued(False) == n + 1
+        assert lease.queued(ServiceClass.BACKGROUND) == n + 1
     assert entered == []  # three are waiting and none got in beside the holder
 
     holder_out.set()
     for n in range(3):
         reached(inside[n])
         assert entered == list(range(n + 1))  # the next waits until this one leaves
-        assert lease.queued(False) == 2 - n
+        assert lease.queued(ServiceClass.BACKGROUND) == 2 - n
         leave[n].set()
     finish(threads)
-    assert lease.queued(True) == lease.queued(False) == 0
+    assert lease.queued(ServiceClass.INTERACTIVE) == lease.queued(ServiceClass.BACKGROUND) == 0
 
 
 def test_a_request_that_fails_releases_the_worker() -> None:
@@ -230,7 +231,7 @@ def test_an_interrupted_wait_leaves_no_ticket_behind() -> None:
     finish([thread])
     assert len(outcome) == 1
     assert isinstance(outcome[0], KeyboardInterrupt)
-    assert lease.queued(False) == 0  # the abandoned ticket is gone
+    assert lease.queued(ServiceClass.BACKGROUND) == 0  # the abandoned ticket is gone
 
     line.join("after", is_interactive=False)  # would never be served behind a dead head
     assert line.let_go() == ["after"]
@@ -278,7 +279,7 @@ def test_closing_refuses_the_requests_that_wait_and_the_ones_that_come_later() -
     finish([thread])
 
     assert len(outcome) == 1
-    assert line.lease.queued(False) == 0  # the refused request left no ticket
+    assert line.lease.queued(ServiceClass.BACKGROUND) == 0  # the refused request left no ticket
     with pytest.raises(WorkerClosedError), line.lease.held():
         raise AssertionError("a request made after the close must not get the worker")
     assert line.let_go() == []  # the holder finished normally
@@ -313,7 +314,7 @@ def test_a_request_cancelled_while_it_waits_gives_its_turn_up_and_the_next_one_r
     assert line.let_go() == ["after"]  # the cancelled request never held the worker
     assert asked == [True]  # asked once, at its turn
     assert len(outcome) == 1
-    assert line.lease.queued(False) == 0
+    assert line.lease.queued(ServiceClass.BACKGROUND) == 0
 
 
 def test_a_request_that_is_not_cancelled_runs_and_the_scope_ends_with_its_block() -> None:
@@ -419,7 +420,7 @@ def test_by_default_each_turn_is_logged_at_debug_level(caplog: pytest.LogCapture
     (record,) = caplog.records
     assert record.getMessage().startswith("worker: a background request waited ")
     assert record.getMessage().endswith(
-        "(RAN); 0 interactive and 0 background waiting at its grant"
+        "(RAN); 0 interactive, 0 live and 0 background waiting at its grant"
     )
 
 
