@@ -279,7 +279,7 @@ class Backend:
         settings, uow = self.settings, library.unit_of_work
 
         def wake_index() -> None:
-            library.coordinator.drain(batch=settings.index_batch)
+            library.coordinator.apply_pending(limit=settings.index_batch)
 
         runner = ProcessingRunner(
             uow,
@@ -317,6 +317,9 @@ class Backend:
         )
 
         def run_once() -> RunOutcome:
+            # The index catches up before a job is claimed, so recognition never runs on an index
+            # left behind by an earlier acceptance or a restart (M6 D8: a video accepts thousands).
+            library.coordinator.drain(batch=settings.index_batch)
             outcome = runner.run_once()
             if outcome.processing_run_id is not None:
                 self.announce_run(outcome.processing_run_id)

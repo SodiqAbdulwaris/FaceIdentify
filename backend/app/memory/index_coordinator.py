@@ -187,15 +187,20 @@ class IndexCoordinator:
             return report
 
     def drain(self, *, batch: int) -> None:
-        """Apply due operations `batch` at a time until a pass settles none: everything one
-        acceptance queued is in the index before the next recognition asks whether it converged.
-        One pass was not enough: a video accepts thousands of faces at once, and an index left
-        behind makes every later recognition abstain (`RETRIEVAL_INCOMPLETE`; M6 D8, 2026-11-12).
-        An operation backing off is not due, so it is left for its time and the loop ends."""
-        while True:
-            report = self.apply_pending(limit=batch)
-            if not (report.applied or report.retrying or report.failed):
+        """Apply what is due when this starts, `batch` at a time: the index has caught up with
+        everything accepted so far before the caller goes on. The budget is fixed at the start, so
+        operations another loop queues meanwhile wait for the next drain and this always ends; an
+        operation that fails is backed off (no longer due) and does not stop the rest. One pass was
+        not enough: a video accepts thousands of faces at once, and an index left behind makes every
+        later recognition abstain (`RETRIEVAL_INCOMPLETE`; M6 D8, 2026-11-12)."""
+        with self._sessions() as session:
+            budget = IndexOperationRepository(session).due_count(now=self._clock())
+        while budget > 0:
+            report = self.apply_pending(limit=min(batch, budget))
+            settled = len(report.applied) + len(report.retrying) + len(report.failed)
+            if not settled:
                 return
+            budget -= settled
 
     def validate_indexes(self, report: CoordinatorReport | None = None) -> list[uuid.UUID]:
         """Check the index of every ACTIVE space and rebuild any that is missing, unusable or stale.

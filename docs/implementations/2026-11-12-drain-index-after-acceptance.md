@@ -8,10 +8,12 @@
 
 ## What changed
 
-`IndexCoordinator.drain(batch=...)` (`backend/app/memory/index_coordinator.py`) applies due index
-operations a batch at a time until a pass settles none. The host's `wake_index`
-(`backend/api/startup.py`), which acceptance calls after its commit, now drains instead of making
-one pass of `index_batch` (100) operations.
+`IndexCoordinator.drain(batch=...)` (`backend/app/memory/index_coordinator.py`) applies the index
+operations that are due when it starts, a batch at a time (`IndexOperationRepository.due_count`
+fixes the budget). Each turn of a host processing loop (`run_once` in `backend/api/startup.py`)
+drains before it claims a job, so recognition always runs on an index that has caught up with
+everything accepted before it, including a backlog left by a restart. The wake after an acceptance
+still makes its one pass, which keeps face search current between jobs.
 
 ## Why
 
@@ -24,13 +26,20 @@ found the index not converged, and every one of its 5,191 faces abstained as
 face's `proposal`). Nobody named after the first video could ever be recognised in a later one.
 
 Retrieval refusing an unconverged index is right (an index that lags looks exactly like a person
-never seen); the defect was only that the host never let it catch up. Operations that fail are
-backed off and so are not due: the loop ends instead of spinning on them.
+never seen); the defect was only that the host never let it catch up.
+
+The review (Codex, PR #254) rejected the first version, which drained after an acceptance until the
+queue was empty: another loop queueing as fast as it drained could keep it going for ever, and a
+restart with a backlog beyond recovery's bounded passes still left the next run's recognition on an
+unconverged index. Draining a budget fixed at the start, before each claim, answers both. Operations
+that fail are backed off, so they are no longer due and do not stop the rest.
 
 ## Verification
 
-- New test `test_drain_applies_every_due_operation_a_batch_at_a_time`: five operations with a batch
-  of 2 all applied, one not yet due left pending.
+- New tests: `test_drain_applies_every_due_operation_a_batch_at_a_time` (five operations with a batch
+  of 2 all applied, one not yet due left pending) and
+  `test_drain_stops_at_what_was_due_when_it_started` (every pass queues one more; the drain ends
+  after the five it found, three left for the next one).
 - `uv run pytest -q tests/integration/test_index_coordinator.py tests/integration/test_api_lifespan.py
   tests/integration/test_api_development_profile.py`: 64 passed; ruff and mypy clean.
 - On the D8 scratch library (real models, CPU): one acceptance drained a backlog of 11,255
