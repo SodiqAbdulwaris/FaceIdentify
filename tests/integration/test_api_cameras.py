@@ -163,6 +163,8 @@ async def test_a_camera_is_configured_listed_and_read(api: Api) -> None:
         await api.client.delete(f"/api/v1/cameras/{missing}"),
         await api.client.delete(f"/api/v1/cameras/{missing}", params={"history": "true"}),
         await api.client.post(f"/api/v1/cameras/{missing}/history/delete", json={}),
+        await api.client.post(f"/api/v1/cameras/{missing}/stop"),
+        await api.client.get(f"/api/v1/cameras/{missing}/preview"),
     ):
         error(response, 404, "CAMERA_NOT_FOUND")
     error(
@@ -376,7 +378,9 @@ async def test_deletions_that_cannot_finish_yet_mark_recovery_degraded(
     await eventually(lambda: _when(status(api, other), lambda s: s["frames"] == 3))
     await api.client.post(f"/api/v1/cameras/{other}/stop")
     gone = await api.client.delete(f"/api/v1/cameras/{other}", params={"history": "true"})
-    assert gone.status_code == 204
+    assert gone.status_code == 202  # what is still owed is said, and finished at the next start
+    assert gone.json()["state"] == "DELETING"
+    assert gone.json()["outstanding"]
     assert api.backend.capabilities["recovery"] == "DEGRADED"
 
 

@@ -58,7 +58,9 @@ export interface paths {
         post?: never;
         /**
          * Remove Camera
-         * @description Remove the configuration; its history stays unless `history=true` (C9).
+         * @description Remove the configuration; its history stays unless `history=true` (C9). With the
+         *     history, `202` and what is still owed when part of the deletion cannot finish yet (a locked
+         *     file); it is finished at the next start.
          */
         delete: operations["remove_camera"];
         options?: never;
@@ -1899,6 +1901,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletionPending"];
+                };
+            };
             /** @description Successful Response */
             204: {
                 headers: {

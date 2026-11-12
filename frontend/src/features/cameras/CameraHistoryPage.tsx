@@ -4,7 +4,6 @@ import { Link, useParams } from 'react-router'
 import { keys } from '@/api/keys'
 import type { OccurrenceSummary, UnresolvedFace } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
-import { Button } from '@/components/ui/button'
 import { personLabel } from '../identities/label'
 import { errorMessage } from '../library/messages'
 import { useObjectUrl } from '../useSourceImage'
@@ -92,14 +91,13 @@ export function CameraHistoryPage() {
       ) : null}
       {days.length > 0 ? (
         <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
+          <ConfirmButton
+            label={`Delete selected (${selected.size})`}
+            question={`Delete the ${selected.size} selected ${selected.size === 1 ? 'visit' : 'visits'} for good? This cannot be undone.`}
+            confirm="Delete for good"
             disabled={selected.size === 0 || remove.isPending}
-            onClick={() => remove.mutate({ occurrence_ids: [...selected] })}
-          >
-            Delete selected ({selected.size})
-          </Button>
+            onConfirm={() => remove.mutate({ occurrence_ids: [...selected] })}
+          />
           <ConfirmButton
             label="Delete all history"
             question={`Delete everything ${name} recorded, for good? This cannot be undone.`}

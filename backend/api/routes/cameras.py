@@ -14,12 +14,14 @@ from typing import Annotated, Any
 
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Query, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.dependencies import Library, get_backend
 from backend.api.errors import ApiError
+from backend.api.routes.sources import DeletionPending
 from backend.api.startup import Backend, ProcessingUnavailableError
 from backend.app.cameras.history import (
     CameraBusyError as HistoryBusyError,
@@ -205,7 +207,13 @@ def get_camera(camera_id: uuid.UUID, library: Library, service: Service) -> Came
     return _summary(service, *rows[0])
 
 
-@router.delete("/cameras/{camera_id}", status_code=204)
+def require_camera(library: Any, camera_id: uuid.UUID) -> None:
+    """`404 CAMERA_NOT_FOUND` unless the camera is configured (and not removed)."""
+    if not library.unit_of_work.read(lambda session: _cameras(session, camera_id)):
+        raise camera_not_found(camera_id)
+
+
+@router.delete("/cameras/{camera_id}", status_code=204, responses={202: {"model": DeletionPending}})
 def remove_camera(
     camera_id: uuid.UUID,
     library: Library,
@@ -215,7 +223,9 @@ def remove_camera(
         bool, Query(description="Also delete all of its history, for good.")
     ] = False,
 ) -> Response:
-    """Remove the configuration; its history stays unless `history=true` (C9)."""
+    """Remove the configuration; its history stays unless `history=true` (C9). With the
+    history, `202` and what is still owed when part of the deletion cannot finish yet (a locked
+    file); it is finished at the next start."""
     if not history:
         try:
             service.remove(camera_id)
@@ -245,9 +255,11 @@ def remove_camera(
         library.session_factory, library.unit_of_work, library.eraser, library.store,
         clock=backend.settings.clock, new_id=backend.settings.new_id,
     ).delete(camera_id)  # fmt: skip
-    if not report.complete:
-        backend.capabilities["recovery"] = "DEGRADED"  # finished at the next start
-    return Response(status_code=204)
+    if report.complete:
+        return Response(status_code=204)
+    backend.capabilities["recovery"] = "DEGRADED"  # finished at the next start
+    pending = DeletionPending(state=SourceState.DELETING, outstanding=report.outstanding)
+    return JSONResponse(pending.model_dump(), status_code=202)
 
 
 @router.post("/cameras/{camera_id}/start", status_code=202)
@@ -268,14 +280,14 @@ def start(camera_id: uuid.UUID, service: Service, library: Library) -> SessionSt
 @router.post("/cameras/{camera_id}/stop", status_code=202)
 async def stop(camera_id: uuid.UUID, service: Service, library: Library) -> SessionStatus:
     """Stop the session; its open encounters are recorded before it ends."""
+    require_camera(library, camera_id)
     await anyio.to_thread.run_sync(service.stop, camera_id)
     return _status(service.status(camera_id))
 
 
 @router.get("/cameras/{camera_id}/status")
 def status(camera_id: uuid.UUID, service: Service, library: Library) -> SessionStatus:
-    if not library.unit_of_work.read(lambda session: _cameras(session, camera_id)):
-        raise camera_not_found(camera_id)
+    require_camera(library, camera_id)
     return _status(service.status(camera_id))
 
 
@@ -286,6 +298,7 @@ def status(camera_id: uuid.UUID, service: Service, library: Library) -> SessionS
 )
 def preview(camera_id: uuid.UUID, service: Service, library: Library) -> Response:
     """The newest frame with its faces outlined, while a session runs. Never stored."""
+    require_camera(library, camera_id)
     picture = service.preview(camera_id)
     if picture is None:
         raise ApiError(404, "MEDIA_NOT_FOUND", "No live picture is available.")

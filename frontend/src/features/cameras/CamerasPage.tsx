@@ -82,11 +82,13 @@ function CameraCard({
   })
   const remove = useMutation({
     mutationFn: (withHistory: boolean) => endpoints.removeCamera(camera.id, withHistory),
-    onSuccess: (_result, withHistory) =>
+    onSuccess: (result, withHistory) =>
       onNotice(
-        withHistory
-          ? `${camera.display_name} and everything it recorded were deleted.`
-          : `${camera.display_name} was removed. What it recorded is still in the library.`,
+        !withHistory
+          ? `${camera.display_name} was removed. What it recorded is still in the library.`
+          : result.status === 202
+            ? `${camera.display_name} was removed. Part of the deletion of what it recorded could not finish yet; it is tried again the next time the app starts.`
+            : `${camera.display_name} and everything it recorded were deleted.`,
       ),
     onError: (error) => onNotice(errorMessage(error)),
     onSettled: refresh,
