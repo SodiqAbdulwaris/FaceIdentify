@@ -39,7 +39,7 @@ from backend.app.cameras.session import (
 )
 from backend.app.sources.models import Source, SourceKind, SourceState
 from backend.infrastructure.db.unit_of_work import UnitOfWork
-from backend.infrastructure.media.camera import CameraError, CaptureDevice
+from backend.infrastructure.media.camera import CameraError, CameraStreamError, CaptureDevice
 
 PREVIEW_MAX_SIDE = 640
 CAPTURE_SECONDS = 10.0  # the longest a search waits for a camera's first picture
@@ -80,6 +80,8 @@ class _Session:
     failure_code: str | None = None
     last: Seen | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # set by the first frame, or by the end of the session (a search waiting for a picture)
+    pictured: threading.Event = field(default_factory=threading.Event)
 
 
 class CameraService:
@@ -248,16 +250,20 @@ class CameraService:
     def capture(self, camera_id: uuid.UUID) -> bytes:
         """One picture from the camera, as a PNG held in memory, for a search (spec 10.4; plan C10):
         the running session's newest frame when this camera runs (the device cannot be opened
-        twice), else one frame read from the device and the device closed again. Nothing is
-        stored. `CameraNotConfiguredError` for an unknown camera; `CameraError` (with its code) when
-        the device gives no picture."""
+        twice: a session that has just started is waited for, up to `CAPTURE_SECONDS`), else one
+        frame read from the device and the device closed again. Nothing is stored.
+        `CameraNotConfiguredError` for an unknown camera; `CameraError` (with its code) when the
+        device gives no picture."""
         with self._lock:
             running = self._sessions.get(camera_id)
-        if running is not None:
+        if running is not None and running.ended is None:
+            running.pictured.wait(CAPTURE_SECONDS)
             with running.lock:
-                last = running.last if running.ended is None else None
+                last, ended = running.last, running.ended
             if last is not None:
                 return _png(last.frame.pixels)
+            if ended is None:  # (still running, still no picture: never open the device twice)
+                raise CameraStreamError("the camera has not given a picture yet")
         device = self._uow.read(lambda session: self.device(session, camera_id))
         source = self._open_source(device, self._settings)
         source.start()
@@ -274,6 +280,7 @@ class CameraService:
                 running.frames += 1
                 running.open_encounters = item.open_encounters
                 running.last = item
+            running.pictured.set()
 
         def closed(occurrence: uuid.UUID | None) -> None:
             with running.lock:
@@ -295,6 +302,7 @@ class CameraService:
             running.live.close()
         with running.lock:
             running.ended, running.failure_code, running.last = ended, code, None
+        running.pictured.set()  # (a search waiting for a first picture opens the device itself)
         self._announce(
             "camera.session.updated", running.camera_id, {"state": ended, "failure_code": code}
         )
