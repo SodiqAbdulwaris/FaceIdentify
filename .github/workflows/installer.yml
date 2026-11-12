@@ -1,0 +1,73 @@
+name: Installer
+
+# M8 step 7: build the personal-use installer, install it silently on a clean Windows runner,
+# check the installed build (files, backend, one image, one video), and uninstall it. It is heavy
+# (the frozen backend and the shell), so it runs on demand and on pull requests that touch what
+# the installer is made of (the backend is frozen into it), not on every push. Nothing is signed or
+# published: the installer stays on the runner, and the job's one artifact is the check report.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - packaging/**
+      - desktop/**
+      - backend/**
+      - scripts/install_ffmpeg.py
+      - scripts/generate_notices.py
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/installer.yml
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    name: Installer (TST-078, TST-079)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked --group build
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - uses: actions/cache@v4
+        with:
+          path: build/ffmpeg-download
+          key: ffmpeg-e907b01fa4783913151237e37df2a10fa97d99a1598a021bf59d4ae62ffed4c0
+      - name: Build the installer
+        run: uv run --group build python packaging/build_installer.py
+      - name: Install it silently into a scratch folder
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*-setup.exe).FullName
+          $target = Join-Path $env:RUNNER_TEMP 'faceidentify-installed'
+          $process = Start-Process $installer -ArgumentList '/S', "/D=$target" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "the installer exited with $($process.ExitCode)" }
+          "FACEIDENTIFY_INSTALLED=$target" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Check the installed build
+        shell: pwsh
+        run: |
+          uv run python packaging/check_installed.py $env:FACEIDENTIFY_INSTALLED | Tee-Object -FilePath installed-check.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installed-check-report
+          path: installed-check.json
+          retention-days: 14
+      - name: Uninstall it
+        if: always()
+        shell: pwsh
+        run: |
+          $uninstaller = Join-Path $env:FACEIDENTIFY_INSTALLED 'uninstall.exe'
+          if (Test-Path $uninstaller) {
+            $process = Start-Process $uninstaller -ArgumentList '/S', "_?=$env:FACEIDENTIFY_INSTALLED" -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "the uninstaller exited with $($process.ExitCode)" }
+          }
