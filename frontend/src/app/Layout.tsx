@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { NavLink, Outlet } from 'react-router'
 import { keys } from '@/api/keys'
+import { CameraOn } from '@/features/cameras/CameraOn'
 import { PolicyNotice } from '@/features/PolicyNotice'
 import { useUi } from '@/state/ui'
 import { useBackend } from './useBackend'
@@ -32,8 +33,16 @@ export function Layout() {
           <NavLink to="/search" className={link}>
             Search
           </NavLink>
+          <NavLink to="/cameras" className={link}>
+            Cameras
+          </NavLink>
         </nav>
-        <span className="ml-auto text-xs text-muted-foreground" role="status" aria-label="Live updates">
+        <CameraOn />
+        <span
+          className="ml-auto text-xs text-muted-foreground"
+          role="status"
+          aria-label="Live updates"
+        >
           {eventsStatus === 'open' ? 'Live' : 'Reconnecting…'}
         </span>
       </header>

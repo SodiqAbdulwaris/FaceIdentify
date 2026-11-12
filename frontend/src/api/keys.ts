@@ -19,4 +19,9 @@ export const keys = {
   search: (q: string, recycled: string) => ['search', q, recycled] as const,
   identity: (id: string) => ['identity', id] as const,
   identityOccurrences: (id: string) => ['identity', id, 'occurrences'] as const,
+  cameras: ['cameras'] as const,
+  cameraDevices: ['cameras', 'devices'] as const,
+  cameraPreview: (id: string) => ['cameras', id, 'preview'] as const,
+  cameraFace: (id: string, observationId: string) =>
+    ['cameras', id, 'face', observationId] as const,
 }

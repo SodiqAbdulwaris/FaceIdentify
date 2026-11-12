@@ -80,6 +80,7 @@ function stubBackend(handlers: Handler[]) {
     { path: '/api/v1/processing-runs', respond: page([]) }, // the layout asks for the newest run
     { path: /\/unresolved-faces$/, respond: { items: [] } }, // a source screen asks for these
     { path: /\/reprocess-reviews$/, respond: { items: [] } }, // and for these
+    { path: '/api/v1/cameras', respond: [] }, // the layout asks whether a camera is on
     ...handlers,
   ].reverse() // the test's own handlers win over the default
   vi.stubGlobal('WebSocket', QuietSocket)

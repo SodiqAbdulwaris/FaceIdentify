@@ -1,4 +1,6 @@
 import { Navigate, createHashRouter, type RouteObject } from 'react-router'
+import { CameraHistoryPage } from '@/features/cameras/CameraHistoryPage'
+import { CamerasPage } from '@/features/cameras/CamerasPage'
 import { IdentitiesPage } from '@/features/identities/IdentitiesPage'
 import { IdentityPage } from '@/features/identities/IdentityPage'
 import { ProcessingPage } from '@/features/processing/ProcessingPage'
@@ -20,6 +22,8 @@ export const routes: RouteObject[] = [
       { path: 'identities', element: <IdentitiesPage /> },
       { path: 'identities/:identityId', element: <IdentityPage /> },
       { path: 'search', element: <SearchPage /> },
+      { path: 'cameras', element: <CamerasPage /> },
+      { path: 'cameras/:cameraId', element: <CameraHistoryPage /> },
       { path: 'processing/:runId', element: <ProcessingPage /> },
     ],
   },
