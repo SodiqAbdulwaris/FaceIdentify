@@ -250,3 +250,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-12 | [M7 step 4: camera sessions and encounters](2026-11-12-m7-step4-camera-sessions.md) | done; routes and screen next (step 5) |
 | 2026-11-12 | [M7 step 5: the Cameras screen, camera history and its deletion](2026-11-12-m7-step5-cameras-screen-history.md) | done; search with a camera next (step 6) |
 | 2026-11-12 | [M7 step 6: search with the camera](2026-11-12-m7-step6-camera-search.md) | done |
+| 2026-11-12 | [M7 step 7: runtime validation and benchmarks](2026-11-12-m7-step7-runtime-validation.md) | done; the real-world check at the camera waits for the owner |
