@@ -36,7 +36,7 @@ from backend.infrastructure.storage.layout import StorageRoots
 from backend.infrastructure.storage.library_lock import LibraryLock, LibraryLockedError
 from backend.infrastructure.storage.library_root import InvalidLibraryRootError
 from tests.factories.models import ModelFactory
-from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+from tests.fixtures.deterministic import EPOCH, FrozenClock, SeededUUIDs
 from tests.fixtures.links import link_directory
 
 
@@ -167,9 +167,9 @@ def test_the_lock_comes_first_then_the_schema_the_layout_and_recovery(
         calls.append("layout")
         real_layout(self)
 
-    def migrate(path: Path) -> None:
+    def migrate(path: Path, **arguments: Any) -> None:
         calls.append("migrate")
-        real_migrate(path)
+        real_migrate(path, **arguments)
 
     def recover(*args: Any, **kwargs: Any) -> Any:
         calls.append("recover")
@@ -296,6 +296,76 @@ def test_a_database_stamped_with_an_older_known_revision_is_upgraded_whatever_th
     assert stamps(opener) == [("0012",)]
 
 
+def old_library(opener: Opener, revision: str = "0003") -> None:
+    """A library whose database is at an older revision."""
+    for suffix in ("", "-wal", "-shm"):
+        Path(str(opener.database) + suffix).unlink(missing_ok=True)
+    (opener.library / "database").mkdir(exist_ok=True)
+    command.upgrade(lifecycle._alembic_config(opener.database), revision)
+
+
+def backups(opener: Opener) -> list[Path]:
+    return sorted((opener.library / "backups").glob("pre-migration-*"))
+
+
+def test_upgrading_an_older_library_first_copies_its_database_and_the_copy_restores(
+    opener: Opener,
+) -> None:
+    old_library(opener)
+    with closing(sqlite3.connect(opener.database)) as connection:
+        tables_before = connection.execute(
+            "SELECT name FROM sqlite_master ORDER BY name"
+        ).fetchall()
+
+    with opener():
+        pass
+
+    (copy,) = backups(opener)
+    assert copy.name == "pre-migration-0003-20260101T000000.db"  # revision, then the clock's time
+    with closing(sqlite3.connect(copy)) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [
+            ("0003",)
+        ]
+        assert connection.execute("SELECT name FROM sqlite_master ORDER BY name").fetchall() == (
+            tables_before
+        )
+    assert stamps(opener) == [("0011",)]  # and the library itself did upgrade
+
+
+def test_a_new_library_and_one_already_at_head_need_no_copy(opener: Opener) -> None:
+    with opener():
+        pass
+    with opener():
+        pass
+
+    assert backups(opener) == []
+
+
+def test_only_the_newest_three_copies_are_kept(opener: Opener, clock: FrozenClock) -> None:
+    for _ in range(5):
+        old_library(opener)
+        with opener():
+            pass
+        clock.advance(hours=1)
+
+    assert [path.name.split("-")[-1] for path in backups(opener)] == [
+        "20260101T020000.db",
+        "20260101T030000.db",
+        "20260101T040000.db",
+    ]
+
+
+def test_a_copy_that_cannot_be_made_stops_the_upgrade(opener: Opener) -> None:
+    old_library(opener)
+    (opener.library / "backups").write_bytes(b"a file where the folder has to be")
+
+    with pytest.raises(OSError, match="backups"), opener():
+        pass
+
+    assert stamps(opener) == [("0003",)]  # the library is exactly as it was
+    assert lock_is_free(opener.library)
+
+
 def test_an_install_path_with_a_percent_sign_still_migrates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -305,7 +375,7 @@ def test_an_install_path_with_a_percent_sign_still_migrates(
     monkeypatch.setattr(lifecycle, "ALEMBIC_DIRECTORY", odd)
     database = tmp_path / "library.db"
 
-    lifecycle.migrate(database)
+    lifecycle.migrate(database, backups=tmp_path / "backups", clock=lambda: EPOCH)
 
     with closing(sqlite3.connect(database)) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchall()
