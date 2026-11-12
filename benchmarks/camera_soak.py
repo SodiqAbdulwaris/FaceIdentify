@@ -2,8 +2,8 @@
 to TST-077).
 
     PYTHONPATH=. uv run python benchmarks/camera_soak.py --picture <a photograph with one face> \\
-        --state-from local-models/state --workdir <a Git-ignored scratch folder> \\
-        --report <workdir>/camera-soak.json [--minutes 10] [--providers ...] [--searches 30]
+        --state-from local-models/state --workdir <a new, Git-ignored scratch folder> \\
+        [--minutes 10] [--providers ...] [--samples 20]
 
 No camera is used. The picture is turned by the pinned ffmpeg into a looping clip (the face shown
 for 3 seconds of every 10, black otherwise) and read through the real capture pipe in real time,
@@ -13,17 +13,20 @@ a fresh library in `--workdir` (never the owner's library), the installed model 
 **copied** from `--state-from` (nothing there is written), the real worker and lease, the real
 session, encounters, acceptance and index.
 
-1. **Latency** (per provider in `--providers`, each a fresh worker): detect and embed times of the
-   picture, p50 and p95 over `--samples` runs, and the provider that actually ran.
+1. **Latency** (per provider in `--providers`, each a fresh worker): the time of a whole face
+   search of the picture and of one worker turn (a detection or an embedding, not told apart),
+   p50 and p95 over `--samples` runs, and the provider that actually ran.
 2. **Soak** (the first provider list): a session runs for `--minutes` while a face search arrives
    every `--search-every` seconds (interactive class) and a background thread asks the worker
    for a detection every `--background-every` seconds (background class, as batch work does).
    Reported: frames read and dropped, encounters recorded, the worker lease's waits per class
-   (p50, p95, max), the process's memory at the start and end and its growth, and the number of
-   indexed faces (USearch growth).
+   (p50, p95, max), the memory of this process (the application: not the worker's or ffmpeg's
+   processes) at the start and end, and the face vectors kept (active representation rows).
 
-The report is written to `--report`; nothing of the picture or the frames is kept outside the
-scratch folder, which the caller deletes. A local measurement, not part of CI.
+`--workdir` must be new or empty and ignored by Git; the report is written there as
+`camera-soak.json`, and everything else the run made there (the clip, the copied package, the
+scratch libraries with their face crops) is deleted when it ends. A local measurement, not part
+of CI.
 """
 
 import argparse
@@ -110,6 +113,20 @@ def memory_bytes() -> int:
     info.argtypes = [ctypes.c_void_p, ctypes.POINTER(Counters), ctypes.c_ulong]
     info(current(), ctypes.byref(counters), counters.cb)
     return int(counters.WorkingSetSize)
+
+
+def scratch_root(workdir: Path) -> Path:
+    """`workdir`, checked: new or empty, and ignored by Git (nothing in it can be committed)."""
+    if workdir.exists() and any(workdir.iterdir()):
+        sys.exit(f"--workdir must be new or empty: {workdir}")
+    workdir.mkdir(parents=True, exist_ok=True)
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", str(workdir)], capture_output=True, creationflags=NO_WINDOW
+    )
+    if ignored.returncode != 0:
+        workdir.rmdir()
+        sys.exit(f"--workdir must be ignored by Git: {workdir}")
+    return workdir
 
 
 def make_clip(tools_dir: Path, picture: Path, clip: Path) -> None:
@@ -294,11 +311,12 @@ def soak(workdir: Path, state: Path, providers: tuple[str, ...], clip: Path, pic
             "failure_code": status.failure_code,
             "searches": summary(searches),
             "lease_wait_s": {name: summary(values) for name, values in waits.items()},
-            "memory_start_mb": round(memory_start / 2**20, 1),
-            "memory_end_mb": round(memory_end / 2**20, 1),
-            "memory_growth_mb": round((memory_end - memory_start) / 2**20, 1),
-            "memory_samples_mb": [round(s["memory"] / 2**20, 1) for s in samples],
-            "indexed_faces": indexed,
+            # this process only (the worker and ffmpeg are other processes)
+            "app_memory_start_mb": round(memory_start / 2**20, 1),
+            "app_memory_end_mb": round(memory_end / 2**20, 1),
+            "app_memory_growth_mb": round((memory_end - memory_start) / 2**20, 1),
+            "app_memory_samples_mb": [round(s["memory"] / 2**20, 1) for s in samples],
+            "active_representations": indexed,
             "samples": samples,
         }
 
@@ -310,7 +328,6 @@ def main() -> None:
     parser.add_argument("--picture", type=Path, required=True)
     parser.add_argument("--state-from", type=Path, required=True)
     parser.add_argument("--workdir", type=Path, required=True)
-    parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--minutes", type=float, default=10)
     parser.add_argument("--samples", type=int, default=20)
     parser.add_argument("--search-every", type=float, default=20)
@@ -325,11 +342,24 @@ def main() -> None:
     args = parser.parse_args()
     if not policy_path(args.state_from, "insightface-buffalo-l").is_file():
         sys.exit("no installed policy under --state-from")
-    args.workdir.mkdir(parents=True, exist_ok=True)
-    state = args.workdir / "state"
+    workdir = scratch_root(args.workdir)
+    try:
+        run(args, workdir)
+    finally:  # (the report stays; frames, crops and the copied package do not)
+        for made in workdir.iterdir():
+            if made.name != REPORT:
+                shutil.rmtree(made) if made.is_dir() else made.unlink()
+
+
+REPORT = "camera-soak.json"
+
+
+def run(args: argparse.Namespace, workdir: Path) -> None:
+    state = workdir / "state"
     scratch_state(args.state_from, state)
-    clip = args.workdir / "clip.mp4"
+    clip = workdir / "clip.mp4"
     make_clip(state, args.picture, clip)
+    out = workdir / REPORT
     report: dict[str, Any] = {
         "when": datetime.now(UTC).isoformat(),
         "machine": {"platform": sys.platform, "cpus": os.cpu_count()},
@@ -337,14 +367,12 @@ def main() -> None:
     }
     for providers in args.providers:
         chosen = tuple(p for p in providers.split(",") if p)
-        report["latency"].append(
-            latency(args.workdir, state, chosen, clip, args.picture, args.samples)
-        )
-        args.report.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        report["latency"].append(latency(workdir, state, chosen, clip, args.picture, args.samples))
+        out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     if not args.skip_soak:
         first = tuple(p for p in args.providers[0].split(",") if p)
         report["soak"] = soak(
-            args.workdir,
+            workdir,
             state,
             first,
             clip,
@@ -353,7 +381,7 @@ def main() -> None:
             args.search_every,
             args.background_every,
         )
-    args.report.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "soak"}, indent=2))
     if "soak" in report:
         print(json.dumps({k: v for k, v in report["soak"].items() if k != "samples"}, indent=2))

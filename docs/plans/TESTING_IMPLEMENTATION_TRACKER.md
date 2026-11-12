@@ -347,7 +347,7 @@ labelled uncalibrated):
 | TST-074 | `PASSING` (this machine only) | DirectML ran the 10-minute soak and `tests/e2e/test_provider_agreement.py` on this NVIDIA RTX 4070 Laptop GPU (2026-11-12). AMD, Intel and machines without DirectX 12 are not verified (one machine available). |
 | TST-075 | `PASSING` | The CPU takes over visibly: a fallback mid-session (detection and embedding, `test_camera_session.py`), the DirectML-cannot-start tests, and a real soak run on 2026-11-12 where DirectML did not start and the CPU took over, recorded as `provider_fallback: ACTIVE`. |
 | TST-076 | `PASSING` | The same faces embedded on DirectML and the CPU agree (largest 1 - cosine 5.5e-9, tolerance 1e-5; `tests/e2e/test_provider_agreement.py`, `e2e`, local weights); the policy stays bound to its representation space, which no provider changes. |
-| TST-077 | `PASSING` | Contention (M7 step 3, `tests/concurrency/test_worker_lease_live.py`) and the baselines of this laptop (M7 step 7, `benchmarks/camera_soak.py`): search p50 0.25 s DirectML, 1.07 s CPU; 10-minute soak on DirectML: 60 of 60 visits recorded, interactive p95 43 ms, background p95 35 ms, memory growth 3.7 MB; [entry](../implementations/2026-11-12-m7-step7-runtime-validation.md). |
+| TST-077 | `PASSING` | Contention (M7 step 3, `tests/concurrency/test_worker_lease_live.py`) and the baselines of this laptop (M7 step 7, `benchmarks/camera_soak.py`): search p50 0.25 s DirectML, 1.07 s CPU; 10-minute soak on DirectML: 60 of 60 visits recorded, interactive p95 43 ms, background p95 35 ms, application process memory growth 3.7 MB (worker and ffmpeg not measured); [entry](../implementations/2026-11-12-m7-step7-runtime-validation.md). |
 
 **Dependencies:** M6 and available supported hardware.
 

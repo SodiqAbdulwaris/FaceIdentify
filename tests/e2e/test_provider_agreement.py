@@ -72,9 +72,11 @@ def test_directml_and_the_cpu_embed_the_same_faces_alike() -> None:
     supervisor = supervisor_for(cpu, real.POLICY)
     client = PerceptionClient(supervisor, cpu, new_id=uuid.uuid4)
     try:
-        detections = [client.detect(pixels).detections for pixels in pictures]
+        detected = [client.detect(pixels) for pixels in pictures]
     finally:
         supervisor.stop()
+    assert all(d.ran.provider == cpu.detector[0].provider for d in detected)  # no fallback
+    detections = [d.detections for d in detected]
     assert any(detections), "no face was found in any picture"
 
     on_cpu = embed(cpu, pictures, detections)

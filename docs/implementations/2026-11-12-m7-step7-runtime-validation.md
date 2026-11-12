@@ -7,7 +7,7 @@
 
 ## What changed
 
-- `benchmarks/camera_soak.py`: per provider, the time of a face search and of one worker turn (p50, p95), and a **soak**: the whole application in one process on a fresh scratch library (the model package and policy copied, nothing of the owner's written), a real session reading a synthetic clip (an LFW photograph shown 3 s in every 10, black otherwise) through the real ffmpeg capture pipe at camera pace, for 10 minutes, with a face search every 20 s (interactive class) and a background detection every 0.5 s (batch class) on the same worker. Writes a JSON report (frames, dropped, encounters, per-class lease waits, memory, indexed faces). Local only.
+- `benchmarks/camera_soak.py`: per provider, the time of a whole face search and of one worker turn (a detection or an embedding, not told apart; p50, p95), and a **soak**: the whole application in one process on a fresh scratch library (the model package and policy copied, nothing of the owner's written), a real session reading a synthetic clip (an LFW photograph shown 3 s in every 10, black otherwise) through the real ffmpeg capture pipe at camera pace, for 10 minutes, with a face search every 20 s (interactive class) and a background detection every 0.5 s (batch class) on the same worker. Writes a JSON report (frames, dropped, encounters, per-class lease waits, the application process's memory, the face vectors kept) into its scratch folder, which must be new and Git-ignored, and deletes everything else it made there (clip, copied package, libraries with their crops) when it ends. Local only.
 - `tests/e2e/test_provider_agreement.py`: the same faces embedded on the CPU and on DirectML through the production client and worker agree to within 1e-5 (1 - cosine, computed in float64), with no fallback on either side. `e2e` (excluded by default; the weights never enter CI); `FACEIDENTIFY_E2E_LOCAL_MODELS` names the models folder so a worktree needs no link to it.
 
 ## Results (this machine: Windows 11, 32 logical CPUs, NVIDIA GeForce RTX 4070 Laptop GPU; 2026-11-12)
@@ -22,9 +22,9 @@ Reports are in the Git-ignored scratch folders of the run and were deleted with 
 | CPU | 6.4 s | 1.07 s / 1.42 s | 0.31 s / 0.52 s |
 | CUDA (`onnxruntime-gpu` 1.23.2, developer only, `FACEIDENTIFY_ORT_GPU_DIR`) | 6.3 s | 0.25 s / 0.31 s | 0.019 s / 0.040 s |
 
-**Soak, 10 minutes, DirectML:** 2,906 frames read of 3,000 sampled (5 per second), 94 dropped (3.1%), **60 encounters recorded of the 60 visits** in the clip, ended `STOPPED`; 29 searches, p50 0.31 s, p95 0.40 s; lease waits: live p50 0.015 ms, p95 2.5 ms (max 4.4 s, the worker's start); interactive p95 43 ms; background 1,098 turns, p95 35 ms (batch work keeps moving under a camera); memory 118.8 MB at the start, 122.5 MB at the end (peak 141.8 MB), growth 3.7 MB; 178 faces indexed (about 3 per encounter, C3).
+**Soak, 10 minutes, DirectML:** 2,906 frames read of 3,000 sampled (5 per second), 94 dropped (3.1%), **60 encounters recorded of the 60 visits** in the clip, ended `STOPPED`; 29 searches, p50 0.31 s, p95 0.40 s; lease waits: live p50 0.015 ms, p95 2.5 ms (max 4.4 s, the worker's start); interactive p95 43 ms; background 1,098 turns, p95 35 ms (batch work keeps moving under a camera); the application process's memory 118.8 MB at the start, 122.5 MB at the end (peak 141.8 MB), growth 3.7 MB (the worker and ffmpeg run in their own processes and were not measured); 178 face vectors kept (active representation rows, about 3 per encounter, C3; the derived index was not measured apart).
 
-**Soak, 10 minutes, CPU** (DirectML did not start in that run and the CPU took over, recorded as `provider_fallback: ACTIVE` and in the run's segments; the same DirectML run alone a few minutes later started normally): 2,369 frames, 632 dropped (27%: the CPU cannot keep 5 per second with searches and batch work beside it), 61 encounters, searches p50 1.0 s, p95 2.5 s; interactive p95 0.60 s; background p95 0.51 s; memory growth 6.1 MB; 179 faces indexed.
+**Soak, 10 minutes, CPU** (DirectML did not start in that run and the CPU took over, recorded as `provider_fallback: ACTIVE` and in the run's segments; the same DirectML run alone a few minutes later started normally): 2,369 frames, 632 dropped (27%: the CPU cannot keep 5 per second with searches and batch work beside it), 61 encounters, searches p50 1.0 s, p95 2.5 s; interactive p95 0.60 s; background p95 0.51 s; application process memory growth 6.1 MB; 179 face vectors kept.
 
 **Agreement DirectML against CPU** (`test_provider_agreement.py`, the 4 pictures of `local-models/images`, 5 faces): largest 1 - cosine 5.5e-9, largest element difference 1.5e-7 (the 2026-10-16 record over 686 faces: 1.25e-6). Passed.
 
@@ -56,6 +56,16 @@ Reports are in the Git-ignored scratch folders of the run and were deleted with 
 8. **Delete:** delete one visit, then a day; confirm they are gone. Then tell the agents the result (it closes TST-071 and the M7 real-world check).
 
 Optional tuning for the check: the 5-second encounter gap and the 5 frames per second (plan section 9, item 4) are application defaults; if visits are split or merged wrongly, say so.
+
+## Limits of these numbers (from the review)
+
+- Memory is the application process only; the worker's and ffmpeg's memory is not in it.
+- "Face vectors kept" counts active representation rows, the authoritative record; the derived
+  USearch index's size was not read separately.
+- Detection and embedding are not timed apart: a worker turn is either; the whole search is
+  timed too.
+- The two soaks ran before the benchmark's workdir check and clean-up were added; they used
+  Git-ignored scratch folders under `evaluation/datasets/`, deleted afterwards.
 
 ## Decisions
 
