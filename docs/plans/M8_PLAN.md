@@ -37,7 +37,7 @@ sidecar) and says where it departs from the "online bootstrap installer" of sect
 
 ## 1a. What remains, and what depends on M6 and M7 (2026-11-12)
 
-Built and merged: steps 1 to 4 and the first part of step 6 (the pre-migration copy). An unsigned
+Built and merged: steps 1 to 4 (PR #258 shipped FFmpeg and turned telemetry off) and the first part of step 6 (the pre-migration copy). An unsigned
 installer builds with `uv run --group build python packaging/build_installer.py` (the notices, the pinned FFmpeg, the frozen
 backend, the shell) and was installed, driven on the development profile and uninstalled in a scratch folder.
 
@@ -54,6 +54,13 @@ under `backend/` as a hidden import, so new camera modules are picked up), regen
 through the FFmpeg already shipped; if it needs a build option the pinned build lacks, the pin changes and the notices follow. What
 a rebuild does not cover and the camera step must check on an installed build: Windows' camera privacy setting for desktop apps, and
 the camera screen on the installed shell.
+
+**Owner requirement (2026-11-12): use a supported GPU, else the CPU, with no manual step.** The model package manifest the first-run flow
+installs declares a DirectML, a CUDA and a CPU variant per model (`reference_manifest`), the frozen backend carries the DirectML runtime
+(the provider probe lists `DmlExecutionProvider`), and `FACEIDENTIFY_PROVIDERS` forces the CPU. The installed-build check
+(`packaging/check_installed.py`) proves the selection by default and forced to the CPU; running the real models on each path is step 8. The
+video session is changing adapter selection in `backend/ml/worker/onnx_session.py` (prefer the high-performance adapter, fall back): when that
+merges, the packaging follow-up is **a re-freeze** (rebuild the installer), like M7's.
 
 **Needs the owner:** the real-model packaged check (step 8) and the choice of when, if ever, to sign (R10).
 
