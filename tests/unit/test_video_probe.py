@@ -1,7 +1,10 @@
 """Reading a video's facts from ffprobe's JSON, and finding the tools (M6 step 3; TST-063)."""
 
+import hashlib
 import os
+import shutil
 import subprocess
+import sys
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -10,6 +13,7 @@ import pytest
 
 from backend.infrastructure.media.video import (
     FFMPEG_DIR_ENV,
+    MANIFEST,
     CorruptVideoError,
     MediaTools,
     MediaToolsMissingError,
@@ -131,6 +135,66 @@ def test_the_tools_are_found_in_the_local_state_or_where_the_environment_says(
     assert media_tools(tmp_path, {FFMPEG_DIR_ENV: str(elsewhere)}).ffmpeg.parent == elsewhere
     with pytest.raises(MediaToolsMissingError):
         media_tools(tmp_path / "nowhere", {})
+
+
+def installed_with_manifest(folder: Path) -> Path:
+    suffix = ".exe" if os.name == "nt" else ""
+    folder.mkdir(parents=True)
+    names = (f"ffmpeg{suffix}", f"ffprobe{suffix}", "avcodec.dll")
+    for name in names:
+        (folder / name).write_bytes(name.encode())
+    sums = "".join(f"{hashlib.sha256(name.encode()).hexdigest()}  {name}\n" for name in names)
+    (folder / MANIFEST).write_text(sums, encoding="utf-8")
+    return folder
+
+
+def test_tools_that_match_their_manifest_are_accepted_once_and_trusted_after(
+    tmp_path: Path,
+) -> None:
+    folder = installed_with_manifest(tmp_path / "ffmpeg")
+    environment = {FFMPEG_DIR_ENV: str(folder)}
+    media_tools(tmp_path, environment)
+
+    (folder / "avcodec.dll").write_bytes(b"swapped after the check")
+    media_tools(tmp_path, environment)  # the check happens before the first use, not on every call
+
+
+def test_a_changed_or_missing_file_is_refused_before_the_first_use(tmp_path: Path) -> None:
+    changed = installed_with_manifest(tmp_path / "changed")
+    (changed / "avcodec.dll").write_bytes(b"not what was installed")
+    with pytest.raises(MediaToolsMissingError, match="avcodec.dll.*does not match"):
+        media_tools(tmp_path, {FFMPEG_DIR_ENV: str(changed)})
+
+    missing = installed_with_manifest(tmp_path / "missing")
+    (missing / "avcodec.dll").unlink()
+    with pytest.raises(MediaToolsMissingError, match="avcodec.dll"):
+        media_tools(tmp_path, {FFMPEG_DIR_ENV: str(missing)})
+
+
+def test_a_manifest_line_cannot_point_outside_its_folder(tmp_path: Path) -> None:
+    folder = installed_with_manifest(tmp_path / "ffmpeg")
+    (tmp_path / "outside.dll").write_bytes(b"x")
+    line = f"{hashlib.sha256(b'x').hexdigest()}  ../outside.dll\n"
+    with (folder / MANIFEST).open("a", encoding="utf-8") as manifest:
+        manifest.write(line)
+    with pytest.raises(MediaToolsMissingError, match="outside.dll"):
+        media_tools(tmp_path, {FFMPEG_DIR_ENV: str(folder)})
+
+
+def test_a_packaged_app_uses_the_ffmpeg_folder_its_installer_shipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shipped = installed_with_manifest(tmp_path / "app" / "ffmpeg")
+    backend = tmp_path / "app" / "faceidentify-backend"
+    backend.mkdir()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(backend / "faceidentify-backend.exe"))
+
+    assert media_tools(tmp_path / "state", {}).ffmpeg.parent == shipped.resolve()
+
+    shutil.rmtree(shipped)  # no shipped folder: the machine-local state is looked at instead
+    with pytest.raises(MediaToolsMissingError, match="runtime"):
+        media_tools(tmp_path / "state", {})
 
 
 def test_a_probe_that_takes_too_long_is_a_corrupt_video(
