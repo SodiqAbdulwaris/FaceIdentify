@@ -124,6 +124,7 @@ export const endpoints = (api: ApiClient) => ({
     ),
   startCamera: (id: string) => api.post<CameraSession>(`${V1}/cameras/${id}/start`),
   stopCamera: (id: string) => api.post<CameraSession>(`${V1}/cameras/${id}/stop`),
+  searchWithCamera: (id: string) => api.post<FaceSearchResponse>(`${V1}/cameras/${id}/search`),
   cameraPreview: (id: string) => api.blob(`${V1}/cameras/${id}/preview`),
   cameraFace: (id: string, observationId: string) =>
     api.blob(`${V1}/cameras/${id}/faces/${observationId}/crop`),

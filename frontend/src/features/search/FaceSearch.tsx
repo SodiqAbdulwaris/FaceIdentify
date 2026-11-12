@@ -175,7 +175,8 @@ export function FaceSearch() {
 
 const percent = (similarity: number) => similarity.toFixed(2)
 
-function Face({ face, url }: { face: FaceAnswer; url: string | undefined }) {
+/** One face of a searched picture and who it may be (also used by the search with a camera). */
+export function Face({ face, url }: { face: FaceAnswer; url: string | undefined }) {
   const answer = face.identity_answer
   return (
     <section
