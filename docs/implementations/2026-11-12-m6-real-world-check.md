@@ -14,13 +14,13 @@ end.
 ## The sample, and how it was chosen
 
 Of the owner's 369 local videos (all probed and decoded by the pinned ffmpeg, see the step 4
-entry), four were chosen:
+entry), four were chosen, covering both containers the owner uses:
 
-- **Three consecutive episodes of one live-action series** (HEVC, 720p, MP4, about 2,466 s each).
-  A recurring main cast makes "named in episode 1, recognised later" a real question.
-- **One live-action feature film** (HEVC 10-bit, 1916 x 798, MKV, 5,821 s): the longest common
-  case, another container and pixel format, and a cast that shares nobody with the series, so any
-  match to the series' people would be a false one.
+- **Three consecutive episodes of one series** (MP4, HEVC, 720p, each about 40 minutes). The same
+  people recur, so "named in the first, recognised in the later ones" is a real question.
+- **One film** (MKV, HEVC 10-bit, wider than 720p, over an hour and a half): the longest common
+  case, another container and pixel format, and no person in common with the series, so any match
+  to the series' people would be a false one.
 
 ## How it ran
 
@@ -42,10 +42,10 @@ DirectML on one episode.
 | Measure | Result |
 |---|---|
 | Decoding | All four files decoded end to end by the pinned ffmpeg; no file refused |
-| Throughput, CPU | 3.4 to 4.0 video seconds per second per run (2.4 once, under the heaviest load); the film 4.0 (5,821 s in 1,451 s) |
+| Throughput, CPU | 3.4 to 4.0 video seconds per second per run (2.4 once, under the heaviest load); the film 4.0 |
 | Throughput, DirectML | 4.5 (episode 1, 545 s; the same 7,264 kept faces as on the CPU, no fallback). Barely faster than the CPU: decoding, sampling and tracking on the CPU are the bound, not inference |
 | Peak memory (host + ML worker + ffmpeg) | About 1.0 GB, film included (largest single sample 1,055 MB, on DirectML) |
-| Kept faces | Episode 1: 7,264 in 3,938 tracks; episode 2: 5,191; episode 3: 3,864; film: 5,819 in 3,047 tracks |
+| Kept faces | Episode 1: 7,264 in 3,938 tracks; episode 2: 5,191; episode 3: 3,864; the film: 5,819 in 3,047 tracks |
 
 **Recognition across episodes.** Six recurring people were named from episode 1 (1,084 of its
 faces, grouped by face similarity, checked by eye, then resolved and named through the API). With
@@ -57,16 +57,15 @@ both fixes in:
 | Track occurrences (appearances) | 187 | 85 |
 | Matched faces | 390 of 5,191 | 169 of 3,864 |
 
-Of the two not recognised, one is present in episode 2 (58 faces whose nearest named person is
-them, similarity up to 0.80) but abstains as `AMBIGUOUS_CANDIDATES`: the nearest rival is usually an
-unnamed face of episode 1, most of whose faces are not named. The other barely appears (10 faces,
-best similarity 0.56).
+Of the two not recognised, one is present in episode 2 (58 faces nearest to them, similarity up
+to 0.80) but abstains as `AMBIGUOUS_CANDIDATES`: the nearest rival is usually an unnamed face of
+episode 1, most of whose faces are not named. The other has 10 faces nearest to them, best
+similarity 0.56.
 
-**Wrong merges:** none confirmed. Every matched face of the most-matched person in episode 2 (91)
-and in episode 3 (70) was checked by eye, and samples of the others; faces under very different
-light or hair sit at similarity 0.72 to 0.78, far above what two different people reach with this
-model. Four matched crops in those sets are not usable faces (hair, a blur through leaves, an eye
-close-up, a dark frame) that rode in on a matched track.
+**Wrong merges:** none confirmed. Every matched face of one person in episode 2 (91) and of
+another in episode 3 (70) was checked by eye, and samples of the others; the least alike-looking
+matches sit at similarity 0.72 to 0.78, far above what two different people reach with this model.
+Four matched detections in those sets are not usable faces; they rode in on a matched track.
 
 **False matches:** none. Not one of the film's 5,819 faces matched any of the six series people.
 
@@ -74,7 +73,7 @@ close-up, a dark frame) that rode in on a matched track.
 the limit instead: most faces abstain, mainly as ambiguous or uncertain similarity under the
 uncalibrated policy, and the track rule (D7) withholds a whole track when its faces do not all agree
 (211 per-face matches in episode 2 were withheld that way). In episode 1, 277 of 1,845 multi-face
-tracks held two people (a cut inside a track); D7 is what keeps those from becoming wrong matches.
+tracks held two people (a shot change inside a track); D7 is what keeps those from becoming wrong matches.
 
 ## Step 7's controls on real files
 
