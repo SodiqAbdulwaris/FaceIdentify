@@ -2,6 +2,7 @@
   "bundle": {
     "resources": {
       "../../build/dist/faceidentify-backend": "faceidentify-backend",
+      "../../build/ffmpeg-state/runtime/ffmpeg": "ffmpeg",
       "../../build/THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
     },
     "windows": {
