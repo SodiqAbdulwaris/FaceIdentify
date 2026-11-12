@@ -6,6 +6,7 @@ import type { CameraSummary, CaptureDevice } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '../library/messages'
+import { Face } from '../search/FaceSearch'
 import { useObjectUrl } from '../useSourceImage'
 import { ConfirmButton } from './ConfirmButton'
 import { isOn, sessionLabel } from './session'
@@ -80,6 +81,12 @@ function CameraCard({
     onError: (error) => onNotice(errorMessage(error)),
     onSettled: refresh,
   })
+  // A face search with what the camera sees now: nothing is stored, the picture is not kept.
+  const search = useMutation({
+    mutationFn: () => endpoints.searchWithCamera(camera.id),
+    onSuccess: () => onNotice(null),
+    onError: (error) => onNotice(errorMessage(error)),
+  })
   const remove = useMutation({
     mutationFn: (withHistory: boolean) => endpoints.removeCamera(camera.id, withHistory),
     onSuccess: (_result, withHistory) =>
@@ -111,6 +118,14 @@ function CameraCard({
           <Button size="sm" disabled={toggle.isPending} onClick={() => toggle.mutate()}>
             {on ? 'Stop' : 'Start'}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={search.isPending}
+            onClick={() => search.mutate()}
+          >
+            Search with this camera
+          </Button>
           <Link
             to={`/cameras/${camera.id}`}
             className="inline-flex h-7 items-center rounded-md border px-2.5 text-[0.8rem]"
@@ -119,6 +134,16 @@ function CameraCard({
           </Link>
         </div>
       </div>
+      {search.data ? (
+        <section aria-label={`Who ${camera.display_name} sees`} className="flex flex-col gap-2">
+          {search.data.faces.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No face in front of the camera.</p>
+          ) : null}
+          {search.data.faces.map((face) => (
+            <Face key={face.index} face={face} url={undefined} />
+          ))}
+        </section>
+      ) : null}
       {on ? <Preview cameraId={camera.id} name={camera.display_name} /> : null}
       {on ? null : (
         <div className="flex flex-wrap gap-2">

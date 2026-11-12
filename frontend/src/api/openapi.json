@@ -2616,6 +2616,50 @@
         ]
       }
     },
+    "/api/v1/cameras/{camera_id}/search": {
+      "post": {
+        "description": "Search the memory with the face in front of the camera now (spec 10.4; plan C10): one\npicture is taken and searched as an uploaded one is, in the interactive class, so it works\nwhile a session runs. Nothing is stored, and the picture is not kept.",
+        "operationId": "search_with_camera",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "camera_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Camera Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaceSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Search With Camera",
+        "tags": [
+          "cameras"
+        ]
+      }
+    },
     "/api/v1/cameras/{camera_id}/start": {
       "post": {
         "operationId": "start",

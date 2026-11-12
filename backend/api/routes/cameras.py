@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session
 
 from backend.api.dependencies import Library, get_backend
 from backend.api.errors import ApiError
+from backend.api.routes.face_search import FaceSearchResponse, search_picture
+from backend.api.routes.processing import processing_settings
 from backend.api.startup import Backend, ProcessingUnavailableError
 from backend.app.cameras.history import (
     CameraBusyError as HistoryBusyError,
@@ -348,3 +350,36 @@ def delete_history(
     return HistoryDeleted(
         faces=report.faces, encounters=report.encounters, complete=report.complete
     )
+
+
+_CAMERA_ERRORS = {
+    "CAMERA_IN_USE": (409, "Another program is using the camera."),
+    "CAMERA_ACCESS_DENIED": (403, "Windows does not let desktop apps use the camera."),
+    "CAMERA_DISCONNECTED": (503, "The camera gave no picture."),
+}
+
+
+@router.post("/cameras/{camera_id}/search")
+async def search_with_camera(
+    camera_id: uuid.UUID, library: Library, service: Service, backend: Cameras
+) -> FaceSearchResponse:
+    """Search the memory with the face in front of the camera now (spec 10.4; plan C10): one
+    picture is taken and searched as an uploaded one is, in the interactive class, so it works
+    while a session runs. Nothing is stored, and the picture is not kept."""
+    settings = processing_settings(backend)
+    if not backend.face_search_slots.acquire(blocking=False):
+        raise ApiError(
+            429, "FACE_SEARCH_BUSY", "Other pictures are being searched. Try again in a moment.",
+            retryable=True,
+        )  # fmt: skip
+    try:
+        try:
+            picture = await anyio.to_thread.run_sync(service.capture, camera_id)
+        except CameraNotConfiguredError:
+            raise camera_not_found(camera_id) from None
+        except CameraError as error:
+            status, message = _CAMERA_ERRORS.get(error.code, (503, "The camera gave no picture."))
+            raise ApiError(status, error.code, message) from None
+        return await anyio.to_thread.run_sync(search_picture, library, settings, picture)
+    finally:
+        backend.face_search_slots.release()
