@@ -24,6 +24,7 @@ URL = (
     "ffmpeg-n9.0.2-39-g7adfbe40dc-win64-lgpl-shared-9.0.zip"
 )
 SHA256 = "e907b01fa4783913151237e37df2a10fa97d99a1598a021bf59d4ae62ffed4c0"
+MANIFEST = "SHA256SUMS"
 KEEP = ("ffmpeg.exe", "ffprobe.exe", "LICENSE.txt")
 
 
@@ -55,6 +56,11 @@ def main() -> None:
     if missing:
         shutil.rmtree(staging)
         raise SystemExit(f"refused: the zip has no {', '.join(missing)}")
+    sums = "".join(
+        f"{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}\n"
+        for file in sorted(staging.iterdir())
+    )  # what the app checks again before it first uses the tools (M8 step 4)
+    (staging / MANIFEST).write_text(sums, encoding="utf-8")
     if backup.exists():
         shutil.rmtree(backup)
     if target.exists():

@@ -4,7 +4,8 @@ Video goes through the pinned LGPL `ffmpeg` and `ffprobe` executables over pipes
 binding (the PyAV wheel bundles GPL encoders, `docs/research/licensing-and-commercialization.md`
 section 4.1). The binaries are not in the repository: `scripts/install_ffmpeg.py` verifies the
 pinned build's SHA-256 and unpacks it into the machine-local state (`<local state>/runtime/ffmpeg`),
-and `FACEIDENTIFY_FFMPEG_DIR` points elsewhere for development and CI.
+and `FACEIDENTIFY_FFMPEG_DIR` points elsewhere for development and CI. The installer ships the
+same build in an `ffmpeg` folder beside the frozen backend's, which a packaged app uses first.
 
 A video is accepted only in an MP4 or QuickTime, Matroska or WebM, or AVI container, with a video
 stream that has a size and a duration. Its facts are what the Source records: the size as it is
@@ -12,9 +13,11 @@ shown (a rotation of 90 or 270 degrees swaps width and height, as an image's ori
 duration and the average frame rate.
 """
 
+import hashlib
 import json
 import os
 import subprocess
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from fractions import Fraction
@@ -22,6 +25,8 @@ from pathlib import Path
 from typing import Any
 
 FFMPEG_DIR_ENV = "FACEIDENTIFY_FFMPEG_DIR"
+MANIFEST = "SHA256SUMS"  # `<sha-256>  <file name>` per line, written when the tools were installed
+_verified: set[Path] = set()  # the folders whose files matched their manifest, once per process
 PROBE_TIMEOUT_SECONDS = 60
 # (no console window flashes up when the desktop app runs a tool; the flag exists only on Windows)
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -72,16 +77,44 @@ def is_video_name(path: Path) -> bool:
     return path.suffix.lower() in VIDEO_SUFFIXES
 
 
+def _bundled_directory() -> Path | None:
+    """The `ffmpeg` folder the installer puts beside the frozen backend's own folder, if this is
+    that frozen backend (an installed application) and the folder is there."""
+    if not getattr(sys, "frozen", False):
+        return None
+    beside = Path(sys.executable).resolve().parent.parent / "ffmpeg"
+    return beside if beside.is_dir() else None
+
+
 def media_tools(local_state_root: Path, environ: Mapping[str, str] | None = None) -> MediaTools:
-    """The installed tools: `FACEIDENTIFY_FFMPEG_DIR`, else `<local state>/runtime/ffmpeg`."""
+    """The installed tools: `FACEIDENTIFY_FFMPEG_DIR`, else the folder the installer shipped beside
+    the application, else `<local state>/runtime/ffmpeg`."""
     environment = os.environ if environ is None else environ
     given = environment.get(FFMPEG_DIR_ENV)
-    directory = Path(given) if given else local_state_root / "runtime" / "ffmpeg"
+    directory = (
+        Path(given) if given else _bundled_directory() or local_state_root / "runtime" / "ffmpeg"
+    )
     suffix = ".exe" if os.name == "nt" else ""
     tools = MediaTools(directory / f"ffmpeg{suffix}", directory / f"ffprobe{suffix}")
     if not (tools.ffmpeg.is_file() and tools.ffprobe.is_file()):
         raise MediaToolsMissingError(f"ffmpeg and ffprobe are not installed in {directory}")
+    _check_manifest(directory)
     return tools
+
+
+def _check_manifest(directory: Path) -> None:
+    """Before the tools are first used, every file the manifest lists must still have its hash (a
+    damaged or swapped file is refused). A folder without a manifest, such as a hand-made one for
+    development, is not checked."""
+    manifest = directory / MANIFEST
+    if directory in _verified or not manifest.is_file():
+        return
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        digest, _, name = line.partition("  ")
+        file = directory / Path(name).name  # (a name in the manifest never leaves the folder)
+        if not file.is_file() or hashlib.sha256(file.read_bytes()).hexdigest() != digest:
+            raise MediaToolsMissingError(f"{name or line} in {directory} does not match its hash")
+    _verified.add(directory)
 
 
 def probe_video(tools: MediaTools, path: Path) -> VideoFacts:
