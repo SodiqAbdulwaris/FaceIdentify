@@ -5,6 +5,7 @@ real scheduler, executor and acceptance, so a requested run is really processed.
 """
 
 import asyncio
+import threading
 import uuid
 from dataclasses import replace
 from functools import partial
@@ -17,7 +18,9 @@ from sqlalchemy import select, update
 from backend.api.pagination import encode_cursor
 from backend.api.startup import ProcessingUnavailableError
 from backend.app.jobs.models import Job
+from backend.app.memory.index_coordinator import IndexCoordinator
 from backend.app.processing.models import ProcessingRun
+from backend.app.processing.runner import ProcessingRunner, RunOutcome
 from backend.app.sources.models import Artifact, Source
 from tests.factories.models import ModelFactory
 from tests.fixtures.api import Api, error, imported
@@ -111,6 +114,37 @@ async def test_processing_a_source_is_accepted_tracked_and_completed(processing_
     detail = (await api.client.get(f"/api/v1/sources/{source['id']}")).json()
     assert detail["processing_status"] == "COMPLETED"
     assert detail["latest_processing_run"] == {"id": accepted["id"], "state": "COMPLETED"}
+
+
+async def test_a_processing_loop_catches_the_index_up_before_each_claim(
+    processing_api: Api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recognition must never run on an index left behind by an earlier acceptance or a restart
+    (M6 D8: a video accepts thousands of faces), so every claim follows a drain."""
+    api = processing_api
+    turn = threading.local()  # one turn of a loop runs on one worker thread
+    claims: list[bool] = []  # per claim: did this turn drain first?
+    drain, run_once = IndexCoordinator.drain, ProcessingRunner.run_once
+
+    def recorded_drain(self: IndexCoordinator, *, batch: int) -> None:
+        turn.drained = True
+        drain(self, batch=batch)
+
+    def recorded_claim(self: ProcessingRunner) -> RunOutcome:
+        claims.append(getattr(turn, "drained", False))
+        turn.drained = False
+        return run_once(self)
+
+    monkeypatch.setattr(IndexCoordinator, "drain", recorded_drain)
+    monkeypatch.setattr(ProcessingRunner, "run_once", recorded_claim)
+    source = await imported(api, path=str(api.image()))
+
+    await finished(api, (await process(api, source))["id"])
+
+    assert any(claims)
+    # each of the two loops may have been past its drain when the patch landed, never more
+    assert claims.count(False) <= 2
+    assert all(claims[2:])
 
 
 async def test_processing_an_unknown_source_is_404(processing_api: Api) -> None:

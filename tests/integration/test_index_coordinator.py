@@ -454,6 +454,25 @@ def test_drain_stops_at_what_was_due_when_it_started(
     assert states == {"APPLIED": 5, "PENDING": 3}  # the five, then three left for the next drain
 
 
+def test_drain_stops_when_another_drainer_settled_what_it_counted(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory, monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    operation = queue(build, active(build, space, 1), "ADD")
+    build.session.commit()
+    passes: list[int] = []
+
+    def taken_meanwhile(*, limit: int) -> CoordinatorReport:
+        passes.append(limit)
+        return CoordinatorReport()  # the other loop's drain claimed it first
+
+    monkeypatch.setattr(coordinator, "apply_pending", taken_meanwhile)
+    coordinator.drain(batch=10)
+
+    assert passes == [1]  # one pass that settled nothing, then it stops
+    assert load_op(factory, operation.id).state == "PENDING"
+
+
 def test_an_operation_that_is_not_yet_due_waits(
     coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
     build: ModelFactory,
