@@ -30,5 +30,11 @@ export function staleBecauseOf(event: EventEnvelope): QueryKey[] {
     // A name or a corrected face shows on the people list, every person page and every source.
     return [keys.identities, keys.people, ['identity'], ['source'], ['search']]
   }
+  if (event.type === 'camera.session.updated' || event.type === 'camera.encounter.closed') {
+    // A session started or ended, or an encounter was recorded: the cameras, the camera's
+    // history (its Source's faces) and the people it saw.
+    const id = event.resource.id
+    return [keys.cameras, keys.source(id), keys.identities, ['identity'], ['search']]
+  }
   return []
 }
