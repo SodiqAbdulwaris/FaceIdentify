@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-12 (work began 2026-11-11)
 - **Milestone / tracker IDs:** M7 step 3 · TST-072 (the live queue is bounded), TST-077 (the contention half)
-- **Status:** done (camera sessions use the class from step 4)
+- **Status:** done (the lease side; nothing calls `live()` until camera sessions exist, step 4)
 - **Commits:** PR (number recorded when merged): `feat(ml): give camera sessions a live class in the worker lease`, `docs: record M7 step 3`
 
 ## What changed
