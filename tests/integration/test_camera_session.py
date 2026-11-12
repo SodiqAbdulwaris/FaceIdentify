@@ -339,3 +339,20 @@ def test_a_session_without_its_run_fails(pipeline: Pipeline, camera: Camera) -> 
 
     with pytest.raises(ProcessingExecutionError, match="run is missing"):
         camera.executor().run(lost, frames())
+
+
+def test_a_crop_that_cannot_be_written_fails_the_session_and_is_recorded_missing(
+    pipeline: Pipeline, red: uuid.UUID, camera: Camera, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def full(_key: str, _source: Any) -> Any:
+        raise OSError("the disk is full")
+
+    monkeypatch.setattr(pipeline.lib.store, "store", full)
+    started = camera.start()
+    with pytest.raises(OSError, match="disk is full"):
+        camera.executor().run(started, frames(*visit("red", 0, 1), *empty(1, 1.6)))
+
+    crops = rows(pipeline, Artifact, Artifact.kind == ArtifactKind.FACE_CROP)
+    assert crops
+    assert {(c.state, c.failure_code) for c in crops} == {("MISSING", "WRITE_NOT_COMPLETED")}
+    assert rows(pipeline, Observation, Observation.source_id == camera.id) == []
