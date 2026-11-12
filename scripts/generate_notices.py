@@ -20,6 +20,7 @@ file (a monorepo crate, for example) is listed under "Declared licence only" wit
 import argparse
 import hashlib
 import json
+import platform
 import re
 import subprocess
 import sys
@@ -235,8 +236,51 @@ def cargo_components() -> list[Component]:
     return found
 
 
-def collect() -> list[Component]:
-    components = python_components() + npm_components() + cargo_components()
+# What the frozen backend folder carries beyond the locked Python packages: the interpreter and the
+# libraries Python's own DLLs and extension modules link (`_internal/*.dll`, `*.pyd`), with the
+# licence each declares. Their texts live upstream (see the URLs); CPython's own file is read here.
+RUNTIME_LIBRARIES = (
+    ("OpenSSL", "3", "Apache-2.0", "libssl-3-x64.dll, libcrypto-3-x64.dll"),
+    ("SQLite", "3", "Public domain (blessing)", "sqlite3.dll"),
+    ("libffi", "8", "MIT", "libffi-8.dll"),
+    ("expat", "2", "MIT", "pyexpat.pyd"),
+    ("bzip2", "1", "bzip2-1.0.6", "_bz2.pyd"),
+    ("XZ Utils (liblzma)", "5", "0BSD", "_lzma.pyd"),
+    ("Microsoft Visual C++ Redistributable", "14", "LicenseRef-Microsoft-VC-Redistributable",
+     "msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll"),
+)  # fmt: skip
+
+
+def bundled_components(ffmpeg: Path | None = None) -> list[Component]:
+    """The non-package components of a packaged build: CPython and its libraries, and FFmpeg when
+    the build ships it (`ffmpeg` is the folder it ships, whose LICENSE.txt is its licence text)."""
+    cpython = Component("bundled", "CPython", platform.python_version(), "PSF-2.0")
+    licence = Path(sys.base_prefix) / "LICENSE.txt"
+    if licence.is_file():
+        cpython.texts[licence.name] = licence.read_text(encoding="utf-8", errors="replace").strip()
+    else:
+        cpython.missing.append(f"CPython ships without its licence: {licence} is missing")
+    found = [cpython] + [
+        Component("bundled", f"{name} ({files})", version, licence_id)
+        for name, version, licence_id, files in RUNTIME_LIBRARIES
+    ]
+    if ffmpeg is not None:
+        build = Component(
+            "bundled", "FFmpeg (shared libraries, LGPL build)", "9.0", "LGPL-2.1-or-later"
+        )
+        licence = ffmpeg / "LICENSE.txt"
+        if licence.is_file():
+            build.texts[licence.name] = licence.read_text(encoding="utf-8").strip()
+        else:
+            build.missing.append(f"FFmpeg ships without its licence: {licence} is missing")
+        found.append(build)
+    return found
+
+
+def collect(ffmpeg: Path | None = None) -> list[Component]:
+    components = (
+        python_components() + npm_components() + cargo_components() + bundled_components(ffmpeg)
+    )
     return sorted(components, key=lambda c: (c.ecosystem, c.name.lower(), c.version))
 
 
@@ -287,8 +331,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--output", type=Path, help="write the notices file here")
     parser.add_argument("--check", action="store_true", help="report problems only, write nothing")
+    parser.add_argument("--ffmpeg", type=Path, help="the FFmpeg folder this build ships")
     args = parser.parse_args()
-    components = collect()
+    components = collect(args.ffmpeg)
     problems = {f"{c.ecosystem}:{c.name} {c.version}": c.problems for c in components if c.problems}
     for name, found in problems.items():
         print(f"PROBLEM {name}: {'; '.join(found)}")

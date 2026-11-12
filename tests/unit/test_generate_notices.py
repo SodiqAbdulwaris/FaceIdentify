@@ -1,6 +1,7 @@
 """The third-party notices generator (M8 step 1): what it flags, how it renders, what it covers."""
 
 import json
+from pathlib import Path
 
 from scripts import generate_notices as notices
 
@@ -70,3 +71,23 @@ def test_the_wheel_that_carries_directml_also_carries_microsofts_terms() -> None
     if runtime is not None:  # the Windows build; other platforms install the plain CPU package
         assert runtime.missing == []
         assert "DirectML-LICENSE.txt" in runtime.texts
+
+
+def test_the_runtime_bundle_names_cpython_with_its_licence_and_the_libraries_it_links() -> None:
+    found = {c.name.split(" (")[0]: c for c in notices.bundled_components()}
+    assert found["CPython"].texts
+    assert not found["CPython"].problems
+    assert {"OpenSSL", "SQLite", "libffi"} <= found.keys()
+    assert "FFmpeg" not in found  # only a build that ships it lists it
+
+
+def test_ffmpeg_is_listed_with_its_licence_text_and_refused_without_one(tmp_path: Path) -> None:
+    (tmp_path / "LICENSE.txt").write_text("GNU LESSER GENERAL PUBLIC LICENSE", encoding="utf-8")
+    shipped = notices.bundled_components(tmp_path)[-1]
+    assert shipped.name.startswith("FFmpeg")
+    assert shipped.texts == {"LICENSE.txt": "GNU LESSER GENERAL PUBLIC LICENSE"}
+    assert shipped.problems == []
+    assert shipped.needs_review  # the LGPL: the owner reviewed it (D2), the build still says so
+
+    (tmp_path / "LICENSE.txt").unlink()
+    assert notices.bundled_components(tmp_path)[-1].problems
