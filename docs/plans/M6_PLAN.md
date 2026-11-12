@@ -177,6 +177,8 @@ evidence (D5). Needed before long videos, useful for images now (a face search d
 A small set of videos the owner may use (D8), processed on DirectML and on the CPU, with timings, the
 appearance list compared by hand for a few people, and a crash-and-resume run.
 
+- Progress: done 2026-11-12 ([entry](../implementations/2026-11-12-m6-real-world-check.md)): three episodes and a film on the CPU, one episode on DirectML, recognition across episodes compared by hand, pause, resume, cancel, a crash and retry, a reprocess; two defects fixed (PRs #252 and #254).
+
 ## 4. Dependencies and blockers
 
 - Step 1 has no dependency beyond M5. Steps 3 to 7 depend on step 1 (Roadmap order) and step 2 (which

@@ -240,3 +240,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-12 | [Fix: recognising a video's faces without quadratic work](2026-11-12-video-recognition-retrieval.md) | done; found by the M6 real-world check (D8) |
 | 2026-11-12 | [Fix: the index catches up fully after an acceptance](2026-11-12-drain-index-after-acceptance.md) | done; found by the M6 real-world check (D8) |
 | 2026-11-12 | [M8 step 6 (part): a copy of the database before an upgrade](2026-11-12-m8-step6-pre-migration-backup.md) | done |
+| 2026-11-12 | [M6 step 8: the real-world check on the owner's videos (D8)](2026-11-12-m6-real-world-check.md) | done; two defects fixed (PRs #252, #254); numbers only |
