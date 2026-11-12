@@ -7,8 +7,9 @@ What it does, honestly labelled:
 
 * it registers a small catalog (a detector, an embedder and one representation space) once, in the
   library's own database, as ordinary rows whose exports point at no real model;
-* its "perception" finds one face in the middle of every image and embeds it as a vector derived
-  from the image's pixels, so identical images are the same identity and different images are not;
+* its "perception" finds one face in the middle of every image (or video frame) and embeds it as a
+  vector derived from the pixels, so identical images are the same identity and different images are
+  not;
 * its decision policy has a visibly provisional version name and thresholds chosen only so that
   those two cases separate; every run frozen under it reports `calibrated: false` (the snapshot
   says `UNCALIBRATED`), which is what the UI shows as the uncalibrated-policy notice.
@@ -19,6 +20,7 @@ Real calibration is TST-044; real models are issue 69.
 import hashlib
 import os
 import uuid
+from contextlib import AbstractContextManager, nullcontext
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -298,6 +300,11 @@ class DevelopmentPerception:
 
     def detect(self, pixels: Any) -> Detected:
         return Detected((Detection(0, 0, (0.2, 0.2, 0.8, 0.8), 0.9, None),), self._detector)
+
+    def turn(self) -> AbstractContextManager[None]:
+        """A video takes one worker turn per batch of frames; this perception runs in the process,
+        so there is no worker to take turns on (without it, no video could be processed here)."""
+        return nullcontext()
 
     def represent(self, pixels: Any, detections: tuple[Detection, ...]) -> Represented:
         if not detections:
