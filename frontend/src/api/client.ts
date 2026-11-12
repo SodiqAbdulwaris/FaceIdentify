@@ -95,12 +95,16 @@ export class ApiClient {
   }
 
   /** A command whose answer is `204` (no body) or carries a body (for example a `202`). */
-  async command<T>(path: string, request?: unknown): Promise<{ status: number; body: T | null }> {
+  async command<T>(
+    path: string,
+    request?: unknown,
+    method: 'POST' | 'DELETE' = 'POST',
+  ): Promise<{ status: number; body: T | null }> {
     const init: RequestInit =
       request === undefined
-        ? { method: 'POST' }
+        ? { method }
         : {
-            method: 'POST',
+            method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(request),
           }

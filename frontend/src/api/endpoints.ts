@@ -117,7 +117,11 @@ export const endpoints = (api: ApiClient) => ({
       device_path: device.path,
     }),
   removeCamera: (id: string, withHistory: boolean) =>
-    api.delete(`${V1}/cameras/${id}${withHistory ? '?history=true' : ''}`),
+    api.command<DeletionPending>(
+      `${V1}/cameras/${id}${withHistory ? '?history=true' : ''}`,
+      undefined,
+      'DELETE',
+    ),
   startCamera: (id: string) => api.post<CameraSession>(`${V1}/cameras/${id}/start`),
   stopCamera: (id: string) => api.post<CameraSession>(`${V1}/cameras/${id}/stop`),
   cameraPreview: (id: string) => api.blob(`${V1}/cameras/${id}/preview`),
