@@ -14,6 +14,7 @@ import json
 import os
 import secrets
 import sqlite3
+import subprocess
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -43,6 +44,7 @@ from backend.app.runtime.perception_client import Represented
 from backend.app.sources.models import Artifact
 from tests.fixtures.api import library_settings
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
+from tests.fixtures.media import installed_tools, make_clip
 
 
 def a_token() -> str:
@@ -154,6 +156,43 @@ async def test_the_development_host_processes_images_and_remembers_them_across_a
         recognised = await identities(client)
         assert len(recognised) == 2  # the persisted memory recognised it: no third identity
         assert sorted(i["occurrence_count"] for i in recognised) == [1, 3]
+
+
+async def test_the_development_host_processes_a_video_and_finds_a_known_face_in_it(
+    tmp_path: Path,
+) -> None:
+    """A video never creates a person, so its appearance needs one already known: a frame of the
+    clip, processed as a picture first, is that person (same pixels, same person here)."""
+    folder = tmp_path / "media"
+    folder.mkdir()
+    clip = make_clip(folder / "red.mp4", seconds=6, size="64x48", source="color=c=0xC80A0A")
+    frame = folder / "frame.png"
+    subprocess.run(
+        [
+            str(installed_tools().ffmpeg),
+            "-v",
+            "error",
+            "-i",
+            str(clip),
+            "-frames:v",
+            "1",
+            str(frame),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    async with host(tmp_path, development_profile=True) as client:
+        await process_and_wait(client, (await import_image(client, frame))["id"])
+        video = await import_image(client, clip)
+        assert video["type"] == "VIDEO"
+        run = await process_and_wait(client, video["id"])
+
+        assert run["job"]["progress"]["completed"] == run["job"]["progress"]["total"] > 0
+        [person] = await identities(client)
+        faces = (await client.get(f"/api/v1/sources/{video['id']}/occurrences")).json()["items"]
+        assert [f["identity_id"] for f in faces] == [person["id"]]  # one appearance, that person
+        assert faces[0]["end_ms"] > faces[0]["start_ms"]  # over time, not one frame
 
 
 async def test_without_the_development_profile_importing_works_and_processing_is_unavailable(
