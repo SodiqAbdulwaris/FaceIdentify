@@ -253,6 +253,9 @@ describe('camera history', () => {
     expect(deleteSelected).toBeDisabled()
     await userEvent.click(screen.getByRole('checkbox'))
     await userEvent.click(screen.getByRole('button', { name: 'Delete selected (1)' }))
+    expect(calls.some((call) => call.path.endsWith('/history/delete'))).toBe(false) // asked first
+    expect(screen.getByText(/Delete the 1 selected visit for good/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Delete for good' }))
 
     const deleted = calls.find((call) => call.path.endsWith('/history/delete'))
     expect(deleted?.body).toEqual({ occurrence_ids: ['v1'] })

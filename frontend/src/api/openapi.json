@@ -2457,7 +2457,7 @@
     },
     "/api/v1/cameras/{camera_id}": {
       "delete": {
-        "description": "Remove the configuration; its history stays unless `history=true` (C9).",
+        "description": "Remove the configuration; its history stays unless `history=true` (C9). With the\nhistory, `202` and what is still owed when part of the deletion cannot finish yet (a locked\nfile); it is finished at the next start.",
         "operationId": "remove_camera",
         "parameters": [
           {
@@ -2484,6 +2484,16 @@
           }
         ],
         "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionPending"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
           "204": {
             "description": "Successful Response"
           },
