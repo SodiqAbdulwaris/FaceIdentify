@@ -57,8 +57,9 @@ the camera screen on the installed shell.
 
 **Owner requirement (2026-11-12): use a supported GPU, else the CPU, with no manual step.** The model package manifest the first-run flow
 installs declares a DirectML, a CUDA and a CPU variant per model (`reference_manifest`), the frozen backend carries the DirectML runtime
-(the provider probe lists `DmlExecutionProvider`), and `FACEIDENTIFY_PROVIDERS` forces the CPU. The installed-build check
-(`packaging/check_installed.py`) proves the selection by default and forced to the CPU; running the real models on each path is step 8. The
+(the provider probe lists `DmlExecutionProvider`), and `FACEIDENTIFY_PROVIDERS` forces the CPU. The installed-build check planned for step 7
+(`packaging/check_installed.py`, in review as its own PR) is to prove the selection by default and forced to the CPU; running the real models on
+each path is step 8. The
 video session is changing adapter selection in `backend/ml/worker/onnx_session.py` (prefer the high-performance adapter, fall back): when that
 merges, the packaging follow-up is **a re-freeze** (rebuild the installer), like M7's.
 
