@@ -244,3 +244,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-12 | [M7 step 2: live camera frames over the pinned ffmpeg](2026-11-12-m7-step2-camera-capture.md) | done; this machine's camera gives no frames (owner to check) |
 | 2026-11-12 | [M8 step 4: FFmpeg in the installer, ONNX Runtime telemetry off](2026-11-12-m8-step4-ffmpeg-bundle-and-telemetry.md) | done |
 | 2026-11-12 | [M7 step 3: a live class in the worker lease](2026-11-12-m7-step3-live-worker-class.md) | done |
+| 2026-11-12 | [M8: what remains and what depends on M6 and M7](2026-11-12-m8-remaining-work-list.md) | done |

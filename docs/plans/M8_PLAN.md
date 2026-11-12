@@ -35,6 +35,28 @@ sidecar) and says where it departs from the "online bootstrap installer" of sect
 - **Release blockers already listed** (`PROGRESS.md` section 4, licensing record sections 1 and 11) are sorted
   in section 6 into what a personal-use build can ship with and what blocks a public release.
 
+## 1a. What remains, and what depends on M6 and M7 (2026-11-12)
+
+Built and merged: steps 1 to 4 and the first part of step 6 (the pre-migration copy). An unsigned
+installer builds with `uv run --group build python packaging/build_installer.py` (the notices, the pinned FFmpeg, the frozen
+backend, the shell) and was installed, driven on the development profile and uninstalled in a scratch folder.
+
+**Left in M8** (none of it waits for M6 or M7): step 5, the first-run flow (the model installation use case and its
+routes with the hash table, the recognition-mode choice, the self-check, the screens, the desktop end-to-end test); the rollback tests of
+steps 4 and 5 (they need that installer); the installer-level upgrade, uninstall and reinstall tests of step 6; step 7, the on-demand CI
+installer job and the process-tree and network checks; step 8, the real-model packaged check on the owner's machine.
+
+**Depends on M6 (merged 2026-11-12):** nothing is left. The FFmpeg that video needs ships in the installer (step 4), hash-checked
+before first use, and the notices carry its licence.
+
+**Depends on M7 (cameras, in progress):** the packaging follow-up is **a rebuild**: re-freeze the backend (the spec lists every module
+under `backend/` as a hidden import, so new camera modules are picked up), regenerate the notices, rebuild the installer. M7 reads cameras
+through the FFmpeg already shipped; if it needs a build option the pinned build lacks, the pin changes and the notices follow. What
+a rebuild does not cover and the camera step must check on an installed build: Windows' camera privacy setting for desktop apps, and
+the camera screen on the installed shell.
+
+**Needs the owner:** the real-model packaged check (step 8) and the choice of when, if ever, to sign (R10).
+
 ## 2. What M8 must produce
 
 1. An installer the owner runs on a Windows 11 machine that has none of the development tools (no Python,
