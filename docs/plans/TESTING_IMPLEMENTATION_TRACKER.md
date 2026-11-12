@@ -340,7 +340,8 @@ labelled uncalibrated):
 
 | ID | Status | Evidence / remaining work |
 |---|---|---|
-| TST-071 | `IN_PROGRESS` | Model half (M7 step 1, revision 0012): a camera is a `CAMERA` Source without an original, with one device row, and a session is a `PROCESS_CAMERA_SESSION` job (`tests/integration/test_migration_0012.py`). Remaining: start, stop and reconnection (steps 2 and 4), history (step 5), search (step 6). |
+| TST-071 | `IN_PROGRESS` | Model half (M7 step 1, revision 0012): a camera is a `CAMERA` Source without an original, with one device row, and a session is a `PROCESS_CAMERA_SESSION` job (`tests/integration/test_migration_0012.py`). Capture half (M7 step 2): start, stop, reconnection with backoff and a missing device, through the pinned ffmpeg and scripted sources (`tests/integration/test_camera_capture.py`, `tests/unit/test_camera_live.py`). Remaining: sessions (step 4), history (step 5), search (step 6). |
+| TST-072 | `IN_PROGRESS` | Capture half (M7 step 2): a stalled consumer holds one frame and counts the rest as dropped; a stalled producer is reported (`test_camera_capture.py`). Remaining: the live class in the worker lease (step 3) and the soak (step 7). |
 
 **Dependencies:** M6 and available supported hardware.
 

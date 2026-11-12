@@ -3,7 +3,7 @@
 **Status:** drafted 2026-11-09 by the agent under the owner's delegation (2026-11-09: "i'll leave the
 rest of the decisions entirely to you"; scope "Everything through M8"). Every decision in section 8 is a
 **delegated decision**: the owner may reverse any of them, and each is written so that reversing it
-costs one step, not the plan. Built so far (2026-11-11): step 1, the schema and spec text only; no capture, session, route or screen. **Scope:** tracker milestone M7 (TST-071 to
+costs one step, not the plan. Built so far (2026-11-12): step 1 (schema and spec text) and step 2 (capture); no session, route or screen. **Scope:** tracker milestone M7 (TST-071 to
 TST-077) in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md) and the Roadmap's
 camera phase ([`Roadmap-Plan.md`](Roadmap-Plan.md) section 71). **Milestone gate (tracker):** "Included
 camera and runtime functionality satisfies its correctness and compatibility requirements."
@@ -100,6 +100,8 @@ read-only review, as in M5 and M6.
 - Tracker: TST-071 (the model half).
 
 ### Step 2. Capture: one frame source over the pinned FFmpeg
+
+> **Built 2026-11-12:** [entry](../implementations/2026-11-12-m7-step2-camera-capture.md). Frames are framed as PPM; this machine's camera is found but delivers no frame (owner to check).
 
 - A frame-source port with two adapters: the real one runs the pinned `ffmpeg` as a subprocess with
   DirectShow input (`-f dshow`) and raw video on a pipe (C1); a test adapter replays a generated clip or
