@@ -154,6 +154,8 @@ read-only review, as in M5 and M6.
 
 ### Step 5. Camera screen, history and deletion
 
+> **Built 2026-11-12:** [entry](../implementations/2026-11-12-m7-step5-cameras-screen-history.md). The desktop end-to-end run with a scripted camera is not built (see the entry).
+
 - Desktop: a Cameras screen (choose a camera, start and stop, status: running, frames dropped,
   reconnecting), a **"Camera on" indicator visible on every screen while a session runs** (C4), a live
   preview that is the newest annotated frame fetched from a loopback route and held only in memory
