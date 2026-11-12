@@ -8,7 +8,7 @@ tables.
 
 import uuid
 
-from sqlalchemy import CheckConstraint, ForeignKey, String
+from sqlalchemy import DDL, CheckConstraint, ForeignKey, String, event
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.infrastructure.db.engine import Base
@@ -32,3 +32,26 @@ class CameraSourceMetadata(Base):
     # DirectShow alternative name) when it has one: names are not unique across drivers, paths are.
     device_name: Mapped[str] = mapped_column(String)
     device_path: Mapped[str | None] = mapped_column(String)
+
+
+# A device row belongs to a camera only (no CHECK can look at another table). Written once here and
+# copied, frozen, into revision 0012: the migration tests compare the migrated schema with
+# `create_all`.
+CAMERA_ONLY_INSERT_TRIGGER = (
+    "CREATE TRIGGER trg_camera_source_metadata_camera_only_insert "
+    "BEFORE INSERT ON camera_source_metadata "
+    "WHEN (SELECT kind FROM sources WHERE id = NEW.source_id) IS NOT 'CAMERA' "
+    "BEGIN SELECT RAISE(ABORT, 'camera metadata belongs to a camera source'); END"
+)
+CAMERA_ONLY_UPDATE_TRIGGER = (
+    "CREATE TRIGGER trg_camera_source_metadata_camera_only_update "
+    "BEFORE UPDATE OF source_id ON camera_source_metadata "
+    "WHEN (SELECT kind FROM sources WHERE id = NEW.source_id) IS NOT 'CAMERA' "
+    "BEGIN SELECT RAISE(ABORT, 'camera metadata belongs to a camera source'); END"
+)
+for _trigger in (CAMERA_ONLY_INSERT_TRIGGER, CAMERA_ONLY_UPDATE_TRIGGER):
+    event.listen(
+        CameraSourceMetadata.__table__,
+        "after_create",
+        DDL(_trigger),  # type: ignore[no-untyped-call]  # SQLAlchemy ships DDL untyped
+    )

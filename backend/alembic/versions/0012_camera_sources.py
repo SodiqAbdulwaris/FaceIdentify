@@ -6,9 +6,11 @@ Delegated decision 2026-11-11 (M7 step 1, plan C1 to C3; PERSISTENCE_IMPLEMENTAT
 1. `sources.kind` gains `CAMERA`, and `sources.original_artifact_id` becomes nullable for a camera
    only: `ck_sources_original_unless_camera` requires `(kind = 'CAMERA') = (original_artifact_id IS
    NULL)`, so every image and video keeps its original and a camera never has one (the ERD's "Camera
-   Sources are exempt").
+   Sources are exempt"); `ck_sources_camera_has_no_media` keeps a camera's thumbnail and media facts
+   empty.
 2. `camera_source_metadata`: one row per camera Source (`source_id` primary key, `CASCADE`) naming the
-   device, `device_name` (non-blank) and an optional `device_path` (non-blank when set).
+   device, `device_name` (non-blank) and an optional `device_path` (non-blank when set), with
+   two triggers that refuse a row (inserted or moved) whose Source is not a camera.
 3. `jobs.type` gains `PROCESS_CAMERA_SESSION`.
 
 SQLite cannot change a CHECK or a NOT NULL in place, so `sources` and `jobs` are recreated (batch
@@ -50,6 +52,22 @@ JOB_TYPES_BEFORE = (
 JOB_TYPES_AFTER = (*JOB_TYPES_BEFORE, "PROCESS_CAMERA_SESSION")
 PRIORITIES = ("INTERACTIVE", "HIGH", "NORMAL", "LOW", "MAINTENANCE")
 ORIGINAL_UNLESS_CAMERA = "(kind = 'CAMERA') = (original_artifact_id IS NULL)"
+CAMERA_HAS_NO_MEDIA = (
+    "kind != 'CAMERA' OR (thumbnail_artifact_id IS NULL AND captured_at IS NULL"
+    " AND media_duration_ms IS NULL AND width IS NULL AND height IS NULL"
+    " AND frame_rate_num IS NULL AND frame_rate_den IS NULL)"
+)
+# Copies of the triggers in `backend/app/cameras/models.py`, frozen (byte-identical).
+CAMERA_ONLY_TRIGGERS = (
+    "CREATE TRIGGER trg_camera_source_metadata_camera_only_insert "
+    "BEFORE INSERT ON camera_source_metadata "
+    "WHEN (SELECT kind FROM sources WHERE id = NEW.source_id) IS NOT 'CAMERA' "
+    "BEGIN SELECT RAISE(ABORT, 'camera metadata belongs to a camera source'); END",
+    "CREATE TRIGGER trg_camera_source_metadata_camera_only_update "
+    "BEFORE UPDATE OF source_id ON camera_source_metadata "
+    "WHEN (SELECT kind FROM sources WHERE id = NEW.source_id) IS NOT 'CAMERA' "
+    "BEGIN SELECT RAISE(ABORT, 'camera metadata belongs to a camera source'); END",
+)
 
 
 def _in(column: str, values: Sequence[str]) -> str:
@@ -73,6 +91,9 @@ def _sources(*, camera: bool) -> sa.Table:
             sa.CheckConstraint(
                 ORIGINAL_UNLESS_CAMERA, name=op.f("ck_sources_original_unless_camera")
             )
+        )
+        checks.append(
+            sa.CheckConstraint(CAMERA_HAS_NO_MEDIA, name=op.f("ck_sources_camera_has_no_media"))
         )
     table = sa.Table(
         "sources",
@@ -251,6 +272,8 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("source_id", name=op.f("pk_camera_source_metadata")),
     )
+    for trigger in CAMERA_ONLY_TRIGGERS:
+        op.execute(trigger)
 
 
 def downgrade() -> None:

@@ -129,6 +129,13 @@ class Source(Base):
         CheckConstraint(
             "(kind = 'CAMERA') = (original_artifact_id IS NULL)", name="original_unless_camera"
         ),
+        # A camera has no thumbnail and no media facts either (persistence 4.2, revision 0012).
+        CheckConstraint(
+            "kind != 'CAMERA' OR (thumbnail_artifact_id IS NULL AND captured_at IS NULL"
+            " AND media_duration_ms IS NULL AND width IS NULL AND height IS NULL"
+            " AND frame_rate_num IS NULL AND frame_rate_den IS NULL)",
+            name="camera_has_no_media",
+        ),
         Index(None, "state", "created_at", "id"),
         Index(None, "current_processing_run_id"),
         Index(None, "original_artifact_id"),
