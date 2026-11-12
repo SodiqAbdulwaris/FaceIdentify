@@ -247,3 +247,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-12 | [M8: what remains and what depends on M6 and M7](2026-11-12-m8-remaining-work-list.md) | done |
 | 2026-11-12 | [M8 step 7 (part): the installed-build check and the installer CI job](2026-11-12-m8-step7-installed-build-check.md) | done; the job runs first on this PR |
 | 2026-11-13 | [M8 step 5(a): installing the face models the user obtained](2026-11-13-m8-step5a-model-installation.md) | done; the first-run screens next |
+| 2026-11-12 | [M7 step 4: camera sessions and encounters](2026-11-12-m7-step4-camera-sessions.md) | done; routes and screen next (step 5) |
