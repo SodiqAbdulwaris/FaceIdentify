@@ -58,7 +58,14 @@ from backend.app.sources.lifecycle import (
     recycle_source,
     restore_source,
 )
-from backend.app.sources.models import Artifact, ArtifactState, Source, SourceState, StorageMode
+from backend.app.sources.models import (
+    Artifact,
+    ArtifactState,
+    Source,
+    SourceKind,
+    SourceState,
+    StorageMode,
+)
 from backend.app.sources.permanent_delete import (
     PermanentSourceDeletion,
     SourceMissingError,
@@ -250,7 +257,7 @@ _Move = Callable[..., Source]
 
 def _move_source(session: Session, backend: Backend, source_id: uuid.UUID, move: _Move) -> bool:
     """Recycle or restore one Source inside the caller's write; False when it was already there."""
-    source = require_visible_source(session, source_id)
+    source = require_media_source(session, source_id)
     target = SourceState.RECYCLED if move is recycle_source else SourceState.ACTIVE
     if source.state == target:
         return False
@@ -283,6 +290,16 @@ def require_visible_source(session: Session, source_id: uuid.UUID) -> Source:
     """The Source, or `404 SOURCE_NOT_FOUND` if it does not exist or is being or was deleted."""
     source = session.get(Source, source_id)
     if source is None or source.state in GONE:
+        raise source_not_found(source_id)
+    return source
+
+
+def require_media_source(session: Session, source_id: uuid.UUID) -> Source:
+    """A visible image or video: the Source routes' lifecycle (recycle, restore, recheck,
+    relink) is for imported media. A camera is managed through the camera routes (M7 step 1), so
+    here it is `404 SOURCE_NOT_FOUND` like any other id these routes do not serve."""
+    source = require_visible_source(session, source_id)
+    if source.kind == SourceKind.CAMERA:
         raise source_not_found(source_id)
     return source
 
@@ -508,7 +525,7 @@ def recheck(
     """Recheck File: verify a missing original again, where it was. A file that differs from the
     recorded one is not the original and the source stays missing (`availability_reason` says
     why). A repeat is harmless; an original that is not missing is left as it is."""
-    library.unit_of_work.read(lambda session: require_visible_source(session, source_id))
+    library.unit_of_work.read(lambda session: require_media_source(session, source_id))
     try:
         result = recheck_original(
             library.session_factory, library.store, source_id, clock=backend.settings.clock
@@ -544,7 +561,7 @@ def relink(
     relinked: they are rechecked where the library keeps them."""
 
     def original(session: Session) -> Artifact:
-        source = require_visible_source(session, source_id)
+        source = require_media_source(session, source_id)
         artifact = session.get(Artifact, source.original_artifact_id)
         assert artifact is not None  # a visible Source always has its original artifact row
         session.expunge(artifact)
