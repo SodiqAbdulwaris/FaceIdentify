@@ -13,8 +13,15 @@ inference already running is never interrupted; the next one is chosen at that s
   the inference in progress, and one background inference after a burst).
 
 A request is interactive when it is made inside `interactive()` (face search wraps its perception
-in it); everything else is background. The lease is held through a worker request and its output
-attachment/release: nothing here touches the database or the filesystem.
+in it), live inside `live()` (a camera session), and background otherwise; the innermost scope
+wins. The lease is held through a worker request and its output attachment/release: nothing here
+touches the database or the filesystem.
+
+M7 step 3 (plan C6) adds that third class between the two: **live**, a camera session's inference.
+The order is interactive, then live, then background, and the burst rule counts grants to either
+higher class: after `burst` of them in a row, the oldest waiting background request goes first, so a
+movie keeps moving under a running camera. A session keeps at most one request outstanding (its
+frame source keeps only the newest frame), so the live queue is never longer than one.
 
 A request made inside `cancellable(cancelled)` is asked `cancelled()` when its turn comes, before it
 reaches the worker: one that answers true gives its turn up and raises `RequestCancelledError`, so
@@ -33,8 +40,9 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 
 from backend.ml.supervisor.supervisor import MLUnavailableError
 
@@ -43,6 +51,14 @@ LOG = logging.getLogger(__name__)
 # Interactive grants in a row before a waiting background request goes first. ponytail: a fixed
 # value until a benchmark of real searches against long runs picks one (the decision's point 4).
 BURST = 3
+
+
+class ServiceClass(StrEnum):
+    """Who is waiting for an inference, most urgent first (processing spec 7; M7 plan C6)."""
+
+    INTERACTIVE = "INTERACTIVE"  # a person waits for the answer (face search)
+    LIVE = "LIVE"  # a running camera session: latency over completeness
+    BACKGROUND = "BACKGROUND"  # everything else (image and movie processing)
 
 
 class WorkerClosedError(MLUnavailableError):
@@ -63,6 +79,14 @@ class TurnRecord:
     queued_interactive: int  # requests of each class still waiting when this one was granted
     queued_background: int
     outcome: str  # RAN, FAILED (the body raised) or CANCELLED (given up at its turn)
+    live: bool = False  # a camera session's request (M7; `interactive` is then False)
+    queued_live: int = 0
+
+    @property
+    def service(self) -> ServiceClass:
+        if self.interactive:
+            return ServiceClass.INTERACTIVE
+        return ServiceClass.LIVE if self.live else ServiceClass.BACKGROUND
 
 
 def _seconds(value: float | None) -> str:
@@ -72,35 +96,51 @@ def _seconds(value: float | None) -> str:
 def log_turn(record: TurnRecord) -> None:
     """The default observer: one debug line per turn."""
     LOG.debug(
-        "worker: a %s request waited %s and held it %s (%s); %d interactive and %d "
+        "worker: a %s request waited %s and held it %s (%s); %d interactive, %d live and %d "
         "background waiting at its grant",
-        "interactive" if record.interactive else "background",
+        record.service.lower(),
         _seconds(record.waited),
         _seconds(record.held),
         record.outcome,
         record.queued_interactive,
+        record.queued_live,
         record.queued_background,
     )
 
 
-_interactive: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "faceidentify_interactive", default=False
+_service: contextvars.ContextVar[ServiceClass] = contextvars.ContextVar(
+    "faceidentify_service_class", default=ServiceClass.BACKGROUND
 )
 
 
 @contextmanager
-def interactive() -> Iterator[None]:
-    """Mark the worker requests made inside as interactive (a person is waiting for them)."""
-    token = _interactive.set(True)
+def serving(service: ServiceClass) -> Iterator[None]:
+    """Mark the worker requests made inside as of `service`'s class."""
+    token = _service.set(service)
     try:
         yield
     finally:
-        _interactive.reset(token)
+        _service.reset(token)
+
+
+def interactive() -> AbstractContextManager[None]:
+    """Mark the worker requests made inside as interactive (a person is waiting for them)."""
+    return serving(ServiceClass.INTERACTIVE)
+
+
+def live() -> AbstractContextManager[None]:
+    """Mark the worker requests made inside as live (a running camera session)."""
+    return serving(ServiceClass.LIVE)
+
+
+def service_class() -> ServiceClass:
+    """The class of the current request."""
+    return _service.get()
 
 
 def is_interactive() -> bool:
     """Whether the current request is made inside `interactive()`."""
-    return _interactive.get()
+    return _service.get() is ServiceClass.INTERACTIVE
 
 
 _cancelled: contextvars.ContextVar[Callable[[], bool] | None] = contextvars.ContextVar(
@@ -135,13 +175,14 @@ class WorkerLease:
         self._condition = threading.Condition()
         self._held = False
         self._closed = False
-        self._waiting: dict[bool, deque[object]] = {True: deque(), False: deque()}
-        self._streak = 0  # interactive grants since the last background one
+        # one queue per class, in the order of urgency
+        self._waiting: dict[ServiceClass, deque[object]] = {cls: deque() for cls in ServiceClass}
+        self._streak = 0  # interactive and live grants since the last background one
 
-    def queued(self, interactive_class: bool) -> int:
+    def queued(self, service: ServiceClass) -> int:
         """How many requests of a class are waiting (for readiness and tests)."""
         with self._condition:
-            return len(self._waiting[interactive_class])
+            return len(self._waiting[service])
 
     def close(self) -> None:
         """Refuse every request that waits and every later one (shutdown), so a queued request is
@@ -157,15 +198,15 @@ class WorkerLease:
 
     def _next(self) -> object:
         """The ticket to serve next. Only a waiter calls it, so one queue is never empty."""
-        interactive_queue, background = self._waiting[True], self._waiting[False]
-        if interactive_queue and (not background or self._streak < self._burst):
-            return interactive_queue[0]
-        return background[0]
+        background = self._waiting[ServiceClass.BACKGROUND]
+        if background and self._streak >= self._burst:
+            return background[0]
+        return next(queue[0] for queue in self._waiting.values() if queue)
 
     @contextmanager
     def held(self) -> Iterator[None]:
         """Wait for the worker, in this request's class and turn, and hold it for the body."""
-        cls = is_interactive()
+        cls = service_class()
         ticket = object()
         queued_at = self._clock()
         with self._condition:
@@ -184,7 +225,7 @@ class WorkerLease:
                 raise
             self._waiting[cls].popleft()
             self._held = True
-            behind = (len(self._waiting[True]), len(self._waiting[False]))
+            behind = {service: len(queue) for service, queue in self._waiting.items()}
         granted_at: float | None = None
         outcome = "FAILED"
         try:
@@ -196,7 +237,7 @@ class WorkerLease:
                     "the request was cancelled before it reached the worker"
                 )
             with self._condition:  # (a turn given up does not count towards the burst)
-                self._streak = self._streak + 1 if cls else 0
+                self._streak = 0 if cls is ServiceClass.BACKGROUND else self._streak + 1
             yield
             outcome = "RAN"
         finally:
@@ -206,11 +247,14 @@ class WorkerLease:
             released_at = self._reading()  # (a failing clock must not lose the turn's record)
             self._observe(
                 TurnRecord(
-                    cls,
+                    cls is ServiceClass.INTERACTIVE,
                     _span(queued_at, granted_at),
                     _span(granted_at, released_at),
-                    *behind,
+                    behind[ServiceClass.INTERACTIVE],
+                    behind[ServiceClass.BACKGROUND],
                     outcome,
+                    live=cls is ServiceClass.LIVE,
+                    queued_live=behind[ServiceClass.LIVE],
                 )
             )
 

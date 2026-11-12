@@ -38,7 +38,7 @@ from backend.app.runtime.perception_client import Detected, Represented
 from backend.app.runtime.worker_config import PerceptionPlan
 from backend.ml.contracts.messages import Detection, ExecutionContext, MLRequest, MLResponse
 from backend.ml.contracts.protocol import MLOperation
-from backend.ml.supervisor.lease import WorkerLease, interactive
+from backend.ml.supervisor.lease import ServiceClass, WorkerLease, interactive
 from backend.ml.supervisor.supervisor import MLSupervisor, WorkerFailedError
 from tests.concurrency.test_worker_lease import DEADLINE, Watched, finish, reached, watched
 from tests.fixtures.deterministic import SeededUUIDs
@@ -164,7 +164,7 @@ def test_a_job_cancelled_while_it_waits_for_the_worker_never_reaches_it(
     assert states(pipeline, run_id) == ("CANCELLED", "CANCELLED")
     assert pipeline.count(Representation) == 0
     assert pipeline.count(Observation) == (1 if waiting_at == "representation" else 0)
-    assert lease.queued(False) == 0  # the turn was given up, nothing left behind
+    assert lease.queued(ServiceClass.BACKGROUND) == 0  # the turn was given up, nothing left behind
     with lease.held():  # and the worker is free
         pass
 
@@ -250,7 +250,7 @@ def test_a_worker_failing_during_a_jobs_inference_fails_the_job_hands_the_turn_o
     assert len(raised) == 1
     assert isinstance(raised[0], WorkerFailedError)
     assert served == ["search"]  # the turn was handed on, nothing hung
-    assert lease.queued(True) == lease.queued(False) == 0
+    assert lease.queued(ServiceClass.INTERACTIVE) == lease.queued(ServiceClass.BACKGROUND) == 0
     assert states(pipeline, run_id) == ("FAILED", "FAILED")
     assert pipeline.count(Observation) == 1  # the detection settled before the failure, private
     assert pipeline.count(Representation) == 0
@@ -399,7 +399,11 @@ def test_a_search_during_a_jobs_detection_runs_at_the_next_boundary_before_its_r
         "job GENERATE_REPRESENTATIONS",
         "search GENERATE_REPRESENTATIONS",
     ]
-    assert pool.lease.queued(True) == pool.lease.queued(False) == 0
+    assert (
+        pool.lease.queued(ServiceClass.INTERACTIVE)
+        == pool.lease.queued(ServiceClass.BACKGROUND)
+        == 0
+    )
 
 
 def test_a_worker_that_fails_during_a_jobs_request_hands_the_turn_to_the_waiting_search(
@@ -427,4 +431,8 @@ def test_a_worker_that_fails_during_a_jobs_request_hands_the_turn_to_the_waiting
         "search DETECT_FACES",
         "search GENERATE_REPRESENTATIONS",
     ]
-    assert pool.lease.queued(True) == pool.lease.queued(False) == 0
+    assert (
+        pool.lease.queued(ServiceClass.INTERACTIVE)
+        == pool.lease.queued(ServiceClass.BACKGROUND)
+        == 0
+    )
