@@ -120,6 +120,8 @@ read-only review, as in M5 and M6.
 
 ### Step 3. The live class in the worker lease
 
+> **Built 2026-11-12:** [entry](../implementations/2026-11-12-m7-step3-live-worker-class.md).
+
 - Add a `live` service class between interactive and background in `WorkerLease` (C6): interactive,
   then live, then background; the fairness rule generalises so a waiting background request goes first
   after the burst of grants to the two higher classes, which keeps a movie moving while a camera runs.
