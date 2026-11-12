@@ -7,10 +7,12 @@ timeout, ended the wait).
 """
 
 import asyncio
+import logging
 import threading
 from collections.abc import Callable
 
 import anyio.to_thread
+import pytest
 
 from backend.api.scheduler import SchedulerService
 from backend.app.processing.runner import RunOutcome, RunOutcomeKind
@@ -97,7 +99,10 @@ async def test_an_error_does_not_stop_the_loop_and_a_later_success_clears_it() -
     assert service.last_error is None
 
 
-async def test_the_recorded_error_is_a_class_name_never_a_message() -> None:
+async def test_the_recorded_error_is_a_class_name_never_a_message(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="backend.api.scheduler")
     script = Script(RuntimeError("secret path C:/Users/x"), then=RuntimeError("again"))
     service = SchedulerService(script, idle_seconds=LONG)
     service.start()
@@ -110,6 +115,8 @@ async def test_the_recorded_error_is_a_class_name_never_a_message() -> None:
     assert service.last_error == "RuntimeError"
     assert "secret" not in str(service.last_error)
     await service.stop()
+    assert "RuntimeError" in caplog.text  # the failure is visible in the log...
+    assert "secret" not in caplog.text  # ...without its message or traceback
 
 
 async def test_stop_waits_for_the_call_in_flight_and_claims_nothing_more() -> None:
