@@ -17,7 +17,7 @@ merged, so the video code and the pinned build exist.
 - `scripts/install_ffmpeg.py`: also writes `SHA256SUMS` (one `<sha-256>  <name>` line per file) into the folder it installs.
 - `backend/infrastructure/media/video.py`: `media_tools` looks, in order, at `FACEIDENTIFY_FFMPEG_DIR`, the `ffmpeg` folder beside the
   frozen backend's own folder (an installed application), then `<local state>/runtime/ffmpeg`. Before the first use in a process every file in the folder's
-  `SHA256SUMS` must match; a changed or missing file raises `MediaToolsMissingError`. A folder without a manifest (a hand-made development folder) is not checked.
+  `SHA256SUMS` must match; a changed or missing file raises `MediaToolsMissingError`. The manifest is required of the shipped and the machine-local folders (deleting it does not switch the check off; an install made before 2026-11-12 needs `install_ffmpeg.py --replace`); only a folder named with `FACEIDENTIFY_FFMPEG_DIR` may go without one.
 - `packaging/build_installer.py`: downloads the pinned zip once into `build/ffmpeg-download` (the installer script verifies its SHA-256), unpacks it, passes
   the folder to the notices generator, and `tauri.installer.conf.json` ships it as the `ffmpeg` resource (`ffplay` is never in it).
 - `scripts/generate_notices.py`: a `bundled` ecosystem lists CPython (with its licence text), the libraries its DLLs and extension modules link
