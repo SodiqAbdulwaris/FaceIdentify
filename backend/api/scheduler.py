@@ -9,18 +9,23 @@ scheduling never race over the same job or run (plan constraint, 2026-10-06).
 * Work found means another call at once; `IDLE` waits for a `wake()` (a new job was queued) or a
   poll interval, whichever comes first. A wake that arrives while a job runs is not lost: the
   event is cleared *before* each call.
-* An error out of `run_once` (a defect, or the database unavailable) is recorded by class name and
-  the loop waits one interval before trying again, so a persistent failure never spins.
+* An error out of `run_once` (a defect, or the database unavailable) is recorded and logged by
+  class name only (a message or traceback can carry a path), and the loop waits one interval
+  before trying again, so a persistent failure never spins. The log line is how a failing loop
+  shows up at all: the M6 real-world check had no other sign of one.
 * `stop()` lets the call in flight finish (it cannot be interrupted) and claims nothing more.
 """
 
 import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import suppress
 
 import anyio.to_thread
 
 from backend.app.processing.runner import RunOutcome, RunOutcomeKind
+
+LOG = logging.getLogger(__name__)
 
 
 class SchedulerService:
@@ -66,6 +71,7 @@ class SchedulerService:
                 outcome: RunOutcome | None = await anyio.to_thread.run_sync(self._run_once)
             except Exception as error:  # noqa: BLE001 - recorded; the loop must survive it
                 self.last_error = type(error).__name__
+                LOG.warning("the processing loop failed (%s); it tries again", self.last_error)
                 outcome = None
             else:
                 self.last_error = None
