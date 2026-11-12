@@ -38,7 +38,6 @@ MAX_SIDE = 1920  # the largest side a frame is given at (as for videos)
 LIST_TIMEOUT_SECONDS = 20
 _DEVICE = re.compile(r'"(?P<name>[^"]+)"\s+\((?P<kinds>[^)]*)\)')
 _ALTERNATIVE = re.compile(r'Alternative name\s+"(?P<path>[^"]+)"')
-_MAX_DIMENSION = 16384  # a header claiming more than this is corrupt, not a frame
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,9 +164,15 @@ class FfmpegFrameSource:
         command: Sequence[str],
         *,
         clock: Callable[[], float] = time.monotonic,
+        max_pixels: int = MAX_SIDE * MAX_SIDE,
     ) -> None:
+        """`max_pixels`: the most a frame may hold (the capture's `max_side` squared); a header
+        claiming more is corrupt, and nothing is read for it."""
         self._command = list(command)
         self._clock = clock
+        self._max_pixels = max_pixels
+        self._stopping = threading.Lock()  # (one stop at a time: a second one waits, then returns)
+        self._stopped = False
         self._condition = threading.Condition()
         self._frame: LiveFrame | None = None
         self._taken = 0  # the sequence of the last frame `latest` returned
@@ -225,11 +230,21 @@ class FfmpegFrameSource:
             assert not ready
             raise CameraStalledError(f"no frame arrived in {timeout:g} seconds")
 
+    def wait_ended(self, timeout: float) -> bool:
+        """Wait until the stream has ended (or the capture was stopped); False on timeout."""
+        with self._condition:
+            return self._condition.wait_for(lambda: self._failure is not None, timeout=timeout)
+
     def stop(self) -> None:
-        """Stop the tool and reap it, and wait for the readers. Safe to call more than once."""
-        process = self._process
-        if process is None:
-            return
+        """Stop the tool and reap it, and wait for the readers. Safe to call more than once and
+        from several threads at once (a session stopping while its stream is being closed)."""
+        with self._stopping:
+            if self._stopped or self._process is None:
+                return
+            self._stopped = True
+            self._stop(self._process)
+
+    def _stop(self, process: subprocess.Popen[bytes]) -> None:
         if process.poll() is None:
             process.kill()
         process.wait()
@@ -259,7 +274,7 @@ class FfmpegFrameSource:
         sequence = 0
         failure: CameraError
         try:
-            while (pixels := _read_ppm(stream)) is not None:
+            while (pixels := _read_ppm(stream, self._max_pixels)) is not None:
                 sequence += 1
                 frame = LiveFrame(sequence, self._clock(), pixels)
                 with self._condition:
@@ -285,8 +300,9 @@ class FfmpegFrameSource:
         return classify(log)(f"the camera stream ended: {log or 'no detail'}")
 
 
-def _read_ppm(stream: IO[bytes]) -> NDArray[np.uint8] | None:
-    """One binary PPM frame (`P6`, maxval 255), or None at the end of the stream."""
+def _read_ppm(stream: IO[bytes], max_pixels: int) -> NDArray[np.uint8] | None:
+    """One binary PPM frame (`P6`, maxval 255), or None at the end of the stream. A frame of more
+    than `max_pixels` is refused before its bytes are read."""
     magic = stream.readline()
     if not magic:
         return None
@@ -300,7 +316,7 @@ def _read_ppm(stream: IO[bytes]) -> NDArray[np.uint8] | None:
         raise CameraStreamError(
             f"the stream sent something that is not a frame: {error}"
         ) from error
-    if not (0 < width <= _MAX_DIMENSION and 0 < height <= _MAX_DIMENSION):
+    if not (width > 0 and height > 0 and width * height <= max_pixels):
         raise CameraStreamError(f"the stream sent a frame of an impossible size {width}x{height}")
     size = width * height * 3
     data = stream.read(size)
