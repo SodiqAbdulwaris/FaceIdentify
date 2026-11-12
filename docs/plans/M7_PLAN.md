@@ -3,7 +3,7 @@
 **Status:** drafted 2026-11-09 by the agent under the owner's delegation (2026-11-09: "i'll leave the
 rest of the decisions entirely to you"; scope "Everything through M8"). Every decision in section 8 is a
 **delegated decision**: the owner may reverse any of them, and each is written so that reversing it
-costs one step, not the plan. Built so far (2026-11-12): step 1 (schema and spec text) and step 2 (capture); no session, route or screen. **Scope:** tracker milestone M7 (TST-071 to
+costs one step, not the plan. Built so far (2026-11-12): steps 1 to 7 (the real-world check at the camera waits for the owner: this machine's camera gives no frame; [step 7](../implementations/2026-11-12-m7-step7-runtime-validation.md)). **Scope:** tracker milestone M7 (TST-071 to
 TST-077) in [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md) and the Roadmap's
 camera phase ([`Roadmap-Plan.md`](Roadmap-Plan.md) section 71). **Milestone gate (tracker):** "Included
 camera and runtime functionality satisfies its correctness and compatibility requirements."
