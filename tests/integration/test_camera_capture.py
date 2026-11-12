@@ -6,8 +6,7 @@ asked only for a device that does not exist.
 """
 
 import sys
-import time
-from collections.abc import Callable
+import threading
 from pathlib import Path
 
 import pytest
@@ -60,29 +59,17 @@ def test_frames_are_sampled_scaled_and_given_newest_first() -> None:
     assert second.received_at >= first.received_at
 
 
-def eventually(condition: Callable[[], bool], seconds: float = 20) -> None:
-    """Wait (polling) until `condition()` holds; fail after `seconds`."""
-    deadline = time.monotonic() + seconds
-    while not condition():
-        assert time.monotonic() < deadline, "the condition never held"
-        time.sleep(0.01)
-
-
 def test_a_stalled_consumer_holds_one_frame_and_counts_the_rest_as_dropped(
     tmp_path: Path,
 ) -> None:
-    body = (
-        "for n in range(6):\n"
-        "    out.write(b'P6\\n1 1\\n255\\n' + bytes([n, n, n]))\n"
-        "out.flush()\n"
-        "time.sleep(30)"
-    )
+    body = "for n in range(6):\n    out.write(b'P6\\n1 1\\n255\\n' + bytes([n, n, n]))\nout.flush()"
     command = writer(tmp_path, body)
     with FfmpegFrameSource(command) as source:
-        eventually(lambda: source.dropped == 5)  # the consumer took nothing while six came
+        assert source.wait_ended(timeout=20)  # six came while the consumer took nothing
+        assert source.dropped == 5
         newest = source.latest(timeout=10)
-        with pytest.raises(CameraStalledError):
-            source.latest(timeout=0.2)  # nothing older is kept to be given late
+        with pytest.raises(CameraStreamError, match="ended"):
+            source.latest(timeout=10)  # nothing older is kept to be given late
 
     assert newest.sequence == 6
     assert newest.pixels.tolist() == [[[5, 5, 5]]]
@@ -129,6 +116,7 @@ def test_stopping_mid_stream_reaps_the_tool_and_ends_the_stream() -> None:
         ("out.write(b'P6\\n2 x\\n255\\n')", "not a frame"),
         ("out.write(b'P6\\n2 2\\n65535\\n')", "not an 8-bit frame"),
         ("out.write(b'P6\\n0 2\\n255\\n')", "impossible size"),
+        ("out.write(b'P6\\n16384 16384\\n255\\n')", "impossible size"),
         ("out.write(b'P6\\n2 2\\n255\\n' + bytes(5))", "ended inside a frame"),
     ],
 )
@@ -181,3 +169,30 @@ def test_a_tool_that_cannot_run_cannot_list_devices(tmp_path: Path) -> None:
     tools = MediaTools(tmp_path / "no-such-ffmpeg.exe", tmp_path / "no-such-ffprobe.exe")
     with pytest.raises(CameraError, match="could not be listed"):
         list_devices(tools)
+
+
+def test_a_capture_stopped_from_two_threads_at_once_is_reaped_once() -> None:
+    """A session's stream is closed from the API thread while its own thread stops the source."""
+    source = FfmpegFrameSource(synthetic(rate=10))
+    source.start()
+    source.latest(timeout=10)
+    barrier = threading.Barrier(2)
+    failures: list[BaseException] = []
+
+    def stop() -> None:
+        barrier.wait()
+        try:
+            source.stop()
+        except BaseException as error:  # noqa: BLE001 - recorded for the assertion
+            failures.append(error)
+
+    threads = [threading.Thread(target=stop) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(20)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert failures == []
+    with pytest.raises(CameraStreamError, match="stopped"):
+        source.latest(timeout=1)
