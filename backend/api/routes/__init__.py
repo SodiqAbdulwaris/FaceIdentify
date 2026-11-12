@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from backend.api.errors import ErrorEnvelope
 from backend.api.routes import (
+    cameras,
     corrections,
     face_search,
     identity_changes,
@@ -28,3 +29,4 @@ api_router.include_router(corrections.router)
 api_router.include_router(identity_changes.router)
 api_router.include_router(search.router)
 api_router.include_router(face_search.router)
+api_router.include_router(cameras.router)

@@ -4,6 +4,182 @@
  */
 
 export interface paths {
+    "/api/v1/cameras": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Cameras
+         * @description Every configured camera (a short list: no pagination).
+         */
+        get: operations["list_cameras"];
+        put?: never;
+        /** Configure */
+        post: operations["configure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Devices
+         * @description The capture devices this computer offers now (asked of DirectShow every time).
+         */
+        get: operations["devices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{camera_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Camera */
+        get: operations["get_camera"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove Camera
+         * @description Remove the configuration; its history stays unless `history=true` (C9).
+         */
+        delete: operations["remove_camera"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{camera_id}/faces/{observation_id}/crop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Face Crop
+         * @description A camera face as it was kept (its face crop).
+         */
+        get: operations["face_crop"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{camera_id}/history/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete History
+         * @description Delete encounters and faces for good (C9): no Recycle bin.
+         */
+        post: operations["delete_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{camera_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview
+         * @description The newest frame with its faces outlined, while a session runs. Never stored.
+         */
+        get: operations["preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{camera_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start */
+        post: operations["start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{camera_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{camera_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop
+         * @description Stop the session; its open encounters are recorded before it ends.
+         */
+        post: operations["stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/identities": {
         parameters: {
             query?: never;
@@ -777,6 +953,34 @@ export interface components {
             /** Y */
             y: number;
         };
+        /** CameraCreate */
+        CameraCreate: {
+            /** Device Name */
+            device_name: string;
+            /** Device Path */
+            device_path?: string | null;
+            /** Display Name */
+            display_name: string;
+        };
+        /** CameraSummary */
+        CameraSummary: {
+            /** Device Name */
+            device_name: string;
+            /** Device Path */
+            device_path: string | null;
+            /** Display Name */
+            display_name: string;
+            /** Id */
+            id: string;
+            session: components["schemas"]["SessionStatus"];
+        };
+        /** CaptureDeviceModel */
+        CaptureDeviceModel: {
+            /** Name */
+            name: string;
+            /** Path */
+            path: string | null;
+        };
         /** Confirm */
         Confirm: {
             /**
@@ -876,6 +1080,28 @@ export interface components {
         ForgetPending: {
             /** Outstanding */
             outstanding: string[];
+        };
+        /**
+         * HistoryDelete
+         * @description Which history to delete: these encounters, and every face seen between `start_ms` and
+         *     `end_ms` (UTC milliseconds, inclusive). An empty body deletes all of it.
+         */
+        HistoryDelete: {
+            /** End Ms */
+            end_ms?: number | null;
+            /** Occurrence Ids */
+            occurrence_ids?: string[];
+            /** Start Ms */
+            start_ms?: number | null;
+        };
+        /** HistoryDeleted */
+        HistoryDeleted: {
+            /** Complete */
+            complete: boolean;
+            /** Encounters */
+            encounters: number;
+            /** Faces */
+            faces: number;
         };
         /** IdentityHit */
         IdentityHit: {
@@ -1333,6 +1559,26 @@ export interface components {
             ranking: components["schemas"]["Ranking"];
             results: components["schemas"]["Results"];
         };
+        /**
+         * SessionStatus
+         * @description `state` None: no session since the application started.
+         */
+        SessionStatus: {
+            /** Dropped */
+            dropped: number;
+            /** Encounters */
+            encounters: number;
+            /** Failure Code */
+            failure_code: string | null;
+            /** Frames */
+            frames: number;
+            /** Job Id */
+            job_id: string | null;
+            /** Open Encounters */
+            open_encounters: number;
+            /** State */
+            state: string | null;
+        };
         /** SourceDetail */
         SourceDetail: {
             /** Availability */
@@ -1439,6 +1685,8 @@ export interface components {
             observation_id: string;
             /** Representation Id */
             representation_id: string;
+            /** Seen At Ms */
+            seen_at_ms?: number | null;
         };
         /** UnresolvedFaces */
         UnresolvedFaces: {
@@ -1454,6 +1702,351 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_cameras: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraSummary"][];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    configure: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    devices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureDeviceModel"][];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_camera: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    remove_camera: {
+        parameters: {
+            query?: {
+                /** @description Also delete all of its history, for good. */
+                history?: boolean;
+            };
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    face_crop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                camera_id: string;
+                observation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HistoryDelete"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryDeleted"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionStatus"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionStatus"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    stop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                camera_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionStatus"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     list_identities: {
         parameters: {
             query?: {
