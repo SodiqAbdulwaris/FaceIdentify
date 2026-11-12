@@ -86,9 +86,13 @@ def test_a_populated_database_keeps_its_rows_and_takes_a_camera(
         ("camera_with_original", "ck_sources_original_unless_camera"),
         ("blank_device_name", "ck_camera_source_metadata_device_name_not_empty"),
         ("blank_device_path", "ck_camera_source_metadata_device_path_not_empty"),
-        ("no_source", "FOREIGN KEY"),
+        ("no_source", "camera metadata belongs to a camera source"),  # (the trigger, first)
         ("second_device_row", "UNIQUE constraint failed: camera_source_metadata.source_id"),
         ("unknown_job_type", "ck_jobs_type"),
+        ("camera_with_thumbnail", "ck_sources_camera_has_no_media"),
+        ("camera_with_media_facts", "ck_sources_camera_has_no_media"),
+        ("device_row_on_an_image", "camera metadata belongs to a camera source"),
+        ("device_row_moved_to_an_image", "camera metadata belongs to a camera source"),
     ],
 )
 def test_each_new_rule_refuses_a_violating_row(
@@ -117,7 +121,26 @@ def test_each_new_rule_refuses_a_violating_row(
                     {"id": camera.source_id.hex},
                 )
 
+            image = build.source()
+            session.commit()
+
+            def moved_to_an_image() -> None:
+                session.execute(
+                    text("UPDATE camera_source_metadata SET source_id = :image"),
+                    {"image": image.id.hex},
+                )
+
             violate: dict[str, Callable[[], object]] = {
+                "camera_with_thumbnail": lambda: build.source(
+                    kind="CAMERA",
+                    original_artifact_id=None,
+                    thumbnail_artifact_id=build.artifact(kind="THUMBNAIL").id,
+                ),
+                "camera_with_media_facts": lambda: build.source(
+                    kind="CAMERA", original_artifact_id=None, width=640
+                ),
+                "device_row_on_an_image": lambda: build.camera(source_id=image.id),
+                "device_row_moved_to_an_image": moved_to_an_image,
                 "image_without_original": lambda: build.source(original_artifact_id=None),
                 "camera_with_original": lambda: build.source(kind="CAMERA"),
                 "blank_device_name": lambda: build.camera(device_name="  "),

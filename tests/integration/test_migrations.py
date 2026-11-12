@@ -120,14 +120,14 @@ def test_migrated_triggers_match_create_all_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The snapshot triggers are written once in the model and copied, frozen, into revisions
-    0003 and 0005: their text must stay identical, or a fresh database and a migrated one would
-    differ."""
+    0003 and 0005 (and the camera triggers into 0012): their text must stay identical, or a fresh
+    database and a migrated one would differ."""
     migrate(monkeypatch, tmp_path / "migrated.db")
     migrated = schema_objects(tmp_path / "migrated.db")
     created = schema_objects(create_all_database(tmp_path / "created.db"))
 
     triggers = {key for key in created if key[0] == "trigger"}
-    assert len(triggers) == 3  # the comparison below would pass vacuously on an empty set
+    assert len(triggers) == 5  # the comparison below would pass vacuously on an empty set
     assert {key: migrated[key] for key in triggers} == {key: created[key] for key in triggers}
     assert {key for key in migrated if key[0] == "trigger"} == triggers
 
