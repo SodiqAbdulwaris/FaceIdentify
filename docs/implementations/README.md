@@ -239,3 +239,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-11 | [M7 step 1: camera source schema and spec text (revision 0012)](2026-11-11-m7-step1-camera-source-schema.md) | done; capture next (step 2) |
 | 2026-11-12 | [Fix: recognising a video's faces without quadratic work](2026-11-12-video-recognition-retrieval.md) | done; found by the M6 real-world check (D8) |
 | 2026-11-12 | [Fix: the index catches up fully after an acceptance](2026-11-12-drain-index-after-acceptance.md) | done; found by the M6 real-world check (D8) |
+| 2026-11-12 | [M8 step 6 (part): a copy of the database before an upgrade](2026-11-12-m8-step6-pre-migration-backup.md) | done |
