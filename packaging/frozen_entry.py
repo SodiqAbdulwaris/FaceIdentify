@@ -4,13 +4,17 @@ The ML worker is a `spawn`ed child of the same executable. A frozen executable m
 `multiprocessing.freeze_support()` first: it recognises the child's `--multiprocessing-fork`
 command line, runs the worker and exits, so no separate worker executable exists.
 
-Two build checks, used by `packaging/check_frozen_backend.py`: `--probe-providers` prints the ONNX
-Runtime providers as seen by this process and by a spawned child; `--probe-worker` runs one request
-through the real worker process (`packaging/frozen_probe.py` supplies handlers in place of models).
+Three build checks. `--probe-providers` prints the ONNX Runtime providers as seen by this
+process and by a spawned child, and `--probe-worker` runs one request through the real worker
+process (`packaging/frozen_probe.py` supplies handlers in place of models); both are used by
+`packaging/check_frozen_backend.py`. `--probe-video <file>`, used by `packaging/check_installed.py`
+on an installed build, probes a video with the FFmpeg this build finds, as an installed
+application does, and decodes its sampled frames.
 """
 
 import json
 import multiprocessing
+import os
 import sys
 import uuid
 from multiprocessing.connection import Connection
@@ -24,6 +28,8 @@ def _child_providers(connection: Connection) -> None:
 
 def probe_providers() -> int:
     import onnxruntime
+
+    from backend.api.real import providers_from
 
     context = multiprocessing.get_context("spawn")
     parent_end, child_end = context.Pipe()
@@ -42,6 +48,7 @@ def probe_providers() -> int:
             {
                 "process": onnxruntime.get_available_providers(),
                 "child": child_providers,
+                "selected": list(providers_from(os.environ)),  # what the real profile would try
                 "usearch_size": len(index),
                 "avif": features.check("avif"),
             }
@@ -86,12 +93,38 @@ def probe_worker() -> int:
         supervisor.stop()
 
 
+def probe_video(path: str) -> int:
+    from pathlib import Path
+
+    from backend.infrastructure.media.frames import sampled_frames
+    from backend.infrastructure.media.video import media_tools
+    from backend.infrastructure.media.video import probe_video as read_facts
+
+    tools = media_tools(Path(sys.argv[0]).parent / "unused-state")  # (the shipped folder wins)
+    facts = read_facts(tools, Path(path))
+    frames = list(sampled_frames(tools, Path(path), width=facts.width, height=facts.height))
+    print(
+        json.dumps(
+            {
+                "ffmpeg": str(tools.ffmpeg),
+                "width": facts.width,
+                "height": facts.height,
+                "duration_ms": facts.duration_ms,
+                "frames": len(frames),
+            }
+        )
+    )
+    return 0 if frames else 1
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     if sys.argv[1:] == ["--probe-worker"]:
         sys.exit(probe_worker())
     if sys.argv[1:] == ["--probe-providers"]:
         sys.exit(probe_providers())
+    if len(sys.argv) == 3 and sys.argv[1] == "--probe-video":
+        sys.exit(probe_video(sys.argv[2]))
     from backend.api.host import main
 
     sys.exit(main())
