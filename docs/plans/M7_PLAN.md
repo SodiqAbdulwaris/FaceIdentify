@@ -171,6 +171,8 @@ read-only review, as in M5 and M6.
 
 ### Step 6. Search with the camera (spec 10.4)
 
+> **Built 2026-11-12:** [entry](../implementations/2026-11-12-m7-step6-camera-search.md).
+
 - "Search with camera": one frame captured, run through the existing face-search route and use case,
   and shown with the ranked possible matches. **Nothing is persisted, and the frame is not kept** (query
   is not ingest). It takes the interactive class, so it also works while a session is running.
