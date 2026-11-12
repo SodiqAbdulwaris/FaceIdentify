@@ -14,6 +14,7 @@
   nullable, non-blank `device_path`); `jobs.type` gains `PROCESS_CAMERA_SESSION`. `sources` and `jobs`
   are rebuilt from frozen definitions (batch mode); every row is kept. Downgrade restores the earlier
   shape, guarded like every destructive downgrade, and a camera Source or camera job stops a forced one.
+- Review follow-ups (Codex, PR #251): `ck_sources_camera_has_no_media` (a camera has no thumbnail or media facts); triggers `trg_camera_source_metadata_camera_only_insert` and `_update` refuse a device row on a Source that is not a camera; `require_media_source` makes the Source routes (recycle, restore, recheck, relink; detail and media already joined the original) answer `404 SOURCE_NOT_FOUND` for a camera; the OpenAPI document and frontend types regenerated (the job type enum).
 - Models: `SourceKind.CAMERA`, `Source.original_artifact_id: UUID | None` with the CHECK,
   `JobType.PROCESS_CAMERA_SESSION`, `backend/app/cameras/models.py` (`CameraSourceMetadata`), registered
   in `backend/app/models.py`. One test narrowed a now-optional id (`test_execute_video_job.py`).
