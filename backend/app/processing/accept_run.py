@@ -15,6 +15,10 @@ evidence as an image's is; then the track rule (D7, `agreed_identity`) is checke
 evidence decides: a track whose faces all match the same identity keeps those matches, and any
 other track's faces must all abstain as `TRACK_UNSETTLED`. A settled track becomes ONE `TRACK`
 occurrence over the time it spans, its matched faces its members; an unsettled one has none.
+
+A camera session (M7 step 4) is not accepted at its end: each encounter is accepted on its own while
+the session runs (`accept_encounter`), through the same validation of its private output, its
+decisions and the track rule, and with the same effects as one video track.
 """
 
 import uuid
@@ -282,6 +286,46 @@ class AcceptProcessingRunUseCase:
             run.id, already_accepted=False, erasing=tuple(sorted(plan.suppressed))
         )
 
+    def accept_encounter(
+        self, session: Session, run_id: uuid.UUID, decisions: Sequence[object], track: object
+    ) -> uuid.UUID | None:
+        """Accept ONE closed encounter of a running camera session, in the caller's transaction:
+        its faces must be exactly the run's private output, each decision must follow its evidence,
+        and the track rule (D7) must hold, as for a FINAL checkpoint. Returns the encounter's
+        occurrence when its faces agreed on one identity, else None (they stay unplaced)."""
+        run = ProcessingRunRepository(session).lock(run_id)
+        if run is None or run.state != ProcessingRunState.RUNNING:
+            raise AcceptanceError("the camera session is not running")
+        self._configuration_snapshot(session, run)
+        source, job = self._context(session, run)
+        if (
+            source.kind != SourceKind.CAMERA
+            or source.state != SourceState.ACTIVE
+            or job.state != JobState.RUNNING
+        ):
+            raise AcceptanceError("the camera or its session is no longer valid")
+        parsed = [self._decision(value) for value in decisions]
+        tracks = self._tracks([track])
+        if set(tracks[0].observations) != {decision.observation_id for decision in parsed}:
+            raise AcceptanceError("the encounter does not name exactly its faces")
+        self._validate_private_output(session, run, parsed, tracks, pending_only=True)
+        now = self._clock()
+        for decision in parsed:
+            self._accept_decision(session, run, source, decision, now, occurrence=False)
+        occurrence = None
+        for settled, identity_id, members in _settled_tracks(tracks, _matched(parsed, exclude=())):
+            occurrence = self._track_occurrence(
+                session, run, source, identity_id, settled, members, now
+            )
+        for decision in parsed:
+            if not ObservationRepository(session).transition(
+                decision.observation_id,
+                from_states=(ObservationState.PENDING,),
+                to_state=ObservationState.ACTIVE,
+            ):
+                raise AcceptanceError("an observation changed while accepting")
+        return occurrence
+
     @staticmethod
     def _require_generation(session: Session, run: ProcessingRun, source: Source) -> None:
         """A first run may only become a Source's first generation; a reprocess run may only
@@ -479,7 +523,11 @@ class AcceptProcessingRunUseCase:
     def _context(self, session: Session, run: ProcessingRun) -> tuple[Source, Job]:
         source = SourceRepository(session).get(run.source_id)
         job_type = (
-            JobType.PROCESS_SOURCE if run.supersedes_run_id is None else JobType.REPROCESS_SOURCE
+            JobType.PROCESS_CAMERA_SESSION
+            if source is not None and source.kind == SourceKind.CAMERA
+            else JobType.PROCESS_SOURCE
+            if run.supersedes_run_id is None
+            else JobType.REPROCESS_SOURCE
         )
         job = JobRepository(session).current_for_run(run.id)  # (a retried video run has two)
         if source is None or job is None or job.type != job_type:
@@ -503,7 +551,11 @@ class AcceptProcessingRunUseCase:
         run: ProcessingRun,
         decisions: Sequence[_Decision],
         tracks: tuple[_Track, ...] | None,
+        *,
+        pending_only: bool = False,
     ) -> None:
+        """`pending_only`: a camera encounter, whose run already holds the accepted faces of
+        earlier encounters; only its private faces are compared."""
         observation_ids = set(self._observation_ids(decisions, None))
         pending_observations = set(
             session.scalars(
@@ -518,7 +570,14 @@ class AcceptProcessingRunUseCase:
             raise AcceptanceError("FINAL checkpoint does not name exactly the private observations")
         representations = list(
             session.scalars(
-                select(Representation).where(Representation.processing_run_id == run.id)
+                select(Representation).where(
+                    Representation.processing_run_id == run.id,
+                    *(
+                        (Representation.state == RepresentationState.PENDING,)
+                        if pending_only
+                        else ()
+                    ),
+                )
             )
         )
         expected = {decision.representation_id for decision in decisions}
@@ -843,10 +902,11 @@ class AcceptProcessingRunUseCase:
         track: _Track,
         members: tuple[uuid.UUID, ...],
         now: datetime,
-    ) -> None:
+    ) -> uuid.UUID:
+        occurrence_id = self._new_id()
         OccurrenceRepository(session).add(
             Occurrence(
-                id=self._new_id(),
+                id=occurrence_id,
                 source_id=source.id,
                 identity_id=identity_id,
                 processing_run_id=run.id,
@@ -862,6 +922,7 @@ class AcceptProcessingRunUseCase:
             ),
             members,
         )
+        return occurrence_id
 
     def _validate_completed(
         self,
