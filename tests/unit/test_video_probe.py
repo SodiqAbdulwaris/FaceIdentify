@@ -120,23 +120,6 @@ def test_videos_are_recognised_by_their_name() -> None:
     assert not is_video_name(Path("photo.png"))
 
 
-def test_the_tools_are_found_in_the_local_state_or_where_the_environment_says(
-    tmp_path: Path,
-) -> None:
-    installed = tmp_path / "runtime" / "ffmpeg"
-    elsewhere = tmp_path / "elsewhere"
-    suffix = ".exe" if os.name == "nt" else ""
-    for folder in (installed, elsewhere):
-        folder.mkdir(parents=True)
-        (folder / f"ffmpeg{suffix}").write_bytes(b"")
-        (folder / f"ffprobe{suffix}").write_bytes(b"")
-
-    assert media_tools(tmp_path, {}).ffprobe == installed / f"ffprobe{suffix}"
-    assert media_tools(tmp_path, {FFMPEG_DIR_ENV: str(elsewhere)}).ffmpeg.parent == elsewhere
-    with pytest.raises(MediaToolsMissingError):
-        media_tools(tmp_path / "nowhere", {})
-
-
 def installed_with_manifest(folder: Path) -> Path:
     suffix = ".exe" if os.name == "nt" else ""
     folder.mkdir(parents=True)
@@ -148,6 +131,22 @@ def installed_with_manifest(folder: Path) -> Path:
     return folder
 
 
+def test_the_tools_are_found_in_the_local_state_or_where_the_environment_says(
+    tmp_path: Path,
+) -> None:
+    installed = installed_with_manifest(tmp_path / "runtime" / "ffmpeg")
+    elsewhere = tmp_path / "elsewhere"  # a developer's folder: no manifest needed
+    suffix = ".exe" if os.name == "nt" else ""
+    elsewhere.mkdir()
+    (elsewhere / f"ffmpeg{suffix}").write_bytes(b"")
+    (elsewhere / f"ffprobe{suffix}").write_bytes(b"")
+
+    assert media_tools(tmp_path, {}).ffprobe == installed / f"ffprobe{suffix}"
+    assert media_tools(tmp_path, {FFMPEG_DIR_ENV: str(elsewhere)}).ffmpeg.parent == elsewhere
+    with pytest.raises(MediaToolsMissingError):
+        media_tools(tmp_path / "nowhere", {})
+
+
 def test_tools_that_match_their_manifest_are_accepted_once_and_trusted_after(
     tmp_path: Path,
 ) -> None:
@@ -157,6 +156,17 @@ def test_tools_that_match_their_manifest_are_accepted_once_and_trusted_after(
 
     (folder / "avcodec.dll").write_bytes(b"swapped after the check")
     media_tools(tmp_path, environment)  # the check happens before the first use, not on every call
+
+
+def test_deleting_the_manifest_does_not_switch_the_check_off(tmp_path: Path) -> None:
+    folder = installed_with_manifest(tmp_path / "runtime" / "ffmpeg")
+    (folder / MANIFEST).unlink()
+
+    with pytest.raises(MediaToolsMissingError, match=MANIFEST):
+        media_tools(tmp_path, {})
+    media_tools(
+        tmp_path, {FFMPEG_DIR_ENV: str(folder)}
+    )  # only a named development folder may go without
 
 
 def test_a_changed_or_missing_file_is_refused_before_the_first_use(tmp_path: Path) -> None:

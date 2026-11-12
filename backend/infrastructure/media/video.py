@@ -98,16 +98,21 @@ def media_tools(local_state_root: Path, environ: Mapping[str, str] | None = None
     tools = MediaTools(directory / f"ffmpeg{suffix}", directory / f"ffprobe{suffix}")
     if not (tools.ffmpeg.is_file() and tools.ffprobe.is_file()):
         raise MediaToolsMissingError(f"ffmpeg and ffprobe are not installed in {directory}")
-    _check_manifest(directory)
+    _check_manifest(directory, required=not given)
     return tools
 
 
-def _check_manifest(directory: Path) -> None:
+def _check_manifest(directory: Path, *, required: bool) -> None:
     """Before the tools are first used, every file the manifest lists must still have its hash (a
-    damaged or swapped file is refused). A folder without a manifest, such as a hand-made one for
-    development, is not checked."""
+    damaged or swapped file is refused). The manifest itself is required of the shipped and the
+    machine-local folders, so deleting it does not switch the check off; only a folder the
+    developer names with `FACEIDENTIFY_FFMPEG_DIR` may go without one."""
     manifest = directory / MANIFEST
-    if directory in _verified or not manifest.is_file():
+    if directory in _verified:
+        return
+    if not manifest.is_file():
+        if required:
+            raise MediaToolsMissingError(f"{directory} has no {MANIFEST} to check its files by")
         return
     for line in manifest.read_text(encoding="utf-8").splitlines():
         digest, _, name = line.partition("  ")
