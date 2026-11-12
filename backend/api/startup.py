@@ -279,7 +279,7 @@ class Backend:
         settings, uow = self.settings, library.unit_of_work
 
         def wake_index() -> None:
-            library.coordinator.apply_pending(limit=settings.index_batch)
+            library.coordinator.drain(batch=settings.index_batch)
 
         runner = ProcessingRunner(
             uow,

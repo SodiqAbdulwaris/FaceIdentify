@@ -411,6 +411,22 @@ def test_a_limit_takes_the_oldest_due_operations_first(
     assert load_op(factory, operations[2].id).state == "PENDING"
 
 
+def test_drain_applies_every_due_operation_a_batch_at_a_time(
+    coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
+    build: ModelFactory,
+) -> None:  # fmt: skip
+    operations = [queue(build, active(build, space, key), "ADD") for key in range(1, 6)]
+    later = queue(
+        build, active(build, space, 6), "ADD", not_before_at=build.clock() + timedelta(hours=1)
+    )
+    build.session.commit()
+
+    coordinator.drain(batch=2)  # three passes, then a fourth that finds nothing due
+
+    assert {load_op(factory, operation.id).state for operation in operations} == {"APPLIED"}
+    assert load_op(factory, later.id).state == "PENDING"  # not due: left for its time
+
+
 def test_an_operation_that_is_not_yet_due_waits(
     coordinator: IndexCoordinator, factory: sessionmaker[Session], space: RepresentationSpace,
     build: ModelFactory,
