@@ -40,6 +40,9 @@ that fail are backed off, so they are no longer due and do not stop the rest.
   of 2 all applied, one not yet due left pending) and
   `test_drain_stops_at_what_was_due_when_it_started` (every pass queues one more; the drain ends
   after the five it found, three left for the next one).
+- After the second review: `test_drain_stops_when_another_drainer_settled_what_it_counted` (the
+  no-progress exit) and, through the real API, `test_a_processing_loop_catches_the_index_up_before_each_claim`
+  (every claim of a loop's turn follows that turn's drain; it fails with the drain line removed).
 - `uv run pytest -q tests/integration/test_index_coordinator.py tests/integration/test_api_lifespan.py
   tests/integration/test_api_development_profile.py`: 64 passed; ruff and mypy clean.
 - On the D8 scratch library (real models, CPU): one acceptance drained a backlog of 11,255
