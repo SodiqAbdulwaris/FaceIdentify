@@ -9,6 +9,10 @@ import type {
   OccurrenceSummary,
   Page,
   FaceSearchResponse,
+  CameraSession,
+  CameraSummary,
+  CaptureDevice,
+  HistoryDeleted,
   SearchResponse,
   ReprocessReview,
   UnresolvedFace,
@@ -104,6 +108,25 @@ export const endpoints = (api: ApiClient) => ({
       display_name: displayName,
       expected_revision: expectedRevision,
     }),
+  cameraDevices: () => api.get<CaptureDevice[]>(`${V1}/cameras/devices`),
+  listCameras: () => api.get<CameraSummary[]>(`${V1}/cameras`),
+  addCamera: (displayName: string, device: CaptureDevice) =>
+    api.post<CameraSummary>(`${V1}/cameras`, {
+      display_name: displayName,
+      device_name: device.name,
+      device_path: device.path,
+    }),
+  removeCamera: (id: string, withHistory: boolean) =>
+    api.delete(`${V1}/cameras/${id}${withHistory ? '?history=true' : ''}`),
+  startCamera: (id: string) => api.post<CameraSession>(`${V1}/cameras/${id}/start`),
+  stopCamera: (id: string) => api.post<CameraSession>(`${V1}/cameras/${id}/stop`),
+  cameraPreview: (id: string) => api.blob(`${V1}/cameras/${id}/preview`),
+  cameraFace: (id: string, observationId: string) =>
+    api.blob(`${V1}/cameras/${id}/faces/${observationId}/crop`),
+  deleteCameraHistory: (
+    id: string,
+    selection: { occurrence_ids?: string[]; start_ms?: number; end_ms?: number },
+  ) => api.post<HistoryDeleted>(`${V1}/cameras/${id}/history/delete`, selection),
   identityOccurrences: (id: string, cursor?: string) =>
     api.get<Page<OccurrenceSummary>>(`${V1}/identities/${id}/occurrences`, { cursor, limit: 50 }),
 })

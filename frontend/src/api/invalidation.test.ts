@@ -64,6 +64,18 @@ describe('staleBecauseOf', () => {
     ])
   })
 
+  it('a camera event refreshes the cameras, the camera history and the people it saw', () => {
+    for (const type of ['camera.session.updated', 'camera.encounter.closed']) {
+      expect(staleBecauseOf(event(type, 'c1'))).toEqual([
+        keys.cameras,
+        keys.source('c1'),
+        keys.identities,
+        ['identity'],
+        ['search'],
+      ])
+    }
+  })
+
   it('an event it does not know makes nothing stale', () => {
     expect(staleBecauseOf(event('camera.frame', 'c1'))).toEqual([])
   })
