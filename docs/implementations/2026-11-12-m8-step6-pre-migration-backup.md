@@ -21,7 +21,7 @@ of [the M8 plan](../plans/M8_PLAN.md) requires.
   start, so the library stays as it was. A new library, one already at head, a newer one and a foreign
   one make no copy (the last two were already refused untouched).
 - `tests/integration/test_library_lifecycle.py`: four tests (a populated `0010` library, the previous
-  release, opens through `open_library`: the copy is exact and every row is kept at `0011`; none at head
+  release, opens through `open_library`: the copy is exact and every row is kept at the head revision; none at head
   or when new; only three kept; a failed copy stops the upgrade and releases the lock) and two existing
   helpers adapted to the new `migrate` signature (no assertion changed).
 
