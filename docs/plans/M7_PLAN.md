@@ -134,6 +134,8 @@ read-only review, as in M5 and M6.
 
 ### Step 4. The live pipeline and encounters
 
+> **Built 2026-11-12:** [entry](../implementations/2026-11-12-m7-step4-camera-sessions.md).
+
 - Detect on the sampled frame, track with M6's NumPy tracker, select observations with M6's selection,
   recognise at the per-face point on each selected observation with agreement (D7), and manage
   encounters: a track not seen for the encounter gap (C8) closes its encounter.
