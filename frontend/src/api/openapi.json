@@ -617,7 +617,8 @@
           "REBUILD_INDEX",
           "RETRAIN_MODEL",
           "INSTALL_RUNTIME",
-          "CLEAN_STORAGE"
+          "CLEAN_STORAGE",
+          "PROCESS_CAMERA_SESSION"
         ],
         "title": "JobType",
         "type": "string"

@@ -986,7 +986,7 @@ export interface components {
          * JobType
          * @enum {string}
          */
-        JobType: "PROCESS_SOURCE" | "REPROCESS_SOURCE" | "REBUILD_INDEX" | "RETRAIN_MODEL" | "INSTALL_RUNTIME" | "CLEAN_STORAGE";
+        JobType: "PROCESS_SOURCE" | "REPROCESS_SOURCE" | "REBUILD_INDEX" | "RETRAIN_MODEL" | "INSTALL_RUNTIME" | "CLEAN_STORAGE" | "PROCESS_CAMERA_SESSION";
         /** Likely */
         Likely: {
             /** Identity Id */
