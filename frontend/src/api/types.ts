@@ -23,6 +23,10 @@ export type SearchResponse = Schemas['SearchResponse']
 export type FaceSearchResponse = Schemas['FaceSearchResponse']
 export type FaceAnswer = Schemas['FaceAnswer']
 export type ImportRequest = Schemas['ImportRequest']
+export type CameraSummary = Schemas['CameraSummary']
+export type CameraSession = Schemas['SessionStatus']
+export type CaptureDevice = Schemas['CaptureDeviceModel']
+export type HistoryDeleted = Schemas['HistoryDeleted']
 
 export interface Page<T> {
   items: T[]
