@@ -23,7 +23,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import onnxruntime as ort
@@ -248,14 +248,16 @@ def build_handlers(
         assert variant.dimension is not None  # (an embedder always has one)
         input_name = session.get_inputs()[0].name
         results: list[RepresentationResult] = []
+        frames: dict[int, Any] = {}  # each image read and converted once, not per face
         for face in asked.faces:
             if face.landmarks is None:
                 raise ContractError(
                     MLErrorCode.INVALID_INPUT, "a representation needs the face's landmarks"
                 )
-            with AttachedSegment(asked.images[face.input_index]) as segment:
-                pixels = segment.copy()
-            crop = alignment.align(pixels, face.landmarks, embedder_rules)
+            if face.input_index not in frames:
+                with AttachedSegment(asked.images[face.input_index]) as segment:
+                    frames[face.input_index] = alignment.image_of(segment.copy())
+            crop = alignment.align_image(frames[face.input_index], face.landmarks, embedder_rules)
             raw = session.run(None, {input_name: alignment.preprocess(crop, embedder_rules)})[0]
             vector = alignment.canonical_vector(raw, variant.dimension)
             output = context.ledger.create("float32", (variant.dimension,))

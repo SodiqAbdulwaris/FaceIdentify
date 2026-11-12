@@ -34,6 +34,7 @@ built with other numbers is a different contract and needs its own version from 
 """
 
 from dataclasses import dataclass
+from functools import cache
 
 import numpy as np
 from numpy.typing import NDArray
@@ -97,11 +98,23 @@ def letterbox(image: NDArray[np.uint8], contract: DetectorContract) -> Letterbox
         raise ContractError(MLErrorCode.INVALID_INPUT, "an image this thin cannot be detected on")
     new_width, new_height = round(width * scale), round(height * scale)
     resized = Image.fromarray(image).resize((new_width, new_height), Image.Resampling.BILINEAR)
-    canvas = np.zeros((size, size, 3), dtype=np.float32)
-    canvas[:new_height, :new_width] = np.asarray(resized, dtype=np.float32)
-    canvas = (canvas - contract.mean) / contract.std  # (padding is zero pixels, normalised too)
-    tensor = np.ascontiguousarray(canvas.transpose(2, 0, 1)[None])
+    # A pixel has 256 values: normalise each once, `(value - mean) / std` in float32 as a canvas
+    # would be, and look them up straight into the channel-first tensor. The same bits as
+    # normalising a float canvas and transposing it, in a fraction of the passes (M6 video
+    # throughput, 2026-11-12); the padding is a zero pixel, normalised the same way.
+    normalised = _normalised(contract.mean, contract.std)
+    tensor = np.empty((1, 3, size, size), dtype=np.float32)
+    tensor[...] = normalised[0]
+    pixels = np.asarray(resized, dtype=np.uint8)
+    tensor[0, :, :new_height, :new_width] = normalised[pixels].transpose(2, 0, 1)
     return Letterboxed(tensor=tensor, scale=scale)
+
+
+@cache
+def _normalised(mean: float, std: float) -> Floats:
+    values = (np.arange(256, dtype=np.float32) - mean) / std
+    values.flags.writeable = False
+    return values
 
 
 def _anchor_centres(size: int, stride: int) -> Floats:

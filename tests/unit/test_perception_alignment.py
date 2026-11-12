@@ -13,7 +13,9 @@ from backend.ml.perception.alignment import (
     TEMPLATE,
     EmbedderContract,
     align,
+    align_image,
     canonical_vector,
+    image_of,
     preprocess,
     similarity_transform,
 )
@@ -123,6 +125,37 @@ def test_a_rotated_face_is_turned_upright() -> None:
         Image.fromarray(image).rotate(30, resample=Image.Resampling.BILINEAR, center=(150, 150))
     )[94:206, 94:206]
     assert np.abs(crop[20:92, 20:92].astype(int) - turned[20:92, 20:92].astype(int)).mean() < 6
+
+
+def _align_before(pixels: np.ndarray[Any, Any], landmarks: tuple[Any, ...]) -> np.ndarray[Any, Any]:
+    """The crop as align made it before 2026-11-12: the image converted again for every face."""
+    height, width = pixels.shape[:2]
+    points = np.array([(x * width, y * height) for x, y in landmarks], dtype=np.float64)
+    forward = similarity_transform(points, TEMPLATE)
+    inverse = np.linalg.inv(np.vstack([forward, [0.0, 0.0, 1.0]]))[:2]
+    crop = Image.fromarray(pixels).transform(
+        (CONTRACT.crop_size, CONTRACT.crop_size),
+        Image.Transform.AFFINE,
+        tuple(inverse.reshape(-1)),
+        resample=Image.Resampling.BILINEAR,
+        fillcolor=(0, 0, 0),
+    )
+    return np.asarray(crop, dtype=np.uint8)
+
+
+def test_the_faces_of_one_frame_share_one_image_and_crop_exactly_as_before() -> None:
+    """One conversion per frame, not per face (M6 video throughput, 2026-11-12); the same crops."""
+    pixels = np.random.default_rng(3).integers(0, 256, (720, 1280, 3), dtype=np.uint8)
+    faces = [
+        landmarks_of(TEMPLATE * scale + np.array(offset), 1280, 720)
+        for scale, offset in ((1.0, (100, 80)), (2.5, (600, 300)), (0.7, (1000, 50)))
+    ]
+    shared = image_of(pixels)
+
+    for landmarks in faces:
+        expected = _align_before(pixels, landmarks)
+        assert np.array_equal(align_image(shared, landmarks, CONTRACT), expected)
+        assert np.array_equal(align(pixels, landmarks, CONTRACT), expected)
 
 
 def test_alignment_needs_five_landmarks() -> None:
