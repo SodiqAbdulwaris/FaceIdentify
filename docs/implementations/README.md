@@ -256,3 +256,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-12 | [M7 step 6: search with the camera](2026-11-12-m7-step6-camera-search.md) | done |
 | 2026-11-13 | [Readiness names the device in use; why the live library was not moved to DirectML](2026-11-13-readiness-execution-device.md) | done; the live move needs a package-upgrade path first |
 | 2026-11-13 | [A registered package that only adds variants is upgraded in place](2026-11-13-package-variant-upgrade.md) | done; delegated decision, spec in persistence 18 |
+| 2026-11-12 | [M7 step 7: runtime validation and benchmarks](2026-11-12-m7-step7-runtime-validation.md) | done; the real-world check at the camera waits for the owner |
