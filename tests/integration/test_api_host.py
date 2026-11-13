@@ -15,7 +15,9 @@ import secrets
 import socket
 import subprocess
 import sys
+import textwrap
 import time
+import types
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
@@ -394,6 +396,73 @@ def test_the_lifeline_is_alive_until_standard_input_ends() -> None:
         assert not alive()
     finally:
         stream.close()
+
+
+def test_the_real_standard_input_is_read_through_a_copy_and_replaced_by_the_null_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_end, write_end = os.pipe()  # stands in for the pipe the shell holds open
+    stand_in = types.SimpleNamespace(fileno=lambda: read_end)
+    monkeypatch.setattr(sys, "stdin", stand_in)
+    try:
+        alive = stdin_lifeline()  # no stream given: the process's own standard input
+
+        assert alive()
+        assert (
+            os.read(read_end, 1) == b""
+        )  # that descriptor is now the null device (an end of file)
+        os.close(write_end)  # the shell let go: the copy sees the end
+        deadline = time.monotonic() + 10
+        while alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not alive()
+    finally:
+        os.close(read_end)
+
+
+def test_a_process_spawned_by_the_host_does_not_inherit_the_pipe_the_lifeline_reads(
+    tmp_path: Path,
+) -> None:
+    """The ML worker is spawned by the host while the lifeline thread blocks on standard input; a
+    child that inherited that pipe never started (found on the installed build, M8 step 8)."""
+    script = tmp_path / "spawn_with_lifeline.py"
+    script.write_text(
+        textwrap.dedent(
+            """
+            import multiprocessing
+            from backend.api.host import stdin_lifeline
+
+            def child(connection):
+                connection.send(42)
+
+            if __name__ == "__main__":
+                alive = stdin_lifeline()
+                context = multiprocessing.get_context("spawn")
+                mine, theirs = context.Pipe()
+                process = context.Process(target=child, args=(theirs,))
+                process.start()
+                print(mine.recv() if mine.poll(60) else "no-child", alive(), flush=True)
+                process.join(30)
+            """
+        ),
+        encoding="utf-8",
+    )
+    repository = Path(__file__).resolve().parents[2]
+    with subprocess.Popen(
+        [sys.executable, str(script)],
+        stdin=subprocess.PIPE,  # open, as the shell keeps it, until the end
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=repository,
+        env={**os.environ, "PYTHONPATH": str(repository)},
+    ) as host_process:
+        assert host_process.stdout is not None
+        try:
+            answer = host_process.stdout.readline()  # (the script gives up after a minute)
+        finally:
+            host_process.kill()
+
+    assert answer.split() == ["42", "True"]
 
 
 async def test_the_host_stops_gracefully_when_its_lifeline_is_cut(tmp_path: Path) -> None:

@@ -187,8 +187,18 @@ else:  # pragma: no cover - the suite runs on Windows
 def stdin_lifeline(stream: IO[bytes] | None = None) -> Callable[[], bool]:
     """A check that is true until standard input reaches end of file: the shell closed it, or the
     shell ended (which closes it). A daemon thread blocks on the read, so nothing polls the pipe."""
-    source = sys.stdin.buffer if stream is None else stream
     closed = threading.Event()
+    if stream is None:
+        # Read through a private copy of the pipe and leave the null device as standard input: the
+        # ML worker is spawned from this process and must not inherit a pipe this thread blocks on
+        # (found on the installed build, M8 step 8).
+        private = os.dup(sys.stdin.fileno())  # (not inheritable)
+        null = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(null, sys.stdin.fileno())
+        os.close(null)
+        source: IO[bytes] = os.fdopen(private, "rb", buffering=0)
+    else:
+        source = stream
 
     def watch() -> None:
         try:
@@ -196,6 +206,8 @@ def stdin_lifeline(stream: IO[bytes] | None = None) -> Callable[[], bool]:
                 pass  # it either; the loop ends only at end of file
         finally:
             closed.set()
+            if stream is None:
+                source.close()  # (the private copy is ours to close)
 
     threading.Thread(target=watch, name="stdin-lifeline", daemon=True).start()
     return lambda: not closed.is_set()
