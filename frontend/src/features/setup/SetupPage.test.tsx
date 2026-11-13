@@ -10,7 +10,7 @@ vi.mock('@/native/backend', async (importOriginal) => ({
   inShell: () => true,
   chooseModels,
   chooseLibrary,
-  libraryRoot: async () => 'C:\Users\me\Documents\FaceIdentify',
+  libraryRoot: async () => 'C:\\Users\\me\\Documents\\FaceIdentify',
 }))
 
 const MODELS = '/api/v1/runtime/models'
@@ -57,13 +57,13 @@ beforeEach(() => {
 describe('first-run setup', () => {
   it('shows where the library is kept and saves another folder for the next start', async () => {
     const user = userEvent.setup()
-    chooseLibrary.mockResolvedValueOnce('D:\Pictures\FaceIdentify')
+    chooseLibrary.mockResolvedValueOnce('D:\\Pictures\\FaceIdentify')
     setup()
 
-    expect(await screen.findByText('C:\Users\me\Documents\FaceIdentify')).toBeInTheDocument()
+    expect(await screen.findByText('C:\\Users\\me\\Documents\\FaceIdentify')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Choose another folder…' }))
 
-    expect(await screen.findByText('D:\Pictures\FaceIdentify')).toBeInTheDocument()
+    expect(await screen.findByText('D:\\Pictures\\FaceIdentify')).toBeInTheDocument()
     expect(screen.getByText(/used after you restart/)).toBeInTheDocument()
   })
 
