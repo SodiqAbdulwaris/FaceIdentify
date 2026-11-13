@@ -495,3 +495,22 @@ def test_anything_else_changed_is_another_package(change: Any) -> None:
     change(offered)
 
     assert not only_adds_variants(registered, offered)
+
+
+@pytest.mark.parametrize(
+    ("where", "before", "after"),
+    [("requirements", True, 1), ("input_contract", 1, 1.0)],
+    ids=["true became 1 in a variant", "1 became 1.0 in an export"],
+)
+def test_a_value_that_only_python_thinks_equal_is_a_change(
+    where: str, before: Any, after: Any
+) -> None:
+    """`True == 1 == 1.0` in Python; in a manifest they are different values."""
+    registered = manifest_dict()
+    target = registered["variants"][0] if where == "requirements" else registered["exports"][0]
+    target[where] = {"setting": before}
+    offered = with_directml(registered)
+    changed = offered["variants"][0] if where == "requirements" else offered["exports"][0]
+    changed[where] = {"setting": after}
+
+    assert not only_adds_variants(registered, offered)

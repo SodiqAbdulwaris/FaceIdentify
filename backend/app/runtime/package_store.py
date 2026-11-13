@@ -165,6 +165,7 @@ class RuntimePackageStore:
                     raise
                 # (the same package with more variants: replaced whole, see `_swap`)
                 retire = self._staging / f"{manifest.key}.{self._new_id().hex}"
+                replaced = (final / MANIFEST_FILE).read_bytes()
                 existing = None
             else:
                 if existing is None:
@@ -183,7 +184,7 @@ class RuntimePackageStore:
             self._write_marker(stage, manifest_bytes)
             self._checkpoint("marked")
             if retire is not None:
-                self._swap(final, stage, retire)
+                self._swap(final, stage, retire, replaced)
                 return InstalledPackage(manifest.key, manifest.version, final, manifest)
             try:
                 os.rename(stage, final)
@@ -216,11 +217,17 @@ class RuntimePackageStore:
             return False
         return only_adds_variants(installed, offered)
 
-    def _swap(self, final: Path, stage: Path, retire: Path) -> None:
+    def _swap(self, final: Path, stage: Path, retire: Path, replaced: bytes) -> None:
         """Replace a complete package with a complete one that only adds variants. The old one is
         moved into staging first: a crash between the two renames leaves both there, complete,
         and recovery publishes one of them, either of which is consistent (registration follows
-        what is published when a library next opens)."""
+        what is published when a library next opens). Another installer that upgraded the package
+        meanwhile is never overwritten: the package must still be the one this upgrade was checked
+        against, or it is refused (install again to extend the newer one)."""
+        if (final / MANIFEST_FILE).read_bytes() != replaced:
+            raise PackageExistsError(
+                f"{final.name}: the package changed while it was being upgraded"
+            )
         os.rename(final, retire)
         self._checkpoint("retired")
         try:

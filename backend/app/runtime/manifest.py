@@ -308,13 +308,21 @@ def only_adds_variants(registered: Mapping[str, Any], offered: Mapping[str, Any]
     > existed (2026-10-15) is upgraded in place by this rule, so a library that registered it can
     > use the GPU without a new key, a reprocess or any change to a stored decision. Anything else
     > under a registered key is refused, as before."""
+    # (compared as canonical JSON text: Python's `True == 1 == 1.0` must not pass a changed value)
     others = set(registered) | set(offered)
-    if any(registered.get(name) != offered.get(name) for name in others - {"variants"}):
+    if any(
+        _canonical(registered.get(n)) != _canonical(offered.get(n)) for n in others - {"variants"}
+    ):
         return False
     variants = offered.get("variants")
     if not isinstance(variants, list):
         return False
-    return all(variant in variants for variant in registered.get("variants", []))
+    kept = {_canonical(variant) for variant in variants}
+    return all(_canonical(variant) in kept for variant in registered.get("variants", []))
+
+
+def _canonical(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def incompatibilities(manifest: PackageManifest, facts: Mapping[str, str]) -> list[str]:
