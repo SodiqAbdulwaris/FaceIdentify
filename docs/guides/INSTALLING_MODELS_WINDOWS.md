@@ -99,9 +99,15 @@ a copy of the abstain-only file beside the live one, so you can go back by copyi
 
 | Setting | Runs on |
 |---|---|
-| `FACEIDENTIFY_PROVIDERS` unset (the default on Windows) | DirectML, then the CPU |
+| `FACEIDENTIFY_PROVIDERS` unset (the default on Windows) | DirectML on the high-performance GPU, then on any adapter, then the CPU |
 | `FACEIDENTIFY_PROVIDERS=CPUExecutionProvider` | the CPU only |
 | `FACEIDENTIFY_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider` **and** `FACEIDENTIFY_ORT_GPU_DIR=<absolute path>/local-models/ort-gpu` | CUDA, then the CPU (**developer only**, never shipped) |
+
+DirectML's adapter: by default the high-performance DirectX 12 GPU (the discrete one on a laptop with
+two), then the adapter DirectML picks itself. `FACEIDENTIFY_DIRECTML_ADAPTER=default` keeps only
+DirectML's own choice; `FACEIDENTIFY_DIRECTML_ADAPTER=<number>` tries that adapter first. The host log
+names the adapter used (`ml-worker: DirectML runs on ...`;
+[entry](../implementations/2026-11-13-directml-high-performance-adapter.md)).
 
 The CUDA path needs a machine-local `onnxruntime-gpu` plus NVIDIA's CUDA 12 and cuDNN 9 libraries in
 `local-models/ort-gpu` (installed by hand on 2026-10-07; NVIDIA's licences govern those files, see the
