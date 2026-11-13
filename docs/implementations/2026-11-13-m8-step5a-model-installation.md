@@ -28,7 +28,7 @@ requirement (a working GPU is used, otherwise the CPU, with no manual step) hold
 
 - 12 use-case tests (the table is replaced by the measured stand-in files in the tests; the real weights are never read) at 100% line and branch coverage
   of `model_install.py`, and 8 route tests. Full backend gate: see the PR description.
-- Added later (rollback, TST-080 and TST-082): a refused install leaves the models already installed verifying and unchanged, and no scratch is left behind (`test_a_refused_install_leaves_the_models_that_were_already_installed_working`).
+- Added later (TST-080, integrity of the installed models): a source that is rejected leaves the models already installed verifying and byte-identical, and no scratch is left behind (`test_a_refused_install_leaves_the_models_that_were_already_installed_working`). This is a source-rejection regression test, not the activation rollback of TST-082: that one (a failed activation or self-check keeps the previously selected runtime) stays open.
 - Not verified: installing the real `buffalo_l` files (the weights are not available to an agent; the hashes are the ones recorded on 2026-10-16; step 8,
   the owner's machine), and a restart-free switch to the real profile: the installed package is registered by `prepare`, which the route calls, and the
   first real processing run is step 8.
