@@ -10,6 +10,7 @@ import hashlib
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -34,7 +35,12 @@ from backend.ml.supervisor.process import ProcessWorker
 from backend.ml.supervisor.supervisor import MLSupervisor, SupervisorPolicy
 from backend.ml.worker.loop import Handler, HandlerContext, WorkerError
 from backend.ml.worker.main import load_handlers
-from backend.ml.worker.onnx_session import load_session
+from backend.ml.worker.onnx_session import (
+    ADAPTER_ENV,
+    HIGH_PERFORMANCE,
+    adapter_name,
+    load_session,
+)
 from backend.ml.worker.perception_handlers import (
     CONTRACTS,
     DETECTOR,
@@ -754,6 +760,128 @@ def test_directml_sessions_run_sequentially_without_memory_patterns(
     (options,) = seen
     assert options.enable_mem_pattern is patterns
     assert options.execution_mode == ort.ExecutionMode.ORT_SEQUENTIAL
+
+
+# --- which GPU DirectML runs on (owner decision 2026-11-12) -------------------------------------
+
+DML = "DmlExecutionProvider"
+
+
+def directml_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcomes: list[str]
+) -> tuple[Path, bytes, list[Any]]:
+    """A model, and DirectML sessions that each `start`, `fail` or `cpu` (ONNX Runtime fell back
+    to the CPU by itself), in turn; returns what each attempt asked for."""
+    data = embedder_model()
+    path = tmp_path / "m.onnx"
+    path.write_bytes(data)
+    asked: list[Any] = []
+    left = list(outcomes)
+
+    class Session:
+        def __init__(self, model: Any, *, sess_options: Any, providers: list[Any]) -> None:
+            asked.append(providers[0])
+            self.outcome = left.pop(0)
+            if self.outcome == "fail":
+                raise RuntimeError("887A0002 The object was not found")
+
+        def get_providers(self) -> list[str]:
+            return [DML] if self.outcome == "start" else [CPU]
+
+    monkeypatch.setattr(ort, "get_available_providers", lambda: [DML, CPU])
+    monkeypatch.setattr(ort, "InferenceSession", Session)
+    monkeypatch.delenv(ADAPTER_ENV, raising=False)
+    return path, hashlib.sha256(data).digest(), asked
+
+
+def test_directml_asks_for_the_high_performance_gpu_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path, digest, asked = directml_session(tmp_path, monkeypatch, ["start"])
+
+    load_session(path, digest, DML)
+
+    assert asked == [(DML, {"performance_preference": "high_performance", "device_filter": "gpu"})]
+    assert "ml-worker: DirectML runs on" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("first", ["fail", "cpu"])
+def test_directml_takes_any_adapter_when_the_high_performance_one_cannot_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first: str
+) -> None:
+    path, digest, asked = directml_session(tmp_path, monkeypatch, [first, "start"])
+
+    load_session(path, digest, DML)
+
+    assert asked == [(DML, HIGH_PERFORMANCE), DML]  # then DirectML's own choice
+
+
+@pytest.mark.parametrize("outcomes", [["fail", "fail"], ["cpu", "cpu"], ["fail", "cpu"]])
+def test_directml_that_starts_on_no_adapter_is_a_provider_failure_so_the_cpu_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcomes: list[str]
+) -> None:
+    path, digest, asked = directml_session(tmp_path, monkeypatch, outcomes)
+
+    with pytest.raises(WorkerError) as refused:
+        load_session(path, digest, DML)
+
+    assert refused.value.code is MLErrorCode.RUNTIME_INITIALIZATION_FAILED  # the CPU variant next
+    assert len(asked) == 2
+
+
+@pytest.mark.parametrize(
+    ("setting", "first"),
+    [
+        ("default", DML),
+        ("1", (DML, {"device_id": "1"})),
+        ("HIGH_PERFORMANCE", (DML, HIGH_PERFORMANCE)),
+    ],
+)
+def test_the_first_adapter_can_be_chosen_by_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setting: str, first: Any
+) -> None:
+    path, digest, asked = directml_session(tmp_path, monkeypatch, ["start"])
+    monkeypatch.setenv(ADAPTER_ENV, setting)
+
+    load_session(path, digest, DML)
+
+    assert asked == [first]
+
+
+def test_an_adapter_setting_that_means_nothing_is_a_provider_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, digest, asked = directml_session(tmp_path, monkeypatch, [])
+    monkeypatch.setenv(ADAPTER_ENV, "the fast one")
+
+    with pytest.raises(WorkerError, match=ADAPTER_ENV) as refused:
+        load_session(path, digest, DML)
+
+    assert refused.value.code is MLErrorCode.RUNTIME_INITIALIZATION_FAILED
+    assert asked == []
+
+
+def _device(name: str, number: str, rank: str) -> Any:
+    hardware = SimpleNamespace(metadata={"Description": name, "DxgiHighPerformanceIndex": rank})
+    return SimpleNamespace(ep_name=DML, device=hardware, ep_options={"device_id": number})
+
+
+def test_the_adapter_in_use_is_named_as_windows_names_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    devices = [_device("Integrated", "0", "1"), _device("Discrete", "1", "0")]
+    monkeypatch.setattr(ort, "get_ep_devices", lambda: devices)
+
+    assert adapter_name(HIGH_PERFORMANCE) == "Discrete"
+    assert adapter_name({"device_id": "0"}) == "Integrated"
+    assert adapter_name({}) == "the adapter DirectML chose"
+
+
+def test_naming_the_adapter_never_fails_a_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable() -> Any:
+        raise RuntimeError("no device listing in this build")
+
+    monkeypatch.setattr(ort, "get_ep_devices", unavailable)
+
+    assert adapter_name(HIGH_PERFORMANCE) == "the adapter DirectML chose"
 
 
 # --- in a real worker process, behind the supervisor ---------------------------------------------
