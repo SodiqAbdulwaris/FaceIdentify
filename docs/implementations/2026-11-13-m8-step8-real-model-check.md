@@ -34,9 +34,30 @@ would have been affected.
 - **Network:** 0 established connections outside loopback from the backend process in both runs (a count taken after processing).
 - Clean stop: exit code 0 both times; silent uninstall exit 0 and the scratch library kept; the camera device list answered with 1 device.
 
+## The whole check again on the exact build from `main` with the fix (installer built from `main`; launched as the shell launches it)
+
+The backend was started with `--parent-pid`, `--allow-origin` for the web view's origins, a piped stdin, stdout and stderr and no console window, as `sidecar.rs` does. Everything above held, and:
+
+- 4 pictures `COMPLETED` (real models, `DmlExecutionProvider` on the RTX 4070, no fallback, worker `READY`); a face search ranked the named person first; reprocess `COMPLETED`; a two-second video `COMPLETED` with 1 appearance;
+  forced CPU reprocessed `COMPLETED` on `CPUExecutionProvider`; 0 outbound connections in both runs; both stops exit 0; uninstall kept the library.
+- **Camera:** the device list returned 1 device; "Integrated Camera" was added, a session started, **32 frames counted and 0 dropped in 8 seconds** (the camera works; 0 encounters, nothing kept), the session stopped; the scratch library was deleted.
+- A later picture of the named person was processed `COMPLETED` but not placed automatically: at the owner-approved operating point (0.45, margin 0.10) a face that is not clear enough waits. That is the policy, not a failure.
+
+## What else only the shell exercises (audit)
+
+| Path | Checked | How |
+|---|---|---|
+| `--stdin-lifeline` with a spawned worker | **found a defect, fixed** | the installed run; regression tests in `test_api_host.py` and now in the frozen CI job (below) |
+| `--parent-pid` watching | no problem | the second real run passed it; the host stopped cleanly |
+| `--allow-origin` | no problem | passed in the second real run; CORS is unit-tested |
+| no console window (`CREATE_NO_WINDOW`) for the host, the worker and FFmpeg | no problem | the second real run used it for the host; the worker, the video and the camera session ran under it |
+| piped stdout and stderr | no problem | the shell drains stderr and reads one line of stdout; the worker writes to stderr only |
+
+CI-safe regression: `packaging/frozen_entry.py --probe-worker` now starts the host's `stdin_lifeline()` before it spawns the worker, and `check_frozen_backend.py` keeps the probe's standard input open, so the `Frozen backend` job spawns a worker from a process holding the lifeline.
+
 ## Not verified
 
-- The live camera (the shutter is closed; the live check stays the owner's) and adding "Integrated Camera" in the app.
+- A person watching the live camera preview (the check counted frames only).
 - The first-run screens driven by a person with the real native dialogs (the page itself was read from the installed web view earlier; the API calls it makes were run here).
 - A second clean machine, WebView2 absent, SmartScreen (unsigned), and an installer upgrade between two different revisions.
 - The process-tree check beyond the connection count (a full SEC-005 run), and activation rollback after a failed self-check (TST-082).
