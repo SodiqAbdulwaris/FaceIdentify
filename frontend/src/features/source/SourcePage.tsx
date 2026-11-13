@@ -25,8 +25,9 @@ import { missingReason } from './missing'
 import { RecycleControl } from './RecycleControl'
 import { ReprocessReviews } from './ReprocessReviews'
 import { UnresolvedFaces } from './UnresolvedFaces'
+import { clock } from '@/lib/utils'
 import { labelFaces } from './faces'
-import { clock, VideoProgress, VideoTimeline } from './VideoPanel'
+import { VideoProgress, VideoTimeline } from './VideoPanel'
 
 const kilobytes = (bytes: number | null) => (bytes === null ? '' : `${Math.ceil(bytes / 1024)} KB`)
 
@@ -111,7 +112,7 @@ export function SourcePage() {
                 {detail.width && detail.height ? `, ${detail.width} × ${detail.height}` : ''}
               </p>
               {latest && isActive(latest.state) ? (
-                <VideoProgress run={latest} now={Date.now()} />
+                <VideoProgress run={latest} now={runs.dataUpdatedAt} />
               ) : null}
               <VideoTimeline durationMs={detail.duration_ms ?? 0} faces={faces} />
             </>
