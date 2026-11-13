@@ -126,7 +126,9 @@ It loads the installed package through the real worker, detects and embeds every
 the timings (on a recent NVIDIA laptop GPU about 0.02 s per picture on DirectML, about 0.5 s on the
 CPU). In the running app, `GET /readiness` reports `execution_provider` and
 `provider_fallback` under `capabilities`: on the GPU they read `DmlExecutionProvider` and `NONE`; `ACTIVE` means a GPU
-start failed and the CPU took over (the worker's log says why).
+start failed and the CPU took over (the worker's log says why). `execution_device` names the device
+that ran, such as `NVIDIA GeForce RTX 4070 Laptop GPU` or `CPU` (`NOT_STARTED` before the first
+picture).
 
 ## 7. The desktop app on the real models
 
