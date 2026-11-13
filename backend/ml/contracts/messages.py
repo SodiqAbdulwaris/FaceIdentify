@@ -471,8 +471,9 @@ class ExecutionProvenance:
     @classmethod
     def from_wire(cls, value: Any) -> "ExecutionProvenance":
         data = as_mapping(value, "execution")
-        exact_keys(data, "execution", set(cls.__slots__))
-        return cls(**{name: data[name] for name in cls.__slots__})
+        # (`adapter` is optional on the wire: a worker from before it was added still answers)
+        exact_keys(data, "execution", set(cls.__slots__) - {"adapter"}, frozenset({"adapter"}))
+        return cls(**{name: data[name] for name in cls.__slots__ if name in data})
 
 
 @dataclass(frozen=True, slots=True)
