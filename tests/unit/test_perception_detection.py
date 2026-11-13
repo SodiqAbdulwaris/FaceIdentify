@@ -70,7 +70,9 @@ def test_letterbox_scales_the_longer_side_and_pads_at_the_bottom_right() -> None
     assert boxed.tensor[0, 1, 0, SIZE - 1] == pytest.approx(white)
 
 
-def _letterbox_before(image: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+def _letterbox_before(
+    image: np.ndarray[Any, Any], contract: DetectorContract = CONTRACT
+) -> np.ndarray[Any, Any]:
     """The tensor as letterbox built it before 2026-11-12: a float canvas, normalised."""
     height, width = image.shape[:2]
     scale = SIZE / max(height, width)
@@ -78,7 +80,7 @@ def _letterbox_before(image: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
     resized = Image.fromarray(image).resize(size, Image.Resampling.BILINEAR)
     canvas = np.zeros((SIZE, SIZE, 3), dtype=np.float32)
     canvas[: size[1], : size[0]] = np.asarray(resized, dtype=np.float32)
-    canvas = (canvas - CONTRACT.mean) / CONTRACT.std
+    canvas = (canvas - contract.mean) / contract.std
     return np.ascontiguousarray(canvas.transpose(2, 0, 1)[None])
 
 
@@ -93,6 +95,15 @@ def test_letterbox_gives_the_very_same_tensor_as_before(shape: tuple[int, int]) 
     assert tensor.dtype == expected.dtype
     assert tensor.flags.c_contiguous
     assert np.array_equal(tensor, expected)
+
+
+@pytest.mark.parametrize(("mean", "std"), [(0.1, 1.1), (127.0, 3.0), (127.5, 128.0)])
+def test_letterbox_normalises_by_the_contract_it_is_given(mean: float, std: float) -> None:
+    """The table is the contract's own: two contracts in one process never share one."""
+    image = np.random.default_rng(5).integers(0, 256, (720, 1280, 3), dtype=np.uint8)
+    contract = DetectorContract(mean=mean, std=std)
+
+    assert np.array_equal(letterbox(image, contract).tensor, _letterbox_before(image, contract))
 
 
 def test_letterbox_keeps_channels_in_rgb_order() -> None:

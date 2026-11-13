@@ -409,6 +409,33 @@ def test_the_same_face_gives_the_same_vector_and_another_face_another(
     assert [(r.input_index, r.face_index) for r in out] == [(0, 0), (0, 1), (1, 0)]
 
 
+def test_the_faces_of_one_image_read_and_convert_it_once(
+    models: dict[str, Any], ledger: SegmentLedger, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A video frame holds several faces: its pixels are copied out and converted once a request
+    (M6 video throughput, 2026-11-13), not once per face."""
+    converted: list[tuple[int, ...]] = []
+    image_of = alignment.image_of
+
+    def counted(pixels: Any) -> Any:
+        converted.append(pixels.shape)
+        return image_of(pixels)
+
+    monkeypatch.setattr(alignment, "image_of", counted)
+    handlers = build_handlers(models["config"])
+    first = image_segment(ledger, picture(224, 224, seed=1))
+    other = image_segment(ledger, picture(224, 224, seed=2))
+    landmarks = template_landmarks(2, 224)
+    faces = tuple(
+        FaceGeometry(i, f, (0.2, 0.2, 0.8, 0.8), landmarks) for i in (0, 1) for f in (0, 1, 2)
+    )
+
+    out = run(handlers, represent_request((first, other), faces), ledger).representations
+
+    assert len(out) == 6
+    assert len(converted) == 2  # one per image, for three faces each
+
+
 def test_a_face_without_landmarks_cannot_be_represented(
     models: dict[str, Any], ledger: SegmentLedger
 ) -> None:
