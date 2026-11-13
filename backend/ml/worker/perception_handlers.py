@@ -42,7 +42,7 @@ from backend.ml.contracts.messages import (
 from backend.ml.contracts.protocol import ContractError, MLErrorCode, MLOperation
 from backend.ml.perception import alignment, detection
 from backend.ml.worker.loop import Handler, HandlerContext, HandlerResult, WorkerError
-from backend.ml.worker.onnx_session import load_session
+from backend.ml.worker.onnx_session import adapter_of, load_session
 
 DETECTOR = "FACE_DETECTOR"
 EMBEDDER = "FACE_REPRESENTATION"
@@ -200,12 +200,13 @@ class _Components:
             )
 
 
-def _provenance(variant: VariantConfig) -> ExecutionProvenance:
+def _provenance(variant: VariantConfig, session: ort.InferenceSession) -> ExecutionProvenance:
     return ExecutionProvenance(
         variant.component_version_id,
         variant.runtime_variant_id,
         variant.provider,
         variant.device,
+        adapter_of(session),
     )
 
 
@@ -240,7 +241,7 @@ def build_handlers(
                 Detection(index, number, face.box, face.score, face.landmarks)
                 for number, face in enumerate(faces)
             )
-        return HandlerResult(DetectFacesOutput(tuple(found)), _provenance(variant))
+        return HandlerResult(DetectFacesOutput(tuple(found)), _provenance(variant, session))
 
     def represent(request: MLRequest, context: HandlerContext) -> HandlerResult:
         variant, session = components.resolve(request, EMBEDDER)
@@ -272,7 +273,9 @@ def build_handlers(
                     output.descriptor,
                 )
             )
-        return HandlerResult(GenerateRepresentationsOutput(tuple(results)), _provenance(variant))
+        return HandlerResult(
+            GenerateRepresentationsOutput(tuple(results)), _provenance(variant, session)
+        )
 
     handlers: dict[MLOperation, Handler] = {}
     kinds = {v.kind for v in variants}

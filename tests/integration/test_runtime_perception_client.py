@@ -210,6 +210,7 @@ def test_directml_that_cannot_start_falls_back_to_the_cpu_visibly(
     assert pool.provider_state() == {
         "execution_provider": CPU,
         "provider_fallback": "ACTIVE",
+        "execution_device": "CPU",  # what the real worker says it ran on
     }
     assert len(caplog.records) == 2  # one warning per stage
     assert f"preferred {DIRECTML} is not available" in caplog.records[0].getMessage()
@@ -530,7 +531,9 @@ def test_on_ran_hears_the_variant_that_actually_ran_and_only_on_success(
         )
     )
     heard: list[PlannedVariant] = []
-    client = PerceptionClient(cast(MLSupervisor, script), plan, new_id=new_id, on_ran=heard.append)
+    client = PerceptionClient(
+        cast(MLSupervisor, script), plan, new_id=new_id, on_ran=lambda ran, _: heard.append(ran)
+    )
 
     client.detect(picture(64, 64))
     assert heard == [second]  # not the provider that was refused
@@ -539,6 +542,30 @@ def test_on_ran_hears_the_variant_that_actually_ran_and_only_on_success(
     with pytest.raises(PerceptionError):
         client.detect(picture(64, 64))
     assert heard == [second]  # a failure is not a run
+
+
+def test_on_ran_hears_the_device_the_worker_says_it_ran_on(new_id: SeededUUIDs) -> None:
+    plan = plan_of((variant(CPU),), ())
+    script = Scripted(
+        lambda r: MLResponse(
+            r.request_id,
+            MLStatus.SUCCESS,
+            r.operation,
+            execution=ran(r, adapter="NVIDIA GeForce RTX 4070 Laptop GPU"),
+            output=DetectFacesOutput(()),
+        )
+    )
+    heard: list[str] = []
+    client = PerceptionClient(
+        cast(MLSupervisor, script),
+        plan,
+        new_id=new_id,
+        on_ran=lambda _, device: heard.append(device),
+    )
+
+    client.detect(picture(64, 64))
+
+    assert heard == ["NVIDIA GeForce RTX 4070 Laptop GPU"]
 
 
 def test_the_two_provider_codes_are_exactly_these() -> None:
@@ -733,7 +760,7 @@ def test_an_observer_that_fails_cannot_keep_the_output_from_being_released(
     side = Embedder(new_id)
     script = Scripted(side.answer)
 
-    def broken(_ran: PlannedVariant) -> None:
+    def broken(_ran: PlannedVariant, _device: str) -> None:
         raise RuntimeError("the observer failed")
 
     client = PerceptionClient(cast(MLSupervisor, script), plan, new_id=new_id, on_ran=broken)

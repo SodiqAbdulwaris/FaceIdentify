@@ -39,7 +39,7 @@ from backend.ml.contracts.shared_memory import SharedMemoryDescriptor, describe
 
 IMAGE = describe("img-0", "uint8", (480, 640, 3), readonly=True)
 EMBEDDING = describe("emb-0", "float32", (512,), readonly=True)
-PROVENANCE = ExecutionProvenance("cv-1", "rv-1", "CUDAExecutionProvider", "cuda:0")
+PROVENANCE = ExecutionProvenance("cv-1", "rv-1", "CUDAExecutionProvider", "cuda:0", "GPU 0")
 
 
 def detect_request(**changes: Any) -> MLRequest:
@@ -390,6 +390,7 @@ BAD_IN_PROCESS: list[Any] = [
     lambda: detect_request(version=2),
     lambda: ExecutionContext(job_id=5),  # type: ignore[arg-type]
     lambda: ExecutionProvenance("", "rv", "p", "d"),
+    lambda: ExecutionProvenance("cv", "rv", "p", "d", 7),  # type: ignore[arg-type]
     lambda: MLError("INFERENCE_FAILED", "x"),  # type: ignore[arg-type]
     lambda: MLError(MLErrorCode.INFERENCE_FAILED, ""),
     lambda: MLResponse("r", STATUS_AS_TEXT_SUCCESS, MLOperation.DETECT_FACES),

@@ -455,10 +455,15 @@ class ExecutionProvenance:
     runtime_variant_id: str
     provider: str
     device: str
+    # The device that ran it as the system names it ("NVIDIA GeForce ...", "CPU"); empty when the
+    # worker cannot tell. Shown in readiness, never used to decide anything.
+    adapter: str = ""
 
     def __post_init__(self) -> None:
-        for name in self.__slots__:
+        for name in ("component_version_id", "runtime_variant_id", "provider", "device"):
             string(getattr(self, name), name)
+        if not isinstance(self.adapter, str):
+            raise invalid("adapter must be a string")
 
     def to_wire(self) -> dict[str, Any]:
         return {name: getattr(self, name) for name in self.__slots__}
