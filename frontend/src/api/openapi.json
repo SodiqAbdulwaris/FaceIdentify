@@ -128,6 +128,23 @@
         "title": "CaptureDeviceModel",
         "type": "object"
       },
+      "ChooseMode": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/RecognitionMode"
+          },
+          "shown_version": {
+            "title": "Shown Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "shown_version"
+        ],
+        "title": "ChooseMode",
+        "type": "object"
+      },
       "Confirm": {
         "properties": {
           "expected_identity_id": {
@@ -903,6 +920,50 @@
           "revision"
         ],
         "title": "MergeMember",
+        "type": "object"
+      },
+      "ModeOption": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/RecognitionMode"
+          },
+          "policy": {
+            "additionalProperties": true,
+            "title": "Policy",
+            "type": "object"
+          }
+        },
+        "required": [
+          "mode",
+          "description",
+          "policy"
+        ],
+        "title": "ModeOption",
+        "type": "object"
+      },
+      "ModeState": {
+        "properties": {
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ModeOption"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "options"
+        ],
+        "title": "ModeState",
         "type": "object"
       },
       "ModelFile": {
@@ -1712,6 +1773,14 @@
         ],
         "title": "Reassign",
         "type": "object"
+      },
+      "RecognitionMode": {
+        "enum": [
+          "ASSISTED",
+          "AUTOMATIC"
+        ],
+        "title": "RecognitionMode",
+        "type": "string"
       },
       "RelinkRequest": {
         "properties": {
@@ -4308,6 +4377,76 @@
           }
         },
         "summary": "Install",
+        "tags": [
+          "runtime"
+        ]
+      }
+    },
+    "/api/v1/runtime/recognition-mode": {
+      "get": {
+        "operationId": "get_mode",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModeState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Get Mode",
+        "tags": [
+          "runtime"
+        ]
+      },
+      "put": {
+        "operationId": "put_mode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChooseMode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModeState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Put Mode",
         "tags": [
           "runtime"
         ]

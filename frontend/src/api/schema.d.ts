@@ -657,6 +657,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runtime/recognition-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mode */
+        get: operations["get_mode"];
+        /** Put Mode */
+        put: operations["put_mode"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -1039,6 +1057,12 @@ export interface components {
             /** Path */
             path: string | null;
         };
+        /** ChooseMode */
+        ChooseMode: {
+            mode: components["schemas"]["RecognitionMode"];
+            /** Shown Version */
+            shown_version: string;
+        };
         /** Confirm */
         Confirm: {
             /**
@@ -1318,6 +1342,23 @@ export interface components {
             /** Revision */
             revision: number;
         };
+        /** ModeOption */
+        ModeOption: {
+            /** Description */
+            description: string;
+            mode: components["schemas"]["RecognitionMode"];
+            /** Policy */
+            policy: {
+                [key: string]: unknown;
+            };
+        };
+        /** ModeState */
+        ModeState: {
+            /** Mode */
+            mode: string;
+            /** Options */
+            options: components["schemas"]["ModeOption"][];
+        };
         /** ModelFile */
         ModelFile: {
             /** Name */
@@ -1580,6 +1621,11 @@ export interface components {
             /** Identity Id */
             identity_id: string | null;
         };
+        /**
+         * RecognitionMode
+         * @enum {string}
+         */
+        RecognitionMode: "ASSISTED" | "AUTOMATIC";
         /** RelinkRequest */
         RelinkRequest: {
             /** Path */
@@ -3088,6 +3134,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelsState"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_mode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeState"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    put_mode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChooseMode"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeState"];
                 };
             };
             /** @description The one error shape. */
