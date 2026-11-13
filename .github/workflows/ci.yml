@@ -87,7 +87,7 @@ jobs:
           uv run python scripts/install_ffmpeg.py --zip "$zip" --local-state-root "$RUNNER_TEMP/local-state"
           echo "FACEIDENTIFY_FFMPEG_DIR=$RUNNER_TEMP/local-state/runtime/ffmpeg" >> "$GITHUB_ENV"
       # Default addopts already exclude e2e, ml_eval, benchmark and hardware.
-      - run: uv run pytest --cov --cov-report=term --cov-report=xml --cov-report=html
+      - run: uv run pytest --cov --cov-report=term --cov-report=xml --cov-report=html --cov-fail-under=100
       # Coverage contains source-line data only; no test data or user media.
       - uses: actions/upload-artifact@v4
         if: always()

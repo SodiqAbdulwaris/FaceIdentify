@@ -261,3 +261,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-13 | [M8 step 5(c)(d): the first-run setup screens and their end-to-end test](2026-11-13-m8-step5cd-first-run-screens.md) | done |
 | 2026-11-13 | [The frontend lint gate fails on warnings again](2026-11-13-frontend-lint-denies-warnings.md) | done |
 | 2026-11-13 | [M8 step 8: the real-model check of the installed build, and the worker-stdin defect it found](2026-11-13-m8-step8-real-model-check.md) | done; fix in this PR |
+| 2026-11-13 | [Backend coverage is 100% again, and CI now fails below it](2026-11-13-backend-coverage-enforced.md) | done |

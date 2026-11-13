@@ -550,3 +550,26 @@ async def test_a_session_that_gives_no_picture_fails_the_search_without_reopenin
     assert cameras.opened == ["Integrated Camera"]
     slow.go.set()
     await api.client.post(f"/api/v1/cameras/{camera}/stop")
+
+
+async def test_a_search_waiting_on_a_session_that_ends_opens_the_camera_itself(
+    api: Api, cameras: Cameras
+) -> None:
+    camera = await configure(api)
+    cameras.next["Integrated Camera"] = Slow([small()])  # the session never gets a picture
+    await api.client.post(f"/api/v1/cameras/{camera}/start")
+
+    async with anyio.create_task_group() as group:
+        answers: list[Any] = []
+
+        async def search() -> None:
+            answers.append(await api.client.post(f"/api/v1/cameras/{camera}/search"))
+
+        group.start_soon(search)
+        await anyio.sleep(0.2)  # (the search is now waiting for the session's first picture)
+        cameras.next["Integrated Camera"] = Planted([small()])
+        await api.client.post(f"/api/v1/cameras/{camera}/stop")
+
+    assert answers[0].status_code == 200, answers[0].text
+    # (the session ended without a picture, so the device was free and the search opened it)
+    assert cameras.opened == ["Integrated Camera", "Integrated Camera"]

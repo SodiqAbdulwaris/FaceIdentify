@@ -720,3 +720,13 @@ def test_a_published_directory_under_the_wrong_name_is_reported_and_never_listed
 
     assert store.installed() == []
     assert store.recover().invalid == ["renamed"]
+
+
+def test_an_installed_package_whose_manifest_cannot_be_read_is_never_upgraded(
+    tmp_path: Path,
+) -> None:
+    offered = b'{"variants": []}'
+
+    assert not RuntimePackageStore._only_adds_variants(tmp_path, offered)  # no manifest there
+    (tmp_path / "manifest.json").write_bytes(b"not json")
+    assert not RuntimePackageStore._only_adds_variants(tmp_path, offered)

@@ -39,6 +39,7 @@ from backend.ml.worker.onnx_session import (
     ADAPTER_ENV,
     HIGH_PERFORMANCE,
     adapter_name,
+    adapter_of,
     load_session,
 )
 from backend.ml.worker.perception_handlers import (
@@ -979,3 +980,8 @@ def test_a_variant_that_cannot_load_in_the_real_worker_is_an_error_answer_not_a_
         supervisor.stop()
         for worker in workers:
             worker.kill()
+
+
+def test_a_session_this_module_did_not_load_has_no_adapter() -> None:
+    # (an object that cannot be weakly referenced was never recorded: no adapter, no error)
+    assert adapter_of(object()) == ""
