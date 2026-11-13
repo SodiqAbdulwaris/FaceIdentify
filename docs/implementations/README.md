@@ -254,3 +254,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-13 | [Video throughput: where the time goes; the worker prepares each frame once](2026-11-13-video-throughput.md) | done; DirectML 8.5 to 10.1 video s per s, CPU 3.4 to 3.6, outputs bit-identical |
 | 2026-11-12 | [M7 step 5: the Cameras screen, camera history and its deletion](2026-11-12-m7-step5-cameras-screen-history.md) | done; search with a camera next (step 6) |
 | 2026-11-12 | [M7 step 6: search with the camera](2026-11-12-m7-step6-camera-search.md) | done |
+| 2026-11-13 | [Readiness names the device in use; why the live library was not moved to DirectML](2026-11-13-readiness-execution-device.md) | done; the live move needs a package-upgrade path first |
