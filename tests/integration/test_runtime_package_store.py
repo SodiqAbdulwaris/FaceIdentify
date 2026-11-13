@@ -170,16 +170,11 @@ def test_a_different_package_under_an_installed_key_is_refused_and_the_original_
     assert staging_names(storage_roots) == []
 
 
-def with_more_variants(package: Path) -> Path:
-    """The same package (files and all) whose manifest adds a DirectML variant per export."""
+def with_more_variants(package: Path, provider: str = "DmlExecutionProvider") -> Path:
+    """The same package (files and all) whose manifest adds a variant per export for `provider`."""
     manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
     manifest["variants"] += [
-        dict(
-            v,
-            provider="DmlExecutionProvider",
-            device_kind="GPU",
-            variant_key=f"{v['variant_key']}-dml",
-        )
+        dict(v, provider=provider, device_kind="GPU", variant_key=f"{v['variant_key']}-{provider}")
         for v in manifest["variants"]
     ]
     (package / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -236,6 +231,34 @@ def test_a_crash_while_upgrading_recovers_to_one_complete_package(
     assert package is not None  # the old or the new, never neither
     assert len(package.manifest.variants) in (2, 4)
     assert restarted.verify("reference-cpu") == []
+    assert staging_names(storage_roots) == []
+
+
+def test_an_upgrade_overtaken_by_another_is_refused_and_never_drops_its_variants(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path, tmp_path: Path
+) -> None:
+    """Two installers check the same old package; the second to publish must not replace the
+    first's upgrade with one that lacks its variants (registration would then refuse it)."""
+    store_for(storage_roots, new_id).install(source, FACTS)
+    directml = with_more_variants(build_package(tmp_path / "directml"))
+    cuda = with_more_variants(build_package(tmp_path / "cuda"), "CUDAExecutionProvider")
+
+    def the_other_installer_goes_first(step: str) -> None:
+        if step == "marked":  # this upgrade is staged; the other one publishes before it
+            RuntimePackageStore(storage_roots, new_id=new_id).install(cuda, FACTS)
+
+    slow = RuntimePackageStore(
+        storage_roots, new_id=new_id, checkpoint=the_other_installer_goes_first
+    )
+    with pytest.raises(PackageExistsError, match="changed while it was being upgraded"):
+        slow.install(directml, FACTS)
+
+    package = store_for(storage_roots, new_id).get("reference-cpu")
+    assert package is not None
+    assert {v.provider for v in package.manifest.variants} == {
+        "CPUExecutionProvider",
+        "CUDAExecutionProvider",
+    }
     assert staging_names(storage_roots) == []
 
 
