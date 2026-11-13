@@ -73,6 +73,7 @@ from backend.app.runtime.manifest import (
     ManifestError,
     PackageManifest,
     file_problems,
+    only_adds_variants,
     parse_manifest,
 )
 from backend.app.runtime.models import (
@@ -213,9 +214,12 @@ class _Registrar:
                 )
             )
         elif row.manifest_json != stored:
-            raise RegistrationError(
-                f"{self.manifest.key}: a different package is registered under this key"
-            )
+            if not only_adds_variants(row.manifest_json, stored):
+                raise RegistrationError(
+                    f"{self.manifest.key}: a different package is registered under this key"
+                )
+            row.manifest_json = stored  # the same package with more variants (`only_adds_variants`)
+            self.session.flush()
         installation = self._installation(row, manifest_bytes)
         exports = tuple(
             self._export(spec, components[spec.component], versions[spec.component])
@@ -254,6 +258,12 @@ class _Registrar:
         )
         if found is not None:
             self._reinstate(found)
+            artifact = self.session.get(Artifact, found.artifact_id)
+            digest = hashlib.sha256(manifest_bytes).digest()
+            if artifact is not None and artifact.sha256 != digest:  # (upgraded in place)
+                artifact.sha256 = digest
+                artifact.size_bytes = len(manifest_bytes)
+                self.session.flush()
             return found
         artifact = self._artifact(
             ArtifactKind.RUNTIME_PACKAGE,

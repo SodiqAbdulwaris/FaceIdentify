@@ -13,6 +13,7 @@ from backend.app.runtime.manifest import (
     PackageManifest,
     file_problems,
     incompatibilities,
+    only_adds_variants,
     parse_manifest,
     safe_relative_path,
 )
@@ -427,3 +428,70 @@ def test_a_declared_file_reached_through_a_link_out_of_the_package_is_refused(
         "models/detector.onnx: resolves outside the package",
         "models/embedder.onnx: resolves outside the package",
     ]
+
+
+# --- the same package with more variants (delegated decision 2026-11-13) ----------------------
+
+
+def with_directml(manifest: dict[str, Any]) -> dict[str, Any]:
+    upgraded = copy.deepcopy(manifest)
+    upgraded["variants"] += [
+        dict(
+            v,
+            provider="DmlExecutionProvider",
+            device_kind="GPU",
+            variant_key=f"{v['variant_key']}-dml",
+        )
+        for v in manifest["variants"]
+    ]
+    return upgraded
+
+
+def test_a_package_that_only_adds_variants_may_replace_the_registered_one() -> None:
+    registered = manifest_dict()
+
+    assert only_adds_variants(registered, with_directml(registered))
+    assert only_adds_variants(registered, copy.deepcopy(registered))  # nothing added: the same
+
+
+def changed_weights(m: dict[str, Any]) -> None:
+    m["exports"][0]["sha256"] = "0" * 64
+
+
+def changed_contract(m: dict[str, Any]) -> None:
+    m["components"][0]["contract"]["preprocessing_contract"] = "another"
+
+
+def changed_variant(m: dict[str, Any]) -> None:
+    m["variants"][0]["requirements"] = {"os": ["windows"]}
+
+
+def removed_variant(m: dict[str, Any]) -> None:
+    m["variants"].pop(0)
+
+
+def changed_version(m: dict[str, Any]) -> None:
+    m["version"] = "9.9.9"
+
+
+def no_variants(m: dict[str, Any]) -> None:
+    m["variants"] = "none"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        changed_weights,
+        changed_contract,
+        changed_variant,
+        removed_variant,
+        changed_version,
+        no_variants,
+    ],
+)
+def test_anything_else_changed_is_another_package(change: Any) -> None:
+    registered = manifest_dict()
+    offered = with_directml(registered)
+    change(offered)
+
+    assert not only_adds_variants(registered, offered)
