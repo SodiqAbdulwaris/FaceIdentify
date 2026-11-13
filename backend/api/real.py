@@ -32,7 +32,9 @@ decision policy (M5 track R; the development profile is `backend.api.development
   `processing_policy` (a usable policy file exists) and `ml_worker` (the state of the supervisor
   that last had the worker: `NOT_STARTED` until a request starts one, then `READY`, `FAILED`...),
   `execution_provider` (the provider that last ran, `NOT_STARTED` before any) and
-  `provider_fallback` (`ACTIVE` when that was not the preferred provider, else `NONE`). A change of
+  `provider_fallback` (`ACTIVE` when that was not the preferred provider, else `NONE`),
+  `execution_device` (the device it ran on as the system names it, such as the DirectML GPU's
+  name or `CPU`; owner decision 2026-11-12: show which device is in use). A change of
   provider is logged, a fallback as a warning: asking for DirectML or CUDA on a machine where it
   cannot start is never a silent CPU run.
 """
@@ -195,6 +197,7 @@ class ClientPool:
         self.lease = WorkerLease()
         # stage -> (the provider that last ran it, whether that was a fallback)
         self._ran: dict[str, tuple[str, bool]] = {}
+        self._devices: dict[str, str] = {}  # stage -> the device it last ran on
 
     def client_for(self, plan: PerceptionPlan) -> PerceptionClient:
         key = (
@@ -213,7 +216,7 @@ class ClientPool:
             supervisor,
             plan,
             new_id=self._new_id,
-            on_ran=lambda ran: self._record(plan, ran),
+            on_ran=lambda ran, device: self._record(plan, ran, device),
             lease=_PlanTurn(self, supervisor),
         )
 
@@ -233,13 +236,15 @@ class ClientPool:
         with self._lock:
             self._active = supervisor
 
-    def _record(self, plan: PerceptionPlan, ran: PlannedVariant) -> None:
-        """Remember the provider a stage ran on; log when it changes, a fallback as a warning."""
+    def _record(self, plan: PerceptionPlan, ran: PlannedVariant, device: str = "") -> None:
+        """Remember the provider a stage ran on, and the device; log when the provider changes, a
+        fallback as a warning."""
         stage = plan.detector if ran.kind == plan.detector[0].kind else plan.embedder
         now = (ran.provider, ran.provider != stage[0].provider)
         with self._lock:
             before = self._ran.get(ran.kind)
             self._ran[ran.kind] = now
+            self._devices[ran.kind] = device or ran.provider
         if now == before:
             return
         if now[1]:
@@ -256,11 +261,17 @@ class ClientPool:
         """The provider in use for readiness: what last ran, and whether it was a fallback."""
         with self._lock:
             ran = list(self._ran.values())
+            devices = set(self._devices.values())
         if not ran:
-            return {"execution_provider": NOT_STARTED, "provider_fallback": NONE}
+            return {
+                "execution_provider": NOT_STARTED,
+                "provider_fallback": NONE,
+                "execution_device": NOT_STARTED,
+            }
         return {
             "execution_provider": ",".join(sorted({provider for provider, _ in ran})),
             "provider_fallback": "ACTIVE" if any(fell for _, fell in ran) else NONE,
+            "execution_device": ",".join(sorted(devices)),
         }
 
     def close(self) -> None:

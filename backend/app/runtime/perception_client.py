@@ -131,7 +131,7 @@ class PerceptionClient:
         plan: PerceptionPlan,
         *,
         new_id: Callable[[], uuid.UUID],
-        on_ran: Callable[[PlannedVariant], None] | None = None,
+        on_ran: Callable[[PlannedVariant, str], None] | None = None,
         lease: Turn | None = None,
     ) -> None:
         self._supervisor = supervisor
@@ -177,7 +177,7 @@ class PerceptionClient:
                 )
         assert isinstance(response.output, DetectFacesOutput)  # (the operation's own output)
         # (a detection makes no worker segments, so there is nothing to release_output here)
-        self._heard(ran)
+        self._heard(ran, response)
         return Detected(response.output.detections, ran, fallbacks)
 
     def represent(
@@ -209,14 +209,15 @@ class PerceptionClient:
                     represented = Represented(self._read(response, asked), ran, fallbacks)
                 finally:
                     self._supervisor.release_output(request.request_id)
-        self._heard(ran)  # (after the release: an observer that fails cannot leak the output)
+        self._heard(ran, response)  # (after the release: a failing observer cannot leak it)
         return represented
 
     # --- internals -------------------------------------------------------------------------
 
-    def _heard(self, ran: PlannedVariant) -> None:
+    def _heard(self, ran: PlannedVariant, response: MLResponse) -> None:
+        """Tell the observer what ran, and on which device the worker says it ran."""
         if self._on_ran is not None:
-            self._on_ran(ran)
+            self._on_ran(ran, response.execution.adapter if response.execution else "")
 
     def _request(
         self,
