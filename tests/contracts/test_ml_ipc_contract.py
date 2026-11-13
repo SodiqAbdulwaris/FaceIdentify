@@ -6,6 +6,7 @@ faces is a success) hold.
 """
 
 import json
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -727,3 +728,18 @@ def test_a_handshake_at_another_protocol_version_is_refused_with_its_own_code() 
             parse_frame({"type": kind.value, "protocol_version": PROTOCOL_VERSION + 1, **extra})
 
         assert raised.value.code is MLErrorCode.UNSUPPORTED_PROTOCOL_VERSION
+
+
+def test_a_provenance_without_the_device_name_still_decodes() -> None:
+    """A worker from before `adapter` existed answers with four keys; that is still an answer."""
+    wire = PROVENANCE.to_wire()
+    del wire["adapter"]
+
+    decoded = ExecutionProvenance.from_wire(wire)
+
+    assert decoded == replace(PROVENANCE, adapter="")
+
+
+def test_a_provenance_with_an_unknown_key_is_still_refused() -> None:
+    with pytest.raises(ContractError, match="unexpected"):
+        ExecutionProvenance.from_wire(PROVENANCE.to_wire() | {"colour": "blue"})
