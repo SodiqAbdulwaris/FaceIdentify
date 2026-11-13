@@ -453,7 +453,8 @@ the same state.
 Errors: `400 MODEL_SOURCE_INVALID` (the path does not exist, a file is missing, or a file is not
 the selected model; the message names the file, never a path), `409 MODELS_ALREADY_INSTALLED`
 (different models are installed under the same key). Installing the same models again answers
-`201` and changes nothing. Only the development profile accepts a folder that declares itself a
+`201` and changes nothing, except that a package installed before it had DirectML variants gains
+them in place (the same models, more variants: persistence 18, delegated decision 2026-11-13). Only the development profile accepts a folder that declares itself a
 fixture (`fixture.json`), so tests can run the flow without the weights; a production build
 refuses it like any other file that is not in the table.
 

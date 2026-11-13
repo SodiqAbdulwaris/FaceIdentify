@@ -393,6 +393,23 @@ The hierarchy is fixed: `Component -> ComponentVersion -> ModelExport -> Runtime
 
 Use association tables for package membership only when the trusted manifest needs relational querying: `runtime_package_runtime_variants(package_id, runtime_variant_id)` and `runtime_package_model_exports(package_id, model_export_id)`. Metadata rows are retained after uninstall; only installation records/managed package bytes change. A calibration change creates a new immutable profile. Runtime fallback is decided by FastAPI after an ML error and creates a new execution segment; the worker never silently changes providers.
 
+> **Delegated decision 2026-11-13** (orchestrating session, under the owner's delegation of
+> 2026-11-09; the owner may reverse it): **a package that only adds runtime variants upgrades the
+> registered one in place.** Under a key already registered (and already installed on this machine),
+> a manifest whose every other field is identical (key, version, requirements, components with
+> their contracts, exports with their weights' digests and sizes) and which keeps every registered
+> variant unchanged replaces the stored `manifest_json`; its new `runtime_variants` rows and their
+> compatibility rows to the existing representation space are added in the same savepoint, and the
+> package installation's manifest artifact takes the new file's digest and size. No other row
+> changes: the weights and contracts are what identify a representation space, so every stored
+> vector and decision stays valid, and nothing is reprocessed. Anything else under a registered key
+> is refused as before. On disk, the package store replaces the package directory whole (the new
+> one verified while copying, the old one moved aside first and put back if the new one cannot be
+> published; a crash in between leaves one complete package, which recovery publishes). This is how
+> a library that registered a package from before the DirectML variants (2026-10-15) uses the GPU.
+> Built: `manifest.only_adds_variants`, `registration`, `package_store`
+> ([entry](../implementations/2026-11-13-package-variant-upgrade.md)).
+
 ## 19. Settings persistence
 
 Persist one singleton row for each normal user setting group. Settings are mutable preferences, not processing provenance.
