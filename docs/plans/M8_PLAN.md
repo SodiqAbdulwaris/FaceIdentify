@@ -76,9 +76,9 @@ merges, the packaging follow-up is **a re-freeze** (rebuild the installer), like
 | 5 First run | model install against the hash table, recognition mode, setup page; e2e against the real backend with stand-in models | the page in the real window with native dialogs; a real `buffalo_l` install |
 | 6 Upgrade, uninstall | pre-migration copy (last three kept) and a populated previous-release upgrade test; installing over an existing install keeps the library and its data, a silent uninstall keeps the library | an installer upgrade between two different revisions (only one build exists); uninstall keeping the state root and policy (the state root was a scratch folder) |
 | 7 Installer CI | `installer.yml` builds, installs, checks and uninstalls on a runner (green on its PR); `check_installed.py` (image, video through the shipped FFmpeg, both provider paths) | process-tree and network checks (SEC-005); the CI job's DirectML path on a runner with a GPU |
-| 8 Real-model check | not done | everything: it needs the weights, which are the owner's to install |
+| 8 Real-model check | run 2026-11-13 on this machine with scratch roots ([entry](../implementations/2026-11-13-m8-step8-real-model-check.md)): first run, real processing, naming, face search, reprocess, a video, DirectML on the RTX 4070 and forced CPU, no outbound connections, uninstall keeps the library; found and fixed a defect that stopped the worker in every packaged run | the live camera, a second clean machine, SmartScreen, a GPU DirectML cannot use |
 
-M8 therefore cannot be declared done: step 8 and the items in the right-hand column of steps 4, 6 and 7 have no evidence yet. A public release would
+Every step now has evidence; what the right-hand column lists is what only the owner, a second machine or a certificate can supply. A public release would
 additionally need the research-only weights replaced or licensed, a code-signing certificate, the update channel R9 left out and the second-machine clean-install checks.
 
 ## 2. What M8 must produce
