@@ -21,8 +21,8 @@ def build_handlers(config_text: str) -> dict[MLOperation, Handler]:
     real_session = ort.InferenceSession
     cpu_only = [name for name in ort.get_available_providers() if name != DIRECTML]
 
-    def session(model: Any, *args: Any, providers: list[str], **kwargs: Any) -> Any:
-        if DIRECTML in providers:
+    def session(model: Any, *args: Any, providers: list[Any], **kwargs: Any) -> Any:
+        if any(DIRECTML in (p if isinstance(p, tuple) else (p,)) for p in providers):
             raise RuntimeError(NO_ADAPTER)
         return real_session(model, *args, providers=providers, **kwargs)
 
