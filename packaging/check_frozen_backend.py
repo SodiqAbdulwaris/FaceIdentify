@@ -69,12 +69,20 @@ def main(folder: Path) -> int:
     report["providers"] = (
         json.loads(probe.stdout) if probe.returncode == 0 else probe.stderr[-2000:]
     )
-    worker = subprocess.run(
-        [str(exe), "--probe-worker"], capture_output=True, text=True, timeout=300, check=False
-    )
-    report["worker"] = (
-        json.loads(worker.stdout) if worker.returncode == 0 else worker.stderr[-2000:]
-    )
+    # Standard input stays open while the probe runs, as the shell keeps it for the host.
+    with subprocess.Popen(
+        [str(exe), "--probe-worker"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True,
+    ) as worker:  # fmt: skip
+        assert worker.stdout
+        assert worker.stdin
+        try:
+            answer = worker.stdout.readline()
+            worker.wait(timeout=300)
+        finally:
+            worker.stdin.close()
+            worker.kill()
+    report["worker"] = json.loads(answer) if worker.returncode == 0 else answer[-2000:]
     report["folder_megabytes"] = round(
         sum(p.stat().st_size for p in folder.rglob("*") if p.is_file()) / 1e6
     )

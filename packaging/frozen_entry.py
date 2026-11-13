@@ -58,6 +58,7 @@ def probe_providers() -> int:
 
 
 def probe_worker() -> int:
+    from backend.api.host import stdin_lifeline
     from backend.infrastructure.resources.shared_memory import OwnedSegment
     from backend.ml.contracts.messages import DetectFacesInput, MLRequest
     from backend.ml.contracts.protocol import MLOperation, MLStatus
@@ -72,6 +73,9 @@ def probe_worker() -> int:
         max_restarts=1,
         restart_window=600,
     )
+    # As the host does for the shell: a thread blocked on standard input while the worker is
+    # spawned (a worker that inherits that pipe never starts: found on the installed build).
+    stdin_lifeline()
     supervisor = MLSupervisor(lambda: ProcessWorker("frozen_probe:build_handlers"), policy)
     segment = OwnedSegment("uint8", (4, 4, 3), new_id=uuid.uuid4)
     segment.write(200)
