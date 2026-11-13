@@ -3,8 +3,7 @@
 - **Date:** 2026-11-13
 - **Milestone / tracker IDs:** follow-up to the DirectML work (owner requirement 2026-11-12: use the
   GPU when there is one); persistence 18
-- **Status:** done (the code and the spec text); moving the owner's live library follows in its own
-  step, recorded separately
+- **Status:** done, and applied to the development laptop's two state roots (below)
 - **Commits:** PR (number recorded when merged): `feat(runtime): upgrade a registered package that
   only adds variants`
 
@@ -60,3 +59,27 @@ variants: every other field is identical and the four existing variants are kept
   package was moved aside, or after the new one was published, recovers to one complete package; a
   publish that fails keeps the old package published.
 - Those three files: 220 passed; ruff and mypy clean.
+
+## Applied on the development laptop (2026-11-13)
+
+**Decision** (delegated, 2026-11-13, within the owner's permission of 2026-11-12 to install the
+DirectML version if it helps): upgrade the package at store level in the two state roots, after the
+upgrade path merged. The desktop app's library (`%APPDATA%\io.github.sodiqabdulwaris.faceidentify\library`,
+the shell's default since no saved choice or environment variable is set) turned out to be a
+**development-profile** library (`library_profile = DEVELOPMENT`: 13 faces as 64-dimensional
+development vectors, no real package ever registered), which the real profile refuses to open by
+design; it was left untouched, and no library was upgraded or migrated.
+
+| State root | Backup (dated, restore steps beside it) | Package before, after | Store check | A scratch real library on it |
+|---|---|---|---|---|
+| `%LOCALAPPDATA%\io.github.sodiqabdulwaris.faceidentify\state` (the desktop app's) | `local-models/backups/20261113T111732Z-app-state-runtime-packages` | 4 files, 191,310,429 bytes; 4 files, 191,310,827 bytes (the manifest gained the two DirectML variants) | verifies; CPU, CUDA and DirectML variants | `runtime_package: READY`, `execution_provider: DmlExecutionProvider`, `provider_fallback: NONE`, `execution_device: NVIDIA GeForce RTX 4070 Laptop GPU` |
+| `local-models/state` (developer and gate tooling) | `local-models/backups/20261113T111817Z-dev-state-runtime-packages` | the same | the same | the same |
+
+Untouched: both policy files (digests compared before and after), all three index folders (the app's
+two and the stale 3-vector `f0fd4e92c8c8492097e2307e82000af9`), the development-profile library, and
+the six evaluation-gate libraries (each has its own `local-state` folder, so the developer state root
+upgrade cannot reach them). `local-models` went from 594 to 599 files: the second backup's four files
+and its restore note. The scratch libraries used for the checks were deleted. To restore either state
+root: stop the app, replace its `runtime/packages` folder with the backup (the `.RESTORE.txt` beside
+each backup says exactly how).
+
