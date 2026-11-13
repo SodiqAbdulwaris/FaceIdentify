@@ -432,6 +432,33 @@ GET /api/v1/identities/{identity_id}/sources
 
 ---
 
+## 5.8 Face model installation (runtime)
+
+The face models are never bundled and never downloaded by the application (M8 decision R6): the
+user obtains them and points the application at them.
+
+```http
+GET  /api/v1/runtime/models
+POST /api/v1/runtime/models/install
+```
+
+`GET` answers `{package_key, installed, licence, source_url, files: [{name, size_bytes, sha256}]}`:
+what the application needs, the licence it comes under (research use only for the reference
+`buffalo_l` models) and the exact size and SHA-256 each file must have. `POST` takes
+`{path}` (absolute: a folder holding the files, or the downloaded zip), checks every file against
+that table and installs the package with a DirectML, a CUDA and a CPU variant per model, so a
+machine with a working GPU uses it and every other machine runs on the CPU. It answers `201` with
+the same state.
+
+Errors: `400 MODEL_SOURCE_INVALID` (the path does not exist, a file is missing, or a file is not
+the selected model; the message names the file, never a path), `409 MODELS_ALREADY_INSTALLED`
+(different models are installed under the same key). Installing the same models again answers
+`201` and changes nothing. Only the development profile accepts a folder that declares itself a
+fixture (`fixture.json`), so tests can run the flow without the weights; a production build
+refuses it like any other file that is not in the table.
+
+---
+
 ## 8.1 Merge
 
 ```http
