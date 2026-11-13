@@ -15,6 +15,7 @@ import os
 import secrets
 import sqlite3
 import subprocess
+import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -193,6 +194,27 @@ async def test_the_development_host_processes_a_video_and_finds_a_known_face_in_
         faces = (await client.get(f"/api/v1/sources/{video['id']}/occurrences")).json()["items"]
         assert [f["identity_id"] for f in faces] == [person["id"]]  # one appearance, that person
         assert faces[0]["end_ms"] > faces[0]["start_ms"]  # over time, not one frame
+
+
+def test_detection_waits_while_the_test_gate_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = tmp_path / "gate"
+    gate.touch()
+    monkeypatch.setenv(development.GATE_ENV, str(gate))
+    waiting = threading.Thread(target=development.wait_at_gate)
+    waiting.start()
+
+    waiting.join(0.3)
+    assert waiting.is_alive()  # held while the gate exists
+    gate.unlink()
+    waiting.join(5)
+    assert not waiting.is_alive()  # and goes on once it is gone
+
+
+def test_without_a_gate_detection_never_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(development.GATE_ENV, raising=False)
+    development.wait_at_gate()  # returns at once
 
 
 async def test_without_the_development_profile_importing_works_and_processing_is_unavailable(

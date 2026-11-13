@@ -12,7 +12,7 @@
 // single synthetic colour; no real face is used or committed.
 
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { render, screen, waitFor, within } from '@testing-library/react'
@@ -34,10 +34,12 @@ vi.mock('@/native/backend', async (importOriginal) => ({
 }))
 
 const LONG = { timeout: 120_000 }
-// Long enough that a pause lands before the end on a fast machine (one chunk is ten seconds of
-// video, sampled at two frames a second), small enough to stay quick.
-const CLIP_SECONDS = 3600
+// Two minutes: 240 frames at two a second, twelve chunks. The pause does not race the run: the
+// development profile's detection waits while the gate file exists (FACEIDENTIFY_DEVELOPMENT_GATE),
+// so the run is held RUNNING until the pause is asked for, then let go to its chunk boundary.
+const CLIP_SECONDS = 120
 let root: string
+let gate: string
 let backend: RunningBackend | null = null
 
 function ffmpeg(args: string[]): void {
@@ -50,6 +52,8 @@ function ffmpeg(args: string[]): void {
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'faceidentify-e2e-video-'))
   mkdirSync(join(root, 'library'))
+  gate = join(root, 'gate')
+  process.env.FACEIDENTIFY_DEVELOPMENT_GATE = gate // the backend inherits it
   window.location.hash = '#/library'
 })
 
@@ -58,6 +62,8 @@ beforeEach(() => {
 })
 
 afterAll(async () => {
+  rmSync(gate, { force: true })
+  delete process.env.FACEIDENTIFY_DEVELOPMENT_GATE
   await backend?.stop()
   rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
@@ -89,11 +95,15 @@ describe('the desktop video workflow', () => {
       await screen.findByRole('link', { name: /Person [0-9A-F]{6}/ }, LONG),
     ).getByText(/Person [0-9A-F]{6}/).textContent!
 
-    // the video: process it, pause it on its screen, resume it, let it finish
+    // the video: process it, pause it on its screen while it is held, let the chunk end, resume
+    writeFileSync(gate, '')
     await user.click(screen.getByRole('link', { name: 'Library' }))
     await user.click(await screen.findByRole('button', { name: 'Process scene' }, LONG))
     await user.click((await screen.findAllByRole('link', { name: /scene/ }, LONG))[0])
     await user.click(await screen.findByRole('button', { name: 'Pause' }, LONG))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull(), LONG)
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull() // pausing, still held
+    rmSync(gate)
     await user.click(await screen.findByRole('button', { name: 'Resume' }, LONG))
     expect(await screen.findByRole('heading', { name: 'Appearances' }, LONG)).toBeInTheDocument()
 
@@ -101,7 +111,8 @@ describe('the desktop video workflow', () => {
     const appearances = screen.getByRole('heading', { name: 'Appearances' }).parentElement!
     expect(within(appearances).getByRole('link', { name: person })).toBeInTheDocument()
     expect(within(appearances).getByText(/^0:00 to /)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument()
+    // the run's own state is fetched apart from the appearances: it reaches the screen a moment later
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull(), LONG)
 
     expect(await backend.stop()).toBe(0)
     backend = null
