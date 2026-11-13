@@ -2,7 +2,7 @@
 
 **Status:** **approved by the owner on 2026-10-21** (drafted 2026-10-16 during the unattended overnight
 run). The owner decided D1 to D10 as recommended and added D11 and D12; the outcomes are recorded in
-section 7. Built so far (2026-11-12): steps 1 to 7, and the real-world check (step 8) done; M6's definition of done still waits on TST-070's desktop video run (section 5). **Scope:** tracker milestone M6 (TST-060 to TST-070) in
+section 7. **M6 is complete as of 2026-11-13 (a delegated declaration under the owner's delegation of 2026-11-09; the owner may reverse it)** ([entry](../implementations/2026-11-13-m6-complete.md)): steps 1 to 8 built and section 5's definition of done met. **Scope:** tracker milestone M6 (TST-060 to TST-070) in
 [`TESTING_IMPLEMENTATION_TRACKER.md`](TESTING_IMPLEMENTATION_TRACKER.md), the Roadmap's Phase G
 (source reprocessing, issue #180) and video phase ([`Roadmap-Plan.md`](Roadmap-Plan.md) sections 66
 to 70), and the worker arbitration that long runs need (issue #175). **Milestone gate (tracker):**
