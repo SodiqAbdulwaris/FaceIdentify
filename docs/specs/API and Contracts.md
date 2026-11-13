@@ -459,6 +459,27 @@ refuses it like any other file that is not in the table.
 
 ---
 
+## 5.9 Recognition mode (runtime)
+
+How automatic recognition is the user's choice (M8 decision R7). The package ships no policy and
+never overwrites one; without a policy processing is unavailable and says so.
+
+```http
+GET /api/v1/runtime/recognition-mode
+PUT /api/v1/runtime/recognition-mode
+```
+
+`GET` answers `{mode, options: [{mode, description, policy}]}`: `mode` is `NONE` (no policy yet),
+`ASSISTED`, `AUTOMATIC` or `CUSTOM` (a policy file this application did not write, which is left as
+it is), and each option carries the exact policy it would write. *Assisted* is the abstain-only
+policy: every face after the first waits for the user. *Automatic* is the owner-approved point
+(match threshold 0.45, margin 0.10, no automatic new identity). `PUT` takes `{mode, shown_version}`
+(the version the user was shown for that mode) and writes that policy atomically; the real profile
+reads it on every request, so it applies at once. Errors: `409 POLICY_NOT_CONFIRMED` (a version
+other than the one shown), `409 POLICY_NOT_REPLACEABLE` (a custom policy is installed).
+
+---
+
 ## 8.1 Merge
 
 ```http

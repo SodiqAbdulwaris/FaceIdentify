@@ -177,6 +177,8 @@ choice and the self-check route; (c) the first-run screens; (d) the desktop end-
 
 **Part built 2026-11-13** ([entry](../implementations/2026-11-13-m8-step5a-model-installation.md)): 5(a), the model installation use case and routes with the hash table and the development-profile fixture path. Still open: 5(b) the recognition-mode choice and the self-check, 5(c) the screens, 5(d) the desktop end-to-end test, and the rollback tests.
 
+**Part built 2026-11-13** ([entry](../implementations/2026-11-13-m8-step5b-recognition-mode.md)): 5(b), the recognition-mode choice. The self-check is the readiness the backend already reports (decision in the entry).
+
 ### Step 6. Upgrade, migration, downgrade, uninstall
 
 - Before the backend applies any migration to an existing library it makes a consistent copy of the database
