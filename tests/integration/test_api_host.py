@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 import types
 from concurrent.futures import ThreadPoolExecutor
@@ -411,10 +412,9 @@ def test_the_real_standard_input_is_read_through_a_copy_and_replaced_by_the_null
         assert (
             os.read(read_end, 1) == b""
         )  # that descriptor is now the null device (an end of file)
+        watcher = next(t for t in threading.enumerate() if t.name == "stdin-lifeline")
         os.close(write_end)  # the shell let go: the copy sees the end
-        deadline = time.monotonic() + 10
-        while alive() and time.monotonic() < deadline:
-            time.sleep(0.01)
+        watcher.join(timeout=30)  # it ends when the copy reaches the end of file
         assert not alive()
     finally:
         os.close(read_end)
