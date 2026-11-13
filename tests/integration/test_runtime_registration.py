@@ -20,6 +20,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.memory.models import RepresentationSpace
+from backend.app.runtime import registration
 from backend.app.runtime.models import (
     Component,
     ComponentVersion,
@@ -427,6 +428,107 @@ def test_a_different_package_under_the_same_key_is_refused(
     other = installed(tmp_path / "b", manifest_dict(embedder=b"other weights"))
     with factory() as session, pytest.raises(RegistrationError, match="different package"):
         register(session, other)
+
+
+def with_directml(manifest: dict[str, Any]) -> dict[str, Any]:
+    """The same package with a DirectML variant beside each one it had (as installed since
+    2026-10-15, against packages installed before it)."""
+    upgraded = copy.deepcopy(manifest)
+    upgraded["variants"] += [
+        dict(
+            v,
+            provider="DmlExecutionProvider",
+            device_kind="GPU",
+            variant_key=f"{v['variant_key']}-dml",
+        )
+        for v in manifest["variants"]
+    ]
+    return upgraded
+
+
+def test_the_same_package_with_more_variants_upgrades_the_registered_one_in_place(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path
+) -> None:
+    """Delegated decision 2026-11-13: the weights and contracts are unchanged, so the space is the
+    same and every stored vector still matches; only the variants that may run it grow."""
+    first = manifest_dict()
+    before = register_once(factory, register, installed(tmp_path, first))
+    after = register_once(factory, register, installed(tmp_path, with_directml(first)))
+
+    assert after.runtime_package_id == before.runtime_package_id
+    assert after.installation_id == before.installation_id  # the same place, upgraded
+    embedder = next(e for e in after.exports if e.representation_space_id is not None)
+    old = next(e for e in before.exports if e.representation_space_id is not None)
+    assert embedder.representation_space_id == old.representation_space_id  # vectors still match
+    assert embedder.model_export_id == old.model_export_id
+    with factory() as session:
+        package = session.scalars(select(RuntimePackage)).one()
+        assert package.manifest_json == with_directml(first)
+        assert sorted(session.scalars(select(RuntimeVariant.provider))) == [
+            "CPUExecutionProvider", "CPUExecutionProvider",
+            "DmlExecutionProvider", "DmlExecutionProvider",
+        ]  # fmt: skip
+        linked = session.scalars(
+            select(RuntimeVariantRepresentationSpace.representation_space_id)
+        ).all()
+        assert set(linked) == {old.representation_space_id}  # both embedder variants, one space
+        assert count(session, RepresentationSpace) == 1
+        manifest = tmp_path / first["key"] / "manifest.json"
+        recorded = session.get(RuntimePackageInstallation, after.installation_id)
+        assert recorded is not None
+        artifact = session.get(Artifact, recorded.artifact_id)
+        assert artifact is not None
+        assert artifact.sha256 == hashlib.sha256(manifest.read_bytes()).digest()
+
+
+def other_weights() -> dict[str, Any]:
+    return with_directml(manifest_dict(embedder=b"other weights"))
+
+
+def other_contract() -> dict[str, Any]:
+    return with_directml(manifest_dict(embedder_contract=EMBEDDER_CONTRACT | {"dimension": 256}))
+
+
+def a_variant_removed() -> dict[str, Any]:
+    offered = with_directml(manifest_dict())
+    offered["variants"].pop(0)
+    return offered
+
+
+@pytest.mark.parametrize("offer", [other_weights, other_contract, a_variant_removed])
+def test_more_variants_with_anything_else_changed_is_still_refused(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path, offer: Any
+) -> None:
+    register_once(factory, register, installed(tmp_path / "a", manifest_dict()))
+
+    with (
+        factory() as session,
+        pytest.raises(RegistrationError, match="different package|immutable"),
+    ):
+        register(session, installed(tmp_path / "b", offer()))
+
+
+def test_an_upgrade_that_fails_part_way_leaves_the_registered_package_as_it_was(
+    factory: sessionmaker[Session], register: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One transaction: a failure after the manifest was updated rolls it back with the rest."""
+    first = manifest_dict()
+    register_once(factory, register, installed(tmp_path, first))
+
+    def broken(*_args: Any, **_kwargs: Any) -> Any:
+        raise RegistrationError("the disk went away")
+
+    monkeypatch.setattr(registration._Registrar, "_variant", broken)
+    with factory() as session:
+        with pytest.raises(RegistrationError, match="disk went away"):
+            register(session, installed(tmp_path, with_directml(first)))
+        session.commit()  # even a caller that commits anyway: the savepoint was rolled back
+
+    with factory() as session:
+        assert session.scalars(select(RuntimePackage)).one().manifest_json == first
+        assert sorted(set(session.scalars(select(RuntimeVariant.provider)))) == [
+            "CPUExecutionProvider"
+        ]
 
 
 def test_a_component_versions_contract_is_immutable(

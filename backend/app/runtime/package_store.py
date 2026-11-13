@@ -26,6 +26,7 @@ lack a file whose entry was lost; `verify` finds that, and a package is cheap to
 """
 
 import hashlib
+import json
 import os
 import shutil
 import uuid
@@ -38,6 +39,7 @@ from backend.app.runtime.manifest import (
     PackageManifest,
     file_problems,
     incompatibilities,
+    only_adds_variants,
     parse_manifest,
 )
 from backend.infrastructure.storage.layout import StorageRoots
@@ -142,7 +144,8 @@ class RuntimePackageStore:
         """Install the package in the directory `source` (a `manifest.json` and its files).
         Installing what is already installed, byte for byte, changes nothing. A published
         directory that is not complete holds nothing worth keeping and is replaced; a complete
-        one is never replaced. Every failure is a `PackageInstallError`."""
+        one is replaced only by the same package with more variants (`only_adds_variants`).
+        Every failure is a `PackageInstallError`."""
         manifest_bytes = self._read_manifest(source)
         manifest = self._parse(manifest_bytes)
         problems = incompatibilities(manifest, facts)
@@ -153,11 +156,21 @@ class RuntimePackageStore:
             raise InvalidPackageError(f"{manifest.key}: " + "; ".join(problems))
 
         final = self._published / manifest.key
+        retire: Path | None = None
         if final.exists():
-            existing = self._complete_with(final, manifest_bytes)
+            try:
+                existing = self._complete_with(final, manifest_bytes)
+            except PackageExistsError:
+                if not self._only_adds_variants(final, manifest_bytes):
+                    raise
+                # (the same package with more variants: replaced whole, see `_swap`)
+                retire = self._staging / f"{manifest.key}.{self._new_id().hex}"
+                existing = None
+            else:
+                if existing is None:
+                    self._discard_incomplete(final, manifest.key)
             if existing is not None:
                 return existing
-            self._discard_incomplete(final, manifest.key)
 
         stage = self._staging / f"{manifest.key}.{self._new_id().hex}"
         try:
@@ -169,6 +182,9 @@ class RuntimePackageStore:
             self._checkpoint("copied")
             self._write_marker(stage, manifest_bytes)
             self._checkpoint("marked")
+            if retire is not None:
+                self._swap(final, stage, retire)
+                return InstalledPackage(manifest.key, manifest.version, final, manifest)
             try:
                 os.rename(stage, final)
             except FileExistsError:  # another process published this key first
@@ -190,6 +206,30 @@ class RuntimePackageStore:
             shutil.rmtree(stage, ignore_errors=True)
             raise
         return InstalledPackage(manifest.key, manifest.version, final, manifest)
+
+    @staticmethod
+    def _only_adds_variants(directory: Path, manifest_bytes: bytes) -> bool:
+        try:
+            installed = json.loads((directory / MANIFEST_FILE).read_bytes())
+            offered = json.loads(manifest_bytes)
+        except (OSError, ValueError):
+            return False
+        return only_adds_variants(installed, offered)
+
+    def _swap(self, final: Path, stage: Path, retire: Path) -> None:
+        """Replace a complete package with a complete one that only adds variants. The old one is
+        moved into staging first: a crash between the two renames leaves both there, complete,
+        and recovery publishes one of them, either of which is consistent (registration follows
+        what is published when a library next opens)."""
+        os.rename(final, retire)
+        self._checkpoint("retired")
+        try:
+            os.rename(stage, final)
+        except OSError:
+            os.rename(retire, final)  # the old package stays published, as it was
+            raise
+        self._checkpoint("published")
+        shutil.rmtree(retire, ignore_errors=True)
 
     def _complete_with(self, directory: Path, manifest_bytes: bytes) -> InstalledPackage | None:
         """The package in `directory` if it is complete and its manifest is exactly this one;

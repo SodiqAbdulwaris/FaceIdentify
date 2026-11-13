@@ -296,6 +296,27 @@ def _variant(value: Any) -> VariantSpec:
 # --- compatibility and integrity -----------------------------------------------------------------
 
 
+def only_adds_variants(registered: Mapping[str, Any], offered: Mapping[str, Any]) -> bool:
+    """Whether `offered` is the `registered` package with more runtime variants and nothing else
+    changed: every other field (key, version, requirements, components with their contracts,
+    exports with their weights' digests and sizes) identical, and every registered variant still
+    there, unchanged. Such a package may replace the registered one in place: the weights and the
+    contracts are what make a representation space, so every stored vector stays in its space.
+
+    > **Delegated decision 2026-11-13** (orchestrating session, under the owner's delegation of
+    > 2026-11-09; the owner may reverse it): a package installed before the DirectML variants
+    > existed (2026-10-15) is upgraded in place by this rule, so a library that registered it can
+    > use the GPU without a new key, a reprocess or any change to a stored decision. Anything else
+    > under a registered key is refused, as before."""
+    others = set(registered) | set(offered)
+    if any(registered.get(name) != offered.get(name) for name in others - {"variants"}):
+        return False
+    variants = offered.get("variants")
+    if not isinstance(variants, list):
+        return False
+    return all(variant in variants for variant in registered.get("variants", []))
+
+
 def incompatibilities(manifest: PackageManifest, facts: Mapping[str, str]) -> list[str]:
     """Why this package is not for this machine; empty means compatible. Every requirement the
     package makes must be matched by a known fact (names and values compared case-insensitively):

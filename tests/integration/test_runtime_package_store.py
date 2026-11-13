@@ -5,6 +5,7 @@ killed process runs no cleanup), then a fresh store recovers from what is on dis
 """
 
 import hashlib
+import json
 import os
 import shutil
 import uuid
@@ -165,6 +166,103 @@ def test_a_different_package_under_an_installed_key_is_refused_and_the_original_
     assert (storage_roots.runtime_packages / "reference-cpu/models/detector.onnx").read_bytes() == (
         DETECTOR
     )
+    assert store.verify("reference-cpu") == []
+    assert staging_names(storage_roots) == []
+
+
+def with_more_variants(package: Path) -> Path:
+    """The same package (files and all) whose manifest adds a DirectML variant per export."""
+    manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
+    manifest["variants"] += [
+        dict(
+            v,
+            provider="DmlExecutionProvider",
+            device_kind="GPU",
+            variant_key=f"{v['variant_key']}-dml",
+        )
+        for v in manifest["variants"]
+    ]
+    (package / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return package
+
+
+def test_the_same_package_with_more_variants_replaces_the_installed_one(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path, tmp_path: Path
+) -> None:
+    """Delegated decision 2026-11-13: a package installed before its DirectML variants existed is
+    upgraded in place; the weights are verified again while copying, as for any install."""
+    store = store_for(storage_roots, new_id)
+    store.install(source, FACTS)
+    upgraded = with_more_variants(build_package(tmp_path / "upgraded"))
+
+    package = store.install(upgraded, FACTS)
+
+    assert len(package.manifest.variants) == 4
+    assert store.get("reference-cpu") == package
+    assert store.verify("reference-cpu") == []
+    published = storage_roots.runtime_packages / "reference-cpu"
+    assert (published / "manifest.json").read_bytes() == (upgraded / "manifest.json").read_bytes()
+    assert (published / "models" / "detector.onnx").read_bytes() == DETECTOR
+    assert staging_names(storage_roots) == []  # the old directory is gone, nothing left staged
+
+
+def test_more_variants_with_other_weights_is_still_refused_and_the_original_kept(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path, tmp_path: Path
+) -> None:
+    store = store_for(storage_roots, new_id)
+    store.install(source, FACTS)
+    other = with_more_variants(build_package(tmp_path / "other", detector=b"different weights"))
+
+    with pytest.raises(PackageExistsError):
+        store.install(other, FACTS)
+
+    assert store.verify("reference-cpu") == []
+    assert len(store.get("reference-cpu").manifest.variants) == 2  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("step", ["retired", "published"])
+def test_a_crash_while_upgrading_recovers_to_one_complete_package(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path, tmp_path: Path, step: str
+) -> None:
+    store_for(storage_roots, new_id).install(source, FACTS)
+    upgraded = with_more_variants(build_package(tmp_path / "upgraded"))
+    with pytest.raises(Crash):
+        store_for(storage_roots, new_id, crash_at=step).install(upgraded, FACTS)
+
+    restarted = store_for(storage_roots, new_id)
+    restarted.recover()
+
+    package = restarted.get("reference-cpu")
+    assert package is not None  # the old or the new, never neither
+    assert len(package.manifest.variants) in (2, 4)
+    assert restarted.verify("reference-cpu") == []
+    assert staging_names(storage_roots) == []
+
+
+def test_an_upgrade_that_cannot_publish_keeps_the_old_package_published(
+    storage_roots: StorageRoots, new_id: SeededUUIDs, source: Path, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    store = store_for(storage_roots, new_id)
+    store.install(source, FACTS)
+    upgraded = with_more_variants(build_package(tmp_path / "upgraded"))
+    rename = os.rename
+    calls: list[str] = []
+
+    def second_fails(src: object, dst: object) -> None:
+        calls.append(str(src))
+        if len(calls) == 2:  # the new package's move into place
+            raise PermissionError("in use")
+        rename(src, dst)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "rename", second_fails)
+    with pytest.raises(PackageInstallError):
+        store.install(upgraded, FACTS)
+    monkeypatch.setattr(os, "rename", rename)
+
+    package = store.get("reference-cpu")
+    assert package is not None
+    assert len(package.manifest.variants) == 2  # the old one, back in place
     assert store.verify("reference-cpu") == []
     assert staging_names(storage_roots) == []
 
