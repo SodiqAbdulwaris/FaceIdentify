@@ -248,3 +248,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-12 | [M8 step 7 (part): the installed-build check and the installer CI job](2026-11-12-m8-step7-installed-build-check.md) | done; the job runs first on this PR |
 | 2026-11-13 | [M8 step 5(a): installing the face models the user obtained](2026-11-13-m8-step5a-model-installation.md) | done; the first-run screens next |
 | 2026-11-12 | [M7 step 4: camera sessions and encounters](2026-11-12-m7-step4-camera-sessions.md) | done; routes and screen next (step 5) |
+| 2026-11-13 | [M6 complete: the desktop video run (TST-070), TST-063 and TST-069 confirmed](2026-11-13-m6-complete.md) | done; delegated declaration, the owner may reverse it |
