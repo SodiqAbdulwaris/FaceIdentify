@@ -107,6 +107,25 @@ def test_a_file_that_is_not_the_selected_model_is_refused_and_nothing_is_install
     assert store.installed() == []
 
 
+def test_a_refused_install_leaves_the_models_that_were_already_installed_working(
+    models: Path, trusted: None, store: RuntimePackageStore, tmp_path: Path
+) -> None:
+    first = install_models(models, store, allow_fixture=False)
+    before = (first.path / "manifest.json").read_bytes()
+    damaged = tmp_path / "damaged"
+    damaged.mkdir()
+    (damaged / DETECTOR).write_bytes(b"not the selected detector")
+    (damaged / EMBEDDER).write_bytes((models / EMBEDDER).read_bytes())
+
+    with pytest.raises(ModelSourceError, match=DETECTOR):
+        install_models(damaged, store, allow_fixture=False)
+
+    assert store.get(PACKAGE_KEY) is not None
+    assert store.verify(PACKAGE_KEY) == []  # every file of the first install still matches
+    assert (first.path / "manifest.json").read_bytes() == before
+    assert not list(store.root.parent.parent.joinpath("temp").iterdir())  # no scratch is left
+
+
 def test_a_missing_file_a_missing_path_and_a_bad_zip_are_refused(
     models: Path, trusted: None, store: RuntimePackageStore, tmp_path: Path
 ) -> None:
