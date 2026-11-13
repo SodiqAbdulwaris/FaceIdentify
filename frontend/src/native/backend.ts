@@ -52,6 +52,16 @@ export async function choosePicture(): Promise<string | null> {
   return inShell() ? invoke<string | null>('choose_picture') : null
 }
 
+/** The face models the user obtained: a zip or a folder picked in the native dialog (null if they cancel). */
+export async function chooseModels(kind: 'zip' | 'folder'): Promise<string | null> {
+  return inShell() ? invoke<string | null>('choose_models', { kind }) : null
+}
+
+/** The folder the user picks to keep the library in (saved by the shell, used after a restart). */
+export async function chooseLibrary(): Promise<string | null> {
+  return inShell() ? invoke<string | null>('choose_library') : null
+}
+
 /** Where the library is kept (empty outside the shell). */
 export async function libraryRoot(): Promise<string> {
   if (!inShell()) return ''

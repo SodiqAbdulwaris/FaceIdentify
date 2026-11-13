@@ -33,6 +33,33 @@ export interface Page<T> {
   page: { next_cursor: string | null; has_more: boolean }
 }
 
+export interface ModelFile {
+  name: string
+  size_bytes: number
+  sha256: string
+}
+
+/** The face models the app needs and whether they are installed (`/runtime/models`). */
+export interface ModelsState {
+  package_key: string
+  installed: boolean
+  licence: string
+  source_url: string
+  files: ModelFile[]
+}
+
+export interface ModeOption {
+  mode: 'ASSISTED' | 'AUTOMATIC'
+  description: string
+  policy: Record<string, unknown>
+}
+
+/** How automatic recognition is: NONE before a choice, CUSTOM for a policy the owner made. */
+export interface ModeState {
+  mode: 'NONE' | 'ASSISTED' | 'AUTOMATIC' | 'CUSTOM'
+  options: ModeOption[]
+}
+
 export interface Readiness {
   state: string
   capabilities?: Record<string, string>

@@ -42,6 +42,19 @@ describe('ApiClient', () => {
     expect(without.headers.Authorization).toBe('Bearer secret-token')
   })
 
+  it('puts JSON with a content type', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => respond(200, { mode: 'ASSISTED' }))
+    const client = new ApiClient(connection, fetcher)
+
+    await client.put('/api/v1/runtime/recognition-mode', { mode: 'ASSISTED' })
+
+    const [url, init] = fetcher.mock.calls[0]
+    expect(url).toBe('http://127.0.0.1:5000/api/v1/runtime/recognition-mode')
+    expect(init.method).toBe('PUT')
+    expect(init.headers['Content-Type']).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ mode: 'ASSISTED' })
+  })
+
   it('turns the one error shape into an ApiError', async () => {
     const error = {
       code: 'SOURCE_NOT_FOUND',
@@ -69,7 +82,12 @@ describe('ApiClient', () => {
 
     const failure = await client.get('/x').catch((e: unknown) => e)
 
-    expect(failure).toMatchObject({ status: 502, code: 'HTTP_ERROR', details: null, retryable: false })
+    expect(failure).toMatchObject({
+      status: 502,
+      code: 'HTTP_ERROR',
+      details: null,
+      retryable: false,
+    })
   })
 
   it('reports an unreachable backend as a retryable network error', async () => {
@@ -86,9 +104,7 @@ describe('ApiClient', () => {
   it('fetches a file as a blob with the token (an image tag could not)', async () => {
     const fetcher = vi
       .fn()
-      .mockResolvedValue(
-        new Response('bytes', { headers: { 'Content-Type': 'image/png' } }),
-      )
+      .mockResolvedValue(new Response('bytes', { headers: { 'Content-Type': 'image/png' } }))
     const client = new ApiClient(connection, fetcher)
 
     const blob = await client.blob('/api/v1/sources/s1/media')

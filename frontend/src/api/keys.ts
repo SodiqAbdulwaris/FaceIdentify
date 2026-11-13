@@ -2,6 +2,8 @@
 
 export const keys = {
   readiness: ['readiness'] as const,
+  models: ['runtime', 'models'] as const,
+  recognitionMode: ['runtime', 'recognition-mode'] as const,
   sources: ['sources'] as const,
   recycledSources: ['sources', 'recycled'] as const, // under `sources`: one invalidation covers both
   source: (id: string) => ['source', id] as const,
