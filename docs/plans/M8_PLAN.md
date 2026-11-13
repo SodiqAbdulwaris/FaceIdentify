@@ -65,6 +65,22 @@ merges, the packaging follow-up is **a re-freeze** (rebuild the installer), like
 
 **Needs the owner:** the real-model packaged check (step 8) and the choice of when, if ever, to sign (R10).
 
+## 1b. Evidence per step (2026-11-13)
+
+| Step | Evidence | Not verified |
+|---|---|---|
+| 1 Notices | `generate_notices.py` (inventory, `--check` in CI, licence texts, CPython and its libraries, FFmpeg) | none known |
+| 2 Frozen backend | CI job `Frozen backend`: READY, migration, clean stop, spawned worker sees DirectML and CPU, one request through the real worker process | the real models in the frozen worker (step 8) |
+| 3 Shell and installer | installer built and installed to a scratch folder; the installed shell started its backend, closing the window ended both; silent uninstall exit 0 | WebView2 on a clean machine, SmartScreen (unsigned, R10) |
+| 4 Runtime packages | FFmpeg shipped and hash-checked before first use, telemetry off, a source rejected leaves the installed models intact | activation rollback after a failed self-check (TST-082) |
+| 5 First run | model install against the hash table, recognition mode, setup page; e2e against the real backend with stand-in models | the page in the real window with native dialogs; a real `buffalo_l` install |
+| 6 Upgrade, uninstall | pre-migration copy (last three kept) and a populated previous-release upgrade test; installing over an existing install keeps the library and its data, a silent uninstall keeps the library | an installer upgrade between two different revisions (only one build exists); uninstall keeping the state root and policy (the state root was a scratch folder) |
+| 7 Installer CI | `installer.yml` builds, installs, checks and uninstalls on a runner (green on its PR); `check_installed.py` (image, video through the shipped FFmpeg, both provider paths) | process-tree and network checks (SEC-005); the CI job's DirectML path on a runner with a GPU |
+| 8 Real-model check | not done | everything: it needs the weights, which are the owner's to install |
+
+M8 therefore cannot be declared done: step 8 and the items in the right-hand column of steps 4, 6 and 7 have no evidence yet. A public release would
+additionally need the research-only weights replaced or licensed, a code-signing certificate, the update channel R9 left out and the second-machine clean-install checks.
+
 ## 2. What M8 must produce
 
 1. An installer the owner runs on a Windows 11 machine that has none of the development tools (no Python,
