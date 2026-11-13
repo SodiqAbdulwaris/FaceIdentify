@@ -154,8 +154,23 @@ jobs:
       - name: Tests against the real backend
         run: cargo test -- --ignored
         working-directory: desktop/src-tauri
+      # The pinned LGPL FFmpeg, as in the backend job: the video workflow (TST-070) makes its clip
+      # with it and the backend samples frames through it. Never committed.
+      - uses: actions/cache@v4
+        with:
+          path: ffmpeg-download
+          key: ffmpeg-e907b01fa4783913151237e37df2a10fa97d99a1598a021bf59d4ae62ffed4c0
+      - name: Install the pinned FFmpeg
+        shell: bash
+        run: |
+          mkdir -p ffmpeg-download
+          zip=ffmpeg-download/ffmpeg.zip
+          url="$(uv run python -c "import runpy; print(runpy.run_path('scripts/install_ffmpeg.py')['URL'])")"
+          [ -f "$zip" ] || curl -sSfL --retry 3 -o "$zip" "$url"
+          uv run python scripts/install_ffmpeg.py --zip "$zip" --local-state-root "$RUNNER_TEMP/local-state"
+          echo "FACEIDENTIFY_FFMPEG_DIR=$RUNNER_TEMP/local-state/runtime/ffmpeg" >> "$GITHUB_ENV"
       # The whole workflow (TST-052, TST-053): the real web app against the real backend, with a
-      # restart in the middle.
+      # restart in the middle; and the video workflow (TST-070): process, pause, resume, appearances.
       - name: End-to-end workflow
         run: npm run test:e2e
 
