@@ -12,6 +12,7 @@ from backend.api.routes import (
     memory,
     people,
     processing,
+    recognition_mode,
     runtime_models,
     search,
     sources,
@@ -32,3 +33,4 @@ api_router.include_router(search.router)
 api_router.include_router(face_search.router)
 api_router.include_router(runtime_models.router)
 api_router.include_router(cameras.router)
+api_router.include_router(recognition_mode.router)
