@@ -392,3 +392,22 @@ def test_a_fallback_while_embedding_embeds_the_encounter_again_under_the_new_pro
     reps = rows(pipeline, Representation, Representation.observation_id.in_([f.id for f in faces]))
     assert {r.execution_segment_id for r in reps} == {segments[1].id}
     assert camera.perception.represented == 2 * len(faces)  # embedded twice: before and after
+
+
+def test_an_encounter_whose_face_changed_while_it_was_accepted_is_refused(
+    pipeline: Pipeline, red: uuid.UUID, camera: Camera, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.app.memory.repository import ObservationRepository
+
+    real = ObservationRepository.transition
+
+    def changed(self: ObservationRepository, *args: Any, **kwargs: Any) -> bool:
+        real(self, *args, **kwargs)
+        return False  # (as if another writer had moved the observation first)
+
+    monkeypatch.setattr(ObservationRepository, "transition", changed)
+
+    with pytest.raises(AcceptanceError, match="changed while accepting"):
+        camera.run(*visit("red", 0, 2), *empty(2, 1.6))
+
+    assert rows(pipeline, Occurrence, Occurrence.source_id == camera.id) == []
