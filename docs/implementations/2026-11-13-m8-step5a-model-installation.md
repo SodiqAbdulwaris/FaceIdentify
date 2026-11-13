@@ -37,6 +37,7 @@ requirement (a working GPU is used, otherwise the CPU, with no manual step) hold
 - Installing the same models again answers `201` (the store is idempotent for an identical package); different ones are a `409`, because a library refuses
   a different manifest for a package it has registered (`INSTALLING_MODELS_WINDOWS.md` section 3).
 - The error messages name the file, never a path, and the store's own refusals are not shown to the user.
+- The path is whatever absolute path the user chose in the file dialog, including a network location, exactly as for importing an image: the user is the one reading it, the application opens no connection of its own, and every file is checked against the table before it is trusted. No rule against network paths exists in the repository (searched the specs, rules and plans); if the owner wants one, it belongs in a shared path validator for imports and models together.
 
 ## Open issues / follow-ups
 
