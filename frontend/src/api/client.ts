@@ -52,11 +52,16 @@ export class ApiClient {
         headers: { ...init.headers, Authorization: `Bearer ${this.connection.token}` },
       })
     } catch {
-      throw new ApiError(0, { code: 'NETWORK_ERROR', message: 'The backend could not be reached.', retryable: true })
+      throw new ApiError(0, {
+        code: 'NETWORK_ERROR',
+        message: 'The backend could not be reached.',
+        retryable: true,
+      })
     }
     if (response.ok) return response
     const body = await response.json().catch(() => null)
-    const error = body && typeof body === 'object' && 'error' in body ? (body.error as ErrorBody) : null
+    const error =
+      body && typeof body === 'object' && 'error' in body ? (body.error as ErrorBody) : null
     throw new ApiError(
       response.status,
       error ?? { code: 'HTTP_ERROR', message: `The backend answered ${response.status}.` },
@@ -71,7 +76,20 @@ export class ApiClient {
     const init: RequestInit =
       body === undefined
         ? { method: 'POST' }
-        : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        : {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }
+    return (await this.send(path, init)).json() as Promise<T>
+  }
+
+  async put<T>(path: string, body: unknown): Promise<T> {
+    const init: RequestInit = {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
     return (await this.send(path, init)).json() as Promise<T>
   }
 

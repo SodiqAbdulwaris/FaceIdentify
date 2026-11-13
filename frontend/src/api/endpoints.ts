@@ -7,6 +7,8 @@ import type {
   IdentitySummary,
   ImportRequest,
   OccurrenceSummary,
+  ModelsState,
+  ModeState,
   Page,
   FaceSearchResponse,
   CameraSession,
@@ -27,6 +29,12 @@ const V1 = '/api/v1'
 
 export const endpoints = (api: ApiClient) => ({
   readiness: () => api.get<Readiness>('/readiness'),
+
+  models: () => api.get<ModelsState>(`${V1}/runtime/models`),
+  installModels: (path: string) => api.post<ModelsState>(`${V1}/runtime/models/install`, { path }),
+  recognitionMode: () => api.get<ModeState>(`${V1}/runtime/recognition-mode`),
+  chooseRecognitionMode: (mode: string, shownVersion: string) =>
+    api.put<ModeState>(`${V1}/runtime/recognition-mode`, { mode, shown_version: shownVersion }),
 
   listSources: (cursor?: string, state: 'ACTIVE' | 'RECYCLED' = 'ACTIVE') =>
     api.get<Page<SourceSummary>>(`${V1}/sources`, { state, cursor, limit: 50 }),

@@ -3,6 +3,8 @@ import {
   NO_SHELL_MESSAGE,
   backendStatus,
   chooseImages,
+  chooseLibrary,
+  chooseModels,
   choosePicture,
   inShell,
   libraryRoot,
@@ -22,6 +24,8 @@ describe('outside the desktop shell', () => {
     expect(inShell()).toBe(false)
     expect(await chooseImages()).toEqual([])
     expect(await choosePicture()).toBeNull()
+    expect(await chooseModels('folder')).toBeNull()
+    expect(await chooseLibrary()).toBeNull()
     expect(await libraryRoot()).toBe('')
   })
 
@@ -65,6 +69,7 @@ describe('inside the desktop shell', () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === 'backend_status') return { state: 'starting' }
       if (command === 'choose_images') return ['C:\\pictures\\a.png']
+      if (command === 'choose_models') return 'C:\\downloads\\buffalo_l.zip'
       if (command === 'library_info') return { library_root: 'C:\\FaceIdentify\\library' }
       throw new Error(`unexpected command ${command}`)
     })
@@ -73,6 +78,8 @@ describe('inside the desktop shell', () => {
       expect(inShell()).toBe(true)
       expect(await backendStatus()).toEqual({ state: 'starting' })
       expect(await chooseImages()).toEqual(['C:\\pictures\\a.png'])
+      expect(await chooseModels('zip')).toBe('C:\\downloads\\buffalo_l.zip')
+      expect(invoke).toHaveBeenCalledWith('choose_models', { kind: 'zip' })
       expect(await libraryRoot()).toBe('C:\\FaceIdentify\\library')
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
