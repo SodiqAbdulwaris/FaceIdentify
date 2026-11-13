@@ -6,6 +6,7 @@ Clips are FFmpeg's own test patterns, made by the pinned build: no face, no user
 import math
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +94,33 @@ def test_stopping_early_ends_the_decoder(tmp_path: Path, monkeypatch: pytest.Mon
     stream.close()
 
     assert started[0].returncode is not None  # killed and waited for, not left running
+
+
+def test_a_reader_that_stalls_holds_the_decoder_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backpressure (TST-069): frames come over a pipe, so while the executor is busy the decoder
+    waits instead of decoding ahead into memory. An hour of tiny frames is 7,200 frames, about
+    66 MB of pixels, far more than a pipe holds; decoded unthrottled it takes well under the stall
+    here."""
+    clip = make_clip(
+        tmp_path / "hour.mp4", seconds=3600, size="64x48", rate=2, source="color=c=red"
+    )
+    started: list[subprocess.Popen[bytes]] = []
+    real = subprocess.Popen
+
+    def recorded(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real(*args, **kwargs)  # type: ignore[call-overload]
+        started.append(process)
+        return process  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(subprocess, "Popen", recorded)
+    stream = sampled_frames(installed_tools(), clip, width=64, height=48)
+    next(stream)
+    time.sleep(3)  # the executor is busy with the first chunk
+
+    assert started[0].poll() is None  # still running: held back by the pipe, not finished ahead
+    assert sum(1 for _ in stream) == 7199  # and every frame still comes, in order, when read
 
 
 def test_a_frame_without_a_time_is_a_corrupt_video(

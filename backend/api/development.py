@@ -19,9 +19,10 @@ Real calibration is TST-044; real models are issue 69.
 
 import hashlib
 import os
+import time
 import uuid
-from contextlib import AbstractContextManager, nullcontext
 from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -58,6 +59,7 @@ EMBEDDER_KEY: Final = "development-face-embedder"
 SPACE_KEY: Final = "development-pixel-hash-embedding-v1"
 POLICY_VERSION: Final = "development-uncalibrated-v1"
 PROVIDER: Final = "CPUExecutionProvider"
+GATE_ENV: Final = "FACEIDENTIFY_DEVELOPMENT_GATE"
 DIMENSION: Final = 64  # enough that unrelated images are far apart (cosine near 0)
 
 _VERSION: Final = "0.0.0-development"
@@ -299,6 +301,7 @@ class DevelopmentPerception:
         self._dimension = plan.dimension
 
     def detect(self, pixels: Any) -> Detected:
+        wait_at_gate()
         return Detected((Detection(0, 0, (0.2, 0.2, 0.8, 0.8), 0.9, None),), self._detector)
 
     def turn(self) -> AbstractContextManager[None]:
@@ -315,6 +318,15 @@ class DevelopmentPerception:
         vector /= np.linalg.norm(vector)
         faces = tuple(FaceVector(d.detection_index, vector, "L2_NORMALIZED") for d in detections)
         return Represented(faces, self._embedder, ())
+
+
+def wait_at_gate() -> None:
+    """For tests: while the file `FACEIDENTIFY_DEVELOPMENT_GATE` names exists, detection waits. A
+    desktop test holds a video run `RUNNING` this way, asks it to pause, then opens the gate, so the
+    pause lands at the chunk boundary every time instead of racing the run (TST-070)."""
+    gate = os.environ.get(GATE_ENV)
+    while gate and Path(gate).exists():
+        time.sleep(0.05)
 
 
 def development_processing(settings: LibrarySettings) -> ProcessingSettings:
