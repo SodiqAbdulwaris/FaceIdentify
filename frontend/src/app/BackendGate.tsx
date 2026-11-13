@@ -60,9 +60,22 @@ function LibraryGate({ children }: { children: ReactNode }) {
 
   const state = readiness.data?.state
   if (state === 'READY' || state === 'DEGRADED') {
+    const capabilities = readiness.data?.capabilities ?? {}
+    // Only the real profile reports these; a missing one is not a reason to show the notice.
+    const unfinished =
+      capabilities.runtime_package === 'UNAVAILABLE' ||
+      capabilities.processing_policy === 'UNAVAILABLE'
     return (
       <>
         <EventsBridge />
+        {unfinished ? (
+          <p role="note" className="border-b bg-amber-50 px-4 py-2 text-sm text-amber-950">
+            Recognition is not set up yet, so pictures are not processed.{' '}
+            <a className="underline" href="#/setup">
+              Finish setting it up
+            </a>
+          </p>
+        ) : null}
         {children}
       </>
     )

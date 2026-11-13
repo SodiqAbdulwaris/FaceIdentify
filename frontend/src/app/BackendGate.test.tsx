@@ -25,7 +25,11 @@ class QuietSocket {
   close() {}
 }
 
-function readinessIs(...bodies: Array<{ state: string; failure?: string } | 'down'>) {
+function readinessIs(
+  ...bodies: Array<
+    { state: string; failure?: string; capabilities?: Record<string, string> } | 'down'
+  >
+) {
   const queue = [...bodies]
   vi.stubGlobal(
     'fetch',
@@ -62,7 +66,9 @@ describe('BackendGate', () => {
 
     renderGate()
 
-    expect(await screen.findByRole('heading', { name: 'Starting FaceIdentify…' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Starting FaceIdentify…' }),
+    ).toBeInTheDocument()
     expect(screen.queryByText('the library')).toBeNull()
   })
 
@@ -71,7 +77,9 @@ describe('BackendGate', () => {
 
     renderGate()
 
-    expect(await screen.findByRole('heading', { name: 'FaceIdentify could not start' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'FaceIdentify could not start' }),
+    ).toBeInTheDocument()
     expect(screen.getByText(/exit code 3/)).toBeInTheDocument()
   })
 
@@ -81,7 +89,9 @@ describe('BackendGate', () => {
 
     renderGate()
 
-    expect(await screen.findByRole('heading', { name: 'Opening your library…' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Opening your library…' }),
+    ).toBeInTheDocument()
     expect(await screen.findByText('the library', {}, { timeout: 3000 })).toBeInTheDocument()
   })
 
@@ -92,6 +102,32 @@ describe('BackendGate', () => {
     renderGate()
 
     expect(await screen.findByText('the library')).toBeInTheDocument()
+  })
+
+  it('points to the setup when the models or the recognition mode are not in place yet', async () => {
+    status.current = { state: 'ready', connection }
+    readinessIs({ state: 'READY', capabilities: { runtime_package: 'UNAVAILABLE' } })
+
+    renderGate()
+
+    expect(await screen.findByText('the library')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Finish setting it up' })).toHaveAttribute(
+      'href',
+      '#/setup',
+    )
+  })
+
+  it('says nothing about setup when everything is in place', async () => {
+    status.current = { state: 'ready', connection }
+    readinessIs({
+      state: 'READY',
+      capabilities: { runtime_package: 'READY', processing_policy: 'READY' },
+    })
+
+    renderGate()
+
+    expect(await screen.findByText('the library')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Finish setting it up' })).toBeNull()
   })
 
   it('keeps trying while the backend is not yet answering', async () => {
@@ -109,7 +145,9 @@ describe('BackendGate', () => {
 
     renderGate()
 
-    expect(await screen.findByRole('heading', { name: 'Your library could not be opened' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('heading', { name: 'Your library could not be opened' }),
+    ).toBeInTheDocument()
     expect(screen.getByText('Reason: LibraryLockedError')).toBeInTheDocument()
     expect(screen.queryByText('the library')).toBeNull()
   })

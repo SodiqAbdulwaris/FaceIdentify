@@ -6,6 +6,7 @@ import { IdentityPage } from '@/features/identities/IdentityPage'
 import { ProcessingPage } from '@/features/processing/ProcessingPage'
 import { LibraryPage } from '@/features/library/LibraryPage'
 import { SearchPage } from '@/features/search/SearchPage'
+import { SetupPage } from '@/features/setup/SetupPage'
 import { SourcePage } from '@/features/source/SourcePage'
 import { Layout } from './Layout'
 
@@ -24,6 +25,7 @@ export const routes: RouteObject[] = [
       { path: 'search', element: <SearchPage /> },
       { path: 'cameras', element: <CamerasPage /> },
       { path: 'cameras/:cameraId', element: <CameraHistoryPage /> },
+      { path: 'setup', element: <SetupPage /> },
       { path: 'processing/:runId', element: <ProcessingPage /> },
     ],
   },
