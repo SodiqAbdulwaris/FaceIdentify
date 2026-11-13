@@ -259,3 +259,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-12 | [M7 step 7: runtime validation and benchmarks](2026-11-12-m7-step7-runtime-validation.md) | done; the real-world check at the camera waits for the owner |
 | 2026-11-13 | [M8 step 5(b): the recognition-mode choice](2026-11-13-m8-step5b-recognition-mode.md) | done |
 | 2026-11-13 | [M8 step 5(c)(d): the first-run setup screens and their end-to-end test](2026-11-13-m8-step5cd-first-run-screens.md) | done |
+| 2026-11-13 | [The frontend lint gate fails on warnings again](2026-11-13-frontend-lint-denies-warnings.md) | done |
