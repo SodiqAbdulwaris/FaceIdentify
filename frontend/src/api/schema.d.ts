@@ -423,6 +423,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runtime/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Models */
+        get: operations["get_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime/models/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install */
+        post: operations["install"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -936,6 +970,11 @@ export interface components {
              */
             storage_mode: "MANAGED" | "REFERENCED";
         };
+        /** InstallModelsRequest */
+        InstallModelsRequest: {
+            /** Path */
+            path: string;
+        };
         /** JobBrief */
         JobBrief: {
             /** Attempt Number */
@@ -1028,6 +1067,28 @@ export interface components {
             id: string;
             /** Revision */
             revision: number;
+        };
+        /** ModelFile */
+        ModelFile: {
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** ModelsState */
+        ModelsState: {
+            /** Files */
+            files: components["schemas"]["ModelFile"][];
+            /** Installed */
+            installed: boolean;
+            /** Licence */
+            licence: string;
+            /** Package Key */
+            package_key: string;
+            /** Source Url */
+            source_url: string;
         };
         /** NamePerson */
         NamePerson: {
@@ -2308,6 +2369,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OccurrenceSummary"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelsState"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    install: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallModelsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelsState"];
                 };
             };
             /** @description The one error shape. */
