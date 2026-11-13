@@ -251,3 +251,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-13 | [M6 complete: the desktop video run (TST-070), TST-063 and TST-069 confirmed](2026-11-13-m6-complete.md) | done; delegated declaration, the owner may reverse it |
 | 2026-11-13 | [DirectML on the high-performance GPU, then any adapter, then the CPU](2026-11-13-directml-high-performance-adapter.md) | done; owner decision 2026-11-12 |
 | 2026-11-12 | [Fix: a run whose acceptance failed is accepted on the next turn](2026-11-12-retry-unaccepted-run.md) | done; the D8 FINALIZING stall |
+| 2026-11-13 | [Video throughput: where the time goes; the worker prepares each frame once](2026-11-13-video-throughput.md) | done; DirectML 8.5 to 10.1 video s per s, CPU 3.4 to 3.6, outputs bit-identical |
