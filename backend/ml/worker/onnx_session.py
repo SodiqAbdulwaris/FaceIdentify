@@ -27,9 +27,11 @@ first choice: `default` (DirectML's own choice only) or an adapter number. The a
 written to the worker's standard error, which the host log keeps.
 """
 
+import contextlib
 import hashlib
 import os
 import sys
+import weakref
 from pathlib import Path
 
 import onnxruntime as ort
@@ -84,6 +86,19 @@ def adapter_name(options: dict[str, str]) -> str:
     return "the adapter DirectML chose"
 
 
+# Which device each loaded session runs on, for the provenance the worker returns.
+_ADAPTERS: "weakref.WeakKeyDictionary[ort.InferenceSession, str]" = weakref.WeakKeyDictionary()
+
+
+def adapter_of(session: ort.InferenceSession) -> str:
+    """The device a session loaded here runs on ("CPU", or the DirectML adapter's name); empty for
+    a session this module did not load."""
+    try:
+        return _ADAPTERS.get(session, "")
+    except TypeError:  # (an object that cannot be weakly referenced was never recorded)
+        return ""
+
+
 def load_session(path: Path, sha256: bytes, provider: str) -> ort.InferenceSession:
     ort.disable_telemetry_events()  # the app is offline and local; no trace events (M8 R4)
     try:
@@ -121,7 +136,12 @@ def load_session(path: Path, sha256: bytes, provider: str) -> ort.InferenceSessi
             continue
         if session.get_providers()[0] == provider:
             if provider == DIRECTML:
-                print(f"ml-worker: DirectML runs on {adapter_name(adapter)}", file=sys.stderr)
+                name = adapter_name(adapter)
+                print(f"ml-worker: DirectML runs on {name}", file=sys.stderr)
+            else:
+                name = "CPU" if provider == CPU else provider
+            with contextlib.suppress(TypeError):
+                _ADAPTERS[session] = name
             return session
         # (ONNX Runtime fell back to the CPU by itself: the next adapter, or a provider failure)
         failure = f"{provider} was requested but the session runs on {session.get_providers()[0]}"

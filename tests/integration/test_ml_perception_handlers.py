@@ -388,6 +388,7 @@ def test_a_representation_is_a_unit_float32_vector_of_the_models_dimension(
     assert float(np.linalg.norm(vector)) == pytest.approx(1.0, abs=1e-6)
     assert np.isfinite(vector).all()
     assert result.execution.runtime_variant_id == f"rv-{EMBEDDER}-{CPU}"
+    assert result.execution.adapter == "CPU"  # the device it ran on, for readiness
 
 
 def test_the_same_face_gives_the_same_vector_and_another_face_another(

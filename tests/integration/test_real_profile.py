@@ -324,6 +324,7 @@ def test_readiness_reports_the_provider_that_ran_and_a_fallback_is_logged_once(
     assert pool.provider_state() == {
         "execution_provider": "NOT_STARTED",
         "provider_fallback": "NONE",
+        "execution_device": "NOT_STARTED",
     }
 
     with machine.side.ledger, caplog.at_level(logging.INFO, logger="faceidentify.runtime"):
@@ -332,6 +333,7 @@ def test_readiness_reports_the_provider_that_ran_and_a_fallback_is_logged_once(
     assert pool.provider_state() == {
         "execution_provider": "CPUExecutionProvider",
         "provider_fallback": "ACTIVE",
+        "execution_device": "CPUExecutionProvider",  # (this fake worker names no device)
     }
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 2  # once per stage, not once per job
@@ -345,6 +347,7 @@ def test_readiness_reports_the_provider_that_ran_and_a_fallback_is_logged_once(
     assert pool.provider_state() == {
         "execution_provider": "CUDAExecutionProvider",
         "provider_fallback": "NONE",
+        "execution_device": "CUDAExecutionProvider",
     }
     assert [r.levelno for r in caplog.records] == [logging.INFO, logging.INFO]
 
@@ -363,7 +366,25 @@ def test_a_stage_with_one_variant_is_never_a_fallback() -> None:
     assert pool.provider_state() == {
         "execution_provider": "CPUExecutionProvider",
         "provider_fallback": "NONE",
+        "execution_device": "CPUExecutionProvider",
     }
+
+
+def test_readiness_names_the_device_each_stage_ran_on() -> None:
+    """Owner decision 2026-11-12: show which device is in use, beside the provider."""
+    pool = ClientPool(uuid.uuid4, supervise=Machine(set()).supervise)
+    plan = PerceptionPlan(
+        uuid.UUID(int=3),
+        EMBEDDING_DIMENSION,
+        (variant(1, "FACE_DETECTOR"),),
+        (variant(2, "FACE_REPRESENTATION"),),
+    )
+    gpu = "NVIDIA GeForce RTX 4070 Laptop GPU"
+
+    pool._record(plan, plan.detector[0], gpu)
+    pool._record(plan, plan.embedder[0], gpu)
+
+    assert pool.provider_state()["execution_device"] == gpu
 
 
 @pytest.mark.parametrize("key", ["../x", "a/b", "a\\b", "", ".hidden", "a..b", "x y"])
