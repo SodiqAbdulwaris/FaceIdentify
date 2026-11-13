@@ -87,6 +87,27 @@ async fn choose_picture(app: AppHandle) -> Result<Option<String>, String> {
         .map(|path| path.display().to_string()))
 }
 
+/// Let the user pick the face models they obtained: the downloaded zip, or the folder they unpacked
+/// it into. Only the path crosses to the web view; the backend reads and checks the files itself.
+#[tauri::command]
+async fn choose_models(app: AppHandle, kind: String) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app.dialog().file();
+        if kind == "folder" {
+            dialog.blocking_pick_folder()
+        } else {
+            dialog
+                .add_filter("Zip archive", &["zip"])
+                .blocking_pick_file()
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(picked
+        .and_then(|path| path.into_path().ok())
+        .map(|path| path.display().to_string()))
+}
+
 /// Let the user pick images and videos to import. The backend reads the files itself (it is on the
 /// same machine), so only their paths cross to the web view.
 #[tauri::command]
@@ -187,7 +208,8 @@ pub fn run() {
             library_info,
             choose_library,
             choose_images,
-            choose_picture
+            choose_picture,
+            choose_models
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
