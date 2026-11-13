@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.app.runtime import recognition_mode
 from backend.app.runtime.recognition_mode import (
     POLICIES,
     ModeNotConfirmedError,
@@ -79,6 +80,32 @@ def test_a_policy_this_application_did_not_write_is_never_replaced(
         choose_mode(path, ASSISTED, version(ASSISTED))
 
     assert path.read_text(encoding="utf-8") == held
+
+
+def test_a_policy_saved_by_the_owner_while_a_choice_is_being_written_is_not_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(POLICIES[ASSISTED]), encoding="utf-8")
+    owners = json.dumps({**POLICIES[AUTOMATIC], "margin": 0.2})
+    checks = 0
+    real = recognition_mode.current_mode
+
+    def owner_saves_after_the_first_look(target: Path) -> RecognitionMode | None:
+        nonlocal checks
+        seen = real(target)
+        checks += 1
+        if checks == 1:  # the owner saves between the first look and the swap
+            target.write_text(owners, encoding="utf-8")
+        return seen
+
+    monkeypatch.setattr(recognition_mode, "current_mode", owner_saves_after_the_first_look)
+
+    with pytest.raises(ModeNotRecognisedError):
+        choose_mode(path, AUTOMATIC, version(AUTOMATIC))
+
+    assert path.read_text(encoding="utf-8") == owners
+    assert not list(tmp_path.glob("*.partial"))
 
 
 def test_a_policy_file_that_cannot_be_read_is_left_alone(tmp_path: Path) -> None:

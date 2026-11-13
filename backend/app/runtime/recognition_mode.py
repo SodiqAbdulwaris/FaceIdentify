@@ -5,7 +5,9 @@ and says so. The first-run flow offers *Assisted* recognition (the abstain-only 
 after the first waits for the user) as the default, and *Automatic* recognition (the owner-approved
 operating point, 0.45 with a margin of 0.10, no automatic new identity) only when the user chooses
 it after being shown exactly what will be written. A policy file that is neither of these two (a
-measured one the owner made) is never replaced by this module.
+measured one the owner made) is never replaced by this module. The file is checked again right
+before it is swapped, which leaves a window of microseconds in which an editor that saves at that
+very instant would be replaced; plain files have no lock to close it.
 """
 
 import json
@@ -81,4 +83,9 @@ def choose_mode(path: Path, mode: RecognitionMode, shown_version: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(f"{path.name}.partial")
     partial.write_text(json.dumps(policy), encoding="utf-8")
+    try:
+        current_mode(path)  # again, right before the swap: a policy saved meanwhile is not ours
+    except ModeNotRecognisedError:
+        partial.unlink()
+        raise
     os.replace(partial, path)  # the old policy or the new one, never half of either

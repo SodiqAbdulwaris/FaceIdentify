@@ -32,6 +32,7 @@ automatic recognition is. The owner's live policy must never be touched by the i
   `provider_fallback`; the worker loads its models on its first request, so which provider runs them is known only after the first processing, and a self-check that processed a generated
   image would have to write one into the library (or add a second, library-free path through the worker). The first-run screen shows the readiness checklist after each step; the provider
   line fills in after the first image. A dedicated self-run is left to step 8 if the real-model check shows it is needed.
+- The file is checked again right before the swap, so a policy the owner saves while a choice is being written is not replaced (tested with a deterministic interleaving); a plain file has no lock, so an editor that saves in the microseconds between that check and the swap is still not protected. A lock the owner's editor would have to take is not a workable workflow, so this residual is accepted and stated.
 - An owner-made policy (`CUSTOM`) is reported and never replaced by the app: changing it is a file the owner edits, as today.
 
 ## Open issues / follow-ups
