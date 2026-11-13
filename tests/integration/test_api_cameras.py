@@ -552,12 +552,27 @@ async def test_a_session_that_gives_no_picture_fails_the_search_without_reopenin
     await api.client.post(f"/api/v1/cameras/{camera}/stop")
 
 
+class Waited(threading.Event):
+    """An event that says when someone has started waiting for it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting = threading.Event()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.waiting.set()
+        return super().wait(timeout)
+
+
 async def test_a_search_waiting_on_a_session_that_ends_opens_the_camera_itself(
     api: Api, cameras: Cameras
 ) -> None:
     camera = await configure(api)
     cameras.next["Integrated Camera"] = Slow([small()])  # the session never gets a picture
     await api.client.post(f"/api/v1/cameras/{camera}/start")
+    assert api.backend.cameras is not None
+    (running,) = api.backend.cameras._sessions.values()
+    running.pictured = waited = Waited()
 
     async with anyio.create_task_group() as group:
         answers: list[Any] = []
@@ -566,7 +581,8 @@ async def test_a_search_waiting_on_a_session_that_ends_opens_the_camera_itself(
             answers.append(await api.client.post(f"/api/v1/cameras/{camera}/search"))
 
         group.start_soon(search)
-        await anyio.sleep(0.2)  # (the search is now waiting for the session's first picture)
+        # (no sleep: the search has entered its wait for the session's first picture)
+        assert await anyio.to_thread.run_sync(waited.waiting.wait, DEADLINE)
         cameras.next["Integrated Camera"] = Planted([small()])
         await api.client.post(f"/api/v1/cameras/{camera}/stop")
 
