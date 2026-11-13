@@ -11,6 +11,7 @@ from backend.api.routes import (
     memory,
     people,
     processing,
+    runtime_models,
     search,
     sources,
 )
@@ -28,3 +29,4 @@ api_router.include_router(corrections.router)
 api_router.include_router(identity_changes.router)
 api_router.include_router(search.router)
 api_router.include_router(face_search.router)
+api_router.include_router(runtime_models.router)
