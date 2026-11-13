@@ -36,7 +36,7 @@ Reports are in the Git-ignored scratch folders of the run and were deleted with 
 - **TST-075 `PASSING`:** the CPU takes over visibly: the step 4 test of a fallback mid-session (detection and embedding), the existing DirectML-cannot-start tests, and the real run above where it happened and was recorded.
 - **TST-076 `PASSING`:** a provider changes nothing the space depends on (the agreement test); the policy stays bound to its representation space, which no provider changes (the catalog's design, tested since M3).
 - **TST-077 `PASSING`:** the baselines above, reproducible with `benchmarks/camera_soak.py`.
-- **TST-071 stays `IN_PROGRESS`:** every automated part passes (steps 1 to 6), but the real camera on this machine gives no picture (below), so start, stop and reconnection with a real camera are not verified.
+- **TST-071 stays `IN_PROGRESS`:** every automated part passes (steps 1 to 6); on 2026-11-13 start, stop, a second start, a crash and a soak passed on the real camera (below). Reconnection after the camera is covered, and the visits of a named and of an unknown person, need the owner.
 
 ## The real camera on this machine (validation that needed no one in front of it, 2026-11-11 and 2026-11-12)
 
@@ -44,10 +44,22 @@ Reports are in the Git-ignored scratch folders of the run and were deleted with 
 - Opening it succeeds, but **no frame ever arrives** (`Error during demuxing: I/O error` before the first one), with every pixel format and buffer size tried, and Windows allows desktop apps to use the camera (`ConsentStore\webcam\NonPackaged` is `Allow`). The application reports this correctly: a session started on it ends `FAILED` with `CAMERA_DISCONNECTED`, and the screen says to check that the camera is plugged in and that its privacy shutter or camera key is not covering it.
 - No frame was captured, recorded or kept by any of these checks.
 
+## The real camera, enabled by the owner (2026-11-13)
+
+The owner enabled the camera ("camera is now enabled"). Run on `main` at `c0b7e36`, through the real backend host (`python -m backend.api.host`) on a scratch library and a scratch state root (the DirectML package and the installed policy copied; the owner's library and state untouched), counts only. The scratch library, with whatever faces it held, was deleted at the end.
+
+- **Frames arrive:** the pinned ffmpeg read 30 frames from "Integrated Camera" into a pipe: 5,184,000 bytes, exactly 30 frames at 320x180 RGB, counted and discarded, nothing written.
+- **Through the app:** the device is listed; the camera is added; **Start** answers `202` and the session goes `STARTING` then `RUNNING` with frames counted; **Stop** ends it `STOPPED`; a **second Start** runs again (frames counted); `/readiness` reports `execution_provider: DmlExecutionProvider`, `execution_device: NVIDIA GeForce RTX 4070 Laptop GPU`, `provider_fallback: NONE`.
+- **Crash:** the host was killed (`taskkill /F /T`) during a running session. After a restart the camera is off (no session: nothing restarts on its own), the library opens `READY`, and a new session starts and runs. No visit had closed before the kill, so "visits recorded before stay" is not shown on the real camera (it is by `tests/recovery/test_camera_process_kill.py`).
+- **Soak, 10.4 minutes on the real camera, DirectML:** 3,039 frames read at 5 per second, **54 skipped (1.8%)**, all in the first minute while the worker loaded the model, none after; **38 visits recorded** (whoever was in front of the camera; the fresh library knows no one, so none was placed under a person and no identity was created: 80 face records kept as unplaced faces); ended `STOPPED`, no failure; 5 searches with the camera while it ran: all `200`, 0.46 to 0.75 s. Memory of the host **with its worker and ffmpeg** (the whole process tree): 294 MB before the session, 616 MB after 30 s, then steady between 824 and 869 MB to the end (no growth after the model loaded).
+- Beside the synthetic soak (DirectML, application process only): 3.1% skipped there, 1.8% here; searches 0.31 s p50 there, 0.46 to 0.75 s here (the camera searches capture a frame first, and two other sessions were running heavy tests on this machine at the same time).
+
 ## What only the owner can do (the real-world check, plan step 7)
 
-1. **Make the camera give a picture:** open the laptop's camera privacy shutter, or press the camera on/off key (often F8 or a key with a crossed-out camera on Lenovo laptops), then check the Windows Camera app shows a picture.
-2. In FaceIdentify: **Cameras**, choose "Integrated Camera", name it, **Add camera**, then **Start**. Check the "Camera on" mark appears at the top of every screen and the live picture shows a box around your face.
+Done without the owner on 2026-11-13 (above): the camera gives a picture, start, stop, a second start, the provider and device, a crash with the camera off afterwards, and a 10-minute soak. Still for the owner:
+
+1. ~~Make the camera give a picture~~ (done 2026-11-13).
+2. In FaceIdentify: **Cameras**, choose "Integrated Camera", name it, **Add camera**, then **Start**. Check the "Camera on" mark appears at the top of every screen and the live picture shows a box around your face (the screen itself was not driven on the real camera).
 3. **A visit by you** (someone you have named in the app): stand in front of the camera for a few seconds, then leave for more than 5 seconds. In **History**, one visit should appear under your name.
 4. **A visit by someone unknown** (with their consent): one visit, shown under "Not recognised", and no new person created.
 5. **Disconnect and reconnect:** close the shutter (or unplug a USB camera) while it runs: the status should show "Reconnecting"; open it again within 30 seconds: it carries on; leave it closed longer: the session ends with the camera message.
