@@ -14,14 +14,19 @@
   - `tests/integration/test_runtime_package_store.py`: an installed package whose manifest is
     missing or not JSON is never treated as an upgrade (`RuntimePackageStore._only_adds_variants`).
   - `tests/integration/test_api_cameras.py`: a search waiting for a session's first picture, when
-    that session ends without one, opens the camera itself (`CameraService.capture`).
+    that session ends without one, opens the camera itself (`CameraService.capture`). The test
+    stops the session only once the search is inside its wait (an event that records the wait, no
+    sleep), so it always takes the branch it is for.
   - `tests/integration/test_camera_session.py`: an encounter whose face changed while it was being
     accepted is refused and leaves no occurrence (`accept_encounter`).
 
 ## Why
 
-`AGENTS.md` and `.agents/rules/testing.md` require backend coverage of exactly 100%. Nothing
-enforced it: the CI command reported coverage and never failed on it. The full gate run on `main`
+Backend coverage has been 100% at every milestone gate (the M5 declaration of 2026-10-21 records
+3,237 tests at 100%), and every agent brief of this run said to keep it there, but no rule file
+states the number and nothing enforced it: the CI command reported coverage and never failed on
+it. `.agents/rules/testing.md` allows a numeric threshold only with a measured baseline; 100% is
+that baseline. The full gate run on `main`
 at `c0b7e36` (and CI's own log for that commit) showed 99%: 13,813 statements, 5 missed, 2 partial
 branches, in `cameras/service.py`, `processing/accept_run.py`, `runtime/package_store.py` and
 `ml/worker/onnx_session.py`, all from work merged on 2026-11-13.
