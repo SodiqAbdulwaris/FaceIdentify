@@ -141,7 +141,7 @@ async def test_a_package_the_store_cannot_install_is_a_refused_source(
 
 def _processing(api: Api, profile: LibraryProfile) -> Any:
     return ProcessingSettings(
-        client_for=lambda _plan: None,  # type: ignore[arg-type,return-value]
+        client_for=lambda _plan: None,
         request_for=lambda _session: {},
         max_pixels=1000,
         recognition_k=5,
