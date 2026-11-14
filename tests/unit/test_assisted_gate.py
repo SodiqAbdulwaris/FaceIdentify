@@ -751,3 +751,15 @@ async def test_enrolment_leaves_out_a_photograph_whose_selected_face_was_not_fou
         {"person": "Ada", "file": "miss.jpg", "rule": "annotation_mismatch"}
     ]
     assert enrolment["skipped_photographs"]["annotation_mismatch"] == 1  # (the lone face stays out)
+
+
+def test_two_manifests_in_sequence_never_share_a_selected_face(tmp_path: Path) -> None:
+    (tmp_path / "Ada").mkdir()
+    (tmp_path / "Ada" / "0.jpg").write_bytes(b"a")
+    selected = {"file": "Ada/0.jpg", "face": {"box": [0.1, 0.1, 0.5, 0.5]}}
+
+    first = choose_people({"Ada": [selected]}, tmp_path, count=1, minimum=1)
+    second = choose_people({"Ada": [{"file": "Ada/0.jpg"}]}, tmp_path, count=1, minimum=1)
+
+    assert first[0]["selected"] != {}
+    assert second[0]["selected"] == {}  # the same photograph, a manifest without a face

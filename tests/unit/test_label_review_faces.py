@@ -154,7 +154,8 @@ def test_a_picture_with_no_detection_run_works_as_before_and_a_box_can_still_be_
 @pytest.mark.parametrize(
     "box",
     [[0.1, 0.1, 0.2], [0.5, 0.1, 0.4, 0.5], [-0.1, 0, 0.5, 0.5], [0, 0, 1.2, 1], ["a"] * 4, "box"]
-    + [[float("nan"), 0, 1, 1], [0.1, 0.1, 0.1, 0.5]],
+    + [[float("nan"), 0, 1, 1], [0.1, 0.1, 0.1, 0.5]]
+    + [[True, False, 1, 1], ["0.1", "0.1", "0.5", "0.5"], b"0.1", {"x1": 0}, range(4)],
 )
 def test_a_face_box_is_four_numbers_with_an_area_inside_the_picture(
     dataset: Path, box: object
