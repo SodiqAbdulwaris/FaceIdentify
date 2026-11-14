@@ -38,6 +38,23 @@ describe('the layout', () => {
     expect(notice).toHaveTextContent('a high score is a reason to look, not proof')
   })
 
+  it('does not call a policy it does not know the development policy', async () => {
+    const custom = run({
+      policy: {
+        calibration_mode: 'UNCALIBRATED',
+        decision_policy_version: 'measured-by-the-owner-v3',
+        calibrated: false,
+        automatic_matching: true,
+      },
+    })
+    renderApp('/library', [library, media, { path: RUNS, respond: page([custom]) }])
+
+    const notice = await screen.findByRole('note')
+
+    expect(notice).toHaveTextContent('a policy that is installed (measured-by-the-owner-v3)')
+    expect(notice).not.toHaveTextContent('development policy')
+  })
+
   it('names Assisted recognition the same way', async () => {
     const chosen = run({
       policy: {

@@ -1,10 +1,11 @@
 import type { PolicyProvenance } from '@/api/types'
 
-/** The policy the results came from, in the words of the choice the person made (or the development policy). */
+/** The policy the results came from: the person's own choice by name, the development policy, or a neutral word for any other. */
 function policyName(version: string | null | undefined): string {
   if (version === 'buffalo-l-verified-match-v1') return 'the Automatic recognition you chose'
   if (version === 'buffalo-l-abstain-only-v1') return 'the Assisted recognition you chose'
-  return `the development policy${version ? ` (${version})` : ''}`
+  if (version?.startsWith('development-')) return `the development policy (${version})`
+  return version ? `a policy that is installed (${version})` : 'an installed policy'
 }
 
 /**
