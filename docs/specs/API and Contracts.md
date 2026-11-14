@@ -510,12 +510,16 @@ DELETE /api/v1/settings/network-roots/{id}
 folder on one, and answers `201` with the root; approving a root already approved answers `201` with the
 existing entry. The text is compared, never resolved: **approving does not contact the host**, so an
 unreachable or unknown name is accepted. A root covers itself and what lies below it, compared without regard
-to case or separator style, component by component (`share2` is not inside `share`). `DELETE` revokes it
+to ASCII case or separator style, component by component (`share2` is not inside `share`; a non-ASCII
+name is compared exactly). `DELETE` revokes it
 (`204`). The list is machine-local state, not part of the library.
 
 Errors: `400 NETWORK_ROOT_INVALID` (not a share or a folder on a share: a drive path, a device namespace such
-as `\\.\` or `\\?\GLOBALROOT`, a missing share, a WebDAV host, a wildcard, a stream, a reserved device name or
-`..`; the message never repeats the text), `404 NETWORK_ROOT_NOT_FOUND`.
+as `\\.\` or `\\?\GLOBALROOT`, a missing share, a WebDAV host or its `DavWWWRoot` share name, an administrative
+or hidden share whose name ends in `$` (`C$`, `IPC$`), a wildcard, a stream, a reserved device name or `..`; the
+message never repeats the text), `404 NETWORK_ROOT_NOT_FOUND`, `422` (a path longer than 1024 characters),
+`503 NETWORK_ROOTS_UNREADABLE` (the file is there but cannot be read or trusted: nothing is approved and nothing
+is written over it).
 
 ---
 
