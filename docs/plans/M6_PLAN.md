@@ -235,6 +235,8 @@ process at each stage.
 | D11 | #221 (the pool owns exactly one worker process, an owner-accepted deferral from #213) | Goes into M6 step 2, alongside #175's remaining acceptance tests |
 | D12 | The M6 plan | Approved |
 
+> **Decision 2026-11-14 (agent, delegated by the owner on 2026-11-09; issue 283; reversible):** D6's "embedding when available" is used: every detected face of a chunk is embedded before tracking, and a face joins a track only if its cosine with the track's face (the previous face in the chunk, or at a chunk start the track's most recent kept face) is at least 0.2, so a cut to another face in the same place starts a new track and D7 sees each person's faces separately. Pixel shot-change signals and spreading the kept faces over time were measured and left tracks D7 could not see. The budgets (`keep_per_track`, `max_per_track`) are unchanged. [Entry](../implementations/2026-11-14-video-track-one-person.md).
+
 ## 8. Not in this plan
 
 Live cameras (M7), CUDA or other GPU work beyond what M5 shipped (M7), packaging the FFmpeg runtime in
