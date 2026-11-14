@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from evaluation import assisted_recognition_gate
 from evaluation.assisted_recognition_gate import (
     EXCLUSION_RULES,
     MINIMUM_ENROLLED,
@@ -607,5 +608,146 @@ async def test_enrolment_records_each_photograph_it_leaves_out_and_why() -> None
         "processing_failed": 1,
         "no_face": 1,
         "no_subject": 1,
+        "annotation_mismatch": 0,
     }
     assert enrolment["planned"] == {"Ada": 5}
+
+
+def at(x: float, y: float, width: float, height: float) -> dict[str, dict[str, float]]:
+    return {"bounding_box": {"x": x, "y": y, "width": width, "height": height}}
+
+
+# --- the reviewer's selected face (issue 181) ---------------------------------------------------
+
+
+def test_a_selected_face_is_the_detected_face_that_corresponds_by_geometry() -> None:
+    big, small = at(0.0, 0.0, 0.5, 0.5), at(0.6, 0.6, 0.1, 0.1)
+    near_small = [0.61, 0.6, 0.71, 0.7]  # a little off the detected box: still that face
+
+    assert subject([big, small], "bounding_box", near_small) is small  # not the larger face
+    assert subject([small, big], "bounding_box", near_small) is small  # whatever the order
+    assert subject([big, small], "bounding_box", [0.0, 0.0, 0.5, 0.5]) is big
+
+
+def test_a_selected_face_with_no_corresponding_detection_is_never_replaced_by_another() -> None:
+    only = at(0.0, 0.0, 0.5, 0.5)
+    # the only face, and the largest, but not the face the reviewer selected
+    assert subject([only], "bounding_box", [0.6, 0.6, 0.9, 0.9]) is None
+    assert subject([], "bounding_box", [0.6, 0.6, 0.9, 0.9]) is None
+    # two faces equally close to the selection: ambiguous, so none
+    twins = [at(0.0, 0.0, 0.4, 0.4), at(0.05, 0.0, 0.4, 0.4)]
+    assert subject(twins, "bounding_box", [0.025, 0.0, 0.425, 0.4]) is None
+
+
+def test_a_selected_face_without_a_match_is_left_out_under_its_own_rule() -> None:
+    faces = [at(0.0, 0.0, 0.5, 0.5)]
+    far = [0.6, 0.6, 0.9, 0.9]
+
+    assert skip_reason(faces, "COMPLETED", far) == "annotation_mismatch"
+    assert skip_reason([], "COMPLETED", far) == "annotation_mismatch"
+    assert skip_reason(faces, "COMPLETED", [0.0, 0.0, 0.5, 0.5]) is None
+    assert skip_reason(faces, "FAILED", far) == "processing_failed"  # (a failed run comes first)
+    assert skip_reason([], "COMPLETED") == "no_face"  # without a selection: as it always was
+    assert "annotation_mismatch" in EXCLUSION_RULES
+    mismatch = {"person": "A", "eligible": True, "faces": 3, "offered": None, "selected_face": True}
+    assert query_exclusion(mismatch) == "annotation_mismatch"
+    assert query_exclusion({**mismatch, "selected_face": False}) == "no_subject"  # unchanged
+    assert query_exclusion({**mismatch, "faces": 0, "selected_face": False}) == "no_face"
+
+
+def test_the_report_names_a_mismatch_among_the_exclusions() -> None:
+    result = {
+        "person": "Ada",
+        "file": "x.jpg",
+        "eligible": True,
+        "faces": 2,
+        "offered": None,
+        "selected_face": True,
+    }
+
+    found = exclusions([], {"Ada": 3}, {"Ada": 3}, [result])
+
+    assert found["counts"]["known_queries"] == {"annotation_mismatch": 1}
+    assert found["known_queries"]["annotation_mismatch"] == [{"person": "Ada", "file": "x.jpg"}]
+
+
+def test_the_people_offered_are_those_of_the_selected_face_not_the_largest() -> None:
+    def person(name: str, similarity: float) -> dict[str, object]:
+        return {"identity": {"person": {"display_name": name}}, "similarity": similarity}
+
+    large = {**at(0.0, 0.0, 0.5, 0.5), "status": "MATCHED", "possible_people": [person("Big", 0.9)]}
+    small = {**at(0.6, 0.6, 0.1, 0.1), "status": "MATCHED", "possible_people": []}
+    answer = {"faces": [large, small], "selected": [0.6, 0.6, 0.7, 0.7]}
+
+    assert ranking(answer) == []  # the selected face's (nobody offered), not "no subject"
+    assert ranking({**answer, "selected": None}) == [{"person": "Big", "similarity": 0.9}]
+    assert ranking({**answer, "selected": [0.8, 0.0, 0.9, 0.1]}) is None  # no face there
+
+
+def test_a_verified_manifest_carries_the_selected_face_to_enrolment_and_queries(
+    tmp_path: Path,
+) -> None:
+    assert not hasattr(assisted_recognition_gate, "MARKS")  # (nothing module-wide to go stale)
+    (tmp_path / "Ada").mkdir()
+    entries: list[dict[str, object]] = []
+    for index in range(4):
+        (tmp_path / "Ada" / f"{index}.jpg").write_bytes(bytes([index]))
+        entries.append({"file": f"Ada/{index}.jpg"})
+    entries[3]["face"] = {"box": [0.6, 0.6, 0.7, 0.7]}
+    entries[0]["face"] = {"box": [0.1, 0.1, 0.5, 0.5]}
+
+    [ada] = choose_people({"Ada": entries}, tmp_path, count=1, minimum=4)
+    again = choose_people({"Ada": entries[:2]}, tmp_path, count=1, minimum=1)
+
+    first, last = (tmp_path / "Ada" / "0.jpg").resolve(), (tmp_path / "Ada" / "3.jpg").resolve()
+    assert ada["selected"] == {first: [0.1, 0.1, 0.5, 0.5], last: [0.6, 0.6, 0.7, 0.7]}
+    assert last in ada["query"]  # the selection travels with the photograph into the queries
+    assert again[0]["selected"] == {first: [0.1, 0.1, 0.5, 0.5]}  # and belongs to this call only
+    unknown = partition_people([ada], known_count=0, minimum=1, unknown_count=1)
+    assert unknown[0]["selected"] == ada["selected"]
+
+
+@pytest.mark.parametrize(
+    "face",
+    [{"box": [0.5, 0.5, 0.2, 0.2]}, {"box": [0, 0, 2, 2]}, {"box": "x"}, {}, {"box": None}],
+)
+def test_an_invalid_selected_face_stops_the_run(tmp_path: Path, face: dict[str, object]) -> None:
+    (tmp_path / "a.jpg").write_bytes(b"a")
+
+    with pytest.raises(SystemExit, match="invalid selected face"):
+        choose_people({"Ada": [{"file": "a.jpg", "face": face}]}, tmp_path, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_enrolment_leaves_out_a_photograph_whose_selected_face_was_not_found() -> None:
+    boxes = {"hit": [0.0, 0.0, 0.5, 0.5], "miss": [0.6, 0.6, 0.9, 0.9]}
+
+    class Gate:
+        async def post(self, path: str, body: dict[str, object] | None = None) -> dict[str, str]:
+            if path == "/sources/import":
+                return {"id": "s-" + Path(str(body and body["path"])).stem}
+            if path.endswith("/process"):
+                return {"id": "run-" + path.split("/")[2]}
+            return {"identity_id": "i1", "id": "p1"}
+
+        async def get(self, path: str) -> dict[str, object]:
+            if path.startswith("/processing-runs/"):
+                return {"state": "COMPLETED"}
+            if path.endswith("unresolved-faces"):
+                box = {"x": 0, "y": 0, "width": 0.5, "height": 0.5}
+                return {"items": [{"bounding_box": box, "representation_id": "r"}]}
+            return {"items": []}
+
+    files = [Path("hit.jpg"), Path("miss.jpg")]
+    log: dict[str, object] = {}
+    person = {"name": "Ada", "enrol": files, "selected": {f: boxes[f.stem] for f in files}}
+
+    enrolled = await enrol(Gate(), [person], log)  # type: ignore[arg-type]
+
+    assert enrolled["Ada"]["faces"] == 1
+    enrolment = log["enrolment"]
+    assert isinstance(enrolment, dict)
+    assert enrolment["excluded_photographs"] == [
+        {"person": "Ada", "file": "miss.jpg", "rule": "annotation_mismatch"}
+    ]
+    assert enrolment["skipped_photographs"]["annotation_mismatch"] == 1  # (the lone face stays out)

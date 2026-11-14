@@ -48,7 +48,7 @@ def test_verified_manifest_rejects_missing_photo_and_missing_digest(tmp_path: Pa
 
 def test_manifest_rejects_escape_and_invalid_verified_schema(tmp_path: Path) -> None:
     export = tmp_path / "verified.json"
-    payload = {"kind": "verified-manifest", "schema_version": 2, "people": {}}
+    payload = {"kind": "verified-manifest", "schema_version": 3, "people": {}}
     export.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(SystemExit, match="not schema 1"):
         read_manifest(tmp_path, export)
@@ -125,3 +125,78 @@ def test_embedding_reuses_the_cache_only_for_the_same_pictures(
     people, _, _, key, _ = read_manifest(tmp_path, manifest)
     with pytest.raises(_Embedded):
         embed_dataset(tmp_path, "CPU", None, manifest=people, content_key=key)  # type: ignore[arg-type]
+
+
+# --- the reviewer's selected face (issue 181) ---------------------------------------------------
+
+
+class Found:
+    """A detection as the worker returns it: a normalised box."""
+
+    def __init__(self, *box: float) -> None:
+        self.box = box
+
+
+def test_a_selected_face_picks_the_corresponding_detection_whatever_the_order() -> None:
+    near, far = Found(0.1, 0.1, 0.3, 0.3), Found(0.5, 0.5, 0.9, 0.9)  # the far one is larger
+    photo = {"file": "a.jpg", "face": {"box": [0.11, 0.1, 0.31, 0.3]}}
+
+    assert mop.pick_subject(photo, (near, far)) == (near, None)
+    assert mop.pick_subject(photo, (far, near)) == (near, None)
+
+
+def test_a_selected_face_nobody_detected_is_left_out_not_replaced_by_the_dominant_one() -> None:
+    only = Found(0.1, 0.1, 0.9, 0.9)  # the dominant (indeed the only) face
+    photo = {"file": "a.jpg", "face": {"box": [0.0, 0.0, 0.05, 0.05]}}
+
+    assert mop.pick_subject(photo, (only,)) == (None, "annotation_mismatch")
+    assert mop.pick_subject(photo, ()) == (None, "annotation_mismatch")
+
+
+def test_without_a_selected_face_the_dominant_face_rule_is_unchanged() -> None:
+    big, small, other = Found(0, 0, 1, 1), Found(0, 0, 0.2, 0.2), Found(0, 0, 0.9, 0.9)
+    photo = {"file": "a.jpg"}
+
+    assert mop.pick_subject(photo, (big, small)) == (big, None)
+    assert mop.pick_subject(photo, (big, other)) == (None, "no_subject")
+    assert mop.pick_subject(photo, ()) == (None, "no_face")
+
+
+def test_a_schema_2_manifest_is_read_with_its_faces_and_a_bad_box_stops_it(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "a.jpg"
+    image.write_bytes(b"reviewed")
+    digest = hashlib.sha256(b"reviewed").hexdigest()
+    photo: dict[str, Any] = {
+        "file": "a.jpg",
+        "sha256": digest,
+        "face": {"box": [0.1, 0.1, 0.4, 0.4]},
+    }
+    export = tmp_path / "verified.json"
+    payload = {"kind": "verified-manifest", "schema_version": 2, "people": {"P": [photo]}}
+    export.write_text(json.dumps(payload), encoding="utf-8")
+
+    people, verified, _, key, _ = read_manifest(tmp_path, export)
+    assert verified
+    assert people["P"][0]["face"]["box"] == [0.1, 0.1, 0.4, 0.4]
+
+    photo["face"]["box"] = [0.1, 0.1, 0.5, 0.5]  # another face: other vectors, so another cache
+    export.write_text(json.dumps(payload), encoding="utf-8")
+    assert read_manifest(tmp_path, export)[3] != key
+
+    photo["face"]["box"] = [0.5, 0.5, 0.1, 0.1]
+    export.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(SystemExit, match="invalid selected face"):
+        read_manifest(tmp_path, export)
+
+
+def test_a_manifest_without_faces_keeps_the_cache_key_it_always_had(tmp_path: Path) -> None:
+    (tmp_path / "a.jpg").write_bytes(b"first")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"P": [{"file": "a.jpg"}]}), "utf-8")
+    digest = hashlib.sha256(b"first").hexdigest()
+
+    key = read_manifest(tmp_path, manifest)[3]
+
+    assert key == hashlib.sha256(json.dumps([("a.jpg", digest)]).encode()).hexdigest()

@@ -9,6 +9,12 @@ Protocol (open set, leave-one-out, subject-disjoint):
 
 * A photograph is usable if it has a subject: its only face, or a face at least 2.5 times larger
   than any other. A person needs at least two usable photographs (one to enrol, one to query).
+  A photograph whose verified manifest entry carries a reviewer-selected face (schema 2,
+  `label_review.py`, issue 181) is read differently: it is decoded the way the application decodes
+  it (EXIF orientation applied, the frame the box is in), the detected face that corresponds to the
+  selected box (`face_boxes.match_face`, intersection over union of at least 0.5) is the subject,
+  and if no detected face corresponds the photograph is left out (`annotation_mismatch`), never
+  replaced by another face.
 * People are split by a hash of their name into a *selection* half and a *final* half. The two
   halves share no person. Inside each half people are split again into *known* (the gallery) and
   *unknown* (never enrolled).
@@ -52,11 +58,14 @@ import numpy as np
 import onnxruntime
 from PIL import Image
 
+from backend.api.startup import PROVISIONAL_MAX_PIXELS
 from backend.app.runtime.package_store import RuntimePackageStore
 from backend.app.runtime.perception_client import PerceptionClient, supervisor_for
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
+from backend.infrastructure.media.image import decode_image
 from backend.infrastructure.storage.layout import StorageRoots
 from backend.ml.supervisor.supervisor import SupervisorPolicy
+from evaluation.face_boxes import BadBox, checked, match_face
 
 KEY = "insightface-buffalo-l"
 POLICY = SupervisorPolicy(120, 120, 10, 10, 1, 600)
@@ -117,6 +126,22 @@ def dominant(detections: tuple[Any, ...], ratio: float = DOMINANCE) -> Any:
     return None
 
 
+def pick_subject(photo: dict[str, Any], detections: tuple[Any, ...]) -> tuple[Any, str | None]:
+    """The face a photograph is used for, or why none: `(face, None)` or `(None, rule)`.
+
+    A photograph with a reviewer-selected face (`photo["face"]`) uses the one detected face that
+    corresponds to it by geometry (`face_boxes.match_face`); with none it is left out as
+    `annotation_mismatch`, never replaced by another face. Any other photograph uses its
+    dominant face, as before."""
+    if "face" in photo:
+        at = match_face(photo["face"]["box"], [list(d.box) for d in detections])
+        return (None, "annotation_mismatch") if at is None else (detections[at], None)
+    subject = dominant(detections)
+    if subject is None:
+        return None, "no_face" if not detections else "no_subject"
+    return subject, None
+
+
 def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], bool, str, str, int]:
     """Read either manifest format and verify reviewed photographs before using any cache.
 
@@ -129,8 +154,10 @@ def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], b
     payload = json.loads(manifest_bytes)
     verified = isinstance(payload, dict) and payload.get("kind") == "verified-manifest"
     if verified:
-        if payload.get("schema_version") != 1 or not isinstance(payload.get("people"), dict):
-            raise SystemExit("the verified manifest is not schema 1")
+        if payload.get("schema_version") not in (1, 2) or not isinstance(
+            payload.get("people"), dict
+        ):
+            raise SystemExit("the verified manifest is not schema 1 or 2")
         manifest = payload["people"]
     else:
         manifest = payload
@@ -138,7 +165,7 @@ def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], b
         raise SystemExit("the dataset manifest must map people to photographs")
     root = dataset.resolve()
     seen: set[str] = set()
-    used: list[tuple[str, str]] = []
+    used: list[tuple[str, ...]] = []
     kept: dict[str, Any] = {}
     duplicates = 0
     for person, photos in manifest.items():
@@ -165,7 +192,14 @@ def read_manifest(dataset: Path, manifest_path: Path) -> tuple[dict[str, Any], b
                 duplicates += 1
                 continue
             seen.add(actual)
-            used.append((name, actual))
+            if "face" in photo:
+                try:
+                    box = checked(photo["face"]["box"])
+                except (BadBox, KeyError, TypeError) as error:
+                    raise SystemExit(f"{name} has an invalid selected face: {error}") from None
+                used.append((name, actual, json.dumps(box)))  # (another face: other vectors)
+            else:
+                used.append((name, actual))
             kept[person].append(photo)
     content_key = hashlib.sha256(json.dumps(sorted(used)).encode()).hexdigest()
     return kept, verified, hashlib.sha256(manifest_bytes).hexdigest(), content_key, duplicates
@@ -186,7 +220,7 @@ def embed_dataset(
 ) -> tuple[dict[str, Any], dict[str, np.ndarray], dict[str, int], str]:
     plan, digest = plan_from(store, provider)
     cache = cache_path(dataset, digest, content_key)
-    skipped = {"no_face": 0, "no_subject": 0, "failed": 0}
+    skipped = {"no_face": 0, "no_subject": 0, "annotation_mismatch": 0, "failed": 0}
     if cache.exists():
         stored = np.load(cache, allow_pickle=False)
         cached = {name.replace("|", "/"): stored[name] for name in stored.files}
@@ -201,11 +235,17 @@ def embed_dataset(
         for photos in manifest.values():
             for photo in photos:
                 try:
-                    pixels = np.asarray(Image.open(dataset / photo["file"]).convert("RGB"))
+                    if "face" in photo:  # the frame the reviewer's box is in: the application's
+                        pixels = decode_image(
+                            (dataset / photo["file"]).read_bytes(),
+                            max_pixels=PROVISIONAL_MAX_PIXELS,
+                        ).pixels
+                    else:
+                        pixels = np.asarray(Image.open(dataset / photo["file"]).convert("RGB"))
                     detected = client.detect(pixels.astype(np.uint8))
-                    subject = dominant(detected.detections)
+                    subject, rule = pick_subject(photo, detected.detections)
                     if subject is None:
-                        skipped["no_face" if not detected.detections else "no_subject"] += 1
+                        skipped[rule or "no_subject"] += 1
                         continue
                     face = client.represent(pixels.astype(np.uint8), (subject,)).vectors[0]
                     vectors[photo["file"]] = face.vector
