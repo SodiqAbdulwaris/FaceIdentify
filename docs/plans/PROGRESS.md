@@ -87,7 +87,7 @@ description.
 | #221 one worker process | M6 step 2 (D11) |
 | #174 network paths | Backlog: refusal by default is built and owner-confirmed; approved network roots are not |
 | #176 PDF face search | Backlog, deferred |
-| #181 which face carries a label | Backlog |
+| #181 which face carries a label | Built 2026-11-14 (no photograph re-reviewed yet) |
 | #183 LFW and CelebA terms at source | M8 release blocker |
 
 ## 4. Release blockers (M8)

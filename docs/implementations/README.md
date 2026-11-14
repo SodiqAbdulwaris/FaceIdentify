@@ -266,3 +266,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-14 | [Four small screen defects: a video card, counts, the error screen, the notice wording (issue 284)](2026-11-14-web-screen-defects-issue-284.md) | done |
 | 2026-11-14 | [A video track holds one person (issue 283)](2026-11-14-video-track-one-person.md) | done; delegated decision |
 | 2026-11-14 | [A track that ends inside a chunk keeps its budget for that chunk](2026-11-14-track-budget-ended-in-chunk.md) | done |
+| 2026-11-14 | [Label review: the reviewer marks which face carries the label (issue 181)](2026-11-14-label-review-subject-mark.md) | built; no photograph re-reviewed yet |

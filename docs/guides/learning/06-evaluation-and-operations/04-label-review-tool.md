@@ -24,7 +24,7 @@ itself and never looks at embeddings.
   note. The latest line for a photograph is current; older ones stay as the audit trail; a half-written last line from a crash is ignored.
 - **A decision belongs to what was looked at.** If the photograph's bytes or its proposed label change, the decision is `stale` and needs a new review.
 - **Decisions**: `VERIFIED`, `INCORRECT` (give the right name if you know it, which then counts as human-confirmed), `UNCERTAIN`, `EXCLUDED`
-  (the last two never count). **Flags** `AMBIGUOUS`, `LOW_QUALITY`, `MULTI_PERSON` keep a photograph out even if marked verified (conservative on purpose).
+  (the last two never count). **Flags** `AMBIGUOUS`, `LOW_QUALITY`, `MULTI_PERSON` keep a photograph out even if marked verified (conservative on purpose). One exception (issue #181): click the face the label belongs to, and a photograph flagged only `MULTI_PERSON` may enter; the gate then evaluates the face under the mark.
   `same_picture_as` groups copies so they count once and never cross a split.
 - **The export** lists only photographs that are verified, unflagged, unchanged and used once, with provenance, and reports a *shortfall*
   against the TST-057B targets (initial targets: 40 verified identities, 80 verified queries) rather than padding. Each export is a new file.
