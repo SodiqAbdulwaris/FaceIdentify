@@ -174,11 +174,17 @@ compared with its most recent kept face, read back from the stored representatio
 
 - `tests/integration/test_video_shot_change.py` (new): a red face, then a cut to a smaller green
   face in the same place, then red again, on generated clips: (1) in one chunk where red outranks
-  green, (2) after the track's lifetime budget is spent, (3) killed inside the chunk where green
-  appears and resumed. Each checks that red's appearances never cover green's time, that red is
-  still recognised before and after the cut, and that a green face is recorded. All three fail on
-  `main` (red's appearance ran 0 to 3.52 s and 0 to 7.52 s over green's time) and pass here. The
-  resume case fails if `kept_faces` returns nothing (checked by hand).
+  green, (2) after the track's lifetime budget is spent, (3) the second clip uninterrupted, killed
+  inside the chunk where green appears and resumed, and with that chunk redone after a provider
+  fallback in the new embedding pass. Each checks that red's appearances never cover green's time,
+  that red is still recognised before and after the cut, and that a green face is recorded; (3) also
+  checks that all three runs make the same tracks (red 0 to 3.52 s, green 4.0 to 5.52 s, red 6.0 to
+  7.52 s, three kept faces each). All fail on `main` (red's appearance ran 0 to 3.52 s and 0 to
+  7.52 s over green's time) and pass here. The resumed run fails if `kept_faces` returns nothing
+  (checked by hand).
+- Independent review (Codex CLI, read-only, posted on the PR): no correctness defect; two findings,
+  both addressed (the status page's contradictory M6 rows; the test above for identical tracks
+  across a resume and a redone chunk).
 - `tests/unit/test_tracking.py`: another person in the same place starts a track; the same person
   turned stays; two people alternating in one place each keep their own track; `recall` gives a
   resumed tracker its face, the state is the same with or without faces, and without a recalled
