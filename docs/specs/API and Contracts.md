@@ -488,6 +488,35 @@ policy: every face after the first waits for the user. *Automatic* is the owner-
 reads it on every request, so it applies at once. Errors: `409 POLICY_NOT_CONFIRMED` (a version
 other than the one shown), `409 POLICY_NOT_REPLACEABLE` (a custom policy is installed).
 
+
+---
+
+## 5.10 Approved network locations (settings)
+
+> **Decision 2026-11-14 (agent, under the owner's locked decision of 2026-10-14 on issue 174 and his brief of 2026-11-14):**
+> this is *user-authorized LAN access*, a deliberate act, and not the application's default offline
+> operation. By default nothing on a network is read. Face search by path may read a picture on a share
+> only if the user approved that share, or a folder on it, by name here. The application never asks for,
+> stores or forwards a network credential: a read uses the signed-in user's own Windows permissions. The
+> backend stays bound to the trusted local desktop context (loopback, launch token, origin checks).
+
+```http
+GET    /api/v1/settings/network-roots
+POST   /api/v1/settings/network-roots
+DELETE /api/v1/settings/network-roots/{id}
+```
+
+`GET` answers `{roots: [{id, path, approved_at}]}`. `POST` takes `{path}`, a share (`\\server\share`) or a
+folder on one, and answers `201` with the root; approving a root already approved answers `201` with the
+existing entry. The text is compared, never resolved: **approving does not contact the host**, so an
+unreachable or unknown name is accepted. A root covers itself and what lies below it, compared without regard
+to case or separator style, component by component (`share2` is not inside `share`). `DELETE` revokes it
+(`204`). The list is machine-local state, not part of the library.
+
+Errors: `400 NETWORK_ROOT_INVALID` (not a share or a folder on a share: a drive path, a device namespace such
+as `\\.\` or `\\?\GLOBALROOT`, a missing share, a WebDAV host, a wildcard, a stream, a reserved device name or
+`..`; the message never repeats the text), `404 NETWORK_ROOT_NOT_FOUND`.
+
 ---
 
 ## 8.1 Merge
