@@ -53,6 +53,8 @@ The backend was started with `--parent-pid`, `--allow-origin` for the web view's
 | no console window (`CREATE_NO_WINDOW`) for the host, the worker and FFmpeg | no problem | the second real run used it for the host; the worker, the video and the camera session ran under it |
 | piped stdout and stderr | no problem | the shell drains stderr and reads one line of stdout; the worker writes to stderr only |
 
+Result of the new check locally: `uv run python packaging/check_frozen_backend.py build/dist/faceidentify-backend` on a frozen build of this branch gave `READY`, exit 0 and a worker detection count of 1 with standard input held open.
+
 CI-safe regression: `packaging/frozen_entry.py --probe-worker` now starts the host's `stdin_lifeline()` before it spawns the worker, and `check_frozen_backend.py` keeps the probe's standard input open, so the `Frozen backend` job spawns a worker from a process holding the lifeline.
 
 ## Not verified

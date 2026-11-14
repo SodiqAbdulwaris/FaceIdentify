@@ -77,8 +77,8 @@ def main(folder: Path) -> int:
         assert worker.stdout
         assert worker.stdin
         try:
+            worker.wait(timeout=300)  # (a hang is a failure within five minutes, not forever)
             answer = worker.stdout.readline()
-            worker.wait(timeout=300)
         finally:
             worker.stdin.close()
             worker.kill()
