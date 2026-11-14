@@ -11,12 +11,18 @@ A root is a share (server and share name) or a folder on one. It is shown in one
 no trailing separator) and compared in another (upper case, component by component), so
 `//SERVER/Share/`, the extended UNC form and a trailing dot component all name one root, and
 `share2` is not inside `share`. Device namespaces, a missing share, a WebDAV host (`server@SSL`),
-wildcards, a stream, a reserved device name and `..` are refused.
+wildcards, a stream, a reserved device name, `..`, the WebDAV share name, and any administrative or
+hidden share (a name ending in `$`: `C$`, `IPC$`) are refused. Names are folded by ASCII case only,
+so a root can under-approve a non-ASCII spelling but never over-approve one.
+
+A caller that goes on to open a path must open the canonical form (`unc_parts` rebuilt), never the
+text it was given.
 """
 
 import hashlib
 import json
 import os
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,6 +32,9 @@ from backend.infrastructure.storage.local_path import is_device_component
 
 _EXTENDED_UNC = "\\\\?\\UNC\\"
 FILE_NAME = "network-roots.json"
+_LOCK = threading.Lock()  # one per process: every NetworkRoots (one is built per request) shares it
+# ponytail: one backend process owns a local state root (the library lock); a second process would
+# need a file lock around read-modify-write.
 
 
 class NetworkRootInvalidError(ValueError):
@@ -34,6 +43,11 @@ class NetworkRootInvalidError(ValueError):
 
 class NetworkRootNotFoundError(LookupError):
     """No approved root has that id."""
+
+
+class NetworkRootsUnreadableError(OSError):
+    """The file exists but cannot be read or trusted. Nothing is approved while it is so, and
+    nothing is written over it (that would silently drop every earlier approval)."""
 
 
 @dataclass(frozen=True)
@@ -51,13 +65,15 @@ def unc_parts(text: str) -> tuple[str, ...] | None:
     text = text.replace("/", "\\")
     if text.upper().startswith(_EXTENDED_UNC):
         text = "\\\\" + text[len(_EXTENDED_UNC) :]
-    if not text.startswith("\\\\") or text.startswith("\\\\.\\") or text.startswith("\\\\?\\"):
-        return None
+    if not text.startswith("\\\\") or text[2:3] in ("\\", ".", "?", ""):
+        return None  # (a third separator, `\\.\` and `\\?\` are device or namespace forms)
     parts = [part for part in text[2:].split("\\") if part not in ("", ".")]
     if len(parts) < 2 or any(_unsafe(part) for part in parts):
         return None
     if "@" in parts[0]:
         return None  # `server@SSL` and `server@8080` are WebDAV: an HTTP connection, not SMB
+    if parts[1].upper() == "DAVWWWROOT" or parts[1].endswith("$"):
+        return None  # the WebDAV redirector's name; administrative, hidden and IPC shares
     return tuple(parts)
 
 
@@ -65,28 +81,33 @@ def _unsafe(part: str) -> bool:
     return (
         part == ".."
         or part[-1] in " ."  # Windows drops them: two spellings of one name
-        or any(ord(char) < 32 for char in part)
+        or any(ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in part)
         or is_device_component(part)  # wildcards, a stream, a device name
     )
 
 
+def _fold(part: str) -> str:
+    """ASCII case only: NTFS folds more than `str.upper` in some places and less in others, so a
+    non-ASCII name is compared exactly (it can under-approve, never over-approve)."""
+    return "".join(char.upper() if char.isascii() else char for char in part)
+
+
 def key_of(parts: tuple[str, ...]) -> str:
-    return "\\".join(part.upper() for part in parts)
+    return "\\".join(_fold(part) for part in parts)
 
 
 def is_inside(parts: tuple[str, ...], root_key: str) -> bool:
     """Whether the path (as components) is the approved root or lies below it."""
     wanted = root_key.split("\\")
-    return len(parts) >= len(wanted) and [p.upper() for p in parts[: len(wanted)]] == wanted
+    return len(parts) >= len(wanted) and [_fold(p) for p in parts[: len(wanted)]] == wanted
 
 
 def _root_of(path: str, approved_at: str) -> NetworkRoot:
     parts = unc_parts(path)
     if parts is None:
         raise NetworkRootInvalidError("not a share or a folder on a share")
-    key = key_of(parts)
     return NetworkRoot(
-        id=hashlib.sha256(key.encode()).hexdigest()[:16],
+        id=hashlib.sha256(key_of(parts).encode()).hexdigest()[:16],
         path="\\\\" + "\\".join(parts),
         approved_at=approved_at,
     )
@@ -97,16 +118,16 @@ class NetworkRoots:
 
     def __init__(self, directory: Path) -> None:
         self._file = directory / FILE_NAME
-        self._lock = threading.Lock()
 
     def approved(self) -> list[NetworkRoot]:
-        with self._lock:
+        """The list; `NetworkRootsUnreadableError` if the file is there and cannot be trusted."""
+        with _LOCK:
             return self._read()
 
     def add(self, path: str, *, now: datetime) -> NetworkRoot:
         """Approve a root. Asking again for one already approved keeps its first approval."""
         root = _root_of(path, now.isoformat())
-        with self._lock:
+        with _LOCK:
             held = self._read()
             for one in held:
                 if one.id == root.id:
@@ -115,7 +136,7 @@ class NetworkRoots:
         return root
 
     def revoke(self, root_id: str) -> None:
-        with self._lock:
+        with _LOCK:
             held = self._read()
             kept = [one for one in held if one.id != root_id]
             if len(kept) == len(held):
@@ -123,22 +144,46 @@ class NetworkRoots:
             self._write(kept)
 
     def approves(self, path: str) -> bool:
-        """Whether `path` (a UNC path) is an approved root or inside one. Text only."""
+        """Whether `path` (a UNC path) is an approved root or inside one. Text only. A file that
+        cannot be trusted approves nothing (default deny)."""
         parts = unc_parts(path)
         if parts is None:
             return False
-        return any(is_inside(parts, key_of(unc_parts(one.path) or ())) for one in self.approved())
+        try:
+            held = self.approved()
+        except NetworkRootsUnreadableError:
+            return False
+        return any(is_inside(parts, key_of(unc_parts(one.path) or ())) for one in held)
 
     def _read(self) -> list[NetworkRoot]:
         try:
-            held = json.loads(self._file.read_text(encoding="utf-8"))
-            return [_root_of(item["path"], item["approved_at"]) for item in held["roots"]]
-        except (OSError, ValueError, KeyError, TypeError):
-            return []  # nothing approved, or a file that cannot be trusted: default deny
+            text = self._file.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return []  # nothing approved yet
+        except OSError as error:
+            raise NetworkRootsUnreadableError(error) from None
+        try:
+            items = json.loads(text)["roots"]
+            found: dict[str, NetworkRoot] = {}
+            for item in items:
+                if not isinstance(item["approved_at"], str):
+                    raise TypeError
+                root = _root_of(item["path"], item["approved_at"])
+                found.setdefault(root.id, root)
+            return list(found.values())
+        except (ValueError, KeyError, TypeError):
+            raise NetworkRootsUnreadableError("the approvals file cannot be trusted") from None
 
     def _write(self, roots: list[NetworkRoot]) -> None:
         self._file.parent.mkdir(parents=True, exist_ok=True)
-        partial = self._file.with_name(f"{FILE_NAME}.partial")
         body = {"roots": [{"path": r.path, "approved_at": r.approved_at} for r in roots]}
-        partial.write_text(json.dumps(body, indent=1), encoding="utf-8")
-        os.replace(partial, self._file)
+        descriptor, partial = tempfile.mkstemp(dir=self._file.parent, suffix=".partial")
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(body, indent=1))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(partial, self._file)
+        except BaseException:
+            Path(partial).unlink(missing_ok=True)
+            raise

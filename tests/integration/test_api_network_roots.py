@@ -53,8 +53,9 @@ async def test_approving_does_not_contact_the_host(
 async def test_something_that_is_not_a_share_is_refused(api: Api, path: str) -> None:
     response = await api.client.post(ROOTS, json={"path": path})
 
-    error(response, 400, "NETWORK_ROOT_INVALID")
-    assert path not in response.text or path == ""
+    body = error(response, 400, "NETWORK_ROOT_INVALID")
+    assert "Device paths and web addresses cannot be approved" in body["message"]
+    assert not path or path not in body["message"]
     assert (await api.client.get(ROOTS)).json() == {"roots": []}
 
 
@@ -66,3 +67,25 @@ async def test_the_routes_need_the_launch_token(api: Api) -> None:
     api.client.headers.pop("Authorization")
 
     assert (await api.client.get(ROOTS)).status_code == 401
+
+
+async def test_a_damaged_list_is_reported_and_never_overwritten(api: Api) -> None:
+    kept = api.backend.library.roots.local_state_root / "network-roots.json"  # type: ignore[union-attr]
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    kept.write_text("{ damaged", encoding="utf-8")
+
+    error(await api.client.get(ROOTS), 503, "NETWORK_ROOTS_UNREADABLE")
+    error(
+        await api.client.post(ROOTS, json={"path": r"\\nas\family"}),
+        503,
+        "NETWORK_ROOTS_UNREADABLE",
+    )
+    error(await api.client.delete(f"{ROOTS}/0123456789abcdef"), 503, "NETWORK_ROOTS_UNREADABLE")
+
+    assert kept.read_text(encoding="utf-8") == "{ damaged"
+
+
+async def test_a_path_that_is_far_too_long_is_a_validation_error(api: Api) -> None:
+    response = await api.client.post(ROOTS, json={"path": "\\\\nas\\" + "a" * 2000})
+
+    assert response.status_code == 422
