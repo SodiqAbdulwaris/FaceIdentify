@@ -23,9 +23,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.memory.models import Representation
 from backend.app.processing.models import CheckpointKind, CheckpointState, ProcessingCheckpoint
 from backend.app.processing.repository import CheckpointRepository
 from backend.app.recognition.reasoner import RecognitionOutcome
@@ -128,6 +131,30 @@ def video_tracks(session: Session, run_id: uuid.UUID) -> list[dict[str, Any]]:
         for observation, track in video["observations"]:
             tracks[str(track)]["observations"].append(observation)
     return [track for track in tracks.values() if track["observations"]]
+
+
+def kept_faces(session: Session, run_id: uuid.UUID) -> dict[int, NDArray[np.float32]]:
+    """Each track's most recent kept face (its stored vector), from the run's chunk checkpoints:
+    what the tracker compares the next face of a track with (`Tracker.recall`, issue #283). A face
+    whose vector was erased meanwhile is not known."""
+    last: dict[int, str] = {}
+    for track in video_tracks(session, run_id):
+        last[track["track"]] = track["observations"][-1]
+    vectors: dict[uuid.UUID, bytes | None] = dict(
+        session.execute(
+            select(Representation.observation_id, Representation.vector).where(
+                Representation.observation_id.in_([uuid.UUID(o) for o in last.values()]),
+                Representation.vector.is_not(None),
+            )
+        )
+        .tuples()
+        .all()
+    )
+    return {
+        track: np.frombuffer(vector, dtype="<f4")
+        for track, observation in last.items()
+        if (vector := vectors.get(uuid.UUID(observation))) is not None
+    }
 
 
 def agreed_identity(

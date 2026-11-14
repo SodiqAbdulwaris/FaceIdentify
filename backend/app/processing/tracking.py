@@ -8,6 +8,13 @@ arriving under the same box, fits less), and must be at least `min_iou`. A track
 than `max_gap` slots ends; a detection that joins nothing starts a new track. Sampling is slow (2
 frames a second, D4), so the overlap needed is low and the motion model carries a moving face.
 
+When the faces' embeddings are given (a video, issue #283), a face also joins a track only if it
+looks like the same person as the track's face (cosine at least `SAME_PERSON`): a cut to another
+face in the same place and pose starts a new track instead of continuing the first person's. The
+track's face is the last one it was given, and at the start of each chunk the one the caller
+`recall`s (the track's most recent kept face): it is never part of the state, because a checkpoint
+holds positions and ids only, and a face that is later erased must not live on in one.
+
 The tracker's state is plain JSON (`state()` / `Tracker(state=...)`), so a chunk checkpoint carries
 it and a track continues across a chunk boundary or a resume (processing spec 13: a chunk boundary
 is not an identity boundary).
@@ -22,7 +29,7 @@ a few observations, not a few every chunk.
 """
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +39,11 @@ from numpy.typing import NDArray
 Box = tuple[float, float, float, float]  # normalised x0, y0, x1, y1
 Points = tuple[tuple[float, float], ...] | None  # normalised landmarks, or none
 SHAPE_SCALE = 0.5  # a landmark shape this far off (mean distance, box units) fits not at all
+# Two faces less alike than this (cosine of their embeddings) are two people, never one track.
+# Measured on the owner's videos for issue #283 (buffalo_l, whose different people sit near 0 and
+# whose same person, turned or blurred, rarely falls this low): see the 2026-11-14 entry.
+SAME_PERSON = 0.2
+Vector = NDArray[np.float32]
 
 
 def shape(box: Box, landmarks: Points) -> list[float] | None:
@@ -77,6 +89,13 @@ class Tracker:
         self._kept: dict[str, int] = dict(state.get("kept", {}))
         # each live track: [id, last slot, box (4), velocity per slot (4), landmark shape or None]
         self._live: list[list[Any]] = [list(track) for track in state["live"]]
+        self._faces: dict[int, Vector] = {}  # each live track's face, when known (not state)
+
+    def recall(self, faces: Mapping[int, Vector]) -> None:
+        """Know each live track's face as `faces` gives it (its most recent kept face), and no
+        other: the same faces whether the run went on or was resumed from a checkpoint."""
+        live = {track[0] for track in self._live}
+        self._faces = {track: face for track, face in faces.items() if track in live}
 
     def state(self) -> dict[str, Any]:
         return {
@@ -96,12 +115,18 @@ class Tracker:
             self._kept[str(track)] = self._kept.get(str(track), 0) + 1
 
     def update(
-        self, slot: int, boxes: Sequence[Box], landmarks: Sequence[Points] | None = None
+        self,
+        slot: int,
+        boxes: Sequence[Box],
+        landmarks: Sequence[Points] | None = None,
+        faces: Sequence[Vector] | None = None,
     ) -> list[int]:
-        """The track of each box seen at `slot`, in order (`landmarks`: each box's, if known)."""
+        """The track of each box seen at `slot`, in order (`landmarks`, `faces`: each box's
+        landmarks and unit embedding, if known)."""
         self._live = [t for t in self._live if slot - t[1] <= self._max_gap]
         live = {str(t[0]) for t in self._live}
         self._kept = {track: n for track, n in self._kept.items() if track in live}
+        self._faces = {t: face for t, face in self._faces.items() if str(t) in live}
         given = landmarks if landmarks is not None else [None] * len(boxes)
         shapes = [shape(box, points) for box, points in zip(boxes, given, strict=True)]
         assigned: list[int | None] = [None] * len(boxes)
@@ -110,6 +135,10 @@ class Tracker:
                 [np.add(t[2], np.multiply(t[3], slot - t[1])) for t in self._live], dtype=float
             )
             fits = np.array([[agreement(t[4], other) for other in shapes] for t in self._live])
+            if faces is not None:
+                known = [self._faces.get(t[0]) for t in self._live]
+                fits *= [[known_face is None or float(known_face @ face) >= SAME_PERSON
+                          for face in faces] for known_face in known]  # fmt: skip
             overlap = iou(predicted, np.array(boxes, dtype=float)) * fits
             while overlap.size and overlap.max() >= self._min_iou:
                 row, column = (
@@ -129,7 +158,10 @@ class Tracker:
                     [self._next_id, slot, list(box), [0.0, 0.0, 0.0, 0.0], shapes[index]]
                 )
                 self._next_id += 1
-        return [track for track in assigned if track is not None]
+        tracks = [track for track in assigned if track is not None]
+        if faces is not None:
+            self._faces.update(zip(tracks, faces, strict=True))
+        return tracks
 
 
 @dataclass(frozen=True, slots=True)

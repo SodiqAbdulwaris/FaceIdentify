@@ -190,3 +190,45 @@ def test_a_track_that_ended_within_the_chunk_counts_nothing() -> None:
     tracker.kept(track)
 
     assert tracker.state()["kept"] == {}
+
+
+A = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+B = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+A_TURNED = np.array([0.8, 0.0, 0.6], dtype=np.float32)  # A turned: 0.8 like A, 0 like B
+
+
+def test_another_person_in_the_same_place_starts_a_new_track() -> None:
+    tracker = Tracker()
+    box = (0.1, 0.1, 0.3, 0.4)
+
+    assert tracker.update(0, [box], faces=[A]) == [0]
+    assert tracker.update(1, [box], faces=[A_TURNED]) == [0]  # the same person, turned
+    assert tracker.update(2, [box], faces=[B]) == [1]  # a cut: B is not A's track
+    assert tracker.update(3, [box], faces=[B]) == [1]
+    assert tracker.update(4, [box]) == [1]  # no faces given: position alone, as before
+
+
+def test_two_people_in_one_place_each_find_their_own_track() -> None:
+    tracker = Tracker()
+    box = (0.1, 0.1, 0.3, 0.4)
+    tracker.update(0, [box], faces=[A])
+    tracker.update(1, [box], faces=[B])
+
+    assert tracker.update(2, [box], faces=[A]) == [0]  # back to A (B's track still live)
+
+
+def test_recall_gives_a_track_its_kept_face_and_never_enters_the_state() -> None:
+    first = Tracker()
+    box = (0.1, 0.1, 0.3, 0.4)
+    first.update(0, [box], faces=[A])
+    state = json.loads(json.dumps(first.state()))
+
+    resumed = Tracker(state=state)
+    resumed.recall({0: A, 7: B})  # (7 is not live: forgotten)
+
+    blind = Tracker()
+    blind.update(0, [box])
+    assert state == blind.state()  # the faces leave no trace in the state
+    assert resumed.update(1, [box], faces=[B]) == [1]
+    without = Tracker(state=state)  # a resume that knows no face falls back to position
+    assert without.update(1, [box], faces=[B]) == [0]
