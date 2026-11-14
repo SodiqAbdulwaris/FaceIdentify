@@ -135,6 +135,15 @@ GET /readiness
 
 The application may be usable in a degraded state when reconstructible capabilities such as ANN search are unavailable.
 
+> **Decision 2026-11-14 (delegated decision, reversible by the owner):** while the library is open,
+> the `state` in the `/readiness` answer is derived from the `capabilities` in the same answer, at
+> the moment of the answer: `DEGRADED` when any capability is `DEGRADED`, `UNAVAILABLE`, `FAILED`
+> or `STOPPED`, otherwise `READY`. `NOT_STARTED` (a worker that starts on first use),
+> `NOT_CONFIGURED` and a provider or device name do not degrade it. Both states serve requests.
+> `INITIALIZING`, `FAILED` and `SHUTTING_DOWN` are the backend's own and are reported as they are.
+> So models installed or a recognition mode chosen after the start make the state `READY` without
+> a restart, and a capability lost during the run makes it `DEGRADED`.
+
 ---
 
 # 4. REST Resource Structure

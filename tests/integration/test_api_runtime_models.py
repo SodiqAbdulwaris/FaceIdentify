@@ -164,3 +164,29 @@ async def test_readiness_follows_what_is_true_now_not_what_was_true_at_the_start
     assert await state() == "READY"
     api.backend.capabilities["recovery"] = "DEGRADED"  # work owed later (a deletion to finish)
     assert await state() == "DEGRADED"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("NOT_STARTED", "READY"),  # the worker starts on first use
+        ("READY", "READY"),
+        ("UNAVAILABLE", "DEGRADED"),
+        ("DEGRADED", "DEGRADED"),
+        ("FAILED", "DEGRADED"),  # a worker that keeps crashing
+        ("STOPPED", "DEGRADED"),
+    ],
+)
+async def test_readiness_follows_the_capabilities_the_processing_reports_live(
+    api: Api, value: str, expected: str
+) -> None:
+    live = {"ml_worker": "READY"}
+    api.backend.processing = dataclasses.replace(
+        _processing(api, LibraryProfile.REAL), capabilities=lambda: live
+    )
+    assert (await api.client.get("/readiness")).json()["state"] == "READY"
+
+    live["ml_worker"] = value
+    body = (await api.client.get("/readiness")).json()
+
+    assert (body["state"], body["capabilities"]["ml_worker"]) == (expected, value)
