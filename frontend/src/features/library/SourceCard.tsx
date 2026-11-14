@@ -25,7 +25,9 @@ export function SourceCard({ source, recycled = false, onNotice }: Props) {
   // Deleted for good: the card goes at once, whatever the list refetch does next.
   const [gone, setGone] = useState(false)
   const missing = source.availability !== 'AVAILABLE'
-  const image = useSourceImage(source.id, !missing && !gone)
+  // A video's bytes are not a picture: it gets a placeholder instead of a broken image.
+  const isVideo = source.type === 'VIDEO'
+  const image = useSourceImage(source.id, !missing && !gone && !isVideo)
   // One request per card, so a second click elsewhere cannot make this button look idle again.
   const process = useMutation({
     mutationFn: () => endpoints.processSource(source.id),
@@ -57,7 +59,15 @@ export function SourceCard({ source, recycled = false, onNotice }: Props) {
   return (
     <li className="flex flex-col overflow-hidden rounded-lg border bg-card">
       <Link to={`/library/source/${source.id}`} className="block aspect-[4/3] bg-muted">
-        {image.url ? (
+        {isVideo && !missing ? (
+          <span
+            className="flex size-full items-center justify-center p-2 text-center text-sm text-muted-foreground"
+            role="img"
+            aria-label={`${source.display_name} (a video)`}
+          >
+            Video
+          </span>
+        ) : image.url ? (
           <img src={image.url} alt={source.display_name} className="size-full object-cover" />
         ) : (
           <span className="flex size-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
