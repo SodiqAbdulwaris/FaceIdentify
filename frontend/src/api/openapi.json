@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "ApproveNetworkRoot": {
+        "properties": {
+          "path": {
+            "maxLength": 1024,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ApproveNetworkRoot",
+        "type": "object"
+      },
       "BoundingBox": {
         "properties": {
           "height": {
@@ -1044,6 +1058,45 @@
           "identity_id"
         ],
         "title": "NamePerson",
+        "type": "object"
+      },
+      "NetworkRootList": {
+        "properties": {
+          "roots": {
+            "items": {
+              "$ref": "#/components/schemas/NetworkRootView"
+            },
+            "title": "Roots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "roots"
+        ],
+        "title": "NetworkRootList",
+        "type": "object"
+      },
+      "NetworkRootView": {
+        "properties": {
+          "approved_at": {
+            "title": "Approved At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "approved_at"
+        ],
+        "title": "NetworkRootView",
         "type": "object"
       },
       "ObservationBrief": {
@@ -4593,6 +4646,111 @@
         "summary": "Search Face",
         "tags": [
           "search"
+        ]
+      }
+    },
+    "/api/v1/settings/network-roots": {
+      "get": {
+        "operationId": "list_roots",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkRootList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "List Roots",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "operationId": "approve_root",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveNetworkRoot"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkRootView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Approve Root",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/network-roots/{root_id}": {
+      "delete": {
+        "operationId": "revoke_root",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "root_id",
+            "required": true,
+            "schema": {
+              "title": "Root Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The one error shape."
+          }
+        },
+        "summary": "Revoke Root",
+        "tags": [
+          "settings"
         ]
       }
     },

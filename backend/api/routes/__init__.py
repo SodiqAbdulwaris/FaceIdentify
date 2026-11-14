@@ -10,6 +10,7 @@ from backend.api.routes import (
     identity_changes,
     jobs,
     memory,
+    network_roots,
     people,
     processing,
     recognition_mode,
@@ -34,3 +35,4 @@ api_router.include_router(face_search.router)
 api_router.include_router(runtime_models.router)
 api_router.include_router(cameras.router)
 api_router.include_router(recognition_mode.router)
+api_router.include_router(network_roots.router)
