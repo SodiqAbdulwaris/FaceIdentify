@@ -196,7 +196,8 @@ compared with its most recent kept face, read back from the stored representatio
 - **A track that ends inside a chunk gets its full budget back for that chunk's selection**
   (`Tracker.update` prunes the count of a track that is no longer live before `room` is asked), so it
   may keep up to `keep_per_track` more faces than `max_per_track` once. Pre-existing and small; seen
-  while testing the resume case. Not changed here.
+  while testing the resume case. Not changed here; fixed the same day in
+  `2026-11-14-track-budget-ended-in-chunk.md`.
 - The two remaining two-person tracks in episode 1 are ones D7 already withholds (both people among
   the kept faces).
 - `SAME_PERSON` is a cosine of `buffalo_l`'s space; another model would need its own measurement.
