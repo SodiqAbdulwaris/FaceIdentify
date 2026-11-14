@@ -310,7 +310,7 @@ Honest limits of the Commons set, which matter for any claim built on it:
   page <https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html> (its `README.txt` states non-commercial research use).
   **Terms: see section 10.3**; both are research datasets; they stay local, are never committed or
   redistributed, and their people may also appear in the recogniser's training data (evaluation
-  leakage). Reading each dataset's terms at its source is issue 183 (CelebA done 2026-10-15; the Kaggle mirror read 2026-10-15; LFW's own page still to read, section 10.3).
+  leakage). Terms evidence is in section 10.3 (issue 183: CelebA verified; LFW stays permission-unverified, owner decision 2026-11-14) and the artifact-exclusion audit in section 10.4.
 - **Celebrity portraits from Wikimedia Commons (`evaluation/datasets/celebs-commons`, from 2026-10-14):**
   read with `collect_commons_portraits.py --licence free` (the owner's script, reviewed and fixed). Each
   file's licence (public domain, CC0, CC BY or CC BY-SA 2.0 to 4.0; never NC or ND), licence URL, author,
@@ -324,65 +324,118 @@ Honest limits of the Commons set, which matter for any claim built on it:
   and biometric data like the others.
 - The Commons set above is **parked**, not removed: its review log and exports stay for later.
 
-### 10.3 LFW and CelebA terms, read at source (2026-10-15)
+### 10.3 LFW and CelebA terms: evidence record (re-read 2026-11-14)
 
 This is a **reading of published terms by an engineer's assistant, not legal advice.** Quotes are kept
-to a few words; everything else is a summary.
+to a few words; everything else is a summary. It covers the two **datasets** only. The licences of the
+InsightFace model weights, their training data and every other dependency are separate records
+(sections 2 to 9); nothing here decides them and nothing there decides this.
 
-**CelebA** (<https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html>, "Agreement" section, read 2026-10-15)
+> **Decision 2026-11-14 (owner):** CelebA's official agreement is verified: non-commercial research
+> only under its published terms, redistribution restricted, citation required. LFW stays
+> **permission-unverified** for redistribution and commercial use, under a conservative release gate,
+> until authoritative evidence is found. A documented decision is not a completed implementation, so
+> issue 183 is not closed by this record.
 
-- *Who and what for:* available for "non-commercial research purposes only". Access can be terminated
-  by MMLAB at any time.
-- *Redistribution:* users agree not to copy, publish or distribute any portion of the dataset; copies
-  for internal use at a single site within the same organisation are allowed. Selling, trading or
-  exploiting the images or derived data commercially is excluded.
-- *Third-party rights:* the images are stated not to be MMLAB's property; MMLAB is not responsible for
-  their content. The page names no open licence (no Creative Commons or similar).
-- *Citation:* Liu, Luo, Wang, Tang, "Deep Learning Face Attributes in the Wild", ICCV 2015.
-- *Identities:* the identity labels are released on request, for research only.
+**Class A: directly verified** (read at the official source by this project)
 
-**LFW** (official page <http://vis-www.cs.umass.edu/lfw/>: **could not be read**)
+| Fact | Source and access date |
+|---|---|
+| CelebA is "non-commercial research purposes" only; users may not reproduce, copy, sell, trade, resell or exploit images or derived data commercially | <https://mmlab.ie.cuhk.edu.hk/projects/CelebA.html>, Agreement section, read 2026-10-15 and again 2026-11-14 |
+| CelebA: no copying, publishing or distributing any portion; copies for internal use at a single site within one organisation are allowed | same page, same dates |
+| CelebA: images are not MMLAB's property; MMLAB is not responsible for their content; MMLAB may terminate access at any time; identities released on request, research only; no open licence named | same page, same dates |
+| CelebA required citation: Liu, Luo, Wang, Tang, "Deep Learning Face Attributes in the Wild", ICCV 2015 | same page, 2026-11-14 |
+| The official LFW page states **no licence, copyright notice or terms of use**. It carries a DISCLAIMER that LFW is a public benchmark for face verification and that performance on it must not be used to conclude an algorithm suits any commercial purpose. That is a statement about benchmarking, not a grant or a refusal of rights | Internet Archive copy of <http://vis-www.cs.umass.edu/lfw/> taken 2025-01-05 (page text "last updated: 2018/01/09"), read 2026-11-14 |
+| The LFW `README.txt` (same archive snapshot) describes the files, protocols and 250x250 Viola-Jones crops; it contains no licence, redistribution or commercial-use text (searched for licen, copyright, redistrib, commercial, permission, terms, rights: no hit) | archived `README.txt` of the 2025-01-05 snapshot, read 2026-11-14 |
+| LFW's technical report states no licence; the images are pre-existing news photographs gathered from the web | <https://people.cs.umass.edu/~elm/papers/lfw.pdf>, read 2026-10-15 |
+| The Kaggle mirror's licence field reads "Other (specified in description)" and the description specifies none; it points to the UMass page and asks for the two citations below | <https://www.kaggle.com/api/v1/datasets/view/jessicali9530/lfw-dataset> (HTTP 200), read 2026-10-15 and again 2026-11-14 |
 
-- The host did not resolve from the owner's machine (local session) or from the fetch tool on 2026-10-15 (DNS failure, tried
-  http and https and the README path; the Wayback copy is blocked). Tried again on 2026-10-15 from a
-  cloud session: the egress proxy refused the connection to the host (502), the fetch tool could not
-  resolve it, and the Wayback copy was refused there too. **The page's own terms, if any, remain
-  unread.** Reading it is the one open step of issue 183.
-- What was read instead: the official technical report by Huang, Ramesh, Berg and Learned-Miller
-  (<https://people.cs.umass.edu/~elm/papers/lfw.pdf>). It states no licence or conditions of use. It
-  says the database is "an aid in studying" unconstrained face recognition, built from pre-existing
-  photographs gathered from news articles on the web (images detected by Viola-Jones, 250x250), and
-  that results should state which of its protocols was used. So the images were not made for the
-  dataset and carry **their original photographers' and publishers' rights**; the creators' consent
-  to anything beyond research use is not documented there.
-- **The Kaggle mirror** the owner downloaded from
-  (<https://www.kaggle.com/datasets/jessicali9530/lfw-dataset>, read 2026-10-15 through Kaggle's public
-  dataset metadata): uploaded by a third party (Jessica Li, not the LFW creators), version 4 of
-  2018-05-17, the deep-funneled images plus CSV metadata. Its licence field reads "Other (specified in
-  description)", but the description specifies **no licence and no conditions**: it says the data
-  came from the UMass LFW page, points readers there, and asks for the LFW technical report (and, for
-  the deep-funneled images, Huang, Mattar, Lee and Learned-Miller, NIPS 2012) to be cited. So the
-  mirror grants nothing beyond what the creators grant, and, on this reading, an uploader could not
-  grant rights in the news photographs anyway; *who may use it and for what*, *redistribution* and *third-party
-  rights* all fall back to the official page (unread) and the photographs' own rights holders.
-- Third-party listings (a catalogue showing "Other"; scikit-learn's BSD marking covers its loader code
-  only) are not terms and were not relied on.
+**Class B: reported by secondary sources** (not relied on, recorded so nobody mistakes them for terms)
 
-**What this means for the project**
+- A third-party catalogue listing LFW's licence as "Other", and scikit-learn's BSD marking (which covers
+  its loader code only). These are not terms and were not relied on (seen 2026-10-15; not re-fetched
+  2026-11-14).
+- Kaggle's licence field and the mirror's open download URL are the uploader's metadata. An uploader
+  cannot grant rights in the news photographs, and the creators' page grants none to inherit.
+
+**Class C: unknown** (no authoritative evidence found; each is treated as **not permitted**)
+
+- Whether the LFW creators permit redistribution of the images, in any variant.
+- Whether any commercial use of the images, or of anything derived from them, is permitted.
+- Who holds the rights in the individual news photographs and whether they were cleared for any use
+  beyond research reference.
+- Whether results measured on LFW may be published in a commercial context.
+- Whether the Wayback copy of the official page matches the live page today (the live host could not
+  be reached; the snapshot is 2025-01-05).
+
+**Attempts to reach LFW's own terms** (every attempt, failures included)
+
+| Date | Route | Result |
+|---|---|---|
+| 2026-10-13 | `http://vis-www.cs.umass.edu/lfw/` from the owner's machine | host did not resolve (issue 183's report) |
+| 2026-10-15 | http, https and the README path, fetch tool and local session | DNS failure; Wayback blocked by the fetch tool |
+| 2026-10-15 | same host from a cloud session | egress proxy refused the connection (502); `web.archive.org` refused |
+| 2026-11-14 | `http://vis-www.cs.umass.edu/lfw/` with the fetch tool and with `curl` (also https and `README.txt`) | `getaddrinfo ENOTFOUND` / curl error 6, could not resolve host |
+| 2026-11-14 | `https://web.archive.org/web/2024/http://vis-www.cs.umass.edu/lfw/` with the fetch tool | refused by the tool ("unable to fetch from web.archive.org") |
+| 2026-11-14 | `https://archive.org/wayback/available?url=vis-www.cs.umass.edu/lfw/` with `curl` | HTTP 200: names a snapshot of 2025-01-05 |
+| 2026-11-14 | `http://web.archive.org/web/20250105180242/http://vis-www.cs.umass.edu/lfw/` and its `README.txt` with `curl` | HTTP 200; read; no licence or terms found (Class A) |
+| 2026-11-14 | `.../lfw/resources.html` via the archive | HTTP 404 |
+| 2026-11-14 | maintainers' published statements (the page's DISCLAIMER, the report) | no licence statement; see Class A |
+
+**Citations required or requested**
+
+- CelebA (required): Liu, Luo, Wang, Tang, "Deep Learning Face Attributes in the Wild", ICCV 2015.
+- LFW (requested on the page and by the mirror), **both for deep-funneled LFW**:
+  1. the original benchmark paper: Huang, Ramesh, Berg, Learned-Miller, "Labeled Faces in the Wild: A
+     Database for Studying Face Recognition in Unconstrained Environments", University of
+     Massachusetts Amherst Technical Report 07-49, October 2007;
+  2. the deep-funneling paper: Huang, Mattar, Lee, Learned-Miller, "Learning to Align from Scratch",
+     NIPS 2012. The owner's local copy is the Kaggle mirror's deep-funneled variant, so it needs both.
+
+**What this means for the project (the conservative release gate)**
 
 | Question | CelebA | LFW |
 |---|---|---|
-| Use here (local evaluation of recognition) | within "non-commercial research" | research evaluation; page terms unread; the Kaggle mirror grants none of its own |
-| Redistribute, commit, publish, bundle in an installer | **No** | **No** (treat as not allowed until the page is read) |
-| Commercial product or any commercial use of the images or derived data | **No** | Not established; assume **no** |
+| Permission status | verified: non-commercial research only | **permission-unverified** |
+| Use here (local evaluation of recognition) | within "non-commercial research" | research evaluation only; no grant found |
+| Redistribute, commit, publish, bundle in an installer | **No** | **No** (not permitted until authoritative evidence exists) |
+| Commercial product or any commercial use of the images or derived data | **No** | **No** (not established; assumed no) |
 | Images carry third-party rights | Yes (stated) | Yes (news photographs) |
 
 Consequences: both stay under the Git-ignored `evaluation/datasets/`, are never committed, uploaded,
-shipped or used to tune a shipped model, and the repository holds none (checked by the ignore rule
-and `git ls-files`, 2026-10-15). A shared or commercial release cannot use them, and a release must
-not depend on numbers measured only on them without the owner accepting that. Their people may also
-appear in the recogniser's training data (evaluation leakage). Recorded here, not decided:
-whether results measured on them may be published (a question for the licence holders or a lawyer).
+shipped or used to tune a shipped model. A shared or commercial release cannot use them, and a release
+must not depend on numbers measured only on them without the owner accepting that. Their people may
+also appear in the recogniser's training data (evaluation leakage). The owner's personal-development
+and release restrictions in sections 1 and 11 are unchanged. Not decided: whether results measured on
+them may be published (a question for the licence holders or a lawyer).
+
+**What would change LFW's status:** a written statement from the LFW maintainers (University of
+Massachusetts Amherst) or the live official page showing terms, kept here with its URL and date. Nothing
+short of that: a mirror's licence field, an open download URL or the dataset's public availability grant
+nothing.
+
+### 10.4 Dataset artifact exclusion audit (2026-11-14)
+
+Checks that no LFW or CelebA image, crop, embedding derived from dataset subjects or other prohibited
+dataset asset is in the repository or a release. Run from the repository root; counts only, no personal data.
+
+| Check | Result |
+|---|---|
+| `git ls-files evaluation/datasets local-models LFW CelebA MyFaces \| wc -l` | 0 |
+| `git ls-files` total / tracked images (`png jpg jpeg bmp webp gif`) | 959 files / 14 PNGs, all `desktop/src-tauri/icons/*` application icons (198,660 bytes in all); 0 JPEG, 0 other image types |
+| `git ls-files` for `npy npz pkl onnx usearch db sqlite tgz zip` | 0 (no embeddings, indexes, databases, weights or archives) |
+| `git ls-files` for names containing `lfw`, `celeba`, `myfaces` | only `docs/implementations/*.md` entries (text) |
+| Whole history: `git log --all --name-only` for dataset paths and for `jpg jpeg bmp webp npy npz onnx usearch db sqlite` | only those same `docs/implementations/*.md` entries; no image or binary data was ever added |
+| `git check-ignore -v` on `evaluation/datasets/`, `local-models/`, `LFW/`, `CelebA/`, `MyFaces/` | all five matched by `.gitignore` lines 23, 30, 32, 33, 34 |
+| Test fixtures (`tests/fixtures/`, `frontend/src/test/fixtures.ts`) | Python and TypeScript files only; no image files |
+| Docs images | none tracked (the 14 PNGs above are the only images) |
+| Installer bundle, by configuration (`desktop/src-tauri/tauri.conf.json`, `tauri.installer.conf.json`) | `bundle.resources` lists only the frozen backend, the LGPL FFmpeg runtime and `THIRD_PARTY_NOTICES.md`; icons are the 14 above |
+| PyInstaller spec (`packaging/faceidentify-backend.spec`) | `datas` are `backend/alembic` plus alembic and onnxruntime package data; no `evaluation/`, dataset or model path; `packaging/build_installer.py` states face models are never included (decision R6) |
+
+**Not checked directly:** no installer build output exists on this machine (no `build/` directory, no
+`*-setup.exe` or `.msi` found in the repository tree; `desktop/src-tauri/target` holds only a debug
+build), so the installer's contents are reasoned from the configuration above, not listed. Repeat the
+listing on the first real installer build, before any release.
 
 ## 11. Before any release: checklist
 
