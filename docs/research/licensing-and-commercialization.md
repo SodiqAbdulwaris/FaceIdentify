@@ -337,7 +337,7 @@ InsightFace model weights, their training data and every other dependency are se
 > until authoritative evidence is found. A documented decision is not a completed implementation, so
 > issue 183 is not closed by this record.
 
-**Class A: directly verified** (read at the official source by this project)
+**Class A: directly verified** (read by this project at the official page, or at the Internet Archive's copy of the official page where the row says so)
 
 | Fact | Source and access date |
 |---|---|
@@ -417,15 +417,16 @@ nothing.
 ### 10.4 Dataset artifact exclusion audit (2026-11-14)
 
 Checks that no LFW or CelebA image, crop, embedding derived from dataset subjects or other prohibited
-dataset asset is in the repository or a release. Run from the repository root; counts only, no personal data.
+dataset asset is in the repository or in the installer's configuration (an installer itself was not
+inspected, see the note after the table). Run from the repository root; counts only, no personal data.
 
 | Check | Result |
 |---|---|
 | `git ls-files evaluation/datasets local-models LFW CelebA MyFaces \| wc -l` | 0 |
-| `git ls-files` total / tracked images (`png jpg jpeg bmp webp gif`) | 959 files / 14 PNGs, all `desktop/src-tauri/icons/*` application icons (198,660 bytes in all); 0 JPEG, 0 other image types |
+| `git ls-files` total / tracked images (`png jpg jpeg bmp webp gif`) | 959 files on `main` (960 with this PR's implementation entry) / 14 PNGs, all `desktop/src-tauri/icons/*` application icons (198,660 bytes in all); 0 JPEG, 0 other image types |
 | `git ls-files` for `npy npz pkl onnx usearch db sqlite tgz zip` | 0 (no embeddings, indexes, databases, weights or archives) |
 | `git ls-files` for names containing `lfw`, `celeba`, `myfaces` | only `docs/implementations/*.md` entries (text) |
-| Whole history: `git log --all --name-only` for dataset paths and for `jpg jpeg bmp webp npy npz onnx usearch db sqlite` | only those same `docs/implementations/*.md` entries; no image or binary data was ever added |
+| Whole history: `git log --all --name-only` for dataset paths and for `jpg jpeg bmp webp npy npz onnx usearch db sqlite` | only those same `docs/implementations/*.md` entries; no dataset path or dataset-type file was ever added. Images ever tracked: the 14 icons above and `frontend/public/favicon.svg` (a project asset; `git log --all` for `png gif svg ico` outside `desktop/src-tauri/icons/` finds only it) |
 | `git check-ignore -v` on `evaluation/datasets/`, `local-models/`, `LFW/`, `CelebA/`, `MyFaces/` | all five matched by `.gitignore` lines 23, 30, 32, 33, 34 |
 | Test fixtures (`tests/fixtures/`, `frontend/src/test/fixtures.ts`) | Python and TypeScript files only; no image files |
 | Docs images | none tracked (the 14 PNGs above are the only images) |
