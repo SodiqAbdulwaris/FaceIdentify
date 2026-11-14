@@ -102,7 +102,7 @@ def fall_back_in_the_second_chunk(perception: PaintedPerception, _run: Callable[
 
     def represent(pixels: Any, detections: tuple[Any, ...]) -> Represented:
         found = real(pixels, detections)
-        if perception.log.count("represent") == 5:  # the second chunk's first embedding turn
+        if perception.log.count("represent") == 9:  # one call a frame: the second chunk's first
             assert found.ran is not None
             failed = ProviderUnavailable(
                 found.ran, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE, "gone"
@@ -140,6 +140,9 @@ def test_a_resumed_or_redone_chunk_makes_the_same_tracks(
             for t in video_tracks(session, run_id)
         ]
     assert tracks == EXPECTED_TRACKS
+    embedded = pipeline.perception.log.count("represent")  # type: ignore[attr-defined]
+    redone = interrupt is fall_back_in_the_second_chunk
+    assert embedded == (24 if redone else 16)  # one call a frame; the redone chunk twice
 
 
 def check_the_cut(
