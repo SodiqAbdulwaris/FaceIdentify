@@ -15,8 +15,8 @@ from backend.app.runtime.network_roots import (
     NetworkRootNotFoundError,
     NetworkRoots,
     NetworkRootsUnreadableError,
-    unc_parts,
 )
+from backend.infrastructure.storage.unc import unc_parts
 
 NOW = datetime(2026, 11, 14, tzinfo=UTC)
 

@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from backend.infrastructure.storage.local_path import is_device_component
+from backend.infrastructure.storage.unc import is_inside, key_of, unc_parts
 
 _EXTENDED_UNC = "\\\\?\\UNC\\"
 FILE_NAME = "network-roots.json"
@@ -55,51 +55,6 @@ class NetworkRoot:
     id: str  # a digest of the key: the same root always has the same id
     path: str  # `\\server\share\folder`, as the user wrote it, with backslashes
     approved_at: str  # ISO 8601, UTC
-
-
-def unc_parts(text: str) -> tuple[str, ...] | None:
-    """The components of a conventional UNC path (`server`, `share`, folders...), or None when the
-    text is not one (a drive path, a device namespace, an empty part, a `..`, or a part Windows
-    would read as something else). Pure: nothing is opened. The extended
-    UNC form is the same path."""
-    text = text.replace("/", "\\")
-    if text.upper().startswith(_EXTENDED_UNC):
-        text = "\\\\" + text[len(_EXTENDED_UNC) :]
-    if not text.startswith("\\\\") or text[2:3] in ("\\", ".", "?", ""):
-        return None  # (a third separator, `\\.\` and `\\?\` are device or namespace forms)
-    parts = [part for part in text[2:].split("\\") if part not in ("", ".")]
-    if len(parts) < 2 or any(_unsafe(part) for part in parts):
-        return None
-    if "@" in parts[0]:
-        return None  # `server@SSL` and `server@8080` are WebDAV: an HTTP connection, not SMB
-    if parts[1].upper() == "DAVWWWROOT" or parts[1].endswith("$"):
-        return None  # the WebDAV redirector's name; administrative, hidden and IPC shares
-    return tuple(parts)
-
-
-def _unsafe(part: str) -> bool:
-    return (
-        part == ".."
-        or part[-1] in " ."  # Windows drops them: two spellings of one name
-        or any(ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in part)
-        or is_device_component(part)  # wildcards, a stream, a device name
-    )
-
-
-def _fold(part: str) -> str:
-    """ASCII case only: NTFS folds more than `str.upper` in some places and less in others, so a
-    non-ASCII name is compared exactly (it can under-approve, never over-approve)."""
-    return "".join(char.upper() if char.isascii() else char for char in part)
-
-
-def key_of(parts: tuple[str, ...]) -> str:
-    return "\\".join(_fold(part) for part in parts)
-
-
-def is_inside(parts: tuple[str, ...], root_key: str) -> bool:
-    """Whether the path (as components) is the approved root or lies below it."""
-    wanted = root_key.split("\\")
-    return len(parts) >= len(wanted) and [_fold(p) for p in parts[: len(wanted)]] == wanted
 
 
 def _root_of(path: str, approved_at: str) -> NetworkRoot:
