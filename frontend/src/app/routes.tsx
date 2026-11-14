@@ -9,6 +9,7 @@ import { SearchPage } from '@/features/search/SearchPage'
 import { SetupPage } from '@/features/setup/SetupPage'
 import { SourcePage } from '@/features/source/SourcePage'
 import { Layout } from './Layout'
+import { RouteError } from './RouteError'
 
 // Hash routing: the app is served from a custom protocol, where a reload on a deep path would
 // otherwise ask the file server for a file that does not exist.
@@ -16,6 +17,7 @@ export const routes: RouteObject[] = [
   {
     path: '/',
     element: <Layout />,
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <Navigate to="/library" replace /> },
       { path: 'library', element: <LibraryPage /> },
