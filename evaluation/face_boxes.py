@@ -29,12 +29,14 @@ class BadBox(ValueError):
 
 def checked(value: object) -> list[float]:
     """`value` as four finite floats with 0 <= x1 < x2 <= 1 and 0 <= y1 < y2 <= 1, or `BadBox`."""
-    if isinstance(value, str | bytes) or not isinstance(value, Sequence) or len(value) != 4:
-        raise BadBox("a face box is four numbers: x1, y1, x2, y2")
-    try:
-        x1, y1, x2, y2 = (float(v) for v in value)
-    except (TypeError, ValueError):
-        raise BadBox("a face box is four numbers: x1, y1, x2, y2") from None
+    # an explicit list or tuple of real numbers: not a string ("01"), not booleans, nothing coerced
+    if (
+        not isinstance(value, list | tuple)
+        or len(value) != 4
+        or not all(isinstance(v, int | float) and not isinstance(v, bool) for v in value)
+    ):
+        raise BadBox("a face box is a list of four numbers: x1, y1, x2, y2")
+    x1, y1, x2, y2 = (float(v) for v in value)
     if not all(math.isfinite(v) and 0.0 <= v <= 1.0 for v in (x1, y1, x2, y2)):
         raise BadBox("a face box lies inside the picture (0 to 1)")
     if x2 - x1 < MINIMUM_SIDE or y2 - y1 < MINIMUM_SIDE:

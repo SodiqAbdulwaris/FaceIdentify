@@ -123,7 +123,7 @@ reviewer sees that it is unverified and can override it. Whether a suggestion is
 
 All commands from the repository root of this change.
 
-- `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy`: clean (see the PR for the final run).
+- `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy`: clean.
 - New and changed tests: `tests/unit/test_label_review_faces.py` (25), changed `test_label_review.py`,
   `test_assisted_gate.py`, `test_measure_operating_point_manifest.py`. They cover the acceptance list on synthetic
   pictures only: an unconfirmed suggestion never becomes ground truth (and a verdict without a face is refused); an
@@ -142,6 +142,20 @@ All commands from the repository root of this change.
   2; on the picture where the detector found no face, `Draw a box` and a mouse drag drew a box and `VERIFIED` saved it as
   `CORRECTED`; `None / cannot determine` saved `UNCERTAIN` with `face_choice NONE_OR_CANNOT_DETERMINE`; `export` carried the
   two selected boxes. Not checked by hand: a touch screen, a real photograph in the page, other browsers.
+- **What is and is not covered for the page.** Nothing automated executes the page's JavaScript: the tests cover the
+  server (state with faces and suggestion, the decision route, refusals), the stored records and the page source (no
+  `innerHTML`, the suggestion wording), but not the click and drag arithmetic for a letterboxed picture (`object-fit:
+  contain`), the keyboard selection or the zoom. Those were exercised only by the manual check above, with a picture
+  whose shape differs from its frame. An independent review of the earlier draft confirmed the coordinate transform, the
+  text-only DOM building, the token check and that EXIF orientation is applied before detection; a browser test of the
+  page is a follow-up (the repository has no browser harness for these local tools).
+- Geometry is accepted only as an explicit list or tuple of four real, non-boolean, finite numbers (a string such as
+  "01", booleans or other iterables are refused), with a regression test; two manifests used one after the other never
+  share a selected face (a test; there is no module-level state).
+- **The full backend suite** (`uv run pytest`, this machine, 18 min): 3,695 passed, 74 failed, 30 errors. Every failure and
+  error is in `tests/integration` and is `MediaToolsMissingError` (the pinned ffmpeg is not installed in the test
+  profile here; CI installs it), in the video, camera and import tests; none touches `evaluation/`. They were not
+  re-run with ffmpeg here; CI's result for the exact head is the evidence.
 - **Real models, counts only** (the installed `insightface-buffalo-l` 1.0.0, CPU): `review_detections.py` on a scratch set
   of 22 LFW photographs of three people: 22 appended, none undecodable or refused; 15 with one face, 7 with several, none
   without; a suggestion for every photograph (15 sole face, 7 label recurrence). No photograph was looked at to judge it,
