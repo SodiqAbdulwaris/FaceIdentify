@@ -35,6 +35,7 @@ from backend.app.lifecycle import OpenLibrary
 from backend.app.processing.configuration import ProcessingConfigurationError
 from backend.app.recognition.face_query import FaceQuery, FaceQueryResult, QueriedFace
 from backend.app.recognition.reasoner import RecognitionOutcome
+from backend.app.runtime.network_roots import NetworkRoots
 from backend.app.runtime.perception_client import PerceptionError
 from backend.app.runtime.worker_config import RuntimeUnavailableError
 from backend.infrastructure.indexing.representation_index import IndexUnusableError
@@ -43,7 +44,7 @@ from backend.infrastructure.media.image import (
     ImageTooLargeError,
     UnsupportedImageError,
 )
-from backend.infrastructure.storage.local_path import open_local
+from backend.infrastructure.storage.local_path import Approved, open_local
 from backend.ml.contracts.protocol import ContractError
 from backend.ml.supervisor.supervisor import MLUnavailableError, WorkerFailedError
 
@@ -92,17 +93,18 @@ def too_large() -> ApiError:
     return ApiError(413, "MEDIA_TOO_LARGE", "The image is larger than is allowed.")
 
 
-def _read_query(raw: bytes, content_type: str, limits: MediaLimits) -> bytes:
+def _read_query(
+    raw: bytes, content_type: str, limits: MediaLimits, approved: Approved | None = None
+) -> bytes:
     """The picture's bytes: the body itself, or the file a JSON body names.
 
     Trust boundary: the bearer token already lets its holder read any file on this computer
     through import, so a local path is accepted, but one that leads off this computer is refused
-    before anything is read: a UNC or device form, a mapped network drive, or a link or junction
-    along the way that points at one (issue #174; `local_target`). It could make this computer
-    reach out and authenticate to another one, and no network location is approved. The resolved
-    local file is what is opened, checked once open to be that file on a local volume (a link
-    planted between the check and the open is still followed by the open, but nothing is read from
-    it), through one handle and never more than the limit, whatever it grows into after a check.
+    before anything is read, and before any outbound access, unless the user approved that share or
+    folder (issue #174; `local_target`, `approved`): a UNC or device form, a mapped drive, or
+    a link or junction along the way that points at one. The effective target is what is judged, and
+    the file is opened through a walk that follows no link, then checked to be that file, through
+    one handle and never more than the limit, whatever it grows into after a check.
     """
     if "json" not in content_type:
         return raw
@@ -110,12 +112,13 @@ def _read_query(raw: bytes, content_type: str, limits: MediaLimits) -> bytes:
         path = json.loads(raw)["path"]
         if not isinstance(path, str):
             raise ValueError
-        handle = open_local(path)
+        handle = open_local(path, approved)
         if handle is None:
             raise ApiError(
                 400, "QUERY_PATH_NOT_LOCAL",
-                "A picture on another computer or a network drive cannot be searched by its path. "
-                "Copy it to this computer, or choose it again so it is sent as bytes.",
+                "That path is not on this computer or an approved network location. Approve the "
+                "share in the settings, copy the picture to this computer, or choose it again so "
+                "it is sent as bytes.",
             )  # fmt: skip
         with handle:
             data = handle.read(limits.max_bytes + 1)
@@ -229,7 +232,13 @@ async def _search(
     del received  # (one copy, not two, while the picture waits for the worker)
 
     return await anyio.to_thread.run_sync(
-        lambda: search_picture(library, settings, _read_query(raw, content_type, limits))
+        lambda: search_picture(
+            library,
+            settings,
+            _read_query(
+                raw, content_type, limits, NetworkRoots(library.roots.local_state_root).approves
+            ),
+        )
     )
 
 

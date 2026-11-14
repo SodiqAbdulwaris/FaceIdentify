@@ -17,10 +17,10 @@ from backend.infrastructure.storage.local_path import (
     Reparse,
     classify_dos_device,
     classify_reparse,
-    is_device_component,
     local_target,
     open_local,
 )
+from backend.infrastructure.storage.unc import is_device_component
 from tests.fixtures.links import link_directory
 
 SHARE = r"\\faceidentify-test.invalid\share"
@@ -414,14 +414,14 @@ def test_a_handle_that_is_not_the_resolved_file_is_closed_unread(
     picture = tmp_path / "a.png"
     picture.write_bytes(b"pixels")
     opened: list[Spy] = []
-    real_open = Path.open
+    real_as_file = local_path._as_file
 
-    def spying_open(self: Path, *args: Any, **kwargs: Any) -> Any:
-        spy = Spy(real_open(self, *args, **kwargs))
+    def spying_as_file(handle: int) -> Any:
+        spy = Spy(real_as_file(handle))
         opened.append(spy)
         return spy
 
-    monkeypatch.setattr(Path, "open", spying_open)
+    monkeypatch.setattr(local_path, "_as_file", spying_as_file)
     monkeypatch.setattr(local_path, "_final_nt_path", lambda descriptor: final)
 
     assert open_local(picture) is None
@@ -434,7 +434,9 @@ def test_a_file_swapped_for_a_link_after_the_check_is_not_returned(
     """The race: `local_target` saw a plain file; by the open it is a link to another file."""
     (tmp_path / "other.png").write_bytes(b"other")
     (tmp_path / "swapped.png").symlink_to(tmp_path / "other.png")
-    monkeypatch.setattr(local_path, "local_target", lambda path: tmp_path / "swapped.png")
+    monkeypatch.setattr(
+        local_path, "local_target", lambda path, approved=None: tmp_path / "swapped.png"
+    )
 
     assert open_local(tmp_path / "plain.png") is None
 
