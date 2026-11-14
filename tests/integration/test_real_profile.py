@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import secrets
 import shutil
 import uuid
@@ -49,13 +50,15 @@ from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.models import RepresentationSpace
 from backend.app.processing.configuration import ProcessingRequestV1
 from backend.app.runtime.models import RuntimePackageInstallation
+from backend.app.runtime.package_store import RuntimePackageStore
 from backend.app.runtime.perception_client import Detected, FaceVector, Represented
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
+from backend.infrastructure.storage.layout import StorageRoots
 from backend.ml.contracts.messages import Detection
 from backend.ml.contracts.protocol import MLErrorCode, MLOperation
 from backend.ml.supervisor.supervisor import MLSupervisor
 from tests.factories.models import ModelFactory
-from tests.fixtures.api import Api, imported, library_settings, serving
+from tests.fixtures.api import Api, error, imported, library_settings, serving
 from tests.fixtures.catalog_packages import manifest_dict, package_files
 from tests.fixtures.deterministic import FrozenClock, SeededUUIDs
 from tests.fixtures.onnx_models import EMBEDDING_DIMENSION
@@ -902,3 +905,147 @@ def test_the_backends_readiness_carries_the_dependencies_the_profile_reports(
 
     assert backend.readiness().missing_dependencies == (f"{KEY} 1.0.0",)
     assert Backend(world.settings).readiness().missing_dependencies == ()  # nothing configured
+
+
+# --- a failed activation keeps the configuration usable (TST-082) -----------------------------
+
+INSTALL = "/api/v1/runtime/models/install"
+
+
+def upgrade_source(world: World, name: str, *, damaged: bool = False) -> Path:
+    """The installed package again with a DirectML variant per export: what an install offers a
+    machine whose package predates those variants (replaced in place, `RuntimePackageStore._swap`).
+    `damaged`: one file has other bytes than its manifest says."""
+    manifest = manifest_dict(KEY)
+    manifest["variants"] += [
+        dict(
+            v,
+            provider="DmlExecutionProvider",
+            device_kind="GPU",
+            variant_key=f"{v['variant_key']}-dml",
+        )
+        for v in manifest["variants"]
+    ]
+    source = package_files(world.folder.parent / name, manifest)
+    if damaged:
+        export = manifest["exports"][0]
+        (source / export["file"]).write_bytes(b"x" * export["size_bytes"])
+    return source
+
+
+def roots_of(world: World) -> StorageRoots:
+    return StorageRoots(world.settings.library_root, world.settings.local_state_root)
+
+
+@pytest.fixture
+def fixture_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The install route takes a ready package folder (the fixture package) instead of looking
+    for the two real model files; the store, the route, `prepare` and readiness are real."""
+    monkeypatch.setattr(
+        "backend.api.routes.runtime_models.install_models",
+        lambda path, store, *, allow_fixture: store.install(path, {}),
+    )
+
+
+async def processes(api: Api, world: World, name: str) -> None:
+    source = await imported(api, path=picture(world.folder, name))
+    assert (await process_and_wait(api, source["id"]))["state"] == "COMPLETED"
+
+
+async def test_an_upgrade_of_the_models_is_activated_and_processing_goes_on(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs, fixture_models: None
+) -> None:
+    """The control for the two tests below: the same request succeeds when nothing is wrong."""
+    install_package(world, clock, new_id)
+    write_policy(world)
+    app, secret = application(world, RecordingPool())
+
+    async with serving(app, secret, world.folder.parent / "files", clock) as api:
+        await processes(api, world, "a.png")
+        source = upgrade_source(world, "upgrade")
+        response = await api.client.post(INSTALL, json={"path": str(source)})
+
+        assert response.status_code == 201, response.text
+        package = RuntimePackageStore(roots_of(world), new_id=new_id).get(KEY)
+        assert package is not None
+        assert len(package.manifest.variants) == 4
+        ready = (await api.client.get("/readiness")).json()
+        assert (ready["state"], ready["capabilities"]["runtime_package"]) == ("READY", "READY")
+        await processes(api, world, "b.png")
+
+
+@pytest.mark.parametrize("failure", ["damaged", "cannot_publish"])
+async def test_a_failed_activation_leaves_the_installed_models_and_the_application_working(
+    world: World,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    fixture_models: None,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    installed = install_package(world, clock, new_id)
+    write_policy(world)
+    before = (installed / "manifest.json").read_bytes()
+    roots = roots_of(world)
+    app, secret = application(world, RecordingPool())
+    rename = os.rename
+    failed: list[str] = []
+
+    def the_new_package_cannot_move_into_place(src: Any, dst: Any) -> None:
+        if not failed and Path(dst) == installed and Path(src).parent == roots.installation:
+            failed.append(str(src))  # (the old package has just been moved aside)
+            raise PermissionError("in use")
+        rename(src, dst)
+
+    async with serving(app, secret, world.folder.parent / "files", clock) as api:
+        await processes(api, world, "a.png")
+        source = upgrade_source(world, "upgrade", damaged=failure == "damaged")
+        with monkeypatch.context() as patch:
+            if failure == "cannot_publish":
+                patch.setattr(os, "rename", the_new_package_cannot_move_into_place)
+            response = await api.client.post(INSTALL, json={"path": str(source)})
+
+        error(response, 400, "MODEL_SOURCE_INVALID")
+        assert bool(failed) == (failure == "cannot_publish")
+        assert (installed / "manifest.json").read_bytes() == before  # the previous package, whole
+        assert RuntimePackageStore(roots, new_id=new_id).verify(KEY) == []
+        assert list(roots.installation.iterdir()) == []  # nothing half-installed is left
+        ready = (await api.client.get("/readiness")).json()
+        assert (ready["state"], ready["capabilities"]["runtime_package"]) == ("READY", "READY")
+        await processes(api, world, "b.png")  # the configuration that worked still works
+
+
+class Killed(BaseException):
+    """The process died here: no cleanup code runs, as when it is killed."""
+
+
+@pytest.mark.parametrize("step", ["retired", "published"])
+async def test_an_activation_killed_half_way_still_starts_and_processes(
+    world: World, clock: FrozenClock, new_id: SeededUUIDs, step: str
+) -> None:
+    """Between the two moves of an upgrade nothing is published under the key; the next start
+    recovers one complete package (the old or the new) and the application works."""
+    install_package(world, clock, new_id)
+    write_policy(world)
+    roots = roots_of(world)
+
+    def die(at: str) -> None:
+        if at == step:
+            raise Killed(at)
+
+    with pytest.raises(Killed):
+        RuntimePackageStore(roots, new_id=new_id, checkpoint=die).install(
+            upgrade_source(world, "upgrade"), {}
+        )
+    app, secret = application(world, RecordingPool())
+
+    async with serving(app, secret, world.folder.parent / "files", clock) as api:
+        ready = (await api.client.get("/readiness")).json()
+        assert (ready["state"], ready["capabilities"]["runtime_package"]) == ("READY", "READY")
+        store = RuntimePackageStore(roots, new_id=new_id)
+        package = store.get(KEY)
+        assert package is not None
+        assert len(package.manifest.variants) in (2, 4)
+        assert store.verify(KEY) == []
+        assert list(roots.installation.iterdir()) == []
+        await processes(api, world, "a.png")
