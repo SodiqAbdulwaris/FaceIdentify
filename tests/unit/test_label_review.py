@@ -145,7 +145,7 @@ def test_the_export_is_written_and_versioned(dataset: Path) -> None:
 
     written = json.loads(path.read_text(encoding="utf-8"))
     assert path.parent == dataset / "review" / "exports"
-    assert (written["schema_version"], written["kind"]) == (1, "verified-manifest")
+    assert (written["schema_version"], written["kind"]) == (2, "verified-manifest")
     assert written["decisions_sha256"] == hashlib.sha256(review.log_path.read_bytes()).hexdigest()
 
 
@@ -172,7 +172,10 @@ def test_the_page_needs_its_token_serves_listed_photographs_and_records_decision
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = str(server.server_address[0]), int(server.server_address[1])
-    first: dict[str, object] = {"file": "Ada Lovelace/00.jpg", "decision": "VERIFIED"}
+    first: dict[str, object] = {
+        "file": "Ada Lovelace/00.jpg",
+        "decision": "VERIFIED",
+    }
 
     def call(method: str, path: str, body: dict[str, object] | None = None) -> tuple[int, bytes]:
         connection = http.client.HTTPConnection(host, port, timeout=5)
