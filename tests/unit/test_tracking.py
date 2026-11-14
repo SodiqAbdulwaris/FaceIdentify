@@ -182,6 +182,19 @@ def test_a_track_that_ends_drops_its_count() -> None:
     assert tracker.state()["kept"] == {}
 
 
+def test_a_track_that_ends_within_the_chunk_keeps_its_budget_for_that_chunk() -> None:
+    tracker = Tracker(max_gap=1)
+    (track,) = tracker.update(0, [(0.1, 0.1, 0.3, 0.4)])
+    for _ in range(7):
+        tracker.kept(track)  # its lifetime budget is spent
+    tracker = Tracker(max_gap=1, state=tracker.state())  # the next chunk
+    assert tracker.update(1, [(0.1, 0.1, 0.3, 0.4)]) == [track]
+
+    tracker.update(5, [])  # it ends before the chunk's selection
+
+    assert room_of(tracker, track) == 0
+
+
 def test_a_track_that_ended_within_the_chunk_counts_nothing() -> None:
     tracker = Tracker(max_gap=1)
     (track,) = tracker.update(0, [(0.1, 0.1, 0.3, 0.4)])
