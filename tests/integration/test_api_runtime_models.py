@@ -150,3 +150,17 @@ def _processing(api: Api, profile: LibraryProfile) -> Any:
         owner="test",
         profile=profile,
     )
+
+
+async def test_readiness_follows_what_is_true_now_not_what_was_true_at_the_start(
+    api: Api,
+) -> None:
+    async def state() -> str:
+        return str((await api.client.get("/readiness")).json()["state"])
+
+    api.backend.capabilities["runtime_package"] = "UNAVAILABLE"  # a first run: no models yet
+    assert await state() == "DEGRADED"
+    api.backend.capabilities["runtime_package"] = "READY"  # the user installed them
+    assert await state() == "READY"
+    api.backend.capabilities["recovery"] = "DEGRADED"  # work owed later (a deletion to finish)
+    assert await state() == "DEGRADED"
