@@ -264,3 +264,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-13 | [Backend coverage is 100% again, and CI now fails below it](2026-11-13-backend-coverage-enforced.md) | done |
 | 2026-11-14 | [Readiness reports the state that is true now](2026-11-14-readiness-state-follows-capabilities.md) | done |
 | 2026-11-14 | [Four small screen defects: a video card, counts, the error screen, the notice wording (issue 284)](2026-11-14-web-screen-defects-issue-284.md) | done |
+| 2026-11-14 | [A video track holds one person (issue 283)](2026-11-14-video-track-one-person.md) | done; delegated decision |
