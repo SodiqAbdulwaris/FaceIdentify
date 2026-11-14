@@ -268,3 +268,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-14 | [A track that ends inside a chunk keeps its budget for that chunk](2026-11-14-track-budget-ended-in-chunk.md) | done |
 | 2026-11-14 | [Dataset licensing evidence record and artifact audit (issue 183)](2026-11-14-dataset-licensing-evidence-issue-183.md) | partial; LFW permission-unverified |
 | 2026-11-14 | [A failed activation of the models keeps the application working (TST-082)](2026-11-14-activation-rollback-tests.md) | tests added; no product change |
+| 2026-11-14 | [Label review: the model suggests the face, a reviewer confirms it (issue 181)](2026-11-14-label-review-confirmed-face.md) | built; issue still open; nothing confirmed by a reviewer yet |
