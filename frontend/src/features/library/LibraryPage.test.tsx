@@ -28,6 +28,21 @@ describe('the library', () => {
     )
   })
 
+  it('shows a plain placeholder for a video and never asks for it as a picture', async () => {
+    const { calls } = renderApp('/library', [
+      {
+        path: SOURCES,
+        respond: page([source({ id: 'v1', type: 'VIDEO', display_name: 'clip.mp4' })]),
+      },
+      media,
+    ])
+
+    expect(await screen.findByRole('img', { name: 'clip.mp4 (a video)' })).toHaveTextContent(
+      'Video',
+    )
+    expect(calls.some((call) => call.path.endsWith('/media'))).toBe(false) // (no broken image)
+  })
+
   it('invites the user to import images when there are none', async () => {
     renderApp('/library', [{ path: SOURCES, respond: page([]) }])
 
