@@ -21,9 +21,21 @@ from sqlalchemy import select
 
 from backend.app.identities.models import Identity
 from backend.app.memory.models import Observation, Occurrence
+from backend.app.processing.video_chunks import video_tracks
+from backend.app.runtime.perception_client import ProviderFallback, ProviderUnavailable, Represented
+from backend.ml.contracts.protocol import MLErrorCode
 from tests.fixtures.media import make_clip
 from tests.fixtures.pipeline import Pipeline
-from tests.fixtures.video_pipeline import import_video, video_executor, video_perception
+from tests.fixtures.video_pipeline import (
+    PaintedPerception,
+    import_video,
+    video_executor,
+    video_perception,
+)
+
+Interrupt = Callable[[PaintedPerception, Callable[[], Any]], None]
+# (track, start ms, end ms, kept faces): red, then green from the cut, then red again
+EXPECTED_TRACKS = [(0, 0, 3520, 3), (1, 4000, 5520, 3), (2, 6000, 7520, 3)]
 
 
 def cut_clip(path: Path, *, seconds: float, green: tuple[float, float]) -> Path:
@@ -74,25 +86,60 @@ class Crash(BaseException):
     """The process was killed here."""
 
 
-def test_a_resumed_run_compares_the_next_face_with_the_kept_one(
-    pipeline: Pipeline, tmp_path: Path
-) -> None:
-    """Killed inside the chunk where the green face first appears, the run resumes from the
-    first chunk's checkpoint: the track's face then comes from the kept face stored in the library
-    (the checkpoint holds no face), so the green face is still not taken for the red one."""
-
+def kill_in_the_second_chunk(perception: PaintedPerception, run: Callable[[], Any]) -> None:
     def crash(number: int) -> None:
-        if number == 10:  # the second chunk's second batch
+        if number == 10:  # the second chunk's second batch, where the green face is
             raise Crash
 
-    check_the_cut(
+    perception.on_detect = crash
+    with pytest.raises(Crash):
+        run()
+    perception.on_detect = None
+
+
+def fall_back_in_the_second_chunk(perception: PaintedPerception, _run: Callable[[], Any]) -> None:
+    real = perception.represent
+
+    def represent(pixels: Any, detections: tuple[Any, ...]) -> Represented:
+        found = real(pixels, detections)
+        if perception.log.count("represent") == 5:  # the second chunk's first embedding turn
+            assert found.ran is not None
+            failed = ProviderUnavailable(
+                found.ran, MLErrorCode.RUNTIME_VARIANT_NOT_AVAILABLE, "gone"
+            )
+            return Represented(found.vectors, found.ran, (ProviderFallback((failed,), found.ran),))
+        return found
+
+    perception.represent = represent  # type: ignore[method-assign]
+
+
+@pytest.mark.parametrize(
+    "interrupt",
+    [None, kill_in_the_second_chunk, fall_back_in_the_second_chunk],
+    ids=["uninterrupted", "killed-and-resumed", "chunk-redone-after-a-fallback"],
+)
+def test_a_resumed_or_redone_chunk_makes_the_same_tracks(
+    pipeline: Pipeline, tmp_path: Path, interrupt: Interrupt | None
+) -> None:
+    """The second chunk starts where the green face first appears, after the red track has spent
+    its budget. Resumed from the first chunk's checkpoint (which holds no face) or redone after a
+    provider fallback in the embedding pass, the track's face is its kept face again (read back
+    from the library on a resume), so every run makes the same tracks as one never interrupted."""
+    run_id = check_the_cut(
         pipeline,
         tmp_path,
         8,
         (3.75, 5.75),
         {"chunk_frames": 8, "keep_per_track": 3, "max_per_track": 3},
-        crash=crash,
+        interrupt=interrupt,
     )
+
+    with pipeline.lib.session_factory() as session:
+        tracks = [
+            (t["track"], t["start_ms"], t["end_ms"], len(t["observations"]))
+            for t in video_tracks(session, run_id)
+        ]
+    assert tracks == EXPECTED_TRACKS
 
 
 def check_the_cut(
@@ -101,19 +148,16 @@ def check_the_cut(
     seconds: float,
     green: tuple[float, float],
     settings: dict[str, Any],
-    crash: Callable[[int], None] | None = None,
-) -> None:
+    interrupt: "Interrupt | None" = None,
+) -> uuid.UUID:
     red = enrol_red(pipeline)
     source_id = import_video(pipeline, cut_clip(tmp_path / "cut.mp4", seconds=seconds, green=green))
     perception = video_perception(pipeline)
     pipeline.enqueue(source_id)
     started = pipeline.scheduler().claim_source_job("worker")
     assert started is not None
-    if crash is not None:
-        perception.on_detect = crash
-        with pytest.raises(Crash):
-            video_executor(pipeline, **settings).execute(started)
-        perception.on_detect = None
+    if interrupt is not None:
+        interrupt(perception, lambda: video_executor(pipeline, **settings).execute(started))
 
     run_id = video_executor(pipeline, **settings).execute(started).processing_run_id
     pipeline.accept(run_id, apply_index=True)
@@ -137,3 +181,4 @@ def check_the_cut(
             )
         ).all()
         assert recorded  # the green person's faces are kept, for review
+    return run_id
