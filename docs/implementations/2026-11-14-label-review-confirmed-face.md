@@ -61,16 +61,18 @@ rule and a named exclusion when it does not match.
   - Decision records are **schema 2** (schema 1 lines stay readable and count as before; a newer schema is refused):
     an immutable `id`, `supersedes` (the previous decision of that photograph), `face_choice` (`SELECTED`,
     `NONE_OR_CANNOT_DETERMINE`, null), `face` (`box`, `image_size`, `source` `DETECTED` or `CORRECTED`, `frame`),
-    `suggestion` (`outcome` `CONFIRMED`, `OVERRIDDEN`, `REJECTED`, `NONE_OFFERED`, and what was offered), `detection`
+    `suggestion` (`outcome` `CONFIRMED`, `OVERRIDDEN`, `REJECTED`, `NOT_ADDRESSED`, `NONE_OFFERED`, and what was offered), `detection`
     (the run's id and provenance). The old `subject_point` of PR 288 is gone (it never reached `main`).
   - `decide(..., face=<box>, none_or_cannot_determine=...)`. **A confirming decision (`VERIFIED`, or `INCORRECT` with a
     correction) on a photograph that has a detection run is refused without a selected face**; the suggestion is never filled
     in for the reviewer. `none / cannot determine` goes with `UNCERTAIN` or `EXCLUDED` and records `REJECTED` when something
-    was offered. The outcome is computed on the server from the boxes (the offered box and the chosen one at IoU 0.95 or
+    was offered (a decision made without answering the suggestion records `NOT_ADDRESSED`). The outcome is computed on the server from the boxes (the offered box and the chosen one at IoU 0.95 or
     more is `CONFIRMED`), not trusted from the page.
   - Validity (`_why`): changed bytes, changed label, an invalid box, a different picture size than the newest detection run
     of the same bytes, or, for a `DETECTED` box, a newer run with no face corresponding to it make the decision **stale**;
-    the export lists each stale photograph under its reason (`stale_reasons`). A box the reviewer drew (`CORRECTED`) is theirs
+    the export lists each stale photograph under its reason (`stale_reasons`). A confirming decision made without a face before the faces were known (no
+    detection run then) turns stale as `face_not_reviewed` once a run exists, so such a photograph is never exported without
+    geometry once detections exist. A box the reviewer drew (`CORRECTED`) is theirs
     and is not tied to a detector. A suggestion made for another label is not shown.
   - Export **schema 2**: each verified photograph that has a face carries `face` and `review` (decision id, reviewer,
     time, suggestion outcome, detection run); top-level `geometry_frame`, `detection_provenance`,
@@ -149,6 +151,12 @@ All commands from the repository root of this change.
   whose shape differs from its frame. An independent review of the earlier draft confirmed the coordinate transform, the
   text-only DOM building, the token check and that EXIF orientation is applied before detection; a browser test of the
   page is a follow-up (the repository has no browser harness for these local tools).
+- **Independent review** (read-only subagent, because Codex was at its usage limit; posted on the PR): no blocker. Fixed from it:
+  a face-less verdict made before detections existed is now stale (`face_not_reviewed`) once a run exists, so nothing is
+  exported without geometry then; the page no longer pre-selects a saved box (it is shown dotted, and a decision needs a
+  fresh selection; re-checked in the browser); `REJECTED` is recorded only for "none / cannot determine", otherwise
+  `NOT_ADDRESSED`; a complete last record that only lost its newline is kept; `tests/unit/test_face_boxes.py` tests the
+  matching boundaries. Not changed: the gate accepts a `face` in a schema 1 manifest (the exporter writes it only in schema 2).
 - Geometry is accepted only as an explicit list or tuple of four real, non-boolean, finite numbers (a string such as
   "01", booleans or other iterables are refused), with a regression test; two manifests used one after the other never
   share a selected face (a test; there is no module-level state).
