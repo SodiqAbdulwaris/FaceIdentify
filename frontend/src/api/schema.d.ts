@@ -709,6 +709,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/network-roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Roots */
+        get: operations["list_roots"];
+        put?: never;
+        /** Approve Root */
+        post: operations["approve_root"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/network-roots/{root_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Root */
+        delete: operations["revoke_root"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sources": {
         parameters: {
             query?: never;
@@ -1018,6 +1053,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ApproveNetworkRoot */
+        ApproveNetworkRoot: {
+            /** Path */
+            path: string;
+        };
         /** BoundingBox */
         BoundingBox: {
             /** Height */
@@ -1390,6 +1430,20 @@ export interface components {
              * Format: uuid
              */
             identity_id: string;
+        };
+        /** NetworkRootList */
+        NetworkRootList: {
+            /** Roots */
+            roots: components["schemas"]["NetworkRootView"][];
+        };
+        /** NetworkRootView */
+        NetworkRootView: {
+            /** Approved At */
+            approved_at: string;
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
         };
         /** ObservationBrief */
         ObservationBrief: {
@@ -3269,6 +3323,97 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["FaceSearchResponse"];
                 };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_roots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkRootList"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    approve_root: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveNetworkRoot"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkRootView"];
+                };
+            };
+            /** @description The one error shape. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    revoke_root: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                root_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description The one error shape. */
             default: {
