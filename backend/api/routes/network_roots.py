@@ -18,6 +18,7 @@ from backend.app.runtime.network_roots import (
     NetworkRootInvalidError,
     NetworkRootNotFoundError,
     NetworkRoots,
+    NetworkRootsUnreadableError,
 )
 
 router = APIRouter(prefix="/settings/network-roots", tags=["settings"])
@@ -45,9 +46,20 @@ def _view(root: NetworkRoot) -> NetworkRootView:
     return NetworkRootView(id=root.id, path=root.path, approved_at=root.approved_at)
 
 
+def unreadable() -> ApiError:
+    return ApiError(
+        503, "NETWORK_ROOTS_UNREADABLE",
+        "The list of approved locations cannot be read, so none is approved. Nothing was changed.",
+        retryable=True,
+    )  # fmt: skip
+
+
 @router.get("")
 def list_roots(library: Library) -> NetworkRootList:
-    return NetworkRootList(roots=[_view(root) for root in network_roots(library).approved()])
+    try:
+        return NetworkRootList(roots=[_view(root) for root in network_roots(library).approved()])
+    except NetworkRootsUnreadableError:
+        raise unreadable() from None
 
 
 @router.post("", status_code=201)
@@ -64,6 +76,8 @@ def approve_root(
             "Give a share such as \\\\server\\share, or a folder on one. "
             "Device paths and web addresses cannot be approved.",
         ) from None  # fmt: skip
+    except NetworkRootsUnreadableError:
+        raise unreadable() from None
 
 
 @router.delete("/{root_id}", status_code=204)
@@ -72,4 +86,6 @@ def revoke_root(root_id: str, library: Library) -> Response:
         network_roots(library).revoke(root_id)
     except NetworkRootNotFoundError:
         raise ApiError(404, "NETWORK_ROOT_NOT_FOUND", "That location is not approved.") from None
+    except NetworkRootsUnreadableError:
+        raise unreadable() from None
     return Response(status_code=204)
