@@ -43,6 +43,12 @@ Exclusions are listed by rule (`log.exclusions`, issue 182): each enrolment phot
 no face, each known person those losses left with too few enrolled faces, and each query not
 evaluated, with why (from the first query pass); a photograph with several faces and no dominant
 one is "not evaluated (ambiguous subject)", not a loss of the pipeline.
+A verified manifest of schema 2 (`label_review.py`, issue 181) may carry, per photograph, the face a
+reviewer selected: a normalised box on the upright picture. That photograph's subject is then the one
+detected face that corresponds to the box (`face_boxes.match_face`: intersection over union of at
+least 0.5, and no other face that close), whatever its size; if no detected face corresponds, the
+photograph is left out as "annotation mismatch" and no other face is taken instead. A photograph
+without a selected face keeps the rule above.
 This is a local run (the weights are not in CI) and is recorded in the tracker with its evidence.
 """
 
@@ -83,6 +89,7 @@ from backend.api.startup import (
     MediaLimits,
     create_backend_app,
 )
+from evaluation.face_boxes import BadBox, checked, match_face
 
 DATASETS_ROOT = (Path(__file__).resolve().parent / "datasets").resolve()
 API = "/api/v1"
@@ -97,6 +104,11 @@ EXCLUSION_RULES = {
     "no_subject": (
         f"not evaluated (ambiguous subject): several faces and none {DOMINANCE} times larger "
         "than the rest"
+    ),
+    "annotation_mismatch": (
+        "not evaluated (annotation mismatch): the reviewer selected a face (label_review.py, issue "
+        "181) and the detector found no one face that corresponds to it (intersection over union "
+        "of at least 0.5, `face_boxes.MATCH_IOU`); no other face is taken instead"
     ),
     "too_few_enrolled_faces": (
         f"not evaluated: the person has fewer than {MINIMUM_ENROLLED} enrolled faces, because "
@@ -207,11 +219,20 @@ def choose_people(
     people = []
     for name, entries in manifest.items():
         files = []
+        selected: dict[Path, list[float]] = {}  # the reviewer's face, by photograph
         for entry in entries:
             path = (dataset / entry["file"]).resolve()
             if root not in path.parents:
                 raise SystemExit(f"{entry['file']} is outside the dataset folder")
             expected = entry.get("sha256")  # (a verified manifest records what was reviewed)
+            face = entry.get("face")  # (the face the reviewer selected, if they selected one)
+            if face is not None:
+                try:
+                    selected_box = checked(face["box"])
+                except (BadBox, KeyError, TypeError) as error:
+                    raise SystemExit(
+                        f"{entry['file']} has an invalid selected face: {error}"
+                    ) from None
             if not path.is_file():
                 if expected:
                     raise SystemExit(f"{entry['file']} was verified but is missing")
@@ -222,10 +243,19 @@ def choose_people(
             if digest not in seen:
                 seen.add(digest)
                 files.append(path)
+                if face is not None:
+                    selected[path] = selected_box
         files.sort()
         if len(files) >= minimum:
             held = max(1, len(files) // 4)
-            people.append({"name": name, "enrol": files[:-held], "query": files[-held:]})
+            people.append(
+                {
+                    "name": name,
+                    "enrol": files[:-held],
+                    "query": files[-held:],
+                    "selected": {f: selected[f] for f in files if f in selected},
+                }
+            )
     people.sort(key=lambda p: hashlib.sha256(str(p["name"]).encode()).hexdigest())
     return people[:count]
 
@@ -248,8 +278,28 @@ def load_provenance(path: Path) -> dict[str, Any] | None:
     return value
 
 
-def subject(faces: list[dict[str, Any]], box: str) -> dict[str, Any] | None:
-    """The one face a photograph is about: its only face, or one DOMINANCE times larger."""
+def subject(
+    faces: list[dict[str, Any]], box: str, selected: list[float] | None = None
+) -> dict[str, Any] | None:
+    """The one face a photograph is about.
+
+    With a face the reviewer selected (`selected`, a normalised [x1, y1, x2, y2] box): the one
+    detected face that corresponds to it by geometry (`face_boxes.match_face`: intersection over
+    union of at least 0.5 and no other face that close), else None. Never another face: not the
+    largest, not the only one. Without a selection: the only face, or one DOMINANCE times larger
+    than the next."""
+    if selected is not None:
+        corners = [
+            [
+                f[box]["x"],
+                f[box]["y"],
+                f[box]["x"] + f[box]["width"],
+                f[box]["y"] + f[box]["height"],
+            ]
+            for f in faces
+        ]
+        found = match_face(selected, corners)
+        return None if found is None else faces[found]
     if not faces:
         return None
 
@@ -262,13 +312,17 @@ def subject(faces: list[dict[str, Any]], box: str) -> dict[str, Any] | None:
     return None
 
 
-def skip_reason(faces: list[dict[str, Any]], run_state: str) -> str | None:
+def skip_reason(
+    faces: list[dict[str, Any]], run_state: str, selected: list[float] | None = None
+) -> str | None:
     """Why an enrolment photograph places no face (an `EXCLUSION_RULES` key), or None.
 
     `enrol` asks only when the photograph has no subject face, so a run that did not complete is
     named instead of being taken for a photograph without a face."""
     if run_state != "COMPLETED":
         return "processing_failed"
+    if selected is not None:
+        return None if subject(faces, "bounding_box", selected) else "annotation_mismatch"
     if not faces:
         return "no_face"
     if subject(faces, "bounding_box") is None:
@@ -343,7 +397,12 @@ async def enrol(
     }
 
     enrolled: dict[str, dict[str, Any]] = {}
-    skipped: dict[str, int] = {"processing_failed": 0, "no_face": 0, "no_subject": 0}
+    skipped: dict[str, int] = {
+        "processing_failed": 0,
+        "no_face": 0,
+        "no_subject": 0,
+        "annotation_mismatch": 0,
+    }
     excluded: list[dict[str, str]] = []
     for person in people:
         record: dict[str, Any] = {
@@ -356,10 +415,11 @@ async def enrol(
         for path in person["enrol"]:
             source_id = sources[path]
             faces = await faces_of(gate, source_id)
-            chosen = subject(faces, "bounding_box")
+            wanted = person.get("selected", {}).get(path)
+            chosen = subject(faces, "bounding_box", wanted)
             if chosen is None:
                 # (never None here: with no subject a rule applies; `or` is for the type checker)
-                rule = skip_reason(faces, states[runs[source_id]]) or "no_subject"
+                rule = skip_reason(faces, states[runs[source_id]], wanted) or "no_subject"
                 skipped[rule] += 1
                 excluded.append({"person": person["name"], "file": path.name, "rule": rule})
                 continue
@@ -401,22 +461,23 @@ async def enrol(
     return enrolled
 
 
-async def ask(gate: Gate, path: Path) -> dict[str, Any]:
+async def ask(gate: Gate, path: Path, selected: list[float] | None = None) -> dict[str, Any]:
     response = await gate.client.post(f"{API}/search/face", json={"path": str(path)})
     response.raise_for_status()
     body: dict[str, Any] = response.json()
+    body["selected"] = selected  # (the reviewer's face, for `subject`)
     return body
 
 
 def subject_status(answer: dict[str, Any]) -> str | None:
     """What the application itself said about the subject face (its own decision, not ours)."""
-    chosen = subject(answer["faces"], "bounding_box")
+    chosen = subject(answer["faces"], "bounding_box", answer.get("selected"))
     return None if chosen is None else str(chosen["status"])
 
 
 def ranking(answer: dict[str, Any]) -> list[dict[str, Any]] | None:
     """The people offered for the photograph's subject face, best first (None: no subject face)."""
-    chosen = subject(answer["faces"], "bounding_box")
+    chosen = subject(answer["faces"], "bounding_box", answer.get("selected"))
     if chosen is None:
         return None
     offered = []
@@ -437,7 +498,8 @@ async def run_queries(
     results = []
     for person in people:
         for path in person["query"]:
-            answer = await ask(gate, path)
+            selected = person.get("selected", {}).get(path)
+            answer = await ask(gate, path, selected)
             results.append(
                 {
                     "person": person["name"],
@@ -446,6 +508,7 @@ async def run_queries(
                     "hard_negative": bool(person.get("hard_negative")),
                     "eligible": enrolled[person["name"]]["faces"] >= MINIMUM_ENROLLED,
                     "faces": len(answer["faces"]),
+                    "selected_face": selected is not None,
                     "offered": ranking(answer),
                     "status": subject_status(answer),
                 }
@@ -605,6 +668,7 @@ def partition_people(
             "name": person["name"],
             "enrol": [],
             "query": sorted(person["enrol"] + person["query"]),
+            "selected": person.get("selected", {}),
             "unknown": True,
         }
         for person in [p for p in everyone if p["name"] not in named][:unknown_count]
@@ -738,6 +802,8 @@ def query_exclusion(result: dict[str, Any]) -> str | None:
     if not result.get("unknown") and not result["eligible"]:
         return "too_few_enrolled_faces"
     if result["offered"] is None:
+        if result.get("selected_face"):
+            return "annotation_mismatch"
         return "no_face" if result["faces"] == 0 else "no_subject"
     return None
 
@@ -898,8 +964,10 @@ async def main_async(args: argparse.Namespace) -> int:
     provenance = load_provenance(provenance_path)
     verified = manifest.get("kind") == "verified-manifest"
     if verified:  # a verified manifest from label_review.py: its schema is checked, its digests too
-        if manifest.get("schema_version") != 1 or not isinstance(manifest.get("people"), dict):
-            raise SystemExit("the verified manifest is not schema 1")
+        if manifest.get("schema_version") not in (1, 2) or not isinstance(
+            manifest.get("people"), dict
+        ):
+            raise SystemExit("the verified manifest is not schema 1 or 2")
         manifest = manifest["people"]
     state = workdir / "local-state"
     for part in (
@@ -1082,6 +1150,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "hard_negative_pool_manifest_sha256": pool_manifest_sha256,
             "minimum_photographs": args.minimum_photographs,
             "dominance": DOMINANCE,
+            "photographs_with_a_selected_face": sum(len(p.get("selected", {})) for p in people),
             "run_timeout_seconds": args.run_timeout,
         },
         "environment": {
