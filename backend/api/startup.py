@@ -218,7 +218,13 @@ class Backend:
         missing: tuple[str, ...] = ()
         if self.processing is not None and self.processing.dependencies is not None:
             missing = tuple(self.processing.dependencies())
-        return BackendReadiness(self.state.value, capabilities, self.failure, missing)
+        state = self.state
+        if state in (LifecycleState.READY, LifecycleState.DEGRADED):
+            # The rule applied when the library opened, on what is true now: models installed or
+            # a policy chosen after the start make it READY; a capability lost later, DEGRADED.
+            degraded = any(value in ("DEGRADED", UNAVAILABLE) for value in capabilities.values())
+            state = LifecycleState.DEGRADED if degraded else LifecycleState.READY
+        return BackendReadiness(state.value, capabilities, self.failure, missing)
 
     def announce(
         self, type_: str, resource_type: str, resource_id: str, data: dict[str, Any] | None = None
