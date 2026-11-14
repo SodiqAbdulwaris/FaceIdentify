@@ -48,7 +48,7 @@ largest). Now a person says which face it is, and the evaluation uses *that* fac
 2. **You confirm explicitly.** Click the face (or press `Draw a box` and drag, when the detector missed it or boxed it badly), then press
    `VERIFIED`. Choosing another face overrides the suggestion; `None / cannot determine` rejects it. A confirming decision with no face is
    refused when the photograph has detections. The decision stores the box (`[x1, y1, x2, y2]`, fractions of the upright picture), the
-   suggestion that was offered and what became of it (`CONFIRMED`, `OVERRIDDEN`, `REJECTED`, `NONE_OFFERED`), and the detection run.
+   suggestion that was offered and what became of it (`CONFIRMED`, `OVERRIDDEN`, `REJECTED`, `NOT_ADDRESSED`, `NONE_OFFERED`), and the detection run.
 3. **The approval binds to the photograph and the box, never to "face number 2".** The record carries the photograph's SHA-256 and the
    geometry. Changed bytes, a changed label, a different picture size, or (for a detected box) a new detection run that has no face
    corresponding to it make the decision `stale` with the reason, so it is reviewed again. The gate and the operating-point script find the

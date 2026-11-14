@@ -465,3 +465,43 @@ def test_detection_records_every_face_with_provenance_and_a_rerun_adds_nothing(
     # what was suggested is still not a decision
     assert review.history() == []
     assert review.export()["people"] == {}
+
+
+def test_a_verdict_made_before_the_faces_were_known_must_be_reviewed_again(dataset: Path) -> None:
+    review = Review(dataset, "sodiq")
+    review.decide(FILE, "VERIFIED")  # no detection run yet: the old workflow
+    assert [i["file"] for i in review.export()["people"][ADA]] == [FILE]
+
+    run(review)  # the faces are known now: which of them is the label's?
+
+    document = review.export()
+    assert document["people"] == {}  # never exported without geometry once detections exist
+    assert document["stale_reasons"] == {"face_not_reviewed": [FILE]}
+    review.decide(FILE, "VERIFIED", face=LEFT)
+    assert review.export()["people"][ADA][0]["face"]["box"] == LEFT
+
+
+def test_a_decision_that_does_not_answer_the_suggestion_is_not_a_rejection(dataset: Path) -> None:
+    review = Review(dataset, "sodiq")
+    run(review)
+
+    plain = review.decide(FILE, "EXCLUDED", flags=("LOW_QUALITY",))
+    said_none = review.decide(FILE, "UNCERTAIN", none_or_cannot_determine=True)
+
+    assert plain["suggestion"]["outcome"] == "NOT_ADDRESSED"
+    assert said_none["suggestion"]["outcome"] == "REJECTED"
+
+
+def test_a_complete_last_record_without_its_newline_is_kept(dataset: Path) -> None:
+    review = Review(dataset, "sodiq")
+    review.decide("Ada Lovelace/01.jpg", "VERIFIED")
+    data = review.log_path.read_bytes()
+    review.log_path.write_bytes(data.rstrip(b"\n"))  # the record is whole; only the newline is lost
+
+    review.decide("Ada Lovelace/02.jpg", "VERIFIED")
+
+    assert [r["file"] for r in Review(dataset).history()] == [
+        "Ada Lovelace/01.jpg",
+        "Ada Lovelace/02.jpg",
+    ]
+    assert not (dataset / "review" / "decisions.torn.jsonl").exists()

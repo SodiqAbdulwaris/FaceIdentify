@@ -36,7 +36,7 @@ never looks at embeddings.
   determine" rejects it. The decision stores the selected face as a normalised box on the upright
   picture (with the picture's size and whether it is a detected box or a corrected one), the
   suggestion that was offered and what became of it (`CONFIRMED`, `OVERRIDDEN`, `REJECTED`,
-  `NONE_OFFERED`), and the detection run it was made from. The box, never a detector index, is
+  `NOT_ADDRESSED`, `NONE_OFFERED`), and the detection run it was made from. The box, never a detector index, is
   what the approval binds to, together with the photograph's digest.
 * **The verified manifest** (`review/exports/verified-<UTC time>.json`, schema 2) lists only
   photographs that are verified, unflagged, unchanged since they were reviewed, and used once. It has
@@ -277,6 +277,14 @@ class Review:
         if not data or data.endswith(b"\n"):
             return
         cut = data.rfind(b"\n") + 1
+        try:
+            json.loads(data[cut:])
+        except ValueError:
+            pass
+        else:  # a complete record that only lacks its newline: keep it
+            with path.open("ab") as log:
+                log.write(b"\n")
+            return
         with (self.review_dir / torn_name).open("ab") as torn:
             torn.write(data[cut:] + b"\n")
         with path.open("r+b") as log:
@@ -390,6 +398,11 @@ class Review:
         if record["original_identity"] != self.entries[file]["identity"]:
             return "label_changed"
         face = record.get("face")
+        confirming = record["decision"] == "VERIFIED" or (
+            record["decision"] == "INCORRECT" and record.get("corrected_identity")
+        )
+        if not face and confirming and detection is not None and record.get("face_choice") is None:
+            return "face_not_reviewed"  # confirmed before the faces were known: which face?
         if face:
             try:
                 box = checked(face["box"])
@@ -481,7 +494,9 @@ class Review:
         if offered is None:
             outcome = "NONE_OFFERED"
         elif box is None:
-            outcome = "REJECTED"  # (no face accepted: the offered one was not taken)
+            # REJECTED only when the reviewer said no face can be determined; a decision made
+            # without answering the suggestion at all is not a rejection
+            outcome = "REJECTED" if none_or_cannot_determine else "NOT_ADDRESSED"
         else:
             outcome = "CONFIRMED" if iou(box, offered["box"]) >= SAME_BOX else "OVERRIDDEN"
         selected: dict[str, Any] | None = None
@@ -724,7 +739,7 @@ function draw(focus){const g=document.getElementById('grid');g.replaceChildren()
   const img=el('img');img.alt=e.file;img.src='/image?f='+encodeURIComponent(e.file)+'&t='+encodeURIComponent(T);
   const layer=el('div',{className:'layer'});const pic=el('div',{className:'pic'},img,layer);
   const faces=det?det.faces:[];const sug=det&&det.suggestion?det.suggestion.box:null;
-  let sel=c.face?{box:c.face.box,n:null}:null;let drawing=false;
+  let sel=null;const saved=c.face?c.face.box:null;let drawing=false;
   const same=(a,b)=>a&&b&&a.every((v,i)=>Math.abs(v-b[i])<1e-6);
   const rect=()=>{const s=Math.min(img.clientWidth/img.naturalWidth,img.clientHeight/img.naturalHeight);
    const w=img.naturalWidth*s,h=img.naturalHeight*s;return{l:(img.clientWidth-w)/2,t:(img.clientHeight-h)/2,w,h}};
@@ -738,10 +753,12 @@ function draw(focus){const g=document.getElementById('grid');g.replaceChildren()
     d.append(el('span',{className:'tag',textContent:(i+1)+(isSug?' Suggestion - not verified':'')}));place(d,f.box);
     const pick=()=>{sel={box:f.box,n:i};paint()};d.onclick=pick;
     d.onkeydown=ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();pick()}};layer.append(d)});
+   if(saved&&!sel){const d=el('div',{className:'face'});d.style.borderStyle='dotted';d.style.pointerEvents='none';
+    d.append(el('span',{className:'tag',textContent:'saved earlier; select again to save'}));place(d,saved);layer.append(d)}
    if(sel&&sel.n===null){const d=el('div',{className:'face picked'});
     d.append(el('span',{className:'tag',textContent:'selected box'}));place(d,sel.box);layer.append(d)}
    info.textContent=(faces.length?faces.length+' face(s) detected. ':det?'The detector found no face. ':'No detection run for this photograph. ')+
-    (sel?(sel.n===null?'A box is selected (drawn or saved).':'Face '+(sel.n+1)+' is selected.'):'No face selected.')+
+    (sel?(sel.n===null?'A drawn box is selected.':'Face '+(sel.n+1)+' is selected.'):'No face selected.')+
     (det&&det.suggestion?' Model suggestion (not verified): '+det.suggestion.rationale:'')};
   img.onload=paint;if(img.complete)paint();
   const startDraw=ev=>{if(!drawing)return;const b=pic.getBoundingClientRect(),r=rect();
