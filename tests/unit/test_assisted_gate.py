@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from evaluation import assisted_recognition_gate
 from evaluation.assisted_recognition_gate import (
     EXCLUSION_RULES,
     MINIMUM_ENROLLED,
@@ -609,3 +610,37 @@ async def test_enrolment_records_each_photograph_it_leaves_out_and_why() -> None
         "no_subject": 1,
     }
     assert enrolment["planned"] == {"Ada": 5}
+
+
+def at(x: float, y: float, width: float, height: float) -> dict[str, dict[str, float]]:
+    return {"bounding_box": {"x": x, "y": y, "width": width, "height": height}}
+
+
+def test_a_marked_subject_is_the_one_face_under_the_mark_whatever_its_size() -> None:
+    big, small = at(0.0, 0.0, 0.5, 0.5), at(0.6, 0.6, 0.1, 0.1)
+
+    assert subject([big, small], "bounding_box", (0.65, 0.65)) is small  # not the larger face
+    assert subject([big, small], "bounding_box", (0.9, 0.1)) is None  # no face there
+    assert subject([big, at(0.4, 0.4, 0.3, 0.3)], "bounding_box", (0.45, 0.45)) is None  # two
+    assert subject([big], "bounding_box", (0.9, 0.9)) is None  # the mark rules, even for one face
+
+
+def test_a_verified_manifest_carries_the_mark_to_enrolment_and_queries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(assisted_recognition_gate, "MARKS", {})
+    (tmp_path / "Ada").mkdir()
+    entries: list[dict[str, object]] = []
+    for index in range(4):
+        (tmp_path / "Ada" / f"{index}.jpg").write_bytes(bytes([index]))
+        entries.append({"file": f"Ada/{index}.jpg"})
+    entries[3]["subject_point"] = [0.65, 0.65]
+
+    choose_people({"Ada": entries}, tmp_path, count=1, minimum=4)
+
+    marked = (tmp_path / "Ada" / "3.jpg").resolve()
+    assert assisted_recognition_gate.MARKS == {marked: (0.65, 0.65)}
+    small = {**at(0.6, 0.6, 0.1, 0.1), "status": "MATCHED", "possible_people": []}
+    answer = {"faces": [at(0.0, 0.0, 0.12, 0.12), small], "mark": (0.65, 0.65)}
+    assert ranking(answer) == []  # evaluated (nobody offered), not "no subject"
+    assert ranking({**answer, "mark": None}) is None

@@ -24,6 +24,11 @@ never looks at embeddings.
   the verified set even if it was marked verified (conservative on purpose). **Same picture:** if two
   photographs are the same picture (a copy, a crop, another encoding) say so with `same_picture_as`;
   such a group counts once and never crosses a split. Spotting them is the reviewer's job.
+* **Which face (issue #181).** In a photograph of several people, click the face the label
+  belongs to: the mark (`subject_point`, x and y from 0 to 1 across the picture) is saved with
+  the decision. A `MULTI_PERSON` photograph with a mark may enter the verified set, and the gate
+  evaluates the face under the mark instead of leaving the photograph out. The mark is the
+  reviewer's: nothing is ever chosen by size or position.
 * **The verified manifest** (`review/exports/verified-<UTC time>.json`, schema 1) lists only
   photographs that are verified, unflagged, unchanged since they were reviewed, and used once. It has
   the same `people` shape the gate script reads, plus provenance: the source manifest's and the
@@ -224,6 +229,7 @@ class Review:
         flags: tuple[str, ...] = (),
         note: str = "",
         same_picture_as: str | None = None,
+        subject_point: Any = None,
     ) -> dict[str, Any]:
         if not self.reviewer:
             raise ReviewError("a reviewer name is needed: decisions are attributed")
@@ -241,6 +247,15 @@ class Review:
         twin = (same_picture_as or "").strip()
         if twin and (twin not in self.entries or twin == file):
             raise ReviewError("same_picture_as must be another photograph of the manifest")
+        point = None
+        if subject_point is not None:
+            try:
+                x, y = (float(value) for value in subject_point)
+            except (TypeError, ValueError):
+                raise ReviewError("a face mark is two numbers, x and y") from None
+            if not (0 <= x <= 1 and 0 <= y <= 1):  # (also refuses NaN)
+                raise ReviewError("a face mark lies inside the picture (0 to 1)")
+            point = [x, y]
         data, digest = self.read_photograph(file)  # (the bytes as they are at this moment)
         record = {
             "schema_version": SCHEMA,
@@ -255,6 +270,7 @@ class Review:
             "flags": sorted(set(flags)),
             "note": note.strip(),
             "same_picture_as": twin or None,
+            "subject_point": point,
         }
         del data
         with self._lock:
@@ -333,7 +349,9 @@ class Review:
             )
             if not confirmed:
                 left_out["not_verified"].append(file)
-            elif record["flags"]:
+            elif record["flags"] and (
+                record["flags"] != ["MULTI_PERSON"] or not record.get("subject_point")
+            ):  # (several people is no doubt once the reviewer marked which face)
                 left_out["flagged"].append(file)
             elif root(file) in counted or self.digest(file) in counted:
                 left_out["duplicates_dropped"].append(file)
@@ -347,6 +365,11 @@ class Review:
                         "title": self.entries[file]["title"],
                         "sha256": record["sha256"],
                         "corrected": record["decision"] == "INCORRECT",
+                        **(
+                            {"subject_point": record["subject_point"]}
+                            if record.get("subject_point")
+                            else {}
+                        ),
                     }
                 )
         left_out["not_verified"] += sorted(set(self.entries) - set(valid) - set(stale))
@@ -418,14 +441,17 @@ body{font:15px system-ui;margin:1rem;background:#fff;color:#111}
 header{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem}
 .card{border:1px solid #bbb;border-radius:8px;padding:.5rem}
-.card img{width:100%;height:240px;object-fit:contain;background:#eee}
+.card img{width:100%;height:240px;object-fit:contain;background:#eee;cursor:crosshair}
+.pic{position:relative}.dot{position:absolute;width:14px;height:14px;margin:-9px 0 0 -9px;
+border:2px solid #fff;border-radius:50%;background:#d00;box-shadow:0 0 0 1px #000;pointer-events:none}
 .badge{font-weight:600}.VERIFIED{color:#0a6b2d}.INCORRECT{color:#a00}.UNCERTAIN{color:#8a6000}
 .EXCLUDED{color:#555}button{margin:.15rem;padding:.35rem .6rem}
 </style>
 <header><h1>Label review</h1><label>Person <select id=who></select></label>
 <span id=status role=status></span></header>
 <p>The label comes from a Commons category and is not evidence. Say VERIFIED only if you can
-tell it is the same person as in the other photographs of this person.</p>
+tell it is the same person as in the other photographs of this person. If several people are
+in a photograph, click the face the label belongs to, tick MULTI_PERSON, then decide.</p>
 <div id=grid class=grid></div>
 <script>
 const T=new URLSearchParams(location.search).get('t');let state=null;
@@ -444,6 +470,16 @@ function draw(focus){const g=document.getElementById('grid');g.replaceChildren()
   const c=state.decisions[e.file]||{};
   const card=el('div',{className:'card',role:'group'});card.setAttribute('aria-label',e.file);
   const img=el('img');img.alt=e.file;img.src='/image?f='+encodeURIComponent(e.file)+'&t='+encodeURIComponent(T);
+  let point=c.subject_point||null;const dot=el('div',{className:'dot'});
+  const marked=el('small',{});const clear=el('button',{type:'button',textContent:'Clear mark'});
+  clear.setAttribute('aria-label','Clear the face mark of '+e.file);
+  const box=()=>{const s=Math.min(img.clientWidth/img.naturalWidth,img.clientHeight/img.naturalHeight);
+   const w=img.naturalWidth*s,h=img.naturalHeight*s;return{l:(img.clientWidth-w)/2,t:(img.clientHeight-h)/2,w,h}};
+  const show=()=>{dot.hidden=clear.hidden=!point;marked.textContent=point?'face marked at '+
+   point.map(v=>v.toFixed(2)).join(', ')+' (saved with the next decision)':'no face marked';
+   if(point&&img.naturalWidth){const b=box();dot.style.left=(b.l+point[0]*b.w)+'px';dot.style.top=(b.t+point[1]*b.h)+'px'}};
+  img.onload=show;img.onclick=ev=>{const b=box(),x=(ev.offsetX-b.l)/b.w,y=(ev.offsetY-b.t)/b.h;
+   if(x>=0&&x<=1&&y>=0&&y<=1){point=[x,y];show()}};clear.onclick=()=>{point=null;show()};show();
   const badge=el('div',{className:'badge'});
   if(c.decision){badge.append(el('span',{className:c.decision,textContent:c.decision}));
    if(c.corrected_identity)badge.append(' as '+c.corrected_identity);
@@ -460,10 +496,10 @@ function draw(focus){const g=document.getElementById('grid');g.replaceChildren()
     const r=await api('/api/decision',{method:'POST',headers:{'Content-Type':'application/json'},
      body:JSON.stringify({file:e.file,decision:x,corrected_identity:corrected,
       flags:flags.map(l=>l.firstChild).filter(b=>b.checked).map(b=>b.dataset.f),
-      note:note.value,same_picture_as:twin.value||null})});
+      note:note.value,same_picture_as:twin.value||null,subject_point:point})});
     if(r.error)alert(r.error);await load({file:e.file,d:x})};return b});
-  card.append(img,el('div',{},el('b',{textContent:e.file}),el('br'),el('small',{textContent:e.title})),
-   badge,el('div',{},...flags),note,twin,el('div',{},...buttons));g.append(card)}
+  card.append(el('div',{className:'pic'},img,dot),el('div',{},el('b',{textContent:e.file}),el('br'),el('small',{textContent:e.title})),
+   badge,el('div',{},marked,' ',clear),el('div',{},...flags),note,twin,el('div',{},...buttons));g.append(card)}
  if(focus){for(const b of g.querySelectorAll('button')){
   if(b.dataset.d===focus.d&&b.getAttribute('aria-label')===focus.d+' '+focus.file){b.focus()}}}}
 document.getElementById('who').onchange=()=>draw();load();
@@ -542,6 +578,7 @@ def make_handler(review: Review, token: str) -> type[http.server.BaseHTTPRequest
                     flags=tuple(body.get("flags", [])),
                     note=str(body.get("note", "")),
                     same_picture_as=body.get("same_picture_as"),
+                    subject_point=body.get("subject_point"),
                 )
             except (ReviewError, KeyError, ValueError, TypeError) as error:
                 self._json(400, {"error": str(error) or "that is not a valid decision"})

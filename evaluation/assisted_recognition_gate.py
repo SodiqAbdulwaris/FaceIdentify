@@ -88,6 +88,9 @@ DATASETS_ROOT = (Path(__file__).resolve().parent / "datasets").resolve()
 API = "/api/v1"
 DOMINANCE = 2.5  # a subject face is at least this many times larger than any other in the picture
 RUN_TIMEOUT = 900.0  # default seconds to wait for the processing runs (`--run-timeout`)
+# Where a reviewer marked the labelled person's face (label_review.py, issue #181), by photograph:
+# x and y from 0 to 1 across the upright picture. Filled by `choose_people` from the manifest.
+MARKS: dict[Path, tuple[float, float]] = {}
 MINIMUM_ENROLLED = 2  # a known person's queries are evaluated only with this many enrolled faces
 # Why a photograph was left out (the report's `exclusions` keys, listed in this order): an enrolment
 # photograph by the first three, tested in order; a query by `query_exclusion`.
@@ -96,7 +99,7 @@ EXCLUSION_RULES = {
     "no_face": "not evaluated: no face was found in the photograph",
     "no_subject": (
         f"not evaluated (ambiguous subject): several faces and none {DOMINANCE} times larger "
-        "than the rest"
+        "than the rest, or not exactly one face at the reviewer's mark"
     ),
     "too_few_enrolled_faces": (
         f"not evaluated: the person has fewer than {MINIMUM_ENROLLED} enrolled faces, because "
@@ -222,6 +225,9 @@ def choose_people(
             if digest not in seen:
                 seen.add(digest)
                 files.append(path)
+                if entry.get("subject_point"):
+                    x, y = entry["subject_point"]
+                    MARKS[path] = (float(x), float(y))
         files.sort()
         if len(files) >= minimum:
             held = max(1, len(files) // 4)
@@ -248,8 +254,21 @@ def load_provenance(path: Path) -> dict[str, Any] | None:
     return value
 
 
-def subject(faces: list[dict[str, Any]], box: str) -> dict[str, Any] | None:
-    """The one face a photograph is about: its only face, or one DOMINANCE times larger."""
+def subject(
+    faces: list[dict[str, Any]], box: str, mark: tuple[float, float] | None = None
+) -> dict[str, Any] | None:
+    """The one face a photograph is about: the face a reviewer marked (the only one whose box
+    holds the mark; none or several is no subject), else its only face, or one DOMINANCE times
+    larger."""
+    if mark is not None:
+        x, y = mark
+        at = [
+            f
+            for f in faces
+            if f[box]["x"] <= x <= f[box]["x"] + f[box]["width"]
+            and f[box]["y"] <= y <= f[box]["y"] + f[box]["height"]
+        ]
+        return at[0] if len(at) == 1 else None
     if not faces:
         return None
 
@@ -356,7 +375,7 @@ async def enrol(
         for path in person["enrol"]:
             source_id = sources[path]
             faces = await faces_of(gate, source_id)
-            chosen = subject(faces, "bounding_box")
+            chosen = subject(faces, "bounding_box", MARKS.get(path))
             if chosen is None:
                 # (never None here: with no subject a rule applies; `or` is for the type checker)
                 rule = skip_reason(faces, states[runs[source_id]]) or "no_subject"
@@ -405,18 +424,19 @@ async def ask(gate: Gate, path: Path) -> dict[str, Any]:
     response = await gate.client.post(f"{API}/search/face", json={"path": str(path)})
     response.raise_for_status()
     body: dict[str, Any] = response.json()
+    body["mark"] = MARKS.get(path)  # (the reviewer's mark, for `subject`)
     return body
 
 
 def subject_status(answer: dict[str, Any]) -> str | None:
     """What the application itself said about the subject face (its own decision, not ours)."""
-    chosen = subject(answer["faces"], "bounding_box")
+    chosen = subject(answer["faces"], "bounding_box", answer.get("mark"))
     return None if chosen is None else str(chosen["status"])
 
 
 def ranking(answer: dict[str, Any]) -> list[dict[str, Any]] | None:
     """The people offered for the photograph's subject face, best first (None: no subject face)."""
-    chosen = subject(answer["faces"], "bounding_box")
+    chosen = subject(answer["faces"], "bounding_box", answer.get("mark"))
     if chosen is None:
         return None
     offered = []
@@ -1082,6 +1102,7 @@ async def main_async(args: argparse.Namespace) -> int:
             "hard_negative_pool_manifest_sha256": pool_manifest_sha256,
             "minimum_photographs": args.minimum_photographs,
             "dominance": DOMINANCE,
+            "photographs_with_a_marked_subject": len(MARKS),
             "run_timeout_seconds": args.run_timeout,
         },
         "environment": {

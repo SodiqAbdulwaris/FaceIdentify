@@ -172,7 +172,11 @@ def test_the_page_needs_its_token_serves_listed_photographs_and_records_decision
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = str(server.server_address[0]), int(server.server_address[1])
-    first: dict[str, object] = {"file": "Ada Lovelace/00.jpg", "decision": "VERIFIED"}
+    first: dict[str, object] = {
+        "file": "Ada Lovelace/00.jpg",
+        "decision": "VERIFIED",
+        "subject_point": [0.5, 0.25],
+    }
 
     def call(method: str, path: str, body: dict[str, object] | None = None) -> tuple[int, bytes]:
         connection = http.client.HTTPConnection(host, port, timeout=5)
@@ -207,6 +211,7 @@ def test_the_page_needs_its_token_serves_listed_photographs_and_records_decision
     assert bad == 400
     assert b"decision is one of" in message
     assert review.current()["Ada Lovelace/00.jpg"]["decision"] == "VERIFIED"
+    assert review.current()["Ada Lovelace/00.jpg"]["subject_point"] == [0.5, 0.25]
 
 
 def test_a_relabelled_photograph_must_be_reviewed_again(dataset: Path) -> None:
@@ -408,3 +413,46 @@ def test_a_misspelt_person_stops_the_tool_with_a_hint(dataset: Path) -> None:
     assert review.shown is None
     with pytest.raises(SystemExit):
         review.focus([])
+
+
+def test_a_marked_face_lets_a_photograph_of_several_people_into_the_verified_set(
+    dataset: Path,
+) -> None:
+    review = Review(dataset, "sodiq")
+    review.decide("Ada Lovelace/00.jpg", "VERIFIED", flags=("MULTI_PERSON",))  # no mark
+    review.decide(
+        "Ada Lovelace/01.jpg", "VERIFIED", flags=("MULTI_PERSON",), subject_point=[0.25, 0.5]
+    )
+    review.decide(  # any other doubt still keeps it out, mark or not
+        "Ada Lovelace/02.jpg",
+        "VERIFIED",
+        flags=("LOW_QUALITY", "MULTI_PERSON"),
+        subject_point=[0.25, 0.5],
+    )
+    review.decide("Ada Lovelace/03.jpg", "VERIFIED")
+
+    document = review.export()
+
+    assert document["people"]["Ada Lovelace"] == [
+        {
+            "file": "Ada Lovelace/01.jpg",
+            "title": "File:1.jpg",
+            "sha256": hashlib.sha256(b"Ada Lovelace 1").hexdigest(),
+            "corrected": False,
+            "subject_point": [0.25, 0.5],
+        },
+        {
+            "file": "Ada Lovelace/03.jpg",
+            "title": "File:3.jpg",
+            "sha256": hashlib.sha256(b"Ada Lovelace 3").hexdigest(),
+            "corrected": False,
+        },
+    ]
+    assert document["left_out"]["flagged"] == ["Ada Lovelace/00.jpg", "Ada Lovelace/02.jpg"]
+    assert Review(dataset).current()["Ada Lovelace/01.jpg"]["subject_point"] == [0.25, 0.5]
+
+
+@pytest.mark.parametrize("mark", [[0.5], [0.5, 1.5], [-0.1, 0.5], ["a", "b"], 3, [float("nan"), 0]])
+def test_a_face_mark_is_two_numbers_inside_the_picture(dataset: Path, mark: object) -> None:
+    with pytest.raises(ReviewError, match="face mark"):
+        Review(dataset, "sodiq").decide("Ada Lovelace/00.jpg", "VERIFIED", subject_point=mark)
