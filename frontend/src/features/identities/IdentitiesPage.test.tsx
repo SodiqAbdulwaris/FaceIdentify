@@ -90,10 +90,10 @@ describe('people', () => {
     const second = screen.getByRole('link', { name: /Person B2/ })
 
     expect(first).toHaveAttribute('href', '/identities/a1')
-    expect(within(first).getByText('3 appearances in 2 images')).toBeInTheDocument()
+    expect(within(first).getByText('3 appearances in 2 images and videos')).toBeInTheDocument()
     expect(await within(first).findByRole('img', { name: "Person A1's face" })).toBeInTheDocument()
     expect(second).toHaveAttribute('href', '/identities/b2')
-    expect(within(second).getByText('1 appearance in 1 image')).toBeInTheDocument()
+    expect(within(second).getByText('1 appearance in 1 image or video')).toBeInTheDocument()
     expect(within(second).queryByRole('img')).toBeNull() // no face to show yet
   })
 

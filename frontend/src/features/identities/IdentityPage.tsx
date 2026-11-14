@@ -62,7 +62,7 @@ export function IdentityPage() {
       </div>
       <p className="text-muted-foreground">
         Appears {count === 1 ? 'once' : `${count} times`} in {sources}{' '}
-        {sources === 1 ? 'image' : 'images'}.
+        {sources === 1 ? 'image or video' : 'images and videos'}.
         {person.data.person ? '' : ' Nobody has named this person yet.'}
       </p>
       <NameForm identityId={identityId} person={person.data.person ?? null} />

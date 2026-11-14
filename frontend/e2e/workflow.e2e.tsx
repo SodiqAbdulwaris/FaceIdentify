@@ -110,7 +110,10 @@ describe('the desktop image workflow', () => {
     const people = await screen.findAllByRole('link', { name: /Person [0-9A-F]{6}/ }, LONG)
     expect(people).toHaveLength(2)
     const counts = people.map((p) => within(p).getByText(/appearances? in/).textContent).sort()
-    expect(counts).toEqual(['1 appearance in 1 image', '2 appearances in 2 images'])
+    expect(counts).toEqual([
+      '1 appearance in 1 image or video',
+      '2 appearances in 2 images and videos',
+    ])
 
     // the person seen twice: both images are listed, each a way back to the image
     const twice = people.find((p) => /2 appearances/.test(p.textContent ?? ''))!
@@ -155,8 +158,8 @@ describe('the desktop image workflow', () => {
       const now = screen.getAllByRole('link', { name: /Person [0-9A-F]{6}/ })
       expect(now).toHaveLength(2) // still two people
       expect(now.map((p) => within(p).getByText(/appearances? in/).textContent).sort()).toEqual([
-        '1 appearance in 1 image',
-        '3 appearances in 3 images',
+        '1 appearance in 1 image or video',
+        '3 appearances in 3 images and videos',
       ])
     }, LONG)
     expect(await quit()).toBe(0)
@@ -172,9 +175,9 @@ describe('the desktop image workflow', () => {
     const personName = /Person [0-9A-F]{6}/
     // the emptied person stays in the library, with no appearances
     const AFTER = [
-      '0 appearances in 0 images',
-      '1 appearance in 1 image',
-      '2 appearances in 2 images',
+      '0 appearances in 0 images and videos',
+      '1 appearance in 1 image or video',
+      '2 appearances in 2 images and videos',
     ]
     const openImage = async (name: string) => {
       await user.click(screen.getByRole('link', { name: 'Library' }))
@@ -214,7 +217,7 @@ describe('the desktop image workflow', () => {
       await user.click(await screen.findByRole('button', { name: `Process ${name}` }, LONG))
     }
     await waitFor(() => expect(screen.getAllByText('Done')).toHaveLength(3), LONG)
-    await peopleNow(['1 appearance in 1 image', '2 appearances in 2 images'])
+    await peopleNow(['1 appearance in 1 image or video', '2 appearances in 2 images and videos'])
     const twice = screen
       .getAllByRole('link', { name: personName })
       .find((p) => /2 appearances/.test(p.textContent ?? ''))!
