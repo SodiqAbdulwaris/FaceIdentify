@@ -72,7 +72,7 @@ merges, the packaging follow-up is **a re-freeze** (rebuild the installer), like
 | 1 Notices | `generate_notices.py` (inventory, `--check` in CI, licence texts, CPython and its libraries, FFmpeg) | none known |
 | 2 Frozen backend | CI job `Frozen backend`: READY, migration, clean stop, spawned worker sees DirectML and CPU, one request through the real worker process | the real models in the frozen worker (step 8) |
 | 3 Shell and installer | installer built and installed to a scratch folder; the installed shell started its backend, closing the window ended both; silent uninstall exit 0 | WebView2 on a clean machine, SmartScreen (unsigned, R10) |
-| 4 Runtime packages | FFmpeg shipped and hash-checked before first use, telemetry off, a source rejected leaves the installed models intact; a damaged, unpublishable or killed upgrade of the models leaves the application serving and processing (TST-082, app-level tests of 2026-11-14, [entry](../implementations/2026-11-14-activation-rollback-tests.md)) | the same check on the installed (frozen) build; the plan's "pointer written last" was not built (a keyed atomic rename with move-back is, see the entry) |
+| 4 Runtime packages | FFmpeg shipped and hash-checked before first use, telemetry off, a source rejected leaves the installed models intact; a damaged, unpublishable or killed upgrade of the models leaves the application serving and processing (TST-082, app-level tests of 2026-11-14, [entry](../implementations/2026-11-14-activation-rollback-tests.md)) | the same check on the installed (frozen) build; if the old package cannot be moved back either, the models are unavailable until the next start (tested; see the entry) |
 | 5 First run | model install against the hash table, recognition mode, setup page; e2e against the real backend with stand-in models | the page in the real window with native dialogs; a real `buffalo_l` install |
 | 6 Upgrade, uninstall | pre-migration copy (last three kept) and a populated previous-release upgrade test; installing over an existing install keeps the library and its data, a silent uninstall keeps the library | an installer upgrade between two different revisions (only one build exists); uninstall keeping the state root and policy (the state root was a scratch folder) |
 | 7 Installer CI | `installer.yml` builds, installs, checks and uninstalls on a runner (green on its PR); `check_installed.py` (image, video through the shipped FFmpeg, both provider paths) | process-tree and network checks (SEC-005); the CI job's DirectML path on a runner with a GPU |
@@ -165,6 +165,15 @@ collection hooks and the worker started from the same executable; (c) the headle
   it beside the executable, with an environment override for development.
 - Runtime activation keeps the previous runtime folder until the new one passes the self-check, and the
   active one is selected by a pointer written last (TST-082).
+
+  > **As built (delegated decisions of 2026-11-13, noted here 2026-11-14; the owner may reverse them):**
+  > there is no pointer and no separate self-check run. A package is published under its key by one
+  > rename and is never replaced, except by the same package with more variants; during that
+  > replacement the old package is moved aside and moved back if the new one cannot be published,
+  > and a start recovers whichever complete package a crash left (`RuntimePackageStore._swap`,
+  > `recover`). The self-check is the readiness report (step 5(b) entry). TST-082 is tested against
+  > this ([entry](../implementations/2026-11-14-activation-rollback-tests.md)).
+
 - Tests: a corrupted or wrong-hash runtime or model package is refused and the previous configuration still
   works (TST-080, TST-082).
 - Tracker: TST-079, TST-080, TST-082.

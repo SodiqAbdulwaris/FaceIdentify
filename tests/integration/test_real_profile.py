@@ -49,7 +49,7 @@ from backend.api.startup import (
 from backend.app.lifecycle import OpenLibrary, open_library
 from backend.app.memory.models import RepresentationSpace
 from backend.app.processing.configuration import ProcessingRequestV1
-from backend.app.runtime.models import RuntimePackageInstallation
+from backend.app.runtime.models import RuntimePackageInstallation, RuntimeVariant
 from backend.app.runtime.package_store import RuntimePackageStore
 from backend.app.runtime.perception_client import Detected, FaceVector, Represented
 from backend.app.runtime.worker_config import PerceptionPlan, PlannedVariant
@@ -947,6 +947,13 @@ def fixture_models(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def registered_providers(api: Api) -> set[str]:
+    """The providers of the variants the library's catalog has registered."""
+    assert api.backend.library is not None
+    with api.backend.library.session_factory() as session:
+        return set(session.scalars(select(RuntimeVariant.provider)))
+
+
 async def processes(api: Api, world: World, name: str) -> None:
     source = await imported(api, path=picture(world.folder, name))
     assert (await process_and_wait(api, source["id"]))["state"] == "COMPLETED"
@@ -971,6 +978,7 @@ async def test_an_upgrade_of_the_models_is_activated_and_processing_goes_on(
         assert len(package.manifest.variants) == 4
         ready = (await api.client.get("/readiness")).json()
         assert (ready["state"], ready["capabilities"]["runtime_package"]) == ("READY", "READY")
+        assert registered_providers(api) == {"CPUExecutionProvider", "DmlExecutionProvider"}
         await processes(api, world, "b.png")
 
 
@@ -1012,7 +1020,57 @@ async def test_a_failed_activation_leaves_the_installed_models_and_the_applicati
         assert list(roots.installation.iterdir()) == []  # nothing half-installed is left
         ready = (await api.client.get("/readiness")).json()
         assert (ready["state"], ready["capabilities"]["runtime_package"]) == ("READY", "READY")
+        assert registered_providers(api) == {"CPUExecutionProvider"}  # nothing new was activated
         await processes(api, world, "b.png")  # the configuration that worked still works
+
+
+async def test_when_the_old_models_cannot_be_put_back_either_the_next_start_recovers_them(
+    world: World,
+    clock: FrozenClock,
+    new_id: SeededUUIDs,
+    fixture_models: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The limit of the rollback: if the new package cannot move into place and the old one cannot
+    be moved back (both locked), nothing is published until the next start. The request is still
+    refused cleanly, the application says the models are unavailable (it does not pretend), the old
+    package is kept whole in the installation folder, and the next start publishes it again."""
+    installed = install_package(world, clock, new_id)
+    write_policy(world)
+    before = (installed / "manifest.json").read_bytes()
+    roots = roots_of(world)
+    rename = os.rename
+
+    def nothing_moves_into_place(src: Any, dst: Any) -> None:
+        if Path(dst) == installed:
+            raise PermissionError("in use")
+        rename(src, dst)
+
+    app, secret = application(world, RecordingPool())
+    async with serving(app, secret, world.folder.parent / "files", clock) as api:
+        await processes(api, world, "a.png")
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "rename", nothing_moves_into_place)
+            source = upgrade_source(world, "upgrade")
+            response = await api.client.post(INSTALL, json={"path": str(source)})
+
+        error(response, 400, "MODEL_SOURCE_INVALID")
+        ready = (await api.client.get("/readiness")).json()
+        assert (ready["state"], ready["capabilities"]["runtime_package"]) == (
+            "DEGRADED",
+            "UNAVAILABLE",
+        )
+        [kept] = list(roots.installation.iterdir())  # the old package, moved aside and whole
+        assert (kept / "manifest.json").read_bytes() == before
+
+    app, secret = application(world, RecordingPool())  # the next start
+    async with serving(app, secret, world.folder.parent / "again", clock) as api:
+        ready = (await api.client.get("/readiness")).json()
+        assert (ready["state"], ready["capabilities"]["runtime_package"]) == ("READY", "READY")
+        assert (installed / "manifest.json").read_bytes() == before
+        assert RuntimePackageStore(roots, new_id=new_id).verify(KEY) == []
+        assert list(roots.installation.iterdir()) == []
+        await processes(api, world, "b.png")
 
 
 class Killed(BaseException):
