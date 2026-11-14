@@ -42,6 +42,32 @@ live in the library database; the recognition policy is a machine-local file wri
   guard that fails any socket or name lookup and any `stat` of a network path while approving and
   comparing. Both new modules have 100% line and branch coverage.
 
+## Review (independent read-only subagent, Codex being out of usage until 21:45) and answers
+
+All ten points were addressed in the second round of commits:
+
+1. *Lock per request, shared temp name (high):* one process-wide lock; each write uses a unique
+   `mkstemp` file, `fsync`, then `os.replace`; a failed write removes its partial. Test with 24
+   approvals through separate instances on 8 threads. Two processes are not covered (one backend
+   owns a local state root; recorded as a `ponytail:` comment).
+2. *Unreadable file turned into an overwrite (medium):* a missing file is empty; an unreadable or
+   untrusted one raises `NetworkRootsUnreadableError`, `add`/`revoke` write nothing, the API answers
+   `503 NETWORK_ROOTS_UNREADABLE`, `approves` still denies.
+3. *`approved_at` not validated, duplicates (low):* validated as text; duplicates collapse by id.
+4. *Lone surrogate (low):* refused as an unsafe character.
+5. *Leading separators and extended forms that hide a device (medium):* a third separator, `.` or
+   `?` right after the two leading ones is refused; callers must open the canonical rebuilt path,
+   never the text they were given.
+6. *`DavWWWRoot` (medium):* refused, with the `server@SSL` forms.
+7. *Administrative shares (medium to low):* a share name ending in `$` is refused (`C$` through the
+   network redirector would sidestep the local walk's reparse refusals; `IPC$` reaches pipes).
+8. *Case folding wider than NTFS (low):* ASCII-only fold; non-ASCII names compare exactly.
+9. *For PR B:* 8.3 short names, server-side links inside an approved share, and a server name that
+   resolves to an unexpected address cannot be seen by text comparison; PR B decides on the resolved
+   target and the opened handle's final path.
+10. Spec gaps (`422`, `DavWWWRoot`) and the weak "does not echo" assertion are fixed; the guard now
+    also covers `lstat` and `scandir` on network paths.
+
 ## Decisions
 
 - Machine-local file, not the library database (see the plan), delegated to the agent by the owner's
