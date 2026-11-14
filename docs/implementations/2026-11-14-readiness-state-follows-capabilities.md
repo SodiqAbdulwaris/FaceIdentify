@@ -14,7 +14,9 @@
   served) is unchanged.
 - `tests/integration/test_api_runtime_models.py`: a first run without models reports `DEGRADED`,
   the same backend reports `READY` once the models are there, and `DEGRADED` again when work is owed
-  later.
+  later; and, through the processing profile's live capabilities, each value of `ml_worker` gives
+  the state the rule says.
+- `docs/specs/API and Contracts.md`: a dated delegated-decision note defining the rule.
 
 ## Why
 
@@ -34,8 +36,10 @@ contract was.
 ## Decisions
 
 Delegated (owner, 2026-11-09; reversible): the reported state follows the reported capabilities.
-No spec text changes: API and Contracts already says the application "may be usable in a degraded
-state" when a capability is unavailable, which is what the report now says at every moment.
+The values that degrade are named once (`DEGRADING` in `startup.py`): `DEGRADED`, `UNAVAILABLE`,
+`FAILED` (a worker that keeps crashing) and `STOPPED` (a scheduler that is not running); the rule
+at open uses the same list. API and Contracts did not define how `state` is derived, so a dated
+note beside its `/readiness` text now does.
 
 ## Verification
 

@@ -64,6 +64,10 @@ from backend.infrastructure.media.video import media_tools
 
 NOT_CONFIGURED: Final = "NOT_CONFIGURED"
 UNAVAILABLE: Final = "UNAVAILABLE"  # a capability the library needs cannot be provided here
+# The capability values that make an open library DEGRADED (it still serves). Every other value
+# (READY, NOT_STARTED for a worker that starts on first use, NOT_CONFIGURED, a provider's name)
+# leaves it READY.
+DEGRADING: Final = ("DEGRADED", UNAVAILABLE, "FAILED", "STOPPED")
 
 
 class LifecycleState(StrEnum):
@@ -222,7 +226,7 @@ class Backend:
         if state in (LifecycleState.READY, LifecycleState.DEGRADED):
             # The rule applied when the library opened, on what is true now: models installed or
             # a policy chosen after the start make it READY; a capability lost later, DEGRADED.
-            degraded = any(value in ("DEGRADED", UNAVAILABLE) for value in capabilities.values())
+            degraded = any(value in DEGRADING for value in capabilities.values())
             state = LifecycleState.DEGRADED if degraded else LifecycleState.READY
         return BackendReadiness(state.value, capabilities, self.failure, missing)
 
@@ -453,9 +457,7 @@ class Backend:
                 self.failure = type(error).__name__
                 self.state = LifecycleState.FAILED
             else:
-                degraded = any(
-                    value in ("DEGRADED", UNAVAILABLE) for value in self.capabilities.values()
-                )
+                degraded = any(value in DEGRADING for value in self.capabilities.values())
                 self.state = LifecycleState.DEGRADED if degraded else LifecycleState.READY
         finally:
             self.settled.set()
