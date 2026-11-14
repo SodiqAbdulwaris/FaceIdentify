@@ -1,5 +1,12 @@
 import type { PolicyProvenance } from '@/api/types'
 
+/** The policy the results came from, in the words of the choice the person made (or the development policy). */
+function policyName(version: string | null | undefined): string {
+  if (version === 'buffalo-l-verified-match-v1') return 'the Automatic recognition you chose'
+  if (version === 'buffalo-l-abstain-only-v1') return 'the Assisted recognition you chose'
+  return `the development policy${version ? ` (${version})` : ''}`
+}
+
 /**
  * The owner's decision (plan, decision 1): results from the development policy are labelled as
  * uncalibrated wherever they are shown. The label comes from the run's own frozen configuration,
@@ -14,9 +21,10 @@ export function PolicyNotice({ policy }: { policy: PolicyProvenance | undefined 
     >
       {policy.calibrated ? null : (
         <p>
-          <strong>Uncalibrated results.</strong> These were produced with the development policy
-          {policy.decision_policy_version ? ` (${policy.decision_policy_version})` : ''}, which has
-          not been calibrated or validated. They are for evaluation only, not for real decisions.
+          <strong>Uncalibrated results.</strong> These were produced with{' '}
+          {policyName(policy.decision_policy_version)}, whose similarity scores have not been
+          calibrated or validated: a high score is a reason to look, not proof. They are for
+          evaluation only, not for real decisions.
         </p>
       )}
       {policy.automatic_matching ? null : (
