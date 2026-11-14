@@ -20,7 +20,7 @@ frames' pixels in memory: `chunk_frames` frames, scaled to a longest side of `ma
 
 import math
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, closing
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -59,6 +59,7 @@ from backend.app.processing.video_chunks import (
     agreed_identity,
     chunk_payload,
     frame_index,
+    kept_faces,
     resume_point,
     video_tracks,
 )
@@ -713,6 +714,7 @@ class ExecuteProcessingJob:
             raise ProcessingExecutionError("this perception cannot process a video")
         resume = self._uow.read(lambda session: resume_point(session, source.run_id))
         tracker = Tracker(state=resume.tracker)
+        references = self._uow.read(lambda session: kept_faces(session, source.run_id))
         frames = sampled_frames(
             self._video_tools(),
             self._original_path(source),
@@ -726,7 +728,7 @@ class ExecuteProcessingJob:
         with closing(frames):
             for chunk in batched(frames, self._video.chunk_frames):
                 started, sequence, tracker = self._video_chunk(
-                    started, source, frozen, client, cancelled, tracker, chunk, sequence
+                    started, source, frozen, client, cancelled, tracker, references, chunk, sequence
                 )
         self._pause_if_requested(started)  # (a pause asked after the last chunk: none to finish)
         observations, representations = self._uow.read(
@@ -769,6 +771,7 @@ class ExecuteProcessingJob:
         client: _VideoPerception,
         cancelled: Callable[[], bool],
         tracker: Tracker,
+        references: dict[int, Any],
         chunk: tuple[Frame, ...],
         sequence: int,
     ) -> tuple[StartedProcessingJob, int, Tracker]:
@@ -778,12 +781,15 @@ class ExecuteProcessingJob:
         A provider that falls back part way through a chunk starts a new execution segment; the
         chunk is then done again from its first frame under the variant that now runs (with the
         tracker as it was before the chunk), so every row it settles names the segment that
-        produced it. A fallback is rare and a chunk is ten seconds of video."""
+        produced it. A fallback is rare and a chunk is ten seconds of video.
+
+        `references` is each track's most recent kept face (`Tracker.recall`), brought up to date
+        here once the chunk is settled, so a redone chunk starts from the same faces."""
         before = tracker.state()
         while True:
             segment = started.execution_segment_id
             started, found = self._chunk_work(
-                started, source, frozen, client, cancelled, tracker, chunk
+                started, source, frozen, client, cancelled, tracker, references, chunk
             )
             if started.execution_segment_id == segment:
                 break
@@ -794,6 +800,10 @@ class ExecuteProcessingJob:
                 session, source, current, frozen, chunk, found, sequence, tracker
             )
         )
+        _detected, faces, represented, _spans = found
+        for position, pairs in faces.items():  # (in time order: a track's latest face wins)
+            vectors = represented[position].vectors
+            references.update((t, v.vector) for (t, _d), v in zip(pairs, vectors, strict=True))
         self._cancel_if_requested(started)
         self._pause_if_requested(started)
         return started, sequence, tracker
@@ -806,6 +816,7 @@ class ExecuteProcessingJob:
         client: _VideoPerception,
         cancelled: Callable[[], bool],
         tracker: Tracker,
+        references: Mapping[int, Any],
         chunk: tuple[Frame, ...],
     ) -> tuple[StartedProcessingJob, Any]:
         detected: list[Detected] = []
@@ -816,14 +827,31 @@ class ExecuteProcessingJob:
                 started = self._advance_after_fallbacks(source, started, result.fallbacks)
             detected.extend(results)
             self._cancel_if_requested(started)
+        # Every face is embedded, so a track is one person's (issue #283); only the kept ones are
+        # recorded below.
+        embedded: dict[int, Represented] = {}
+        with_faces = [(p, r) for p, r in enumerate(detected) if r.detections]
+        for pairs in batched(with_faces, self._video.frames_per_turn):
+            with cancellable(cancelled), client.turn():
+                answers = [client.represent(chunk[p].pixels, r.detections) for p, r in pairs]
+            for (position, result), answer in zip(pairs, answers, strict=True):
+                started = self._advance_after_fallbacks(source, started, answer.fallbacks)
+                if answer.ran is None or len(answer.vectors) != len(result.detections):
+                    raise ProcessingExecutionError("the embedder did not settle every face")
+                embedded[position] = answer
+            self._cancel_if_requested(started)
+        tracker.recall(references)
         spans: dict[int, list[int]] = {}
         candidates: list[Candidate] = []
         for position, (frame, result) in enumerate(zip(chunk, detected, strict=True)):
             index = frame_index(frame.timestamp_ms, frame.slot, source.frame_rate)
             boxes = [detection.box for detection in result.detections]
             points = [detection.landmarks for detection in result.detections]
+            seen = [face.vector for face in embedded[position].vectors] if boxes else []
             for detection, track in zip(
-                result.detections, tracker.update(frame.slot, boxes, points), strict=True
+                result.detections,
+                tracker.update(frame.slot, boxes, points, seen),
+                strict=True,
             ):
                 span = spans.setdefault(track, [frame.timestamp_ms, 0, index, 0])
                 span[1], span[3] = frame.timestamp_ms, index
@@ -849,16 +877,10 @@ class ExecuteProcessingJob:
         for candidate in sorted(kept, key=lambda c: (c.key[0], c.key[1].detection_index)):
             faces.setdefault(candidate.key[0], []).append((candidate.track, candidate.key[1]))
         represented: dict[int, Represented] = {}
-        for pairs in batched(faces.items(), self._video.frames_per_turn):
-            with cancellable(cancelled), client.turn():
-                embedded = [
-                    client.represent(chunk[position].pixels, tuple(d for _t, d in found))
-                    for position, found in pairs
-                ]
-            for (position, _found), vectors in zip(pairs, embedded, strict=True):
-                started = self._advance_after_fallbacks(source, started, vectors.fallbacks)
-                represented[position] = vectors
-            self._cancel_if_requested(started)
+        for position, found in faces.items():
+            every = {face.detection_index: face for face in embedded[position].vectors}
+            chosen = tuple(every[d.detection_index] for _t, d in found)
+            represented[position] = Represented(chosen, embedded[position].ran)
         return started, (detected, faces, represented, spans)
 
     def _pause_if_requested(self, started: StartedProcessingJob) -> None:
@@ -911,8 +933,7 @@ class ExecuteProcessingJob:
         kept: list[tuple[uuid.UUID, int]] = []
         for position, pairs in faces.items():
             frame, result = chunk[position], represented[position]
-            if result.ran is None or len(result.vectors) != len(pairs):
-                raise ProcessingExecutionError("the embedder did not settle every selected face")
+            assert result.ran is not None  # (every face was checked when it was embedded)
             index = frame_index(frame.timestamp_ms, frame.slot, source.frame_rate)
             for (track, detection), vector in zip(pairs, result.vectors, strict=True):
                 observation_id = write_observation(
