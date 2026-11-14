@@ -157,6 +157,9 @@ All commands from the repository root of this change.
   fresh selection; re-checked in the browser); `REJECTED` is recorded only for "none / cannot determine", otherwise
   `NOT_ADDRESSED`; a complete last record that only lost its newline is kept; `tests/unit/test_face_boxes.py` tests the
   matching boundaries. Not changed: the gate accepts a `face` in a schema 1 manifest (the exporter writes it only in schema 2).
+- A flaky test was found and fixed on the way: the unauthorised-POST check failed about one run in ten on Windows
+  (`ConnectionAbortedError`) because the server answered 403 before reading the request body. The handler now reads the
+  bounded body first; 60 consecutive runs of that test passed.
 - Geometry is accepted only as an explicit list or tuple of four real, non-boolean, finite numbers (a string such as
   "01", booleans or other iterables are refused), with a regression test; two manifests used one after the other never
   share a selected face (a test; there is no module-level state).

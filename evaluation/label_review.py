@@ -871,12 +871,14 @@ def make_handler(review: Review, token: str) -> type[http.server.BaseHTTPRequest
         def do_POST(self) -> None:  # noqa: N802
             parsed = urllib.parse.urlparse(self.path)
             allowed = self._allowed(urllib.parse.parse_qs(parsed.query))
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(min(length, 65536))  # (read before any answer: an unread body
+            # can make the connection abort under the client, which then never sees the 403)
             if not allowed or parsed.path != "/api/decision":
                 self._json(403, {"error": "not allowed"})
                 return
-            length = int(self.headers.get("Content-Length", "0"))
             try:
-                body = json.loads(self.rfile.read(min(length, 65536)))
+                body = json.loads(raw)
                 record = review.decide(
                     body["file"],
                     body["decision"],
