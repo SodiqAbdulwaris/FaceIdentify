@@ -270,3 +270,4 @@ Blocked items, spec conflicts, out-of-scope issues noticed.
 | 2026-11-14 | [A failed activation of the models keeps the application working (TST-082)](2026-11-14-activation-rollback-tests.md) | tests added; no product change |
 | 2026-11-14 | [Label review: the model suggests the face, a reviewer confirms it (issue 181)](2026-11-14-label-review-confirmed-face.md) | built; issue still open; nothing confirmed by a reviewer yet |
 | 2026-11-14 | [Approved network roots: the store and its API (issue 174, step A)](2026-11-14-approved-network-roots-store.md) | partial |
+| 2026-11-14 | [Approved network paths in the face-search path check; retained-handle open (issue 174, step B)](2026-11-14-approved-network-paths-policy.md) | partial |
