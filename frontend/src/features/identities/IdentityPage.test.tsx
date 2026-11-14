@@ -27,7 +27,7 @@ describe('a person', () => {
     ])
 
     expect(await screen.findByRole('heading', { name: 'Person I1' })).toBeInTheDocument()
-    expect(screen.getByText(/Appears 2 times in 2 images\./)).toBeInTheDocument()
+    expect(screen.getByText(/Appears 2 times in 2 images and videos\./)).toBeInTheDocument()
     expect(screen.getByText(/Nobody has named this person yet\./)).toBeInTheDocument()
     const beach = await screen.findByRole('link', { name: /beach\.png/ })
     const party = screen.getByRole('link', { name: /party\.jpg/ })
@@ -46,7 +46,7 @@ describe('a person', () => {
       media,
     ])
 
-    expect(await screen.findByText(/Appears once in 1 image\./)).toBeInTheDocument()
+    expect(await screen.findByText(/Appears once in 1 image or video\./)).toBeInTheDocument()
   })
 
   it('pages through many appearances on request', async () => {
@@ -145,6 +145,6 @@ describe('a person', () => {
 
     expect(within(party).getByText('From an image in the recycle bin')).toBeInTheDocument()
     expect(within(beach).queryByText(/recycle bin/)).toBeNull()
-    expect(screen.getByText(/Appears 2 times in 2 images\./)).toBeInTheDocument() // still counted
+    expect(screen.getByText(/Appears 2 times in 2 images and videos\./)).toBeInTheDocument() // still counted
   })
 })

@@ -81,7 +81,7 @@ export function IdentitiesPage() {
                     <span className="font-medium">{personLabel(person.id, person.person)}</span>
                     <span className="text-sm text-muted-foreground">
                       {plural(person.occurrence_count, 'appearance', 'appearances')} in{' '}
-                      {plural(person.source_count, 'image', 'images')}
+                      {plural(person.source_count, 'image or video', 'images and videos')}
                     </span>
                   </span>
                 </Link>
@@ -95,7 +95,8 @@ export function IdentitiesPage() {
         <section className="flex flex-col gap-2" aria-label="People without a remembered face">
           <h2 className="font-medium">Known by name only</h2>
           <p className="text-sm text-muted-foreground">
-            The app remembers no face for these people, so it cannot recognise them. Their names stay.
+            The app remembers no face for these people, so it cannot recognise them. Their names
+            stay.
           </p>
           <ul className="flex flex-col gap-1">
             {withoutFace.map((person) => (
