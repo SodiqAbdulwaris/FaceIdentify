@@ -98,10 +98,13 @@ class Tracker:
         self._faces = {track: face for track, face in faces.items() if track in live}
 
     def state(self) -> dict[str, Any]:
+        # A track that ended keeps its count until here (the chunk's selection still asks its
+        # `room`), and never enters a checkpoint: it will not be seen again.
+        live = {str(track[0]) for track in self._live}
         return {
             "next_id": self._next_id,
             "live": [list(track) for track in self._live],
-            "kept": dict(self._kept),
+            "kept": {track: n for track, n in self._kept.items() if track in live},
         }
 
     def room(self, track: int, cap: int) -> int:
@@ -124,9 +127,8 @@ class Tracker:
         """The track of each box seen at `slot`, in order (`landmarks`, `faces`: each box's
         landmarks and unit embedding, if known)."""
         self._live = [t for t in self._live if slot - t[1] <= self._max_gap]
-        live = {str(t[0]) for t in self._live}
-        self._kept = {track: n for track, n in self._kept.items() if track in live}
-        self._faces = {t: face for t, face in self._faces.items() if str(t) in live}
+        live = {t[0] for t in self._live}
+        self._faces = {t: face for t, face in self._faces.items() if t in live}
         given = landmarks if landmarks is not None else [None] * len(boxes)
         shapes = [shape(box, points) for box, points in zip(boxes, given, strict=True)]
         assigned: list[int | None] = [None] * len(boxes)
