@@ -20,6 +20,38 @@ describe('the layout', () => {
     expect(notice).toHaveTextContent('not for real decisions')
   })
 
+  it('names the recognition mode the person chose instead of calling it the development policy', async () => {
+    const chosen = run({
+      policy: {
+        calibration_mode: 'UNCALIBRATED',
+        decision_policy_version: 'buffalo-l-verified-match-v1',
+        calibrated: false,
+        automatic_matching: true,
+      },
+    })
+    renderApp('/library', [library, media, { path: RUNS, respond: page([chosen]) }])
+
+    const notice = await screen.findByRole('note')
+
+    expect(notice).toHaveTextContent('the Automatic recognition you chose')
+    expect(notice).not.toHaveTextContent('development policy')
+    expect(notice).toHaveTextContent('a high score is a reason to look, not proof')
+  })
+
+  it('names Assisted recognition the same way', async () => {
+    const chosen = run({
+      policy: {
+        calibration_mode: 'UNCALIBRATED',
+        decision_policy_version: 'buffalo-l-abstain-only-v1',
+        calibrated: false,
+        automatic_matching: false,
+      },
+    })
+    renderApp('/library', [library, media, { path: RUNS, respond: page([chosen]) }])
+
+    expect(await screen.findByRole('note')).toHaveTextContent('the Assisted recognition you chose')
+  })
+
   it('says so when the policy cannot match a face to an existing person', async () => {
     const disabled = run({
       policy: {
