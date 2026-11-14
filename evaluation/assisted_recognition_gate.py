@@ -45,8 +45,8 @@ evaluated, with why (from the first query pass); a photograph with several faces
 one is "not evaluated (ambiguous subject)", not a loss of the pipeline.
 A verified manifest of schema 2 (`label_review.py`, issue 181) may carry, per photograph, the face a
 reviewer selected: a normalised box on the upright picture. That photograph's subject is then the
-one detected face that corresponds to the box (`face_boxes.match_face`: intersection over union of at
-least 0.5, and no other face that close), whatever its size; if no detected face corresponds, the
+one detected face that corresponds to the box (`face_boxes.match_face`: intersection over union
+of at least 0.5, and no other face that close), whatever its size; if no detected face corresponds, the
 photograph is left out as "annotation mismatch" and no other face is taken instead. A photograph
 without a selected face keeps the rule above.
 This is a local run (the weights are not in CI) and is recorded in the tracker with its evidence.
