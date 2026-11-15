@@ -493,7 +493,7 @@ other than the one shown), `409 POLICY_NOT_REPLACEABLE` (a custom policy is inst
 
 ## 5.10 Approved network locations (settings)
 
-> **Decision 2026-11-14 (agent, under the owner's locked decision of 2026-10-14 on issue 174 and his brief of 2026-11-14):**
+> **Decision 2026-11-14 (agent, under the owner's locked decision of 2026-10-14 on issue 174 and the owner's brief of 2026-11-14):**
 > this is *user-authorized LAN access*, a deliberate act, and not the application's default offline
 > operation. By default nothing on a network is read. Face search by path may read a picture on a share
 > only if the user approved that share, or a folder on it, by name here. The application never asks for,
@@ -756,6 +756,17 @@ Repeating the same face search must not grow memory.
 > `503 PERCEPTION_UNAVAILABLE`, `503 SEARCH_INDEX_UNAVAILABLE`, `429 FACE_SEARCH_BUSY` (at most three in flight). A path may name any readable local file (the
 > bearer token already grants import of any file) except a network path; the body is size-checked as it
 > arrives and the answer is built in the same read transaction that validated the candidates.
+
+> **Decision 2026-11-14 (agent, under the owner's locked decision of 2026-10-14 on issue 174):** the "except a
+> network path" above now reads "except one the user has not approved" (section 5.10). A path may name a
+> picture on a share the user approved, directly (`\\server\share\...`), through a mapped drive, a `subst`
+> of a share, or a link or junction whose resolved target is inside an approved root; anything else that leaves
+> the computer is refused with `400 QUERY_PATH_NOT_LOCAL` before any outbound access, and no unapproved host is
+> contacted to find out. The effective target is judged, not the submitted text. The file is opened by a walk of
+> retained handles that follows no link, must be a plain disk file (not a folder, pipe or device) and is checked
+> to be where the target says before any byte is read. A read never imports the picture, creates a source,
+> identity or evidence, or keeps anything; it uses the signed-in user's own permissions and no credential is
+> ever requested, stored or forwarded.
 
 > **Decision 2026-10-15 (owner; issue 188):** face search also accepts an AVIF, under the same size and
 > pixel limits as import, so the accepted query formats are JPEG, PNG, BMP, WebP and AVIF (PDF still is not).

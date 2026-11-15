@@ -1,6 +1,6 @@
 # Approved network roots for face search by path (issue #174)
 
-_Status: PR A built (2026-11-14); B, C and D not started._
+_Status: PRs A and B built (2026-11-14); C and D not started._
 
 **Goal.** Under the owner's decision of 2026-10-14 (locked, on issue #174) and the direction of
 2026-11-14: a picture named by path in face search may live on a network share the user approved by
@@ -12,7 +12,7 @@ import from a share (#179), cameras, and any listener on a LAN interface.
 | Step | Content | State |
 |---|---|---|
 | A | Approvals store (machine-local file `network-roots.json` under the local state root) and `GET`/`POST`/`DELETE /api/v1/settings/network-roots`; approving contacts nothing | built, [entry](../implementations/2026-11-14-approved-network-roots-store.md) |
-| B | Policy in the path check: a UNC path, mapped drive, link or junction whose effective target is inside an approved root is allowed; the walk-to-open race closed | not started |
+| B | Policy in the path check: a UNC path, mapped drive, link or junction whose effective target is inside an approved root is allowed; the walk-to-open race closed | built, [entry](../implementations/2026-11-14-approved-network-paths-policy.md) |
 | C | Isolation and deadlines: network reads in a killable helper process with a deadline, retryable failure, no lease, transaction or lock held while waiting | not started |
 | D | Settings screen to review, add and revoke approved locations | not started |
 
