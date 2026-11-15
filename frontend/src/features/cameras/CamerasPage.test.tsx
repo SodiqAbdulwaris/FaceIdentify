@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { failure, page, renderApp, type Handler } from '@/test/harness'
@@ -213,6 +213,30 @@ describe('camera history', () => {
     expect(within(day).getByRole('link', { name: 'Ada' })).toHaveAttribute('href', '/identities/i1')
     expect(within(day).getByText('Not recognised')).toBeInTheDocument()
     expect(await within(day).findByRole('img', { name: "Ada's face" })).toBeInTheDocument()
+  })
+
+  it('lets a face the camera did not recognise be filed under a new person', async () => {
+    const { calls } = renderApp(
+      '/cameras/c1',
+      history([
+        {
+          method: 'POST',
+          path: '/api/v1/representations/r9/resolve',
+          respond: { identity_id: 'i9' },
+        },
+      ]),
+    )
+
+    expect(
+      await screen.findByRole('img', { name: /An unrecognised face at/ }),
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'This is someone new' }))
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.path.endsWith('/r9/resolve'))?.body).toEqual({
+        identity_id: null,
+      }),
+    )
   })
 
   it('deletes a day, after asking', async () => {

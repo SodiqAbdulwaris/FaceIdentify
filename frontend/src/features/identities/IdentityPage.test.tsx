@@ -27,7 +27,7 @@ describe('a person', () => {
     ])
 
     expect(await screen.findByRole('heading', { name: 'Person I1' })).toBeInTheDocument()
-    expect(screen.getByText(/Appears 2 times in 2 images and videos\./)).toBeInTheDocument()
+    expect(screen.getByText(/Appears 2 times in 2 images, videos and cameras\./)).toBeInTheDocument()
     expect(screen.getByText(/Nobody has named this person yet\./)).toBeInTheDocument()
     const beach = await screen.findByRole('link', { name: /beach\.png/ })
     const party = screen.getByRole('link', { name: /party\.jpg/ })
@@ -39,6 +39,42 @@ describe('a person', () => {
     expect(within(party).queryByRole('img')).toBeNull()
   })
 
+  it('shows a camera visit with its kept face picture and leads to the camera, not to an image', async () => {
+    const { calls } = renderApp('/identities/i1', [
+      { path: PERSON, respond: identity({ occurrence_count: 1, source_count: 1 }) },
+      {
+        path: `${PERSON}/occurrences`,
+        respond: page([
+          occurrence({
+            id: 'o1',
+            source_id: 'cam1',
+            source_display_name: 'Front door',
+            representative_observation: {
+              id: 'ob1',
+              source_id: 'cam1',
+              bounding_box: { x: 0.2, y: 0.1, width: 0.4, height: 0.5 },
+              face_crop: {
+                id: 'a1',
+                kind: 'FACE_CROP',
+                url: '/api/v1/cameras/cam1/faces/ob1/crop',
+                content_type: 'image/jpeg',
+              },
+            },
+          }),
+        ]),
+      },
+      { path: '/api/v1/cameras/cam1/faces/ob1/crop', respond: 'bytes' },
+      media,
+    ])
+
+    const visit = await screen.findByRole('link', { name: /Camera: Front door/ })
+    expect(visit).toHaveAttribute('href', '/cameras/cam1')
+    expect(
+      await within(visit).findByRole('img', { name: 'Person I1 in Front door' }),
+    ).toBeInTheDocument()
+    expect(calls.some((call) => call.path === '/api/v1/sources/cam1/media')).toBe(false)
+  })
+
   it('says once, and one image, for a single appearance', async () => {
     renderApp('/identities/i1', [
       { path: PERSON, respond: identity() },
@@ -46,7 +82,7 @@ describe('a person', () => {
       media,
     ])
 
-    expect(await screen.findByText(/Appears once in 1 image or video\./)).toBeInTheDocument()
+    expect(await screen.findByText(/Appears once in 1 image, video or camera\./)).toBeInTheDocument()
   })
 
   it('pages through many appearances on request', async () => {
@@ -145,6 +181,6 @@ describe('a person', () => {
 
     expect(within(party).getByText('From an image in the recycle bin')).toBeInTheDocument()
     expect(within(beach).queryByText(/recycle bin/)).toBeNull()
-    expect(screen.getByText(/Appears 2 times in 2 images and videos\./)).toBeInTheDocument() // still counted
+    expect(screen.getByText(/Appears 2 times in 2 images, videos and cameras\./)).toBeInTheDocument() // still counted
   })
 })

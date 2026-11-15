@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { keys } from '@/api/keys'
 import type { UnresolvedFace } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
@@ -48,7 +48,17 @@ export function UnresolvedFaces({ sourceId }: { sourceId: string }) {
   )
 }
 
-function Unresolved({ sourceId, face }: { sourceId: string; face: UnresolvedFace }) {
+/** One face to place. `picture` replaces the crop cut from the source's image (a camera face has
+ * no image: its kept crop is shown instead). */
+export function Unresolved({
+  sourceId,
+  face,
+  picture,
+}: {
+  sourceId: string
+  face: UnresolvedFace
+  picture?: ReactNode
+}) {
   const { endpoints } = useBackend()
   const queryClient = useQueryClient()
   const [target, setTarget] = useState('')
@@ -71,7 +81,9 @@ function Unresolved({ sourceId, face }: { sourceId: string; face: UnresolvedFace
   return (
     <div className="flex flex-col gap-2 rounded-md border p-3">
       <div className="flex items-center gap-3">
-        <FaceCrop sourceId={sourceId} box={face.bounding_box} label="A face to place" />
+        {picture ?? (
+          <FaceCrop sourceId={sourceId} box={face.bounding_box} label="A face to place" />
+        )}
         <div className="flex flex-col gap-1">
           {face.likely.length > 0 ? (
             <span className="text-xs text-muted-foreground">

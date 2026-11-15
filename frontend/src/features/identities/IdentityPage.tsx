@@ -5,14 +5,14 @@ import { ApiError } from '@/api/client'
 import { keys } from '@/api/keys'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
-import { FaceCrop } from '../FaceCrop'
+import { ObservationFace } from '../FaceCrop'
 import { FaceCorrection } from '../source/FaceCorrection'
 import { errorMessage } from '../library/messages'
 import { ForgetControl } from './ForgetControl'
 import { MergeControl } from './MergeControl'
 import { NameForm } from './NameForm'
 import { SplitControl } from './SplitControl'
-import { personLabel } from './label'
+import { appearanceLink, personLabel } from './label'
 
 export function IdentityPage() {
   const { identityId = '' } = useParams()
@@ -62,7 +62,7 @@ export function IdentityPage() {
       </div>
       <p className="text-muted-foreground">
         Appears {count === 1 ? 'once' : `${count} times`} in {sources}{' '}
-        {sources === 1 ? 'image or video' : 'images and videos'}.
+        {sources === 1 ? 'image, video or camera' : 'images, videos and cameras'}.
         {person.data.person ? '' : ' Nobody has named this person yet.'}
       </p>
       <NameForm identityId={identityId} person={person.data.person ?? null} />
@@ -94,20 +94,25 @@ export function IdentityPage() {
             return (
               <li key={occurrence.id}>
                 <Link
-                  to={`/library/source/${occurrence.source_id}`}
+                  to={appearanceLink(occurrence.source_id, face)}
                   className="flex items-center gap-3 rounded-lg border bg-card p-3 hover:bg-accent/40"
                 >
                   {face ? (
-                    <FaceCrop
-                      sourceId={face.source_id}
-                      box={face.bounding_box}
+                    <ObservationFace
+                      face={face}
                       label={`${label} in ${occurrence.source_display_name}`}
                     />
                   ) : (
                     <div className="size-24 shrink-0 rounded-md bg-muted" aria-hidden="true" />
                   )}
                   <span className="min-w-0 break-words text-sm font-medium">
+                    {face?.face_crop ? 'Camera: ' : ''}
                     {occurrence.source_display_name}
+                    {face?.face_crop ? (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        {new Date(occurrence.created_at).toLocaleString()}
+                      </span>
+                    ) : null}
                     {occurrence.source_recycled ? (
                       <span className="block text-xs font-normal text-muted-foreground">
                         From an image in the recycle bin

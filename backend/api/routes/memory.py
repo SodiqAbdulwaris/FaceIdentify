@@ -136,7 +136,15 @@ def _brief(
             width=observation.bbox_width,
             height=observation.bbox_height,
         ),
-        face_crop=None,
+        # A camera face has no picture to cut it from: its kept crop is served by the camera routes.
+        face_crop=None
+        if observation.face_crop_artifact_id is None
+        else MediaReference(
+            id=str(observation.face_crop_artifact_id),
+            kind="FACE_CROP",
+            url=f"/api/v1/cameras/{observation.source_id}/faces/{observation.id}/crop",
+            content_type="image/jpeg",
+        ),
     )
 
 

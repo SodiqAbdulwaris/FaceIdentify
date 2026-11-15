@@ -240,6 +240,37 @@ async def _when(awaitable: Any, test: Callable[[Any], Any]) -> Any:
     return test(await awaitable)
 
 
+async def test_a_camera_face_placed_under_a_person_is_shown_by_its_kept_picture(
+    api: Api, cameras: Cameras
+) -> None:
+    """A camera has no picture to cut a face from, so wherever the face is listed (a person's
+    appearances) its brief says where its kept crop is."""
+    camera = await configure(api)
+    cameras.next["Integrated Camera"] = Planted([picture(("green", 20, 40))] * 5)
+    await api.client.post(f"/api/v1/cameras/{camera}/start")
+    await eventually(lambda: _when(status(api, camera), lambda s: s["frames"] == 5 and s))
+    await api.client.post(f"/api/v1/cameras/{camera}/stop")
+    [face, *_] = (await api.client.get(f"/api/v1/sources/{camera}/unresolved-faces")).json()[
+        "items"
+    ]
+
+    placed = await api.client.post(
+        f"/api/v1/representations/{face['representation_id']}/resolve", json={"identity_id": None}
+    )
+    assert placed.status_code == 200, placed.text
+    identity = placed.json()["identity_id"]
+    [appearance] = (await api.client.get(f"/api/v1/identities/{identity}/occurrences")).json()[
+        "items"
+    ]
+
+    brief = appearance["representative_observation"]
+    assert brief["source_id"] == camera
+    assert brief["face_crop"]["kind"] == "FACE_CROP"
+    assert brief["face_crop"]["url"] == f"/api/v1/cameras/{camera}/faces/{brief['id']}/crop"
+    crop = await api.client.get(brief["face_crop"]["url"])
+    assert (crop.status_code, crop.content[:2].hex()) == (200, "ffd8")  # a JPEG
+
+
 async def test_a_camera_that_cannot_be_opened_ends_its_session_with_the_reason(
     api: Api, cameras: Cameras
 ) -> None:

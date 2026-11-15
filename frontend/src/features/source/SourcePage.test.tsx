@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { keys } from '@/api/keys'
@@ -65,6 +65,14 @@ describe('a source', () => {
     expect(first).toHaveStyle({ left: '20%', top: '10%', width: '40%', height: '50%' })
     expect(second).toHaveAttribute('href', '/identities/i2')
     expect(second).toHaveStyle({ left: '60%', top: '30%', width: '20%', height: '25%' })
+    // Once the picture's own size is known the frame takes its proportions, so a tall picture
+    // shrunk to the height limit is not left in a frame wider than itself (boxes would drift).
+    const picture = first.parentElement!.querySelector('img')!
+    Object.defineProperty(picture, 'naturalWidth', { value: 300 })
+    Object.defineProperty(picture, 'naturalHeight', { value: 400 })
+    fireEvent.load(picture)
+    expect(first.parentElement).toHaveStyle({ aspectRatio: '0.75' })
+    expect(first.parentElement!.style.width).toBe('min(100%, 52.5vh)') // 70vh at 3:4
     const people = screen.getByRole('heading', { name: 'People in this image' }).parentElement!
     expect(within(people).getByRole('link', { name: 'Person I1' })).toHaveAttribute(
       'href',

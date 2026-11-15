@@ -40,7 +40,7 @@ describe('face search', () => {
     await choose(picture())
 
     const result = await screen.findByRole('region', { name: 'Face 1 of the picture' })
-    expect(within(result).getByText('Possible people')).toBeInTheDocument()
+    expect(within(result).getByText('Not recognised')).toBeInTheDocument()
     const link = within(result).getByRole('link', { name: /Ada/ })
     expect(link).toHaveAttribute('href', '/identities/i1')
     expect(link).toHaveTextContent('similarity 0.81 · 3 matching faces · 2 images')

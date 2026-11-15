@@ -183,7 +183,9 @@ export function Face({ face, url }: { face: FaceAnswer; url: string | undefined 
       aria-label={`Face ${face.index + 1} of the picture`}
       className="flex flex-wrap gap-3 rounded-lg border p-3"
     >
-      <CroppedImage url={url} box={face.bounding_box} label={`Face ${face.index + 1}`} />
+      {url ? (
+        <CroppedImage url={url} box={face.bounding_box} label={`Face ${face.index + 1}`} />
+      ) : null}
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {answer ? (
           <p className="font-medium">
@@ -196,10 +198,11 @@ export function Face({ face, url }: { face: FaceAnswer; url: string | undefined 
         ) : null}
         {face.status === 'POSSIBLE_PEOPLE' ? (
           <>
-            <p className="font-medium">Possible people</p>
+            <p className="font-medium">Not recognised</p>
             <p className="text-sm text-muted-foreground">
-              Nearest first. The similarity is a score of how alike the faces look, not a probability
-              that it is the same person.
+              The closest people in your library, nearest first. The similarity is a score of how
+              alike the faces look, not a probability that it is the same person; a low one means a
+              different person.
             </p>
           </>
         ) : null}

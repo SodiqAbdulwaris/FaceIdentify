@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import type { BoundingBox } from '@/api/types'
-import { useSourceImage } from './useSourceImage'
+import { useQuery } from '@tanstack/react-query'
+import type { BoundingBox, ObservationBrief } from '@/api/types'
+import { useBackend } from '@/app/useBackend'
+import { useObjectUrl, useSourceImage } from './useSourceImage'
 
 /**
  * One face, cut out of its image for display. The backend stores no face crops yet, so the crop is
@@ -21,6 +23,45 @@ export function FaceCrop({
 }) {
   const { url } = useSourceImage(sourceId)
   return <CroppedImage url={url} box={box} size={size} label={label} />
+}
+
+/**
+ * A face the library holds, as a square tile: its kept crop when it has one (a camera face: there
+ * is no picture to cut it from), else cut out of its image.
+ */
+export function ObservationFace({
+  face,
+  size = 96,
+  label,
+}: {
+  face: ObservationBrief
+  size?: number
+  label: string
+}) {
+  return face.face_crop ? (
+    <KeptCrop url={face.face_crop.url} size={size} label={label} />
+  ) : (
+    <FaceCrop sourceId={face.source_id} box={face.bounding_box} size={size} label={label} />
+  )
+}
+
+function KeptCrop({ url, size, label }: { url: string; size: number; label: string }) {
+  const { endpoints } = useBackend()
+  const picture = useQuery({
+    queryKey: ['media', url],
+    queryFn: () => endpoints.media(url),
+    staleTime: Infinity,
+    retry: false,
+  })
+  const shown = useObjectUrl(picture.data)
+  return (
+    <div
+      className="shrink-0 overflow-hidden rounded-md bg-muted"
+      style={{ width: size, height: size }}
+    >
+      {shown ? <img src={shown} alt={label} className="size-full object-cover" /> : null}
+    </div>
+  )
 }
 
 /** The same tile for a picture that is not in the library (the one a face search was made with). */

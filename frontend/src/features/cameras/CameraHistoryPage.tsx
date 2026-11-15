@@ -6,6 +6,7 @@ import type { OccurrenceSummary, UnresolvedFace } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
 import { personLabel } from '../identities/label'
 import { errorMessage } from '../library/messages'
+import { Unresolved } from '../source/UnresolvedFaces'
 import { useObjectUrl } from '../useSourceImage'
 import { ConfirmButton } from './ConfirmButton'
 import { dayLabel, dayRange, timeLabel } from './session'
@@ -152,15 +153,25 @@ export function CameraHistoryPage() {
           {day.unknown.length > 0 ? (
             <div className="flex flex-col gap-1">
               <h3 className="text-sm text-muted-foreground">Not recognised</h3>
+              <p className="text-sm text-muted-foreground">
+                Say who a face is and it is filed under that person; the camera then recognises
+                them on later visits.
+              </p>
               <ul className="flex flex-wrap gap-2">
                 {day.unknown.map((face) => (
-                  <li key={face.observation_id} className="flex flex-col items-center text-xs">
-                    <CameraFace
-                      cameraId={cameraId}
-                      observationId={face.observation_id}
-                      label={`An unrecognised face at ${timeLabel(face.seen_at_ms ?? 0)}`}
+                  <li key={face.observation_id} className="flex flex-col gap-1 text-xs">
+                    <Unresolved
+                      sourceId={cameraId}
+                      face={face}
+                      picture={
+                        <CameraFace
+                          cameraId={cameraId}
+                          observationId={face.observation_id}
+                          label={`An unrecognised face at ${timeLabel(face.seen_at_ms ?? 0)}`}
+                        />
+                      }
                     />
-                    {timeLabel(face.seen_at_ms ?? 0)}
+                    Seen at {timeLabel(face.seen_at_ms ?? 0)}
                   </li>
                 ))}
               </ul>

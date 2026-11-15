@@ -45,6 +45,8 @@ export const endpoints = (api: ApiClient) => ({
     api.command<DeletionPending>(`${V1}/sources/${id}/permanent-delete`),
   importSource: (request: ImportRequest) => api.post<SourceDetail>(`${V1}/sources/import`, request),
   sourceMedia: (id: string) => api.blob(`${V1}/sources/${id}/media`),
+  /** A picture the backend gave the address of (a kept face crop). */
+  media: (url: string) => api.blob(url),
   sourceOccurrences: (id: string, cursor?: string) =>
     api.get<Page<OccurrenceSummary>>(`${V1}/sources/${id}/occurrences`, { cursor, limit: 200 }),
   sourceRuns: (id: string, cursor?: string) =>

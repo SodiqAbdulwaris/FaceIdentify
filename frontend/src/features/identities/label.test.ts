@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { personLabel } from './label'
+import { appearanceLink, personLabel } from './label'
 
 describe('personLabel', () => {
   it('is the start of the identity id, in capitals, without dashes', () => {
@@ -18,5 +18,13 @@ describe('personLabel', () => {
 
     expect(personLabel(a)).toBe(personLabel(a))
     expect(personLabel(a)).not.toBe(personLabel(b))
+  })
+})
+
+describe('appearanceLink', () => {
+  it('leads to the image, or to the camera for a face that has its own kept picture', () => {
+    expect(appearanceLink('s1', { face_crop: null })).toBe('/library/source/s1')
+    expect(appearanceLink('s1', null)).toBe('/library/source/s1')
+    expect(appearanceLink('cam1', { face_crop: { url: '/x' } })).toBe('/cameras/cam1')
   })
 })

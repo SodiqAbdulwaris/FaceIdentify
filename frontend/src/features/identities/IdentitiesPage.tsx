@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router'
 import { keys } from '@/api/keys'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
-import { FaceCrop } from '../FaceCrop'
+import { ObservationFace } from '../FaceCrop'
 import { errorMessage } from '../library/messages'
 import { personLabel } from './label'
 
@@ -69,9 +69,8 @@ export function IdentitiesPage() {
                   className="flex items-center gap-3 rounded-lg border bg-card p-3 hover:bg-accent/40"
                 >
                   {face ? (
-                    <FaceCrop
-                      sourceId={face.source_id}
-                      box={face.bounding_box}
+                    <ObservationFace
+                      face={face}
                       label={`${personLabel(person.id, person.person)}'s face`}
                     />
                   ) : (
@@ -81,7 +80,7 @@ export function IdentitiesPage() {
                     <span className="font-medium">{personLabel(person.id, person.person)}</span>
                     <span className="text-sm text-muted-foreground">
                       {plural(person.occurrence_count, 'appearance', 'appearances')} in{' '}
-                      {plural(person.source_count, 'image or video', 'images and videos')}
+                      {plural(person.source_count, 'image, video or camera', 'images, videos and cameras')}
                     </span>
                   </span>
                 </Link>

@@ -5,10 +5,10 @@ import { keys } from '@/api/keys'
 import type { OccurrenceSummary } from '@/api/types'
 import { useBackend } from '@/app/useBackend'
 import { Button } from '@/components/ui/button'
-import { FaceCrop } from '../FaceCrop'
+import { ObservationFace } from '../FaceCrop'
 import { errorMessage } from '../library/messages'
 import { FaceSearch } from './FaceSearch'
-import { personLabel } from '../identities/label'
+import { appearanceLink, personLabel } from '../identities/label'
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 type Recycled = 'include' | 'exclude'
@@ -189,11 +189,11 @@ function Appearance({ occurrence }: { occurrence: OccurrenceSummary }) {
   return (
     <li>
       <Link
-        to={`/library/source/${occurrence.source_id}`}
+        to={appearanceLink(occurrence.source_id, face)}
         className="flex items-center gap-3 rounded-lg border bg-card p-3 hover:bg-accent/40"
       >
         {face ? (
-          <FaceCrop sourceId={face.source_id} box={face.bounding_box} label={`${who}'s face`} />
+          <ObservationFace face={face} label={`${who}'s face`} />
         ) : (
           <div className="size-24 shrink-0 rounded-md bg-muted" aria-hidden="true" />
         )}
