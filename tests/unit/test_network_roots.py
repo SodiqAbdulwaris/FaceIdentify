@@ -95,6 +95,9 @@ def test_one_share_has_one_name_however_it_is_written(text: str) -> None:
         "\\\\\\GLOBALROOT\\Device\\x",
         "\\\\?\\UNC\\\\.\\pipe\\x",  # an extended form that hides a device
         "\\\\.\\\\share",
+        r"\\server\pipe\name",  # a remote named pipe is not a file share
+        r"\\server\PIPE",
+        r"\\server\Mailslot\x",
         r"\\server\DavWWWRoot\x",  # the WebDAV redirector
         r"\\server\davwwwroot",
         r"\\localhost\C$\Users",  # administrative, hidden and IPC shares

@@ -17,19 +17,24 @@
     **subst** of `\??\UNC\server\share` likewise. Anything else that is not a local volume (a bare
     `\Device\Mup`, DFS, WebDAV, RDP drives, no answer) stays refused;
   - a **symlink** whose target is a UNC path, at any depth (nested with junctions and other links);
-    the existing loop reads each link's target from the link itself.
+    each link's target is read from the link itself.
   A link that leads to an unapproved share is refused unseen; a UNC path with `..` is refused rather
   than collapsed. With `approved=None` (the default) every network target is refused as before.
-- `local_path.open_local(path, approved=None)` now opens by a **walk of retained handles**
-  (`NtCreateFile`): the volume by the NT device name the drive letter was checked against, or
-  `\??\UNC\server\share` for an approved share; then each component relative to the handle before
-  it, every one with `FILE_OPEN_REPARSE_POINT` (no link or junction is followed) and refused if the
-  opened entry is a reparse point (a cloud file already on disk excepted); the last as a
-  non-directory. The handle must be a disk file (`GetFileType`) and is then handed to Python. A
-  folder raises `IsADirectoryError`; a file that is missing raises `FileNotFoundError`; a share that
-  cannot be reached raises the Windows `OSError`. Finally Windows is asked where the handle really
-  is: for a local file the NT name must equal the resolved target (as before); for a share the
-  final UNC name must still be inside an approved root. Nothing is read before all of that holds.
+- **One walk, by retained no-follow handles, for the check and for the open.** `local_target` and
+  `open_local` share `_resolve`/`_walk` (`NtCreateFile`): the volume by the NT device name the drive
+  letter was checked against, or `\??\UNC\server\share` for an approved share; then each component
+  relative to the handle before it, every one with `FILE_OPEN_REPARSE_POINT`, so no link or junction
+  is ever followed. A symbolic link or junction met on the way is *read* from its open handle
+  (`FSCTL_GET_REPARSE_POINT`, `parse_reparse`) and its target resolved again from the text; any other
+  reparse point (a cloud file already on disk excepted) is refused; on a share every link is refused.
+  The first version looked at each component by absolute path (`FindFirstFileW`, `os.readlink`), which
+  a directory swapped for a link to an unapproved share between two lookups could turn into a contact
+  (found in review, below): those calls are gone. `open_local` keeps the last handle, which must be a
+  disk file (`GetFileType`; a folder raises `IsADirectoryError`, a missing file `FileNotFoundError`, a
+  share that cannot be reached the Windows `OSError`), hands it to Python and asks Windows where it
+  really is: for a local file the NT name must equal the resolved target; for a share the final UNC
+  name must still be inside an approved root. Nothing is read before all of that holds.
+  `local_target` for an approved UNC path is decided on text and opens nothing.
 - `backend/api/routes/face_search.py`: the path form passes `NetworkRoots(...).approves`; the
   `400 QUERY_PATH_NOT_LOCAL` message now says the path is not on this computer or an approved
   location and how to proceed (code unchanged, path never echoed).
@@ -46,6 +51,21 @@ reparse points and link swaps are decided by the resolved target; device namespa
 directories and bypasses by separators, casing or normalisation are refused; the identity of what is
 opened is validated, not the submitted string; and the documented race is closed.
 
+## Review (Codex, read-only, in a disposable worktree) and answers
+
+1. *Critical: the check walked by absolute path, so a directory swapped for a link to an unapproved
+   share between two lookups was followed, and contacted, before `approved()` ran.* Fixed by the one
+   walk above: the check itself now opens each step relative to a held handle without following, so
+   a swapped-in link is read and judged, never opened. Regression tests
+   (`test_network_open.py`, `swap_when_opening`): a directory becomes a link to an unapproved share
+   between steps, with zero contacts recorded; to a local folder (judged by where it now leads); to
+   an approved share (read from it); a directory renamed after it was opened is caught by the final
+   name; a drive letter remapped after the check is refused. The old `FindFirstFileW` entry reader and
+   its tests were replaced (the tests of the refusals they proved now fake the opened step's
+   attributes instead of the lookup).
+2. *Required: `\\server\pipe\name` was approvable.* `PIPE` and `MAILSLOT` are refused as share names
+   (with `DavWWWRoot` and `$` shares), in the approvals and the path check alike; tests for both.
+
 ## Decisions
 
 - **The race is closed by retained handles with no-follow, not by a recheck.** The first version
@@ -55,12 +75,11 @@ opened is validated, not the submitted string; and the documented race is closed
   the letter was checked against also closes a drive letter being remapped after the check. Parent
   handles are opened with full sharing so the walk disturbs nobody; each relative open is atomic, so
   holding the parents is not what makes it safe.
-- **Remote components are not pre-walked.** Reading a share's directory entries to look for links
-  would contact the host before the open does and add nothing: the no-follow open refuses a server
-  side link, and the final-name check requires the file to still be inside an approved root. Windows
-  does not follow a remote-to-remote symlink by default; if the owner's machine enables it, the
-  final-name check still refuses a result outside the approved roots (after the contact the link
-  caused: stated, not hidden).
+- **A share is opened by the same walk, but no link on it is followed or read:** a server-side link
+  is a reparse point and is refused, and the final-name check requires the file to still be inside
+  an approved root. Windows does not follow a remote-to-remote symlink by default; if a machine
+  enables it, the final-name check still refuses a result outside the approved roots (after the
+  contact the link caused: stated, not hidden).
 - **The effective path is decided on canonical text** (`unc_parts` rebuilt), and the open uses that
   text, never the submitted string (review point 5 of PR A).
 - A **mapped drive** is trusted only in the SMB redirector shape above; anything else is refused.

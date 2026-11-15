@@ -34,8 +34,8 @@ def unc_parts(text: str) -> tuple[str, ...] | None:
         return None
     if "@" in parts[0]:
         return None  # `server@SSL` and `server@8080` are WebDAV: an HTTP connection, not SMB
-    if parts[1].upper() == "DAVWWWROOT" or parts[1].endswith("$"):
-        return None  # the WebDAV redirector's name; administrative, hidden and IPC shares
+    if parts[1].upper() in ("DAVWWWROOT", "PIPE", "MAILSLOT") or parts[1].endswith("$"):
+        return None  # the WebDAV redirector, remote pipes and mailslots; administrative shares
     return tuple(parts)
 
 

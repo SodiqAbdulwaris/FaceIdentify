@@ -37,18 +37,18 @@ class Followed(Exception):
 @pytest.fixture
 def probes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Fail on every call that follows a path (stat, lstat, open, listing); record each entry
-    looked at by name (`_entry`, which reads only the entry itself), so a test can say which."""
+    looked at by name (`_nt_create`, a no-follow open of one step), so a test can say which."""
     looked: list[str] = []
-    real_entry = local_path._entry
+    real_create = local_path._nt_create
 
-    def entry(path: Path) -> tuple[int, int] | None:
-        looked.append(os.fspath(path))
-        return real_entry(path)
+    def create(parent: int | None, name: str) -> int:
+        looked.append(name)
+        return real_create(parent, name)
 
     def forbidden(*args: object, **kwargs: object) -> None:
         raise Followed(args)
 
-    monkeypatch.setattr(local_path, "_entry", entry)
+    monkeypatch.setattr(local_path, "_nt_create", create)
     for owner, name in (
         (os, "lstat"),
         (os, "stat"),
@@ -221,14 +221,21 @@ def test_reparse_points_are_classified_from_attributes_and_tag(
 
 
 def fake_entry(monkeypatch: pytest.MonkeyPatch, entry: Path, attributes: int, tag: int) -> None:
-    """Make the lookup of `entry` answer as a reparse point of the given kind (none can be made
-    here)."""
-    real = local_path._entry
+    """Make the entry named like `entry` answer as a reparse point of the given kind (none can be
+    made here): its opened handle reports these attributes and tag."""
+    real_create, real_attributes = local_path._nt_create, local_path._attributes
+    named: dict[int, str] = {}
 
-    def lookup(path: Path) -> tuple[int, int] | None:
-        return (attributes, tag) if path == entry else real(path)
+    def create(parent: int | None, name: str) -> int:
+        handle = real_create(parent, name)
+        named[handle] = name
+        return handle
 
-    monkeypatch.setattr(local_path, "_entry", lookup)
+    def attributes_of(handle: int) -> tuple[int, int] | None:
+        return (attributes, tag) if named.get(handle) == entry.name else real_attributes(handle)
+
+    monkeypatch.setattr(local_path, "_nt_create", create)
+    monkeypatch.setattr(local_path, "_attributes", attributes_of)
 
 
 def test_an_app_execution_alias_is_refused_even_deep_in_the_path(
@@ -245,6 +252,7 @@ def test_a_cloud_placeholder_is_plain_only_when_it_is_on_disk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     picture = tmp_path / "a.png"
+    picture.write_bytes(b"x")
     fake_entry(monkeypatch, picture, REPARSE, 0x9000001A)
     assert local_target(picture) == picture
 
@@ -428,17 +436,17 @@ def test_a_handle_that_is_not_the_resolved_file_is_closed_unread(
     assert opened[0].closed
 
 
-def test_a_file_swapped_for_a_link_after_the_check_is_not_returned(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The race: `local_target` saw a plain file; by the open it is a link to another file."""
+def test_a_file_that_is_a_link_is_read_from_where_it_leads(tmp_path: Path) -> None:
+    """A link is never followed by the walk, only read: its target is resolved and walked again,
+    so the file that is opened is the one the path leads to now (races: test_network_open)."""
     (tmp_path / "other.png").write_bytes(b"other")
     (tmp_path / "swapped.png").symlink_to(tmp_path / "other.png")
-    monkeypatch.setattr(
-        local_path, "local_target", lambda path, approved=None: tmp_path / "swapped.png"
-    )
 
-    assert open_local(tmp_path / "plain.png") is None
+    handle = open_local(tmp_path / "swapped.png")
+
+    assert handle is not None
+    with handle:
+        assert handle.read() == b"other"
 
 
 def test_a_handle_that_cannot_be_asked_about_is_refused() -> None:
@@ -476,19 +484,35 @@ def test_wildcards_and_invalid_characters_are_refused_before_any_probe(
 def test_an_entry_that_cannot_be_examined_is_not_walked_through(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = local_path._entry
-    asked: list[Path] = []
+    real = local_path._nt_create
+    asked: list[str] = []
 
-    def lookup(path: Path) -> tuple[int, int] | None:
-        asked.append(path)
-        if path == tmp_path / "locked":
+    def create(parent: int | None, name: str) -> int:
+        asked.append(name)
+        if name == "locked":
             raise PermissionError(5, "Access is denied")
-        return real(path)
+        return real(parent, name)
 
-    monkeypatch.setattr(local_path, "_entry", lookup)
+    monkeypatch.setattr(local_path, "_nt_create", create)
 
     assert local_target(tmp_path / "locked" / "deeper" / "a.png") is None
-    assert asked[-1] == tmp_path / "locked"  # nothing below it was looked at
+    assert asked[-1] == "locked"  # nothing below it was looked at
+
+
+def entry_of(path: Path) -> tuple[int, int] | None:
+    """The entry's own (attributes, reparse tag) by a no-follow walk of handles, None if absent."""
+    device = local_path._query_dos_device(path.drive)
+    assert device is not None
+    handles = [local_path._nt_create(None, device + "\\")]
+    try:
+        for part in path.parts[1:]:
+            handles.append(local_path._nt_create(handles[-1], part))
+        return local_path._attributes(handles[-1])
+    except FileNotFoundError:
+        return None
+    finally:
+        for handle in handles:
+            local_path._close(handle)
 
 
 def test_an_entry_is_read_without_following_it(tmp_path: Path) -> None:
@@ -496,9 +520,9 @@ def test_an_entry_is_read_without_following_it(tmp_path: Path) -> None:
     (tmp_path / "gone").symlink_to(tmp_path / "missing", target_is_directory=True)
     link_directory(tmp_path / "junction", tmp_path)
 
-    plain = local_path._entry(tmp_path / "plain.png")
-    symlink = local_path._entry(tmp_path / "gone")  # dangling: following it would fail
-    junction = local_path._entry(tmp_path / "junction")
+    plain = entry_of(tmp_path / "plain.png")
+    symlink = entry_of(tmp_path / "gone")  # dangling: following it would fail
+    junction = entry_of(tmp_path / "junction")
 
     assert plain is not None
     assert classify_reparse(*plain) is Reparse.PLAIN
@@ -506,13 +530,13 @@ def test_an_entry_is_read_without_following_it(tmp_path: Path) -> None:
     assert classify_reparse(*symlink) is Reparse.FOLLOW
     assert junction is not None
     assert classify_reparse(*junction) is Reparse.FOLLOW
-    assert local_path._entry(tmp_path / "nothing.png") is None
-    assert local_path._entry(tmp_path / "plain.png" / "below") is None  # a file is no folder
+    assert entry_of(tmp_path / "nothing.png") is None
+    assert entry_of(tmp_path / "plain.png" / "below") is None  # a file is no folder
 
 
 def test_an_entry_the_lookup_rejects_raises(tmp_path: Path) -> None:
     with pytest.raises(OSError, match="WinError"):
-        local_path._entry(tmp_path / ("a" * 300))  # a name no folder can hold
+        entry_of(tmp_path / "wild*card")  # a name no folder can hold
 
 
 def test_a_drive_mapped_to_a_folder_of_a_volume_is_refused_before_any_probe(

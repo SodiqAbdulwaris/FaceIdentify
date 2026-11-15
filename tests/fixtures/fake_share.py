@@ -36,13 +36,13 @@ def install(monkeypatch: pytest.MonkeyPatch, folder: Path) -> FakeShare:
     real_create = local_path._nt_create
     real_final = local_path._final_path
 
-    def create(parent: int | None, name: str, *, directory: bool) -> int:
+    def create(parent: int | None, name: str) -> int:
         if parent is None and name.upper().startswith("\\??\\UNC\\"):
             share.contacts.append(name)
             if name.upper() != f"\\??\\UNC\\{HOST}\\{SHARE}\\".upper():
                 raise OSError(53, "The network path was not found")  # offline or unknown host
-            return real_create(None, f"\\??\\{share.folder}\\", directory=True)
-        return real_create(parent, name, directory=directory)
+            return real_create(None, f"\\??\\{share.folder}\\")
+        return real_create(parent, name)
 
     def final(descriptor: int, flags: int) -> str | None:
         text = real_final(descriptor, flags)

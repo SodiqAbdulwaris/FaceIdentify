@@ -26,13 +26,14 @@ a root `approved` accepts; the answer is decided on text, before any outbound ac
 unapproved network target stays refused. Mapped drives are read from the object manager
 (`QueryDosDeviceW`), never contacted. Links on a remote share are not walked: the open refuses them.
 
-`open_local` opens the target by a walk of retained handles: the volume (by the NT device name
-the drive letter was checked against, or by the `UNC` alias of an approved share)
+The whole way is walked by retained handles, for the check as well as for the open: the volume (by
+the NT device name the drive letter was checked against, or by the `UNC` alias of an approved share)
 and then each component relative to the handle before it, every one opened with
-`FILE_OPEN_REPARSE_POINT` so that no link or junction is ever followed, and refused if it is a
-reparse point. A link planted after the check therefore cannot redirect the open anywhere, and a
-drive letter remapped after the check cannot either. The file handle is then checked to be a plain
-disk file (not a directory, a pipe or a device), and that Windows places it where the resolved
+`FILE_OPEN_REPARSE_POINT` so that no link or junction is ever followed. A link met on the way is
+read from its open handle and judged by where it leads; any other reparse point is refused. A link
+planted while this runs therefore cannot redirect a lookup or the open anywhere, and a drive letter
+remapped after the check cannot either. `open_local` keeps the last handle, checks it to be a plain
+disk file (not a directory, a pipe or a device) and that Windows places it where the resolved
 target says (the NT name on a local volume; for a share a name still inside an approved root).
 Nothing is read before all of that holds.
 """
@@ -66,6 +67,7 @@ _RECALL = (
     | getattr(stat, "FILE_ATTRIBUTE_OFFLINE", 0x1000)
 )
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_DIRECTORY = getattr(stat, "FILE_ATTRIBUTE_DIRECTORY", 0x10)
 
 _VOLUME_DEVICE = re.compile(r"\\Device\\(HarddiskVolume|CdRom)\d+", re.IGNORECASE)
 
@@ -147,41 +149,6 @@ if sys.platform == "win32":
     _kernel32.GetFinalPathNameByHandleW.restype = ctypes.c_uint32
     _VOLUME_NAME_NT = 0x2
 
-    class _FindData(ctypes.Structure):  # WIN32_FIND_DATAW
-        _fields_ = (
-            ("dwFileAttributes", ctypes.c_uint32),
-            ("ftCreationTime", ctypes.c_uint32 * 2),
-            ("ftLastAccessTime", ctypes.c_uint32 * 2),
-            ("ftLastWriteTime", ctypes.c_uint32 * 2),
-            ("nFileSizeHigh", ctypes.c_uint32),
-            ("nFileSizeLow", ctypes.c_uint32),
-            ("dwReserved0", ctypes.c_uint32),  # the reparse tag, when there is one
-            ("dwReserved1", ctypes.c_uint32),
-            ("cFileName", ctypes.c_wchar * 260),
-            ("cAlternateFileName", ctypes.c_wchar * 14),
-        )
-
-    _kernel32.FindFirstFileW.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(_FindData)]
-    _kernel32.FindFirstFileW.restype = ctypes.c_void_p
-    _kernel32.FindClose.argtypes = [ctypes.c_void_p]
-    _INVALID_HANDLE = ctypes.c_void_p(-1).value
-    _NOT_THERE = (2, 3, 267)  # file not found, path not found, a file where a folder was expected
-
-    def _entry(path: Path) -> tuple[int, int] | None:
-        """The entry's own (attributes, reparse tag), or None if nothing is there; any other
-        failure raises OSError. Unlike `os.lstat` this never reopens a reparse point it does not
-        recognise with traversal (CPython does, which can start a cloud download), and it opens no
-        file: it asks the parent folder about the name."""
-        data = _FindData()
-        handle = _kernel32.FindFirstFileW(_EXTENDED + os.fspath(path), ctypes.byref(data))
-        if handle is None or handle == _INVALID_HANDLE:
-            error = ctypes.get_last_error()
-            if error in _NOT_THERE:
-                return None
-            raise ctypes.WinError(error)
-        _kernel32.FindClose(handle)
-        return data.dwFileAttributes, data.dwReserved0
-
     def _query_dos_device(drive: str) -> str | None:
         """The current mapping of a drive such as `C:`, or None. Opens nothing."""
         if not drive:
@@ -261,21 +228,36 @@ if sys.platform == "win32":
     _kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
     _FILE_ATTRIBUTE_TAG_INFO = 9
     _FILE_TYPE_DISK = 1
-    # access: list/traverse or read data, read attributes, synchronize
-    _DIRECTORY_ACCESS = 0x1 | 0x20 | 0x80 | 0x100000
-    _FILE_ACCESS = 0x1 | 0x80 | 0x100000
+    _FSCTL_GET_REPARSE_POINT = 0x900A8
+    # access: list or read data, read attributes, synchronize (the same for a folder and a file)
+    _ACCESS = 0x1 | 0x80 | 0x100000
     _SHARE_ALL = 0x7  # (the walk must not stop anyone else from using what it passes through)
     _OPEN_EXISTING = 0x1  # FILE_OPEN
-    # options: directory or non-directory, never follow a reparse point, plain synchronous I/O
-    _DIRECTORY_OPTIONS = 0x1 | 0x200000 | 0x20
-    _FILE_OPTIONS = 0x40 | 0x200000 | 0x20
+    # options: never follow a reparse point, plain synchronous I/O; neither "folder" nor "file" is
+    # demanded, so a link (which may be either) is opened itself and can be read
+    _OPTIONS = 0x200000 | 0x20
     _CASE_INSENSITIVE = 0x40
-    _STATUS_FILE_IS_A_DIRECTORY = ctypes.c_long(0xC00000BA).value
+    _GONE = tuple(
+        ctypes.c_long(status).value
+        for status in (0xC0000034, 0xC000003A, 0xC0000039, 0xC0000103)  # name, path, not a folder
+    )
 
-    def _nt_create(parent: int | None, name: str, *, directory: bool) -> int:
+    _kernel32.DeviceIoControl.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_uint32),
+        ctypes.c_void_p,
+    ]
+    _kernel32.DeviceIoControl.restype = ctypes.c_int
+
+    def _nt_create(parent: int | None, name: str) -> int:
         """Open one step by NtCreateFile: `name` is absolute (`\\Device\\...`, `\\??\\UNC\\...`)
         when there is no `parent`, else one component of it. Never follows a reparse point.
-        Raises OSError (FileNotFoundError and friends from the status) when the step fails."""
+        A name that is not there is a FileNotFoundError; any other failure is an OSError."""
         length = len(name) * 2
         text = _UnicodeString(length, length + 2, name)
         attributes = _ObjectAttributes(
@@ -290,31 +272,48 @@ if sys.platform == "win32":
         status_block = _IoStatus()
         status = _ntdll.NtCreateFile(
             ctypes.byref(handle),
-            _DIRECTORY_ACCESS if directory else _FILE_ACCESS,
+            _ACCESS,
             ctypes.byref(attributes),
             ctypes.byref(status_block),
             None,
             0,
             _SHARE_ALL,
             _OPEN_EXISTING,
-            _DIRECTORY_OPTIONS if directory else _FILE_OPTIONS,
+            _OPTIONS,
             None,
             0,
         )
-        if status == _STATUS_FILE_IS_A_DIRECTORY:
-            raise IsADirectoryError(21, "A folder is not a picture")
+        if status in _GONE:
+            raise FileNotFoundError(2, "Not there")
         if status < 0:
             raise ctypes.WinError(_ntdll.RtlNtStatusToDosError(status))
         return int(handle.value or 0)
 
-    def _plain(handle: int) -> bool:
-        """The opened entry itself is not a reparse point (a cloud file on disk excepted)."""
+    def _attributes(handle: int) -> tuple[int, int] | None:
+        """The opened entry's own (attributes, reparse tag), or None if Windows will not say."""
         info = _AttributeTag()
         if not _kernel32.GetFileInformationByHandleEx(
             handle, _FILE_ATTRIBUTE_TAG_INFO, ctypes.byref(info), ctypes.sizeof(info)
         ):
-            return False
-        return classify_reparse(info.FileAttributes, info.ReparseTag) is Reparse.PLAIN
+            return None
+        return info.FileAttributes, info.ReparseTag
+
+    def _reparse_data(handle: int) -> bytes | None:
+        """The raw reparse data of an open link (`FSCTL_GET_REPARSE_POINT`), or None."""
+        buffer = ctypes.create_string_buffer(16 * 1024)
+        returned = ctypes.c_uint32()
+        if not _kernel32.DeviceIoControl(
+            handle,
+            _FSCTL_GET_REPARSE_POINT,
+            None,
+            0,
+            buffer,
+            len(buffer),
+            ctypes.byref(returned),
+            None,
+        ):
+            return None
+        return buffer.raw[: returned.value]
 
     def _file_type(handle: int) -> int:
         return int(_kernel32.GetFileType(handle))
@@ -330,6 +329,7 @@ if sys.platform == "win32":
             _close(handle)
             raise
 
+
 else:  # pragma: no cover - the suite runs on Windows; this keeps the module importable elsewhere
 
     def _query_dos_device(drive: str) -> str | None:
@@ -344,11 +344,14 @@ else:  # pragma: no cover - the suite runs on Windows; this keeps the module imp
     def _final_unc_path(descriptor: int) -> str | None:
         return None
 
-    def _nt_create(parent: int | None, name: str, *, directory: bool) -> int:
+    def _nt_create(parent: int | None, name: str) -> int:
         raise OSError("handle walks need Windows")
 
-    def _plain(handle: int) -> bool:
-        return False
+    def _attributes(handle: int) -> tuple[int, int] | None:
+        return None
+
+    def _reparse_data(handle: int) -> bytes | None:
+        return None
 
     def _file_type(handle: int) -> int:
         return 0
@@ -360,9 +363,6 @@ else:  # pragma: no cover - the suite runs on Windows; this keeps the module imp
         raise OSError("handle walks need Windows")
 
     _FILE_TYPE_DISK = 1
-
-    def _entry(path: Path) -> tuple[int, int] | None:
-        return None
 
 
 def _local_text(text: str) -> str | None:
@@ -379,22 +379,133 @@ def _local_text(text: str) -> str | None:
     return text
 
 
-def _readlink(link: Path) -> str:
-    target = Path(os.readlink(link))
-    return os.fspath(target if target.is_absolute() else link.parent / target)
+def parse_reparse(data: bytes) -> tuple[str, bool] | None:
+    """(the link's target name, whether it is relative) from the raw reparse data of a symbolic
+    link or a mount point; None for anything else or for data that does not hold together."""
+    if len(data) < 8:
+        return None
+    tag = int.from_bytes(data[0:4], "little")
+    if tag not in (_TAG_SYMLINK, _TAG_MOUNT_POINT):
+        return None
+    base = 8 + (12 if tag == _TAG_SYMLINK else 8)
+    offset = int.from_bytes(data[8:10], "little")
+    length = int.from_bytes(data[10:12], "little")
+    raw = data[base + offset : base + offset + length]
+    if len(data) < base or len(raw) != length or length == 0 or length % 2:
+        return None
+    relative = tag == _TAG_SYMLINK and bool(int.from_bytes(data[16:20], "little") & 1)
+    try:
+        return raw.decode("utf-16-le"), relative
+    except UnicodeDecodeError:
+        return None
 
 
-def local_target(path: str | Path, approved: Approved | None = None) -> Path | None:
-    """The file `path` leads to, links and junctions resolved: a local path, or (only when
-    `approved` accepts it) a UNC path on an approved share. None if it leads off this computer to
-    anywhere not approved, to a device, through a reparse point it will not follow, or through too
-    many links. The file itself need not exist. A network target is decided on text alone."""
+def _link_text(name: str, relative: bool, folder: str) -> str | None:
+    """A link's target as text to resolve again: relative ones from the folder holding the link,
+    NT-form ones (`\\??\\C:\\x`, `\\??\\UNC\\server\\share`) in plain form; None for any other
+    NT name (a volume GUID, a device)."""
+    if relative:
+        return os.path.join(folder, name)
+    if name.upper().startswith(_UNC_ALIAS.upper()):
+        return "\\\\" + name[len(_UNC_ALIAS) :]
+    if name.startswith("\\??\\"):
+        rest = name[4:]
+        drive, _ = ntpath.splitdrive(rest)
+        return rest if len(drive) == 2 and drive[1] == ":" else None
+    return None
+
+
+class _Follow:
+    """The walk met a link and read where it leads; resolve that text again."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+def _walk(
+    target: Path, root: str, *, links: bool, keep: bool
+) -> "tuple[Path, int | None] | _Follow | None":
+    """Walk `target` below `root` by retained handles: the root, then each component opened
+    relative to the handle before it, never following a link. A symbolic link or junction is read
+    (never followed) and, where `links`, answered as `_Follow`; any other reparse point, or a link
+    where none may be, is a refusal (None). A name that is not there ends the walk: with `keep`
+    that is a FileNotFoundError, otherwise the path simply need not exist yet. With `keep`, the last
+    step must be a plain disk file and its handle is returned (the caller owns it); without it
+    every handle is closed. Errors other than "not there" are OSErrors with `keep`, and a refusal
+    without it (an entry that cannot be examined is not walked through)."""
+    parts = target.parts[1:]
+    held: list[int] = []
+    try:
+        parent = _nt_create(None, root)
+        held.append(parent)
+        for index, part in enumerate(parts):
+            last = index == len(parts) - 1
+            try:
+                child = _nt_create(parent, part)
+            except FileNotFoundError:
+                if keep:
+                    raise
+                return target, None
+            except OSError:
+                if keep:
+                    raise
+                return None
+            held.append(child)
+            examined = _attributes(child)
+            if examined is None:
+                return None
+            attributes, tag = examined
+            action = classify_reparse(attributes, tag)
+            if action is Reparse.REFUSE:
+                return None
+            if action is Reparse.FOLLOW:
+                data = _reparse_data(child) if links else None
+                read = parse_reparse(data) if data else None
+                folder = os.fspath(
+                    Path(*target.parts[: index + 2]).parent
+                )  # (the link's own folder)
+                text = _link_text(*read, folder) if read else None
+                if text is None:
+                    return None
+                return _Follow(os.path.join(text, *parts[index + 1 :]))
+            if not last and not attributes & _DIRECTORY:
+                if keep:
+                    raise FileNotFoundError(2, "Not a folder")
+                return target, None
+            if last and keep:
+                if attributes & _DIRECTORY:
+                    raise IsADirectoryError(21, "A folder is not a picture")
+                if _file_type(child) != _FILE_TYPE_DISK:
+                    return None  # a pipe, a device
+            parent = child
+        if keep:
+            return (target, held.pop()) if parts else None  # (a volume root is not a file)
+        return target, None
+    finally:
+        for handle in held:
+            _close(handle)
+
+
+def _resolve(
+    path: str | Path, approved: Approved | None, *, keep: bool
+) -> tuple[Path, int | None] | None:
+    """The file `path` leads to, and with `keep` its open handle (see `_walk`). None if it leads
+    off this computer to anywhere `approved` does not accept, to a device, through a reparse point
+    it will not follow, or through too many links. A network target is decided on text before
+    anything is opened, and every local step is a no-follow handle open, so a link planted while
+    this runs is read and judged, never followed."""
     text = os.fspath(path)
     for _ in range(MAX_LINKS + 1):
         parts = unc_parts(text)
         if parts is not None:  # a UNC path, however it was reached: approved, or refused unseen
             canonical = "\\\\" + "\\".join(parts)
-            return Path(canonical) if approved is not None and approved(canonical) else None
+            if approved is None or not approved(canonical):
+                return None
+            target = Path(canonical)
+            if not keep:
+                return target, None  # (decided on text: nothing is contacted to answer)
+            outcome = _walk(target, _UNC_ALIAS + target.drive[2:] + "\\", links=False, keep=True)
+            return None if outcome is None or isinstance(outcome, _Follow) else outcome
         local = _local_text(text)
         if local is None:
             return None
@@ -415,25 +526,21 @@ def local_target(path: str | Path, approved: Approved | None = None) -> Path | N
             continue
         if any(is_device_component(part) for part in current.parts[1:]):
             return None
-        walked = Path(current.anchor)
-        parts = current.parts[1:]
-        for index, part in enumerate(parts):
-            walked = walked / part
-            try:
-                entry = _entry(walked)  # (the entry itself, never what it points at)
-            except OSError:
-                return None  # an entry that cannot be examined is not walked through
-            if entry is None:
-                continue  # nothing there (yet)
-            action = classify_reparse(*entry)
-            if action is Reparse.REFUSE:
-                return None
-            if action is Reparse.FOLLOW:
-                text = os.path.join(_readlink(walked), *parts[index + 1 :])
-                break
-        else:
-            return current
+        outcome = _walk(current, alias + "\\", links=True, keep=keep)
+        if isinstance(outcome, _Follow):
+            text = outcome.text
+            continue
+        return outcome
     return None
+
+
+def local_target(path: str | Path, approved: Approved | None = None) -> Path | None:
+    """The file `path` leads to, links and junctions resolved: a local path, or (only when
+    `approved` accepts it) a UNC path on an approved share. None if it leads off this computer to
+    anywhere not approved, to a device, through a reparse point it will not follow, or through too
+    many links. The file itself need not exist. A network target is decided on text alone."""
+    resolved = _resolve(path, approved, keep=False)
+    return resolved[0] if resolved else None
 
 
 def _expected_nt_path(target: Path) -> str | None:
@@ -442,65 +549,21 @@ def _expected_nt_path(target: Path) -> str | None:
     return device + os.fspath(target)[len(target.drive) :] if kind is DosDevice.LOCAL else None
 
 
-def _is_network(target: Path) -> bool:
-    return target.drive.startswith("\\\\")
-
-
-def _root_name(target: Path) -> str | None:
-    """The name the volume or share is opened by, with its closing separator: the device the drive
-    letter classified as local (a letter remapped later changes nothing), or the share's alias."""
-    if _is_network(target):
-        return "\\??\\UNC\\" + target.drive[2:] + "\\"
-    kind, device = classify_dos_device(_query_dos_device(target.drive))
-    return device + "\\" if kind is DosDevice.LOCAL else None
-
-
-def _open_walk(target: Path) -> int | None:
-    """Open `target` by retained handles, no link ever followed: the root, then each component
-    relative to the handle before it. None if any step is a reparse point, a folder where the file
-    should be (or the reverse), not a plain disk file at the end. Raises OSError when a step cannot
-    be opened (including a missing file)."""
-    root = _root_name(target)
-    if root is None:
-        return None
-    parts = target.parts[1:]
-    held: list[int] = []
-    try:
-        parent = _nt_create(None, root, directory=True)
-        held.append(parent)
-        if not _plain(parent):
-            return None
-        for index, part in enumerate(parts):
-            last = index == len(parts) - 1
-            child = _nt_create(parent, part, directory=not last)
-            held.append(child)
-            if not _plain(child) or (last and _file_type(child) != _FILE_TYPE_DISK):
-                return None
-            parent = child
-        if not parts:
-            return None  # (a volume root is not a file)
-        return held.pop()
-    finally:
-        for handle in held:
-            _close(handle)
-
-
 def open_local(path: str | Path, approved: Approved | None = None) -> BinaryIO | None:
     """The file `path` leads to, opened for reading, or None if it leads off this computer to
     anywhere `approved` does not accept (or is not a plain file).
 
-    Raises OSError when the file cannot be opened. A handle is returned only once it was opened
-    with no link followed and Windows says it is where the resolved target says, so nothing is read
-    before that is known."""
-    target = local_target(path, approved)
-    if target is None:
+    Raises OSError when the file cannot be opened (FileNotFoundError when it is not there,
+    IsADirectoryError for a folder). The whole way is walked by retained no-follow handles, and a
+    handle is returned only once Windows says it is where the resolved target says, so nothing is
+    read before that is known."""
+    resolved = _resolve(path, approved, keep=True)
+    if resolved is None:
         return None
-    network = _is_network(target)
-    handle = _open_walk(target)
-    if handle is None:
-        return None
+    target, handle = resolved
+    assert handle is not None  # (`keep` always answers a handle)
     opened = _as_file(handle)
-    if network:
+    if target.drive.startswith("\\\\"):
         final = _final_unc_path(opened.fileno())
         trusted = final is not None and approved is not None and approved(final)
     else:

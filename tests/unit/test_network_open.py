@@ -6,6 +6,7 @@ policy decides is, with real files, real links and junctions, and the real no-fo
 """
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,8 @@ def test_the_same_picture_by_another_spelling_is_the_same_decision(
         r"\\srv\share\..\other\a.png",  # a dot-dot never leaves the approved share unnoticed
         r"\\srv\ADMIN$\a.png",
         r"\\srv\DavWWWRoot\a.png",
+        r"\\srv\pipe\a.png",
+        r"\\srv\MAILSLOT\a.png",
         r"\\.\pipe\srv",
         r"\\?\GLOBALROOT\Device\x",
         r"\\?\UNC\\.\pipe\x",
@@ -253,75 +256,123 @@ def test_an_offline_share_fails_to_open_and_can_be_tried_again(
     assert share.contacts == ["\\??\\UNC\\gone\\share\\", f"\\??\\UNC\\{HOST}\\{SHARE}\\"]
 
 
-def test_a_directory_swapped_for_a_junction_after_the_check_is_not_followed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def swap_when_opening(
+    monkeypatch: pytest.MonkeyPatch, name: str, swap: Callable[[], None], *, after: bool = False
 ) -> None:
-    """The race of the first version: `local_target` saw `plain\\a.png`; before the open, `plain`
-    became a junction to another folder (here one holding another picture). The walk opens each
-    step without following links, so it refuses instead of reading it."""
+    """Run `swap` once, just before (or, with `after`, just after) the step named `name` is opened:
+    the moment a planted link would matter, between one step of the walk and the next."""
+    real = local_path._nt_create
+    done: list[bool] = []
+
+    def create(parent: int | None, step: str) -> int:
+        fire = step == name and parent is not None and not done
+        if fire and not after:
+            done.append(True)
+            swap()
+        handle = real(parent, step)
+        if fire and after:
+            done.append(True)
+            swap()
+        return handle
+
+    monkeypatch.setattr(local_path, "_nt_create", create)
+
+
+def test_a_directory_swapped_for_a_link_to_an_unapproved_share_is_never_contacted(
+    share: FakeShare, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The race of the first version, aimed at a share nobody approved: between one step of the
+    walk and the next, `plain` becomes a link to it. Every step is opened without following, so the
+    link is read, judged by where it leads and refused: nothing reaches out, even to look."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "a.png").write_bytes(b"checked")
+
+    def swap() -> None:
+        (plain / "a.png").unlink()
+        plain.rmdir()
+        plain.symlink_to(r"\\other\share", target_is_directory=True)
+
+    swap_when_opening(monkeypatch, "plain", swap)
+
+    assert read(plain / "a.png", approving(UNC)) is None
+    assert share.contacts == []
+
+
+def test_a_directory_swapped_for_a_link_is_judged_by_where_the_link_now_leads(
+    share: FakeShare, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     plain = tmp_path / "plain"
     plain.mkdir()
     (plain / "a.png").write_bytes(b"checked")
     other = tmp_path / "other"
     other.mkdir()
     (other / "a.png").write_bytes(b"other")
-    real_target = local_path.local_target
 
-    def swap_after_the_check(path: str | Path, approved: object = None) -> Path | None:
-        result = real_target(path, approved)  # type: ignore[arg-type]
+    def swap() -> None:
         (plain / "a.png").unlink()
         plain.rmdir()
         link_directory(plain, other)
-        return result
 
-    monkeypatch.setattr(local_path, "local_target", swap_after_the_check)
+    swap_when_opening(monkeypatch, "plain", swap)
 
-    assert read(plain / "a.png", None) is None
+    assert read(plain / "a.png", None) == b"other"  # the resolved target, wherever it is now
 
 
-def test_a_directory_swapped_for_a_link_to_an_unapproved_share_is_never_contacted(
+def test_a_directory_swapped_for_a_link_to_an_approved_share_is_read_from_the_share(
     share: FakeShare, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The same race, aimed at a share nobody approved: the open must not reach out."""
     plain = tmp_path / "plain"
     plain.mkdir()
     (plain / "a.png").write_bytes(b"checked")
-    real_target = local_path.local_target
 
-    def swap_after_the_check(path: str | Path, approved: object = None) -> Path | None:
-        result = real_target(path, approved)  # type: ignore[arg-type]
+    def swap() -> None:
         (plain / "a.png").unlink()
         plain.rmdir()
-        plain.symlink_to(r"\\other\share", target_is_directory=True)
-        return result
+        plain.symlink_to(UNC, target_is_directory=True)
 
-    monkeypatch.setattr(local_path, "local_target", swap_after_the_check)
+    swap_when_opening(monkeypatch, "plain", swap)
+
+    assert read(plain / "a.png", approving(UNC)) == PIXELS  # the share's a.png, by the policy
+
+
+def test_a_directory_replaced_after_it_was_opened_is_caught_by_the_final_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A step that was opened is the real directory; if the name is then pointed elsewhere the
+    handle's own final name no longer matches the target and nothing is read."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "a.png").write_bytes(b"checked")
+    other = tmp_path / "other"
+    other.mkdir()
+
+    def swap() -> None:
+        plain.rename(tmp_path / "moved")
+        link_directory(plain, other)
+
+    swap_when_opening(monkeypatch, "plain", swap, after=True)
 
     assert read(plain / "a.png", None) is None
-    assert share.contacts == []
 
 
 def test_a_drive_letter_remapped_after_the_check_is_not_followed(
     share: FakeShare, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The letter was a local volume when checked; the open is by the device it was checked
-    against, so a later mapping of the letter to a share changes nothing."""
+    """The walk is opened by the device the letter was checked against; if the letter is then
+    mapped to a share, the final-name check no longer finds a local volume and nothing is read."""
     picture = tmp_path / "a.png"
     picture.write_bytes(b"local")
     drive = picture.drive
-    real_target = local_path.local_target
+    real = local_path._query_dos_device
+    asked: list[str] = []
 
-    def remap(path: str | Path, approved: object = None) -> Path | None:
-        result = real_target(path, approved)  # type: ignore[arg-type]
-        real = local_path._query_dos_device
-        monkeypatch.setattr(
-            local_path, "_query_dos_device", lambda d: MAPPED if d == drive else real(d)
-        )
-        return result
+    def remapped(letter: str) -> str | None:
+        asked.append(letter)
+        return MAPPED if letter == drive and len(asked) > 1 else real(letter)
 
-    monkeypatch.setattr(local_path, "local_target", remap)
+    monkeypatch.setattr(local_path, "_query_dos_device", remapped)
 
-    # the root is named by the device found when it is opened, here already the share's: refused
     assert read(picture, approving(UNC)) is None
     assert share.contacts == []
 
@@ -340,8 +391,8 @@ def test_a_volume_root_and_a_path_with_no_file_are_refused(tmp_path: Path) -> No
     assert read(Path(tmp_path.anchor), None) is None
 
 
-def test_a_handle_that_cannot_be_asked_about_is_not_plain() -> None:
-    assert local_path._plain(0) is False
+def test_a_handle_that_cannot_be_asked_about_has_no_attributes() -> None:
+    assert local_path._attributes(0) is None
 
 
 def test_a_handle_that_cannot_become_a_file_is_closed_and_raises() -> None:
@@ -349,10 +400,10 @@ def test_a_handle_that_cannot_become_a_file_is_closed_and_raises() -> None:
         local_path._as_file(-1)
 
 
-def test_a_volume_root_that_is_a_reparse_point_is_refused(
+def test_an_entry_that_cannot_be_examined_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "a.png").write_bytes(PIXELS)
-    monkeypatch.setattr(local_path, "_plain", lambda handle: False)
+    monkeypatch.setattr(local_path, "_attributes", lambda handle: None)
 
     assert read(tmp_path / "a.png", None) is None
